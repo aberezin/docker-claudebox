@@ -6,7 +6,7 @@ Run the container as an HTTP API server with workspace management, file operatio
 # docker-compose.yml
 services:
   claudebox:
-    image: psyb0t/claudebox:latest
+    image: claudebox:latest    # build locally first: make build
     ports:
       - "8080:8080"
     environment:

@@ -37,27 +37,31 @@ Docker installed and running. That's it.
 
 ## Quick Start
 
-### One-liner install
+> **This is a local-build fork.** Unlike upstream, nothing is pulled from Docker Hub — you build the image from this checkout and the wrapper runs that local image (`claudebox:latest`). Intended to run under [Colima](https://github.com/abiosoft/colima).
 
-The install script pulls the Docker image, generates SSH keys for git operations inside the container, downloads the wrapper script, and installs it as a command on your system.
+### Install
+
+Clone the repo and run the installer from the checkout. It builds the image locally with `docker build`, generates SSH keys for git operations inside the container, and installs the wrapper as a command on your system.
 
 ```bash
+git clone <your-fork-url> claudebox && cd claudebox
+
 # full image (recommended — all dev tools pre-installed)
-curl -fsSL https://raw.githubusercontent.com/psyb0t/docker-claudebox/master/install.sh | bash
+./install.sh
 
 # minimal image (just the essentials — Claude installs what it needs on the fly)
-export CLAUDEBOX_MINIMAL=1 && curl -fsSL https://raw.githubusercontent.com/psyb0t/docker-claudebox/master/install.sh | bash
+export CLAUDEBOX_MINIMAL=1 && ./install.sh
 
 # custom binary name (e.g. if you want to call it 'claude' instead of 'claudebox')
-curl -fsSL https://raw.githubusercontent.com/psyb0t/docker-claudebox/master/install.sh | bash -s -- claude
-# or: export CLAUDEBOX_BIN_NAME=claude && curl -fsSL .../install.sh | bash
+./install.sh claude
+# or: export CLAUDEBOX_BIN_NAME=claude && ./install.sh
 ```
 
-> **Heads up on env vars:** `VAR=x curl … | bash` does **not** set `VAR` for the install script — bash semantics attach the var to `curl` only. Always `export` the var first (or put it on the `bash` side of the pipe).
+The installer must run from a checkout of the repo — it needs the `Dockerfile` and `wrapper.sh` beside it, and it will not pipe from `curl` since there is no registry image to fall back to.
 
 ### Manual setup
 
-If you prefer not to pipe scripts to bash:
+If you prefer to do it by hand:
 
 ```bash
 # 1. create the data directory
@@ -68,30 +72,30 @@ mkdir -p "$HOME/.ssh/claudebox"
 ssh-keygen -t ed25519 -C "claude@claude.ai" -f "$HOME/.ssh/claudebox/id_ed25519" -N ""
 # then add the public key to GitHub/GitLab/wherever you push code
 
-# 3. pull the image
-docker pull psyb0t/claudebox:latest
-# or: docker pull psyb0t/claudebox:latest-minimal
+# 3. build the image locally
+make build
+# or minimal: make build-minimal
 
-# 4. grab the wrapper script and install it
-# see install.sh for exactly how the wrapper is set up
+# 4. install the wrapper script as a command
+sudo install -m 755 wrapper.sh /usr/local/bin/claudebox
 ```
 
 ## Image Variants
 
-### `psyb0t/claudebox:latest` (full)
+### `claudebox:latest` (full)
 
 Everything pre-installed. Go, Python, Node.js, C/C++ toolchains, Terraform, kubectl, database clients, linters, formatters — the works. Large image, but Claude wakes up and gets to work immediately with zero wait time. This is the recommended variant for most users.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/psyb0t/docker-claudebox/master/install.sh | bash
+./install.sh    # or: make build
 ```
 
-### `psyb0t/claudebox:latest-minimal`
+### `claudebox:latest-minimal`
 
-Just enough to run Claude: Ubuntu, git, curl, Node.js, and Docker. Claude has passwordless sudo, so it will install whatever else it needs on the fly via `apt-get`, `pip`, `npm`, etc. Smaller image to pull, but the first run takes longer as Claude sorts out its dependencies.
+Just enough to run Claude: Ubuntu, git, curl, Node.js, and Docker. Claude has passwordless sudo, so it will install whatever else it needs on the fly via `apt-get`, `pip`, `npm`, etc. Smaller image to build, but the first run takes longer as Claude sorts out its dependencies.
 
 ```bash
-export CLAUDEBOX_MINIMAL=1 && curl -fsSL https://raw.githubusercontent.com/psyb0t/docker-claudebox/master/install.sh | bash
+export CLAUDEBOX_MINIMAL=1 && ./install.sh    # or: make build-minimal
 ```
 
 Use `~/.claude/init.d/*.sh` hooks (see [Init Hooks](docs/customization.md#init-hooks-claudeinitd)) to pre-install your tools on first container create so Claude doesn't burn tokens figuring out package management.

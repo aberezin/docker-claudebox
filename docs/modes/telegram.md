@@ -50,7 +50,7 @@ Per-chat configuration options: `workspace`, `model`, `effort`, `continue`, `sys
 # docker-compose.yml
 services:
   claudebox-telegram:
-    image: psyb0t/claudebox:latest
+    image: claudebox:latest    # build locally first: make build
     environment:
       - CLAUDEBOX_MODE_TELEGRAM=1
       - CLAUDEBOX_TELEGRAM_BOT_TOKEN=123456:ABC-DEF

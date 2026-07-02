@@ -1,6 +1,8 @@
 # Docker image configuration
-IMAGE_NAME := psyb0t/claudebox
-TAG := latest
+# This fork builds a LOCAL image (bare repo name, no registry prefix) so Docker
+# never pulls from Docker Hub. Override with `make IMAGE_NAME=... build`.
+IMAGE_NAME ?= claudebox
+TAG ?= latest
 
 .PHONY: build build-minimal build-all test clean help
 

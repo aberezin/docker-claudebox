@@ -32,25 +32,41 @@ else
 	ssh-keygen -t ed25519 -C "claude@claude.ai" -f "$HOME/.ssh/claudebox/id_ed25519" -N ""
 fi
 
-CLAUDE_TAG="latest"
-_minimal="${CLAUDEBOX_MINIMAL:-${CLAUDE_MINIMAL:-}}"
-[ -n "$_minimal" ] && CLAUDE_TAG="latest-minimal"
-echo "📦 Pulling Claude Code image (tag: $CLAUDE_TAG)..."
-docker pull "psyb0t/claudebox:$CLAUDE_TAG"
-
-# get wrapper.sh — from same dir if running locally, otherwise download from GitHub
+# This fork builds the image LOCALLY and never pulls from a registry. It must be
+# run from a checkout of the repo (the Dockerfile and wrapper.sh live next to it).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/null}")" 2>/dev/null && pwd)"
+
+IMAGE_NAME="${CLAUDEBOX_IMAGE_NAME:-claudebox}"
+CLAUDE_TAG="latest"
+BUILD_TARGET="full"
+_minimal="${CLAUDEBOX_MINIMAL:-${CLAUDE_MINIMAL:-}}"
+if [ -n "$_minimal" ]; then
+	CLAUDE_TAG="latest-minimal"
+	BUILD_TARGET="minimal"
+fi
+
+if [ ! -f "$SCRIPT_DIR/Dockerfile" ]; then
+	echo "❌ Dockerfile not found in $SCRIPT_DIR."
+	echo "   This fork builds a local image and does not pull from Docker Hub —"
+	echo "   run install.sh from a checkout of the repo, not piped from curl."
+	exit 1
+fi
+
+echo "🔨 Building local Claude Code image ($IMAGE_NAME:$CLAUDE_TAG, target: $BUILD_TARGET)..."
+if ! docker build --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
+	echo "❌ Image build failed."
+	exit 1
+fi
+
+# install wrapper.sh from this checkout
 WRAPPER_TMP="$(mktemp /tmp/claude-wrapper-XXXXXX.sh)"
 if [ -f "$SCRIPT_DIR/wrapper.sh" ]; then
 	echo "📝 Using local wrapper.sh..."
 	cp "$SCRIPT_DIR/wrapper.sh" "$WRAPPER_TMP"
 else
-	echo "📝 Downloading wrapper.sh..."
-	if ! curl -fsSL "https://raw.githubusercontent.com/psyb0t/docker-claudebox/master/wrapper.sh" -o "$WRAPPER_TMP"; then
-		echo "❌ Failed to download wrapper.sh"
-		rm -f "$WRAPPER_TMP"
-		exit 1
-	fi
+	echo "❌ wrapper.sh not found in $SCRIPT_DIR"
+	rm -f "$WRAPPER_TMP"
+	exit 1
 fi
 
 if [ ! -s "$WRAPPER_TMP" ]; then

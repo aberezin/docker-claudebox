@@ -94,7 +94,7 @@ Standard 5-field (`min hr dom mon dow`) for minute resolution, or 6-field (`sec 
 # docker-compose.yml
 services:
   claudebox-cron:
-    image: psyb0t/claudebox:latest
+    image: claudebox:latest    # build locally first: make build
     environment:
       - CLAUDEBOX_MODE_CRON=1
       - CLAUDEBOX_MODE_CRON_FILE=/home/claude/.claude/cron.yaml
@@ -131,7 +131,7 @@ Example combined-mode `docker-compose.yml`:
 ```yaml
 services:
   claudebox-cron-tg:
-    image: psyb0t/claudebox:latest
+    image: claudebox:latest    # build locally first: make build
     environment:
       - CLAUDEBOX_MODE_CRON=1
       - CLAUDEBOX_MODE_TELEGRAM=1

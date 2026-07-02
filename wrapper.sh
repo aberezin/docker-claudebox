@@ -5,13 +5,18 @@ DEBUG="${CLAUDEBOX_ENV_DEBUG:-${DEBUG:-}}"
 
 dbg() { [ "${DEBUG:-}" = "true" ] && echo "[DEBUG $(date +%H:%M:%S.%3N)] $*" >&2; }
 
+# This fork uses a locally-built image (see install.sh / `make build`), NOT the
+# upstream psyb0t/claudebox on Docker Hub. The bare repo name has no registry
+# prefix, so Docker never tries to pull it — a missing image is a hard error,
+# which is what we want (build it locally first). Override with CLAUDEBOX_IMAGE.
 CLAUDE_IMAGE="${CLAUDEBOX_IMAGE:-${CLAUDE_IMAGE:-}}"
+CLAUDE_IMAGE_NAME="${CLAUDEBOX_IMAGE_NAME:-claudebox}"
 _minimal="${CLAUDEBOX_MINIMAL:-${CLAUDE_MINIMAL:-}}"
 if [ -z "$CLAUDE_IMAGE" ]; then
     if [ -n "$_minimal" ]; then
-        CLAUDE_IMAGE="psyb0t/claudebox:latest-minimal"
+        CLAUDE_IMAGE="${CLAUDE_IMAGE_NAME}:latest-minimal"
     else
-        CLAUDE_IMAGE="psyb0t/claudebox:latest"
+        CLAUDE_IMAGE="${CLAUDE_IMAGE_NAME}:latest"
     fi
 fi
 
