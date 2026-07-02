@@ -314,7 +314,10 @@ fi
 
 CLAUDE_GIT_NAME="${CLAUDEBOX_GIT_NAME:-${CLAUDE_GIT_NAME:-}}"
 CLAUDE_GIT_EMAIL="${CLAUDEBOX_GIT_EMAIL:-${CLAUDE_GIT_EMAIL:-}}"
-CLAUDE_DIR="${CLAUDEBOX_DATA_DIR:-${CLAUDE_DATA_DIR:-$HOME/.claude}}"
+# Per-project shared-nothing data dir (Phase 3 of docs/design/per-project-vm.md).
+# An explicit CLAUDEBOX_DATA_DIR / CLAUDE_DATA_DIR override still wins; otherwise
+# CLAUDE_DIR is resolved per project after the VM subcommands (needs the id).
+CLAUDE_DIR="${CLAUDEBOX_DATA_DIR:-${CLAUDE_DATA_DIR:-}}"
 CLAUDE_SSH="${CLAUDEBOX_SSH_DIR:-${CLAUDE_SSH_DIR:-$HOME/.ssh/claudebox}}"
 
 # auth: prefer CLAUDEBOX_ENV_*, fall back to legacy direct vars
@@ -351,6 +354,19 @@ case "${1:-}" in
         cb_vm_destroy "$_cbid"; exit $?
         ;;
 esac
+
+# ── resolve the per-project data dir (shared-nothing) unless overridden ───────
+# Each project gets its own ~/.claude state under ~/.config/claudebox/projects/<id>.
+# Auth is not project state — it still arrives per invocation via env (below) and
+# is written into this dir, so there is no shared mutable directory.
+if [ -z "$CLAUDE_DIR" ]; then
+    CB_PROJECT_ID="$(cb_project_id "$CB_PROJECT_ROOT")"
+    CLAUDE_DIR="$(cb_project_data_dir "$CB_PROJECT_ID")"
+    dbg "per-project data dir: $CLAUDE_DIR (id=$CB_PROJECT_ID)"
+else
+    dbg "data dir override: $CLAUDE_DIR"
+fi
+mkdir -p "$CLAUDE_DIR"
 
 DOCKER_ARGS=(
     --network host
