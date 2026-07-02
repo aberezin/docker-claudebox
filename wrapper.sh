@@ -1,6 +1,187 @@
 #!/usr/bin/env bash
 
 # CLAUDEBOX_* is the canonical prefix. CLAUDE_* names remain supported for backwards compat.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Config layer — Phase 1 of docs/design/per-project-vm.md
+#
+# Pure host-side helpers: per-project identity (.claudebox/config.yml, kept
+# rehome-safe via a marker file rather than a path hash), the committed sample,
+# .gitignore wiring, and the machine-wide config (~/.config/claudebox/config.yml)
+# with baked-in defaults. No docker/colima here. Source this file with
+# CLAUDEBOX_SOURCE_ONLY=1 to load just these functions (tests/test_cbconfig.sh).
+# ─────────────────────────────────────────────────────────────────────────────
+
+cb_config_home() { printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
+
+cb_machine_config_path() {
+    local base="$(cb_config_home)/claudebox"
+    if [ -f "$base/config.yaml" ] && [ ! -f "$base/config.yml" ]; then
+        printf '%s' "$base/config.yaml"
+    else
+        printf '%s' "$base/config.yml"
+    fi
+}
+
+# baked-in defaults, used when neither project nor machine config supplies a value
+cb_baked_default() {
+    case "$1" in
+        vm.cpu|vm.default_cpu)       printf '4' ;;
+        vm.memory|vm.default_memory) printf '8GiB' ;;
+        vm.disk|vm.default_disk)     printf '60GiB' ;;
+        vm.autostop)                 printf 'false' ;;
+        vm.warn_max)                 printf '3' ;;
+        vm.hard_max)                 printf '5' ;;
+        data_root)                   printf '%s' "$(cb_config_home)/claudebox/projects" ;;
+        *)                           printf '' ;;
+    esac
+}
+
+# _cb_yaml_get FILE DOTTED_KEY — minimal reader for the 2-level YAML we generate.
+# Supports top-level `key: val` and one level of nesting `parent:\n  key: val`.
+_cb_yaml_get() {
+    [ -f "$1" ] || return 0
+    awk -v want="$2" '
+        function trim(s){ sub(/^[ \t]+/,"",s); sub(/[ \t\r]+$/,"",s); return s }
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        {
+            tmp=$0; indent=0
+            while (substr(tmp,1,1)==" ") { indent++; tmp=substr(tmp,2) }
+            pos=index(tmp,":"); if (pos==0) next
+            key=trim(substr(tmp,1,pos-1)); val=trim(substr(tmp,pos+1))
+            if (substr(val,1,1)=="#") { val="" }
+            else { c=index(val," #"); if (c>0) val=trim(substr(val,1,c-1)) }
+            if (indent==0) { parent=key; if (key==want) { print val; exit } }
+            else { if (parent"."key==want) { print val; exit } }
+        }
+    ' "$1"
+}
+
+# read a value from the machine-wide config, falling back to the baked default
+cb_machine_get() {
+    local key="$1" f v=""
+    f="$(cb_machine_config_path)"
+    [ -f "$f" ] && v="$(_cb_yaml_get "$f" "$key")"
+    [ -z "$v" ] && v="$(cb_baked_default "$key")"
+    printf '%s' "$v"
+}
+
+# expand a leading ~ to $HOME
+cb_expand_path() {
+    case "$1" in
+        "~")   printf '%s' "$HOME" ;;
+        "~/"*) printf '%s/%s' "$HOME" "${1#\~/}" ;;
+        *)     printf '%s' "$1" ;;
+    esac
+}
+
+cb_data_root() { cb_expand_path "$(cb_machine_get data_root)"; }
+
+# 8 lowercase-hex chars — a valid colima profile name fragment
+cb_gen_id() {
+    if command -v uuidgen >/dev/null 2>&1; then
+        uuidgen | tr 'A-Z' 'a-z' | tr -d '-' | cut -c1-8
+    else
+        head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n' | cut -c1-8
+    fi
+}
+
+# project root = git toplevel, else the given/current dir
+cb_project_root() {
+    local start="${1:-$PWD}"
+    git -C "$start" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$start"
+}
+
+cb_project_config_path() { printf '%s/.claudebox/config.yml' "$1"; }
+
+# wire /.claudebox/config.yml into .gitignore, but only inside a real git repo
+cb_ensure_gitignore() {
+    local root="$1" gi="$1/.gitignore" line="/.claudebox/config.yml"
+    [ -d "$root/.git" ] || return 0
+    if [ -f "$gi" ]; then
+        grep -qxF "$line" "$gi" 2>/dev/null || printf '%s\n' "$line" >> "$gi"
+    else
+        printf '%s\n' "$line" > "$gi"
+    fi
+}
+
+cb_write_sample() {
+    cat > "$1/.claudebox/config.sample.yml" <<'CBSAMPLE'
+# .claudebox/config.sample.yml — schema reference (committed).
+# claudebox generates the real, gitignored .claudebox/config.yml on first run.
+id: auto                  # stable project identity; generated once, never change
+vm:
+  cpu: 4
+  memory: 8GiB
+  disk: 60GiB
+  autostop: false         # stop the VM when the harness container exits
+network:
+  hostname:               # optional /etc/hosts alias -> the VM's current IP; blank = raw IP
+CBSAMPLE
+}
+
+# cb_init_project_config ROOT — ensure config + sample + gitignore; print the id.
+cb_init_project_config() {
+    local root="$1" cfg id cpu mem disk
+    mkdir -p "$root/.claudebox"
+    cfg="$(cb_project_config_path "$root")"
+    [ -f "$cfg" ] && id="$(_cb_yaml_get "$cfg" id)"
+    if [ -z "${id:-}" ] || [ "${id:-}" = "auto" ]; then
+        id="$(cb_gen_id)"
+        cpu="$(cb_machine_get vm.default_cpu)"
+        mem="$(cb_machine_get vm.default_memory)"
+        disk="$(cb_machine_get vm.default_disk)"
+        cat > "$cfg" <<CBCONF
+# .claudebox/config.yml — generated by claudebox; edit to taste. Gitignored.
+id: $id
+vm:
+  cpu: $cpu
+  memory: $mem
+  disk: $disk
+  autostop: false         # stop the VM when the harness container exits
+network:
+  hostname:               # optional /etc/hosts alias -> the VM's current IP; blank = raw IP
+CBCONF
+    fi
+    cb_write_sample "$root"
+    cb_ensure_gitignore "$root"
+    printf '%s' "$id"
+}
+
+# cb_project_id ROOT — read the id, initializing config on first use
+cb_project_id() {
+    local root="$1" cfg id
+    cfg="$(cb_project_config_path "$root")"
+    if [ -f "$cfg" ]; then
+        id="$(_cb_yaml_get "$cfg" id)"
+        if [ -n "$id" ] && [ "$id" != "auto" ]; then printf '%s' "$id"; return 0; fi
+    fi
+    cb_init_project_config "$root"
+}
+
+# vm sizing with fallback: project config -> machine default -> baked default
+cb_vm_get() {
+    local root="$1" field="$2" v=""
+    v="$(_cb_yaml_get "$(cb_project_config_path "$root")" "vm.$field")"
+    if [ -z "$v" ]; then
+        case "$field" in
+            cpu)      v="$(cb_machine_get vm.default_cpu)" ;;
+            memory)   v="$(cb_machine_get vm.default_memory)" ;;
+            disk)     v="$(cb_machine_get vm.default_disk)" ;;
+            autostop) v="$(cb_baked_default vm.autostop)" ;;
+        esac
+    fi
+    printf '%s' "$v"
+}
+
+cb_project_profile()  { printf 'cb-%s' "$1"; }         # $1 = id
+cb_project_context()  { printf 'colima-cb-%s' "$1"; }  # $1 = id
+cb_project_data_dir() { printf '%s/%s/claude' "$(cb_data_root)" "$1"; }  # $1 = id
+
+# load functions only (for tests) without running the wrapper body
+[ -n "${CLAUDEBOX_SOURCE_ONLY:-}" ] && return 0 2>/dev/null || true
+
 DEBUG="${CLAUDEBOX_ENV_DEBUG:-${DEBUG:-}}"
 
 dbg() { [ "${DEBUG:-}" = "true" ] && echo "[DEBUG $(date +%H:%M:%S.%3N)] $*" >&2; }
