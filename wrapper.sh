@@ -226,8 +226,9 @@ cb_parse_vm_lines() {
     }'
 }
 
-# from "name<TAB>status" stdin -> names of running cb-* profiles
-cb_running_cb_profiles() { awk -F'\t' '$1 ~ /^cb-/ && $2 == "Running" { print $1 }'; }
+# from "name<TAB>status" stdin -> names of running cb-* PROJECT profiles.
+# cb-infra is the shared image-store VM, not a project — never counted/listed as one.
+cb_running_cb_profiles() { awk -F'\t' '$1 ~ /^cb-/ && $1 != "cb-infra" && $2 == "Running" { print $1 }'; }
 
 # from "name<TAB>status" stdin -> status of $1, or "absent"
 cb_status_of() { awk -F'\t' -v p="$1" '$1==p { print $2; f=1 } END { if (!f) print "absent" }'; }
@@ -237,34 +238,79 @@ cb_vm_status()        { _cb_vm_list_json | cb_parse_vm_lines | cb_status_of "$1"
 cb_vm_running()       { [ "$(cb_vm_status "$1")" = "Running" ]; }
 cb_running_cb_count() { _cb_vm_list_json | cb_parse_vm_lines | cb_running_cb_profiles | grep -c . ; }
 
-# cb_ensure_vm ROOT ID — start the project VM if it isn't running (enforces limits)
-cb_ensure_vm() {
-    local root="$1" id="$2" profile cpu mem disk count warn hard decision
-    profile="$(cb_project_profile "$id")"
-    cb_guard_profile "$profile" || return 1
-    if cb_vm_running "$profile"; then
-        return 0
+# cb-infra: a dedicated colima profile that holds the locally-built image(s).
+# make build / install.sh build into it; project VMs are seeded from it via
+# save|load. This keeps the human's 'default' VM entirely untouched.
+CB_INFRA_PROFILE="cb-infra"
+cb_infra_context() { printf 'colima-%s' "$CB_INFRA_PROFILE"; }
+
+# `colima start` hijacks the global active docker context. We address every VM
+# explicitly via `docker --context`, so restore the human's previously-active
+# context afterward — otherwise their bare `docker` would silently point at a
+# claudebox VM instead of `default`.
+cb_colima_start() {
+    local prev rc
+    prev="$(docker context show 2>/dev/null)"
+    colima start "$@"; rc=$?
+    [ -n "$prev" ] && docker context use "$prev" >/dev/null 2>&1
+    return $rc
+}
+
+# start cb-infra if it exists but isn't running (never creates it — that's `make build`)
+cb_ensure_infra() {
+    cb_vm_running "$CB_INFRA_PROFILE" && return 0
+    if [ "$(cb_vm_status "$CB_INFRA_PROFILE")" = "absent" ]; then
+        echo "❌ '$CB_INFRA_PROFILE' colima profile not found — build the image first: make build (or make build-minimal)" >&2
+        return 1
     fi
-    count="$(cb_running_cb_count)"
-    warn="$(cb_machine_get vm.warn_max)"
-    hard="$(cb_machine_get vm.hard_max)"
-    decision="$(cb_vm_limit_decision "$count" "$warn" "$hard")"
-    case "$decision" in
-        deny) echo "❌ $count claudebox VMs already running (hard_max=$hard). Free one with 'claudebox down' or 'claudebox destroy'." >&2; return 1 ;;
-        warn) echo "⚠️  $count claudebox VMs running (warn_max=$warn); starting another." >&2 ;;
-    esac
-    cpu="$(cb_vm_get "$root" cpu)"
-    mem="$(cb_vm_get "$root" memory)"
-    disk="$(cb_vm_get "$root" disk)"
-    local mount_args=()
-    case "$root/" in
-        "$HOME"/*) : ;;                        # under $HOME — colima auto-mounts it
-        *) mount_args=(--mount "$root:w") ;;   # outside $HOME — mount it writable
-    esac
-    echo "🟢 starting colima VM '$profile' (cpu=$(cb_num "$cpu") mem=$(cb_num "$mem")GiB disk=$(cb_num "$disk")GiB)..." >&2
-    colima start -p "$profile" \
-        --cpu "$(cb_num "$cpu")" --memory "$(cb_num "$mem")" --disk "$(cb_num "$disk")" \
-        "${mount_args[@]}"
+    echo "🟢 starting '$CB_INFRA_PROFILE' VM (image store)..." >&2
+    cb_colima_start -p "$CB_INFRA_PROFILE"
+}
+
+# seed $CLAUDE_IMAGE into a target docker context (save|load from cb-infra) if missing
+cb_ensure_image() {
+    local ctx="$1" src
+    docker --context "$ctx" image inspect "$CLAUDE_IMAGE" >/dev/null 2>&1 && return 0
+    cb_ensure_infra || return 1
+    src="$(cb_infra_context)"
+    if ! docker --context "$src" image inspect "$CLAUDE_IMAGE" >/dev/null 2>&1; then
+        echo "❌ $CLAUDE_IMAGE not present in $CB_INFRA_PROFILE — build it: make build (or make build-minimal)" >&2
+        return 1
+    fi
+    echo "📦 seeding $CLAUDE_IMAGE into project VM (one-time save|load)..." >&2
+    docker --context "$src" save "$CLAUDE_IMAGE" | docker --context "$ctx" load >/dev/null
+}
+
+# cb_ensure_vm ROOT ID — start the project VM if needed (enforces limits), then
+# make sure the claudebox image is present in it.
+cb_ensure_vm() {
+    local root="$1" id="$2" profile ctx cpu mem disk count warn hard decision
+    profile="$(cb_project_profile "$id")"
+    ctx="$(cb_project_context "$id")"
+    cb_guard_profile "$profile" || return 1
+    if ! cb_vm_running "$profile"; then
+        count="$(cb_running_cb_count)"
+        warn="$(cb_machine_get vm.warn_max)"
+        hard="$(cb_machine_get vm.hard_max)"
+        decision="$(cb_vm_limit_decision "$count" "$warn" "$hard")"
+        case "$decision" in
+            deny) echo "❌ $count claudebox VMs already running (hard_max=$hard). Free one with 'claudebox down' or 'claudebox destroy'." >&2; return 1 ;;
+            warn) echo "⚠️  $count claudebox VMs running (warn_max=$warn); starting another." >&2 ;;
+        esac
+        cpu="$(cb_vm_get "$root" cpu)"
+        mem="$(cb_vm_get "$root" memory)"
+        disk="$(cb_vm_get "$root" disk)"
+        local mount_args=()
+        case "$root/" in
+            "$HOME"/*) : ;;                        # under $HOME — colima auto-mounts it
+            *) mount_args=(--mount "$root:w") ;;   # outside $HOME — mount it writable
+        esac
+        echo "🟢 starting colima VM '$profile' (cpu=$(cb_num "$cpu") mem=$(cb_num "$mem")GiB disk=$(cb_num "$disk")GiB)..." >&2
+        cb_colima_start -p "$profile" \
+            --cpu "$(cb_num "$cpu")" --memory "$(cb_num "$mem")" --disk "$(cb_num "$disk")" \
+            "${mount_args[@]}" || return 1
+    fi
+    cb_ensure_image "$ctx" || return 1
 }
 
 cb_vm_down() {
@@ -284,10 +330,17 @@ cb_vm_destroy() {
 }
 
 cb_vm_ls() {
-    local lines
-    lines="$(_cb_vm_list_json | cb_parse_vm_lines | awk -F'\t' '$1 ~ /^cb-/')"
-    if [ -z "$lines" ]; then echo "no claudebox VMs"; return 0; fi
-    { printf 'PROFILE\tSTATUS\n'; printf '%s\n' "$lines"; } | column -t -s "$(printf '\t')"
+    local rows proj infra
+    rows="$(_cb_vm_list_json | cb_parse_vm_lines)"
+    proj="$(printf '%s\n' "$rows"  | awk -F'\t' '$1 ~ /^cb-/ && $1 != "cb-infra"')"
+    infra="$(printf '%s\n' "$rows" | awk -F'\t' '$1 == "cb-infra" { print $2 }')"
+    if [ -z "$proj" ]; then
+        echo "no claudebox project VMs"
+    else
+        { printf 'PROFILE\tSTATUS\n'; printf '%s\n' "$proj"; } | column -t -s "$(printf '\t')"
+    fi
+    [ -n "$infra" ] && printf 'infra (cb-infra): %s\n' "$infra"
+    return 0
 }
 
 # load functions only (for tests) without running the wrapper body
@@ -355,14 +408,20 @@ case "${1:-}" in
         ;;
 esac
 
+# ── project identity → colima context (Phase 4) ──────────────────────────────
+# Every docker call below runs against the project's own VM via `"${DOCKER[@]}"`.
+CB_PROJECT_ID="$(cb_project_id "$CB_PROJECT_ROOT")"
+CB_CONTEXT="$(cb_project_context "$CB_PROJECT_ID")"
+DOCKER=(docker --context "$CB_CONTEXT")
+dbg "project id=$CB_PROJECT_ID context=$CB_CONTEXT"
+
 # ── resolve the per-project data dir (shared-nothing) unless overridden ───────
 # Each project gets its own ~/.claude state under ~/.config/claudebox/projects/<id>.
 # Auth is not project state — it still arrives per invocation via env (below) and
 # is written into this dir, so there is no shared mutable directory.
 if [ -z "$CLAUDE_DIR" ]; then
-    CB_PROJECT_ID="$(cb_project_id "$CB_PROJECT_ROOT")"
     CLAUDE_DIR="$(cb_project_data_dir "$CB_PROJECT_ID")"
-    dbg "per-project data dir: $CLAUDE_DIR (id=$CB_PROJECT_ID)"
+    dbg "per-project data dir: $CLAUDE_DIR"
 else
     dbg "data dir override: $CLAUDE_DIR"
 fi
@@ -431,14 +490,18 @@ set -- "${REMAINING_ARGS[@]}"
 
 # setup-token — throwaway container, token is saved to mounted ~/.claude
 if [ "${1:-}" = "setup-token" ]; then
-    docker run -it --rm --name "${container_name}_setup_$$" "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE setup-token
+    cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
+    "${DOCKER[@]}" run -it --rm --name "${container_name}_setup_$$" "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE setup-token
     exit 0
 fi
 
-# stop — kill running interactive container for this workspace
+# stop — kill running interactive container for this workspace (no VM boot: a
+# stopped VM means nothing is running)
 if [ "${1:-}" = "stop" ]; then
-    if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
-        docker stop "$container_name" >/dev/null 2>&1
+    if ! cb_vm_running "$(cb_project_profile "$CB_PROJECT_ID")"; then
+        echo "nothing running (VM not up)"
+    elif "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+        "${DOCKER[@]}" stop "$container_name" >/dev/null 2>&1
         echo "stopped $container_name"
     else
         echo "nothing running"
@@ -467,8 +530,9 @@ if [ -n "$_mode_cron" ]; then
     dbg "cron container: $cron_name"
 
     if [ "${1:-}" = "stop" ]; then
-        if docker ps --format '{{.Names}}' | grep -q "^${cron_name}$"; then
-            docker stop "$cron_name" >/dev/null 2>&1
+        if cb_vm_running "$(cb_project_profile "$CB_PROJECT_ID")" \
+            && "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${cron_name}$"; then
+            "${DOCKER[@]}" stop "$cron_name" >/dev/null 2>&1
             echo "stopped $cron_name"
         else
             echo "cron not running"
@@ -476,9 +540,11 @@ if [ -n "$_mode_cron" ]; then
         exit 0
     fi
 
-    if docker ps --format '{{.Names}}' | grep -q "^${cron_name}$"; then
+    cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
+
+    if "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${cron_name}$"; then
         echo "cron already running ($cron_name)"
-        echo "  docker logs -f $cron_name"
+        echo "  docker --context $CB_CONTEXT logs -f $cron_name"
         exit 0
     fi
 
@@ -490,21 +556,22 @@ if [ -n "$_mode_cron" ]; then
     [ -n "$_mode_cron_file" ] && CRON_ARGS+=(-e "CLAUDEBOX_MODE_CRON_FILE=$_mode_cron_file")
     [ "$DEBUG" = "true" ]     && CRON_ARGS+=(-e "DEBUG=true")
 
-    if docker ps -a --format '{{.Names}}' | grep -q "^${cron_name}$"; then
+    if "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${cron_name}$"; then
         echo "restarting cron container ($cron_name)..."
-        docker start "$cron_name"
+        "${DOCKER[@]}" start "$cron_name"
     else
         echo "starting cron container ($cron_name)..."
-        docker run -d --name "$cron_name" "${DOCKER_ARGS[@]}" "${CRON_ARGS[@]}" $CLAUDE_IMAGE
+        "${DOCKER[@]}" run -d --name "$cron_name" "${DOCKER_ARGS[@]}" "${CRON_ARGS[@]}" $CLAUDE_IMAGE
     fi
-    echo "  docker logs -f $cron_name"
+    echo "  docker --context $CB_CONTEXT logs -f $cron_name"
     exit 0
 fi
 
 # passthrough commands — run in throwaway container, bypass entrypoint
 case "${1:-}" in
     -v|--version|doctor|auth|mcp)
-        docker run --rm --entrypoint claude "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE "$@"
+        cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
+        "${DOCKER[@]}" run --rm --entrypoint claude "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE "$@"
         exit 0
         ;;
 esac
@@ -616,18 +683,20 @@ if [ $# -gt 0 ]; then
         dbg "PASS_ARGS: ${PASS_ARGS[*]}"
         dbg "PIPE_MODE: $PIPE_MODE"
 
+        cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
+
         # Programmatic mode — own container, no TTY
         prog_name="${container_name}_prog"
         dbg "prog container: $prog_name"
         prog_rc=0
-        if ! docker ps -a --format '{{.Names}}' | grep -q "^${prog_name}$"; then
+        if ! "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${prog_name}$"; then
             dbg "prog: container does not exist, creating with docker run"
             if [ -n "$PIPE_MODE" ]; then
-                docker run --name "$prog_name" "${DOCKER_ARGS[@]}" -e CLAUDEBOX_CONTAINER_NAME="$prog_name" $CLAUDE_IMAGE "${PASS_ARGS[@]}" \
-                    | docker run --rm -i --entrypoint python3 $CLAUDE_IMAGE /home/claude/jsonpipe.py "$PIPE_MODE"
+                "${DOCKER[@]}" run --name "$prog_name" "${DOCKER_ARGS[@]}" -e CLAUDEBOX_CONTAINER_NAME="$prog_name" $CLAUDE_IMAGE "${PASS_ARGS[@]}" \
+                    | "${DOCKER[@]}" run --rm -i --entrypoint python3 $CLAUDE_IMAGE /home/claude/jsonpipe.py "$PIPE_MODE"
                 prog_rc=${PIPESTATUS[0]}
             else
-                docker run --name "$prog_name" "${DOCKER_ARGS[@]}" -e CLAUDEBOX_CONTAINER_NAME="$prog_name" $CLAUDE_IMAGE "${PASS_ARGS[@]}"
+                "${DOCKER[@]}" run --name "$prog_name" "${DOCKER_ARGS[@]}" -e CLAUDEBOX_CONTAINER_NAME="$prog_name" $CLAUDE_IMAGE "${PASS_ARGS[@]}"
                 prog_rc=$?
             fi
             dbg "prog: docker run exited with $prog_rc"
@@ -637,11 +706,11 @@ if [ $# -gt 0 ]; then
             printf '%q ' "${PASS_ARGS[@]}" > "$CLAUDE_DIR/.${prog_name}-args"
             dbg "prog: docker start -a $prog_name"
             if [ -n "$PIPE_MODE" ]; then
-                docker start -a "$prog_name" \
-                    | docker run --rm -i --entrypoint python3 $CLAUDE_IMAGE /home/claude/jsonpipe.py "$PIPE_MODE"
+                "${DOCKER[@]}" start -a "$prog_name" \
+                    | "${DOCKER[@]}" run --rm -i --entrypoint python3 $CLAUDE_IMAGE /home/claude/jsonpipe.py "$PIPE_MODE"
                 prog_rc=${PIPESTATUS[0]}
             else
-                docker start -a "$prog_name"
+                "${DOCKER[@]}" start -a "$prog_name"
                 prog_rc=$?
             fi
             dbg "prog: docker start exited with $prog_rc"
@@ -661,28 +730,31 @@ else
     rm -f "$UPDATE_FILE"
 fi
 
+# Interactive — ensure the project VM (+ image) is up first
+cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
+
 # Wait for container to not be running (another session might be using it)
-if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+if "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
     echo "⏳ Container '$container_name' is busy. Waiting for it to finish..."
     for i in 1 2 3; do
         sleep $((5 * i))
-        if ! docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+        if ! "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
             echo "✅ Container is free."
             break
         fi
         echo "   attempt $i/3..."
     done
-    if docker ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
+    if "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
         echo "❌ Container is still busy after 3 attempts. Try again later." >&2
         exit 1
     fi
 fi
 
 # Interactive — start existing container or create new one
-if docker ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
+if "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
     echo "🔄 Starting container '$container_name'..."
-    docker start -ai "$container_name"
+    "${DOCKER[@]}" start -ai "$container_name"
 else
     echo "🔧 Creating container '$container_name'..."
-    docker run -it --name "$container_name" "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE
+    "${DOCKER[@]}" run -it --name "$container_name" "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE
 fi

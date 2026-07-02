@@ -6,9 +6,14 @@ BIN_PATH="$INSTALL_DIR/$BIN_NAME"
 
 echo "🚀 Starting Claude Code setup (binary: $BIN_NAME)..."
 
-# Check for Docker
+# Check for Docker + Colima (this fork runs under colima with per-project VMs)
 if ! command -v docker &>/dev/null; then
 	echo "❌ Docker is not installed. Please install Docker first."
+	exit 1
+fi
+if ! command -v colima &>/dev/null; then
+	echo "❌ Colima is not installed. This fork builds and runs under colima."
+	echo "   Install it (e.g. 'brew install colima') and retry."
 	exit 1
 fi
 
@@ -52,8 +57,22 @@ if [ ! -f "$SCRIPT_DIR/Dockerfile" ]; then
 	exit 1
 fi
 
-echo "🔨 Building local Claude Code image ($IMAGE_NAME:$CLAUDE_TAG, target: $BUILD_TARGET)..."
-if ! docker build --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
+# Build into a dedicated cb-infra colima profile (never the human's default VM).
+# Project VMs are seeded from it via save|load at run time. See
+# docs/design/per-project-vm.md.
+CB_INFRA_PROFILE="${CLAUDEBOX_INFRA_PROFILE:-cb-infra}"
+CB_INFRA_CTX="colima-$CB_INFRA_PROFILE"
+if ! colima status -p "$CB_INFRA_PROFILE" >/dev/null 2>&1; then
+	echo "🟢 Starting '$CB_INFRA_PROFILE' colima VM (image store, one-time)..."
+	if ! colima start -p "$CB_INFRA_PROFILE" \
+		--cpu "${CLAUDEBOX_INFRA_CPU:-4}" --memory "${CLAUDEBOX_INFRA_MEMORY:-8}" --disk "${CLAUDEBOX_INFRA_DISK:-80}"; then
+		echo "❌ Failed to start the $CB_INFRA_PROFILE colima VM."
+		exit 1
+	fi
+fi
+
+echo "🔨 Building local Claude Code image into $CB_INFRA_PROFILE ($IMAGE_NAME:$CLAUDE_TAG, target: $BUILD_TARGET)..."
+if ! docker --context "$CB_INFRA_CTX" build --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
 	echo "❌ Image build failed."
 	exit 1
 fi
