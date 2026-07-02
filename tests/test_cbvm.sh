@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Standalone unit tests for the Phase-2 VM-lifecycle *pure* helpers in wrapper.sh.
+# No colima/docker needed — the colima-calling glue is exercised in integration.
+#
+# Run:  bash tests/test_cbvm.sh
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WRAPPER="$SCRIPT_DIR/../wrapper.sh"
+
+export CLAUDEBOX_SOURCE_ONLY=1
+# shellcheck disable=SC1090
+source "$WRAPPER"
+unset CLAUDEBOX_SOURCE_ONLY
+
+PASS=0
+FAIL=0
+ok()  { echo "  ok   $1"; PASS=$((PASS + 1)); }
+bad() { echo "  FAIL $1"; FAIL=$((FAIL + 1)); }
+eq()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected '$3', got '$2')"; fi; }
+rc()  { if [ "$2" = "$3" ]; then ok "$1"; else bad "$1 (expected rc $3, got $2)"; fi; }
+
+echo "--- cb_num (strip unit suffix) ---"
+eq "8GiB"   "$(cb_num 8GiB)"    "8"
+eq "60GiB"  "$(cb_num 60GiB)"   "60"
+eq "4"      "$(cb_num 4)"       "4"
+eq "2.5GiB" "$(cb_num 2.5GiB)"  "2.5"
+eq "empty"  "$(cb_num '')"      "0"
+
+echo "--- cb_guard_profile ---"
+cb_guard_profile "cb-7f3ac9e2" 2>/dev/null; rc "cb-* allowed" "$?" "0"
+cb_guard_profile "default"     2>/dev/null; rc "default refused" "$?" "1"
+cb_guard_profile ""            2>/dev/null; rc "empty refused" "$?" "1"
+cb_guard_profile "randomvm"    2>/dev/null; rc "non-cb refused" "$?" "1"
+
+echo "--- cb_vm_limit_decision COUNT WARN HARD ---"
+eq "0/3/5 ok"   "$(cb_vm_limit_decision 0 3 5)" "ok"
+eq "2/3/5 ok"   "$(cb_vm_limit_decision 2 3 5)" "ok"
+eq "3/3/5 warn" "$(cb_vm_limit_decision 3 3 5)" "warn"
+eq "4/3/5 warn" "$(cb_vm_limit_decision 4 3 5)" "warn"
+eq "5/3/5 deny" "$(cb_vm_limit_decision 5 3 5)" "deny"
+eq "6/3/5 deny" "$(cb_vm_limit_decision 6 3 5)" "deny"
+eq "bad input -> ok" "$(cb_vm_limit_decision x 3 5)" "ok"
+
+echo "--- cb_parse_vm_lines (colima list --json) ---"
+FIX='{"name":"default","status":"Running","arch":"aarch64","cpus":4,"address":"192.168.64.3"}
+{"name":"cb-7f3ac9e2","status":"Running","arch":"aarch64","address":"192.168.64.5"}
+{"name":"cb-1b2c3d4e","status":"Stopped","cpus":4}'
+parsed="$(printf '%s\n' "$FIX" | cb_parse_vm_lines)"
+eq "3 rows parsed" "$(printf '%s\n' "$parsed" | grep -c .)" "3"
+eq "status field-order independent" \
+   "$(printf '%s\n' '{"status":"Running","name":"cb-zz"}' | cb_parse_vm_lines)" \
+   "$(printf 'cb-zz\tRunning')"
+
+echo "--- cb_running_cb_profiles (filter) ---"
+running="$(printf '%s\n' "$FIX" | cb_parse_vm_lines | cb_running_cb_profiles)"
+eq "only running cb-* listed" "$running" "cb-7f3ac9e2"
+eq "running count = 1" "$(printf '%s\n' "$running" | grep -c .)" "1"
+
+echo "--- cb_status_of ---"
+eq "running profile"  "$(printf '%s\n' "$FIX" | cb_parse_vm_lines | cb_status_of cb-7f3ac9e2)" "Running"
+eq "stopped profile"  "$(printf '%s\n' "$FIX" | cb_parse_vm_lines | cb_status_of cb-1b2c3d4e)" "Stopped"
+eq "absent profile"   "$(printf '%s\n' "$FIX" | cb_parse_vm_lines | cb_status_of cb-nope)"     "absent"
+
+echo "--- cb_project_id_ro (no creation) ---"
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+eq "empty when no config" "$(cb_project_id_ro "$TMP")" ""
+[ ! -d "$TMP/.claudebox" ] && ok "id_ro did not create .claudebox" || bad "id_ro created .claudebox"
+mkdir -p "$TMP/.claudebox"
+printf 'id: abc1234f\n' > "$TMP/.claudebox/config.yml"
+eq "reads existing id" "$(cb_project_id_ro "$TMP")" "abc1234f"
+
+echo ""
+echo "  $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

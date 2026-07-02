@@ -179,6 +179,117 @@ cb_project_profile()  { printf 'cb-%s' "$1"; }         # $1 = id
 cb_project_context()  { printf 'colima-cb-%s' "$1"; }  # $1 = id
 cb_project_data_dir() { printf '%s/%s/claude' "$(cb_data_root)" "$1"; }  # $1 = id
 
+# read the project id WITHOUT creating config (empty if none) — for down/destroy
+cb_project_id_ro() {
+    local cfg
+    cfg="$(cb_project_config_path "$1")"
+    [ -f "$cfg" ] && _cb_yaml_get "$cfg" id
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VM lifecycle — Phase 2 of docs/design/per-project-vm.md
+#
+# Pure helpers (cb_num, cb_guard_profile, cb_vm_limit_decision, cb_parse_vm_lines,
+# cb_running_cb_profiles, cb_status_of) parse/decide from stdin or args and are
+# unit-tested. The colima-calling glue (_cb_vm_list_json, cb_vm_status,
+# cb_ensure_vm, cb_vm_down/destroy/ls) is exercised in integration.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# strip a unit suffix to the bare number colima wants (8GiB -> 8, 60GiB -> 60)
+cb_num() { local s="${1//[!0-9.]/}"; printf '%s' "${s:-0}"; }
+
+# only ever act on a real claudebox profile — never 'default', never empty
+cb_guard_profile() {
+    case "${1:-}" in
+        cb-?*) return 0 ;;
+        *) printf 'refusing to operate on non-claudebox colima profile: %s\n' "${1:-<empty>}" >&2; return 1 ;;
+    esac
+}
+
+# cb_vm_limit_decision COUNT WARN HARD -> ok | warn | deny
+cb_vm_limit_decision() {
+    local count="$1" warn="$2" hard="$3"
+    case "$count$warn$hard" in *[!0-9]*) printf 'ok'; return 0 ;; esac
+    if   [ "$count" -ge "$hard" ]; then printf 'deny'
+    elif [ "$count" -ge "$warn" ]; then printf 'warn'
+    else printf 'ok'; fi
+}
+
+# read `colima list --json` (JSON lines) on stdin -> "name<TAB>status" per VM.
+# Field-order independent (matches "name"/"status" anywhere on the line).
+cb_parse_vm_lines() {
+    awk '{
+        name=""; status="";
+        if (match($0, /"name":"[^"]*"/))   name=substr($0, RSTART+8,  RLENGTH-9);
+        if (match($0, /"status":"[^"]*"/)) status=substr($0, RSTART+10, RLENGTH-11);
+        if (name != "") print name "\t" status;
+    }'
+}
+
+# from "name<TAB>status" stdin -> names of running cb-* profiles
+cb_running_cb_profiles() { awk -F'\t' '$1 ~ /^cb-/ && $2 == "Running" { print $1 }'; }
+
+# from "name<TAB>status" stdin -> status of $1, or "absent"
+cb_status_of() { awk -F'\t' -v p="$1" '$1==p { print $2; f=1 } END { if (!f) print "absent" }'; }
+
+_cb_vm_list_json()    { colima list --json 2>/dev/null; }
+cb_vm_status()        { _cb_vm_list_json | cb_parse_vm_lines | cb_status_of "$1"; }
+cb_vm_running()       { [ "$(cb_vm_status "$1")" = "Running" ]; }
+cb_running_cb_count() { _cb_vm_list_json | cb_parse_vm_lines | cb_running_cb_profiles | grep -c . ; }
+
+# cb_ensure_vm ROOT ID — start the project VM if it isn't running (enforces limits)
+cb_ensure_vm() {
+    local root="$1" id="$2" profile cpu mem disk count warn hard decision
+    profile="$(cb_project_profile "$id")"
+    cb_guard_profile "$profile" || return 1
+    if cb_vm_running "$profile"; then
+        return 0
+    fi
+    count="$(cb_running_cb_count)"
+    warn="$(cb_machine_get vm.warn_max)"
+    hard="$(cb_machine_get vm.hard_max)"
+    decision="$(cb_vm_limit_decision "$count" "$warn" "$hard")"
+    case "$decision" in
+        deny) echo "❌ $count claudebox VMs already running (hard_max=$hard). Free one with 'claudebox down' or 'claudebox destroy'." >&2; return 1 ;;
+        warn) echo "⚠️  $count claudebox VMs running (warn_max=$warn); starting another." >&2 ;;
+    esac
+    cpu="$(cb_vm_get "$root" cpu)"
+    mem="$(cb_vm_get "$root" memory)"
+    disk="$(cb_vm_get "$root" disk)"
+    local mount_args=()
+    case "$root/" in
+        "$HOME"/*) : ;;                        # under $HOME — colima auto-mounts it
+        *) mount_args=(--mount "$root:w") ;;   # outside $HOME — mount it writable
+    esac
+    echo "🟢 starting colima VM '$profile' (cpu=$(cb_num "$cpu") mem=$(cb_num "$mem")GiB disk=$(cb_num "$disk")GiB)..." >&2
+    colima start -p "$profile" \
+        --cpu "$(cb_num "$cpu")" --memory "$(cb_num "$mem")" --disk "$(cb_num "$disk")" \
+        "${mount_args[@]}"
+}
+
+cb_vm_down() {
+    local profile; profile="$(cb_project_profile "$1")"
+    cb_guard_profile "$profile" || return 1
+    if [ "$(cb_vm_status "$profile")" = "absent" ]; then echo "no VM for this project ($profile)"; return 0; fi
+    echo "⏹  stopping colima VM '$profile' (keeps disk; 'claudebox' restarts it)..."
+    colima stop -p "$profile"
+}
+
+cb_vm_destroy() {
+    local profile; profile="$(cb_project_profile "$1")"
+    cb_guard_profile "$profile" || return 1
+    if [ "$(cb_vm_status "$profile")" = "absent" ]; then echo "no VM for this project ($profile)"; return 0; fi
+    echo "🗑  deleting colima VM '$profile' and all its containers/volumes..."
+    colima delete -f -p "$profile"
+}
+
+cb_vm_ls() {
+    local lines
+    lines="$(_cb_vm_list_json | cb_parse_vm_lines | awk -F'\t' '$1 ~ /^cb-/')"
+    if [ -z "$lines" ]; then echo "no claudebox VMs"; return 0; fi
+    { printf 'PROFILE\tSTATUS\n'; printf '%s\n' "$lines"; } | column -t -s "$(printf '\t')"
+}
+
 # load functions only (for tests) without running the wrapper body
 [ -n "${CLAUDEBOX_SOURCE_ONLY:-}" ] && return 0 2>/dev/null || true
 
@@ -217,6 +328,29 @@ dbg "container_name=$container_name"
 dbg "CLAUDE_DIR=$CLAUDE_DIR"
 dbg "CLAUDE_SSH=$CLAUDE_SSH"
 dbg "PWD=$PWD"
+
+# ── per-project VM subcommands (Phase 2 of docs/design/per-project-vm.md) ─────
+# Act on the project's colima VM and exit before any container/auth setup.
+CB_PROJECT_ROOT="$(cb_project_root "$PWD")"
+dbg "CB_PROJECT_ROOT=$CB_PROJECT_ROOT"
+case "${1:-}" in
+    vm)
+        case "${2:-}" in
+            ls|list|"") cb_vm_ls; exit 0 ;;
+            *) echo "usage: claudebox vm ls" >&2; exit 1 ;;
+        esac
+        ;;
+    down)
+        _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
+        if [ -z "$_cbid" ]; then echo "no claudebox VM for this project (no .claudebox/config.yml)"; exit 0; fi
+        cb_vm_down "$_cbid"; exit $?
+        ;;
+    destroy)
+        _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
+        if [ -z "$_cbid" ]; then echo "no claudebox VM for this project (no .claudebox/config.yml)"; exit 0; fi
+        cb_vm_destroy "$_cbid"; exit $?
+        ;;
+esac
 
 DOCKER_ARGS=(
     --network host
