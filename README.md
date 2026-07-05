@@ -96,6 +96,27 @@ mkdir -p ~/.local/bin && install -m 755 wrapper.sh ~/.local/bin/claudebox
 # make sure ~/.local/bin is on your PATH (add to ~/.zshrc if needed)
 ```
 
+### Create a new claudebot project (`claudebox bootstrap`)
+
+To stand up a fresh project *and hand claudebot the reason it's being created*, use
+`bootstrap`. It runs a **preflight** (asserts `colima`/`docker`/`git` are present),
+`git init`s the repo, scaffolds a starter layout, and writes a **committed mission
+brief** at `.claudebox/BRIEF.md`. On first boot, claudebot is pointed at that brief
+(a banner is prepended to its `CLAUDE.md`) so it starts knowing *why* it exists.
+
+```bash
+mkdir project-a && cd project-a
+claudebox bootstrap "Build a 3-tier app: React UI, Node API, Postgres, all in containers."
+#   ...or pipe a longer brief:   claudebox bootstrap < intent.md
+#   ...or from a file:           claudebox bootstrap --brief-file intent.md
+```
+
+Flags: `--no-start` (scaffold but don't boot claudebot — a host Claude session uses
+this, then tells you to `cd project-a && claudebox`), `--brief-only` (just the brief
++ config, no git/dirs/boot), `--force` (overwrite an existing brief). As claudebot
+works it keeps the brief's *Progress / handoff log* current, so any later session
+catches up from one file. See [docs/design/bootstrap.md](docs/design/bootstrap.md).
+
 ## Image Variants
 
 ### `claudebox:latest` (full)

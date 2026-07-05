@@ -193,7 +193,7 @@ fi
 SYSTEM_HINT_FILE="/home/claude/.claude/system-hint.txt"
 if [ ! -f "$SYSTEM_HINT_FILE" ]; then
 	cat > "$SYSTEM_HINT_FILE" <<SYSHINT
-You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host.
+You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .claudebox/BRIEF.md exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work.
 SYSHINT
 	chown claude:claude "$SYSTEM_HINT_FILE"
 	dbg "system hint created"
@@ -204,6 +204,31 @@ if [ ! -f "$WORKSPACE_DIR/CLAUDE.md" ]; then
 	cp "$CLAUDE_MD_TEMPLATE" "$WORKSPACE_DIR/CLAUDE.md"
 	chown claude:claude "$WORKSPACE_DIR/CLAUDE.md"
 	dbg "CLAUDE.md copied to $WORKSPACE_DIR"
+fi
+
+# If this project was bootstrapped (docs/design/bootstrap.md), surface its mission
+# brief unmissably: prepend a one-block banner to the workspace CLAUDE.md pointing at
+# .claudebox/BRIEF.md. Guarded by a marker so it's done exactly once (idempotent
+# across restarts). We do NOT inline the brief — claudebot reads the live file.
+BRIEF_FILE="$WORKSPACE_DIR/.claudebox/BRIEF.md"
+if [ -f "$BRIEF_FILE" ] && [ -f "$WORKSPACE_DIR/CLAUDE.md" ] \
+   && ! grep -q "claudebox:mission-banner" "$WORKSPACE_DIR/CLAUDE.md" 2>/dev/null; then
+	BANNER_TMP="$(mktemp)"
+	{
+		echo "<!-- claudebox:mission-banner -->"
+		echo "## 🎯 Your mission — read \`.claudebox/BRIEF.md\` FIRST"
+		echo ""
+		echo "This project was bootstrapped with a mission brief at \`.claudebox/BRIEF.md\`."
+		echo "It states WHY this project exists and what to build. Read it before anything"
+		echo "else, follow it as project spec, and keep its \"Progress / handoff log\""
+		echo "section updated as you work."
+		echo ""
+		echo "---"
+		echo ""
+		cat "$WORKSPACE_DIR/CLAUDE.md"
+	} > "$BANNER_TMP" && mv "$BANNER_TMP" "$WORKSPACE_DIR/CLAUDE.md"
+	chown claude:claude "$WORKSPACE_DIR/CLAUDE.md"
+	dbg "mission banner prepended (BRIEF.md present)"
 fi
 
 # ensure .claude.json has required native install properties

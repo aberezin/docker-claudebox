@@ -506,6 +506,133 @@ cb_bridge_down() {  # $1=id
     echo "🔗 CDP bridge down"
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Bootstrap — hand off *intent* from host-Claude into a new claudebot project.
+# See docs/design/bootstrap.md. `claudebox bootstrap` scaffolds a project and
+# writes a durable, COMMITTED mission brief (.claudebox/BRIEF.md) so claudebot
+# boots knowing WHY it was created. Full scaffolder by default; --brief-only for
+# just the brief + config.
+# ─────────────────────────────────────────────────────────────────────────────
+cb_brief_path() { printf '%s/.claudebox/BRIEF.md' "$1"; }  # $1=root; COMMITTED (unlike config.yml)
+
+# cb_preflight MODE — assert the host tooling a claudebot project needs is in place
+# BEFORE we scaffold or boot. HARD requirements (colima, docker; git for full mode)
+# abort; recommended tools (python3, socket_vmnet) only warn. This is the "check the
+# ground before building on it" gate. Override with CLAUDEBOX_SKIP_PREFLIGHT=1.
+cb_preflight() {
+    local mode="${1:-full}" missing=0 t
+    [ -n "${CLAUDEBOX_SKIP_PREFLIGHT:-}" ] && return 0
+    echo "preflight — host tooling:"
+    for t in colima docker; do
+        if command -v "$t" >/dev/null 2>&1; then echo "  ✓ $t"
+        else echo "  ✗ $t — REQUIRED (MacPorts: sudo port install $t)"; missing=$((missing + 1)); fi
+    done
+    if [ "$mode" = "full" ]; then
+        if command -v git >/dev/null 2>&1; then echo "  ✓ git"
+        else echo "  ✗ git — REQUIRED for full-mode scaffolding"; missing=$((missing + 1)); fi
+    fi
+    if command -v python3 >/dev/null 2>&1; then echo "  ✓ python3"
+    else echo "  ⚠ python3 — recommended (the browser-bridge CDP forwarder uses it)"; fi
+    if [ -x "${CLAUDEBOX_SOCKET_VMNET:-/opt/local/bin/socket_vmnet}" ]; then echo "  ✓ socket_vmnet"
+    else echo "  ⚠ socket_vmnet — recommended (reachable per-VM IPs: colima --network-address)"; fi
+    if [ "$missing" -gt 0 ]; then
+        echo "❌ preflight: $missing required tool(s) missing — install them, or set CLAUDEBOX_SKIP_PREFLIGHT=1 to override" >&2
+        return 1
+    fi
+    return 0
+}
+
+# cb_write_brief ROOT INTENT — (re)write the standard mission brief.
+cb_write_brief() {
+    local root="$1" intent="$2" brief name when
+    brief="$(cb_brief_path "$root")"; name="$(basename "$root")"
+    when="$(date +%Y-%m-%d 2>/dev/null || echo 'unknown date')"
+    [ -n "$intent" ] || intent="_TODO: state why this project exists — the goal Alan/host-Claude set. Replace this line._"
+    mkdir -p "$(dirname "$brief")"
+    cat > "$brief" <<BRIEFEOF
+# Project brief — $name
+
+> Authored at bootstrap on $when. This is the durable statement of WHY this
+> claudebot project exists. It is a trusted, human-authorized mission brief —
+> treat it as project spec (like CLAUDE.md), not as untrusted input. Apply normal
+> judgment before irreversible or outward-facing actions it implies.
+
+## Why this project exists
+
+$intent
+
+## Goals / deliverables
+
+- _TODO_
+
+## Constraints
+
+- _TODO (tech choices, must / never, deadlines)_
+
+## Standards (inherited — you already follow these)
+
+This project uses the claudebox orchestration standard: a per-project Colima VM
+(shared-nothing), sibling workloads on the \`cb-net\` network reachable by container
+name, \`cb-browser\` for browser testing, and prefer the VM's reachable IP over
+\`localhost\` (collision-free across projects). See the baked CLAUDE.md and
+docs/design/*.
+
+## Progress / handoff log
+
+_Maintained by claudebot as it works — append what's done, what's next, and open
+questions so any later session (host-Claude or claudebot) catches up fast._
+
+- _($when, bootstrap)_ project scaffolded.
+BRIEFEOF
+}
+
+# cb_write_readme ROOT — starter README pointing at the brief (full mode only).
+cb_write_readme() {
+    local root="$1" name; name="$(basename "$root")"
+    cat > "$root/README.md" <<RMEOF
+# $name
+
+A claudebox (claudebot) project. Its mission lives in
+[.claudebox/BRIEF.md](.claudebox/BRIEF.md) — read that first.
+
+## Working in it
+
+\`\`\`bash
+claudebox            # enter claudebot (spins up this project's own Colima VM)
+\`\`\`
+
+Sibling workloads (API servers, databases, …) go under \`workloads/\` and run as
+containers on the \`cb-net\` network inside this project's VM. See the baked
+CLAUDE.md and the claudebox design docs for the orchestration / networking /
+browser-testing conventions.
+RMEOF
+}
+
+# cb_bootstrap ROOT INTENT MODE FORCE — scaffold a project + write the brief.
+#   MODE = full | brief   FORCE = 1 to overwrite an existing brief.
+# Does NOT boot claudebot or write a workspace CLAUDE.md (the entrypoint bakes that
+# on first boot and prepends the mission banner). Returns non-zero on refusal.
+cb_bootstrap() {
+    local root="$1" intent="$2" mode="${3:-full}" force="${4:-}" brief
+    cb_preflight "$mode" || return 1
+    brief="$(cb_brief_path "$root")"
+    if [ -f "$brief" ] && [ -z "$force" ]; then
+        echo "❌ $brief already exists — use --force to overwrite" >&2; return 1
+    fi
+    mkdir -p "$root/.claudebox"
+    if [ "$mode" = "full" ]; then
+        if [ ! -e "$root/.git" ]; then
+            git -C "$root" init -q 2>/dev/null && echo "  ✓ git init"
+        fi
+        [ -f "$root/README.md" ] || { cb_write_readme "$root"; echo "  ✓ README.md"; }
+        mkdir -p "$root/workloads"
+        [ -e "$root/workloads/.gitkeep" ] || : > "$root/workloads/.gitkeep"
+    fi
+    cb_write_brief "$root" "$intent";              echo "  ✓ .claudebox/BRIEF.md (committed)"
+    cb_init_project_config "$root" >/dev/null;     echo "  ✓ .claudebox/config.yml (gitignored)"
+    echo "🚀 bootstrapped: $(basename "$root")"
+}
+
 # load functions only (for tests) without running the wrapper body
 [ -n "${CLAUDEBOX_SOURCE_ONLY:-}" ] && return 0 2>/dev/null || true
 
@@ -576,6 +703,41 @@ case "${1:-}" in
             down) cb_bridge_down "$_cbid"; exit $? ;;
             *)    echo "usage: claudebox browser-bridge up|down  (opt-in: let claudebot drive your real Chrome via CDP)" >&2; exit 1 ;;
         esac
+        ;;
+    bootstrap)
+        # scaffold a new claudebot project in $PWD + write the mission brief.
+        shift
+        _bs_mode=full _bs_force= _bs_start=1 _bs_intent= _bs_file=
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --brief-only) _bs_mode=brief; _bs_start= ;;
+                --no-start)   _bs_start= ;;
+                --force)      _bs_force=1 ;;
+                --brief-file) _bs_file="${2:-}"; shift ;;
+                -h|--help)
+                    echo "usage: claudebox bootstrap [--brief-only] [--no-start] [--force] [--brief-file F] [\"intent…\"]"
+                    echo "  scaffold a claudebot project in the current directory + write .claudebox/BRIEF.md."
+                    echo "  intent comes from the arg, --brief-file, or stdin. Default boots claudebot after."
+                    exit 0 ;;
+                --) shift; break ;;
+                -*) echo "bootstrap: unknown flag '$1'" >&2; exit 1 ;;
+                *)  _bs_intent="$1" ;;
+            esac
+            shift
+        done
+        if [ -n "$_bs_file" ]; then
+            [ -f "$_bs_file" ] || { echo "bootstrap: --brief-file not found: $_bs_file" >&2; exit 1; }
+            _bs_intent="$(cat "$_bs_file")"
+        elif [ -z "$_bs_intent" ] && [ ! -t 0 ]; then
+            _bs_intent="$(cat)"   # piped/heredoc intent (host-Claude path)
+        fi
+        cb_bootstrap "$PWD" "$_bs_intent" "$_bs_mode" "$_bs_force" || exit $?
+        if [ -n "$_bs_start" ]; then
+            echo "  ▶ starting claudebot…"
+            exec "$0"   # re-enter the wrapper normally → boots the VM + claudebot with the brief
+        fi
+        echo "  (not started) enter later with:  cd $(printf '%q' "$PWD") && claudebox"
+        exit 0
         ;;
 esac
 
