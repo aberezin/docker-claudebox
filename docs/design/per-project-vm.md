@@ -83,20 +83,20 @@ targets* — not the mount itself.
 the image seeded into each project VM from the shared `cb-infra` profile:
 
 ```mermaid
-xflowchart TB
+flowchart TB
     browser["Browser / curl on the Mac"]
     wrap["claudebox (wrapper.sh)"]
-    cfg[".claudebox/config.yml<br/>id · vm sizing · hostname"]
+    cfg[".claudebox/config.yml<br/>id, vm sizing, hostname"]
     data["~/.config/claudebox/projects/ID/claude<br/>shared-nothing per project"]
 
-    subgraph host["macOS host — colima"]
-      subgraph defvm["profile: default — RESERVED for the human"]
+    subgraph host["macOS host (colima)"]
+      subgraph defvm["default profile - RESERVED for the human"]
         human["the human's own containers"]
       end
-      subgraph infra["profile: cb-infra — image store (no reachable IP)"]
+      subgraph infra["cb-infra profile - image store (no reachable IP)"]
         img["claudebox:latest image"]
       end
-      subgraph pa["profile: cb-idA — project A · IP 192.168.64.5"]
+      subgraph pa["cb-idA - project A - IP 192.168.64.5"]
         da["dockerd (VM-private)"]
         ha["claudebox harness<br/>Claude runs here"]
         apia["cb_A_api :8080"]
@@ -105,7 +105,7 @@ xflowchart TB
         da --- apia
         da --- pga
       end
-      subgraph pb["profile: cb-idB — project B · IP 192.168.64.6"]
+      subgraph pb["cb-idB - project B - IP 192.168.64.6"]
         db["dockerd (VM-private)"]
         hb["claudebox harness"]
         apib["cb_B_api :8080"]
@@ -117,7 +117,7 @@ xflowchart TB
     wrap -->|"reads / creates"| cfg
     wrap -->|"mounts /home/claude/.claude"| data
     wrap -->|"docker --context colima-cb-idA"| da
-    wrap -. never touches .-> defvm
+    wrap -. never touches .-> human
     img ==>|"save / load (one-time)"| da
     img ==>|"save / load (one-time)"| db
     browser -->|"http://192.168.64.5:8080"| apia
@@ -137,14 +137,14 @@ sequenceDiagram
 
     U->>W: claudebox
     W->>W: resolve project id from .claudebox/config.yml
-    W->>C: cb_ensure_vm — colima start -p cb-ID --network-address
-    Note over W,C: enforce warn_max/hard_max; restore human's docker context
+    W->>C: cb_ensure_vm - colima start -p cb-ID --network-address
+    Note over W,C: enforce warn_max/hard_max, restore the docker context
     W->>V: is claudebox:latest present?
     alt missing (first run)
         W->>I: docker --context colima-cb-infra save
         I-->>V: docker --context colima-cb-ID load
     end
-    W->>V: docker --context colima-cb-ID run harness<br/>(mounts per-project .claude + workspace)
+    W->>V: docker --context colima-cb-ID run harness (mounts .claude + workspace)
     V-->>U: isolated Claude session
     U->>V: Claude spins up cb_api / cb_db workloads
     U->>V: browse http://vm-ip:port
