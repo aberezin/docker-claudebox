@@ -25,11 +25,19 @@ NET="${CB_BROWSER_NET:-cb-net}"
 # browsers are cached in the image; only the JS package is fetched
 INSTALL="npm i --no-save --prefix /pw playwright@${PW_VER} >/dev/null 2>&1"
 
+# 'watch' (A2): a headful browser with a noVNC web UI you open from your Mac
+WATCH_IMAGE="${CB_WATCH_IMAGE:-lscr.io/linuxserver/chromium:latest}"
+WATCH_PORT="${CB_WATCH_PORT:-3010}"
+WATCH_NAME="${CB_WATCH_NAME:-cb-watch}"
+
 _usage() {
     cat >&2 <<EOF
 usage:
   cb-browser shot <url> [out-dir]         navigate + full-page screenshot + page.json (title/text/console)
   cb-browser script <file.cjs> [args...]  run a Playwright script (mounted read-only at /work; use require('playwright'))
+  cb-browser watch <url> [port]           open a HEADFUL browser on <url> with a noVNC web UI you watch/drive
+                                          from your Mac at http://<project-vm-ip>:<port> (default $WATCH_PORT)
+  cb-browser watch-stop                   stop the watch browser
   cb-browser net                          ensure/print the shared network name
 
 Put the workloads you test on the '$NET' network so they're reachable by name.
@@ -88,6 +96,27 @@ RUNNER
     _ensure_net
     docker run --rm --network "$NET" -v "$sdir:/work:ro" -v "$outdir:/out" -w /work "$PW_IMAGE" \
         bash -lc "$INSTALL && NODE_PATH=/pw/node_modules node /work/$sfile $*" ;;
+
+  watch)
+    url="${1:-}"; [ -n "$url" ] || _usage
+    port="${2:-$WATCH_PORT}"
+    _ensure_net
+    docker rm -f "$WATCH_NAME" >/dev/null 2>&1 || true
+    # headful Chromium with a noVNC web UI (published on the VM). On a project VM
+    # (which has a reachable IP) this is browsable from the Mac at http://<vm-ip>:<port>.
+    docker run -d --name "$WATCH_NAME" --network "$NET" -p "$port:3000" --shm-size=1g \
+        -e CHROME_CLI="$url" "$WATCH_IMAGE" >/dev/null
+    # best-effort VM IP (harness shares the VM's netns via --network host); the
+    # reachable IP is the 192.168.x that isn't the colima gateway (192.168.5.x)
+    ip="${CLAUDEBOX_VM_IP:-$(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 \
+        | grep -E '^192\.168\.' | grep -vE '^192\.168\.5\.' | head -1)}" || true
+    echo "cb-browser: watching $url (headful, live)"
+    if [ -n "${ip:-}" ]; then echo "  open   http://$ip:$port   in your Mac browser"
+    else echo "  open   http://<project-vm-ip>:$port   (get the IP with 'claudebox ip' on the host)"; fi
+    echo "  stop   cb-browser watch-stop" ;;
+
+  watch-stop)
+    docker rm -f "$WATCH_NAME" >/dev/null 2>&1 && echo "cb-browser: watch stopped" || echo "cb-browser: no watch running" ;;
 
   ""|-h|--help) _usage 0 ;;
   *) echo "cb-browser: unknown command '$cmd'" >&2; _usage ;;

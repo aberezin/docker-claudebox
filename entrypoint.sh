@@ -165,6 +165,7 @@ so they're reachable by name:
 - `docker run -d --name api --network cb-net your/image`
 - `cb-browser shot http://api:8080` → `./cb-browser-out/{screenshot.png,page.json}` (page.json has status/title/text/consoleErrors)
 - `cb-browser script ./test.cjs` → run your own Playwright script (use `require('playwright')`)
+- `cb-browser watch http://api:8080` → headful browser with a noVNC web UI the human watches/drives live at http://<project-vm-ip>:<port>; `cb-browser watch-stop` to stop
 - `cb-browser net` → the network name to attach workloads to
 This is the standard way to browser-test here; prefer it over ad-hoc setups.
 
