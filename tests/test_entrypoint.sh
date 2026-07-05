@@ -35,28 +35,37 @@ test_entrypoint_behaviors() {
 
 # ── UID/GID matching ─────────────────────────────────────────────────────────
 
-test_entrypoint_uid_matching() {
-    local tmpdir host_uid
-    # must live under $HOME (via $WORKDIR) so colima actually mounts it into the VM;
-    # a /var/folders mktemp isn't mounted, so the entrypoint would see uid 0 and skip.
-    tmpdir=$(mktemp -d "$WORKDIR/tests/.tmp-uid-XXXXX")
+# The point of the entrypoint's UID-matching (on Linux) is that files claude
+# creates in your workspace land owned by YOU, not by root/1000. Under colima,
+# virtiofs maps every container-side write back to the host user regardless of the
+# in-container UID, so that invariant holds via the mount and UID-matching is a
+# no-op. Assert the invariant that actually matters (host-side ownership) rather
+# than the Linux-specific UID-matching mechanism. See docs/design/per-project-vm.md.
+test_entrypoint_workspace_ownership() {
+    local tmpdir host_uid owner
+    tmpdir=$(mktemp -d "$WORKDIR/tests/.tmp-own-XXXXX")
     host_uid=$(id -u)
 
     if [ "$host_uid" = "0" ]; then
-        echo "  SKIP: running as root, UID matching not applicable"
+        echo "  SKIP: running as root, ownership check not meaningful"
         rm -rf "$tmpdir"
         return 0
     fi
 
-    local out
-    out=$(docker run --rm \
-        -e "CLAUDE_WORKSPACE=$tmpdir" \
-        -e "CLAUDE_CONTAINER_NAME=${CONTAINER_PREFIX}-uid" \
-        -v "$tmpdir:$tmpdir" \
-        --entrypoint bash "$IMAGE" -c \
-        "/home/claude/entrypoint.sh echo uid_test 2>/dev/null; id -u claude" 2>&1)
+    # a container process creates a file in the mounted workspace
+    docker run --rm -v "$tmpdir:$tmpdir" \
+        --entrypoint bash "$IMAGE" -c "touch '$tmpdir/made-in-container'" >/dev/null 2>&1
 
-    assert_contains "$out" "$host_uid" "UID matches host ($host_uid)"
+    if [ ! -f "$tmpdir/made-in-container" ]; then
+        echo "  FAIL: container did not create the file in the mounted workspace"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    # it must come back owned by the host user on the host (ls -ln is portable
+    # across BSD/GNU; stat's -f/-c differ by platform)
+    owner=$(ls -ln "$tmpdir/made-in-container" | awk 'NR==1{print $3}')
+    assert_eq "$owner" "$host_uid" "container-created file is owned by host user ($host_uid)"
     rm -rf "$tmpdir"
 }
 
@@ -126,7 +135,7 @@ test_entrypoint_auto_continue() {
 ALL_TESTS+=(
     test_entrypoint_behaviors
     test_entrypoint_claude_md
-    test_entrypoint_uid_matching
+    test_entrypoint_workspace_ownership
     test_entrypoint_system_hint
     test_entrypoint_config_patching
     test_entrypoint_initd

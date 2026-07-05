@@ -243,7 +243,7 @@ environment:
 - **`--dangerously-skip-permissions`** is always enabled. Claude has full, unrestricted access to the container. That's the entire point.
 - **SSH keys** are mounted from the host for git push/pull inside the container. Do not share your container or image with untrusted parties.
 - **Host paths are preserved** — your project at `/home/you/project` is mounted at the same path inside the container. This means Docker volume mounts that Claude creates from within the container resolve correctly against host paths.
-- **UID/GID matching** — the container's `claude` user UID/GID is automatically adjusted to match the host directory owner on startup. File permissions should just work without manual `chown`.
+- **File ownership just works** — files that Claude creates in your workspace come back owned by **you** on the Mac, no manual `chown` needed. Under Colima this is handled by the VM's virtiofs mount, which maps every container-side write back to the host user regardless of the in-container UID — so the entrypoint's Linux-style UID/GID matching is a harmless no-op here (it stats the mount, sees root, and skips).
 - **Docker-in-Docker** — the Docker socket is mounted into the container. Claude can build images and run containers from within its container. This is by design.
 - **Two containers per workspace** — the wrapper creates `claude-<path>` for interactive (TTY) sessions and `claude-<path>_prog` for programmatic (no TTY) sessions. Both share the same mounted volumes and data.
 - **Workspace busy tracking** — in API mode, each workspace can only have one active Claude process at a time. Concurrent requests to the same workspace return a 409 Conflict response. Use different workspace subpaths for parallel work.

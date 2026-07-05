@@ -369,6 +369,15 @@ No macOS `sudo` **at runtime**. Specifically:
   whatever dir you first run in — the marker file still makes it rehome-safe.
 - **Resource exhaustion:** many projects = many VMs. `claudebox vm ls` + explicit
   `down`/`destroy` are the management surface; `autostop` is available per project.
+- **File ownership / UID-matching is a no-op under Colima.** The entrypoint's
+  Linux-style UID/GID matching (adjust the `claude` user to the workspace owner so
+  Claude's files aren't root/`1000`-owned on the host) is unnecessary here: Colima's
+  virtiofs mount maps *every* container-side write back to the host user regardless
+  of the in-container UID, so files Claude creates always come back owned by you.
+  The entrypoint stats the mounted workspace, sees root (`0`), and correctly skips
+  matching. Tests assert the real invariant (host-side ownership round-trip), not
+  the Linux UID-matching mechanism. (Verified: a file created by a root process in
+  a bind-mounted dir shows up owned by the host user `501` on the Mac.)
 
 ## Alternatives considered
 
