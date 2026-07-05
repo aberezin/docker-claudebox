@@ -373,6 +373,21 @@ cb_addr_of() { awk -F'\t' -v p="$1" '$1==p { print $2; exit }'; }
 # the project VM's reachable IP (empty if the VM has none / isn't up)
 cb_vm_address() { _cb_vm_list_json | cb_parse_vm_addr | cb_addr_of "$1"; }
 
+# Poll until the VM's reachable IP actually answers. The reachable interface
+# (col0 / vmnet via bridge100 on the vz backend) lags `colima start
+# --network-address` by a couple of seconds — there is no clean socket_vmnet/lima
+# "ready" log to watch, so ICMP reachability is the signal. Don't fixed-sleep;
+# poll. Echoes the ip once reachable (or best-effort ip after the timeout).
+cb_wait_reachable() {   # $1=profile  $2=max_seconds (default 20)
+    local profile="$1" max="${2:-20}" i=0 ip=""
+    while [ "$i" -lt "$max" ]; do
+        ip="$(cb_vm_address "$profile")"
+        if [ -n "$ip" ] && timeout 2 ping -c1 "$ip" >/dev/null 2>&1; then printf '%s' "$ip"; return 0; fi
+        sleep 1; i=$((i + 1))
+    done
+    printf '%s' "$ip"; return 1
+}
+
 # project network.hostname from config (empty/blank if unset)
 cb_project_hostname() { _cb_yaml_get "$(cb_project_config_path "$1")" network.hostname; }
 
@@ -398,13 +413,14 @@ cb_hosts_status() {
 cb_network_info() {
     local root="$1" id="$2" profile ip host status line
     profile="$(cb_project_profile "$id")"
-    ip="$(cb_vm_address "$profile")"
+    # poll — the reachable IP lags VM start by a couple seconds
+    ip="$(cb_wait_reachable "$profile")"
     if [ -z "$ip" ]; then
         echo "🌐 VM $profile has no reachable IP yet (is it running? try 'claudebox')."
         return 0
     fi
     echo "🌐 project VM $profile: $ip"
-    echo "   browse a published workload at  http://$ip:<port>"
+    echo "   browse a published workload at  http://$ip:<port>  (or http://localhost:<port>, colima-forwarded but collides across projects)"
     host="$(cb_project_hostname "$root")"
     if [ -z "$host" ]; then
         echo "   (set network.hostname in .claudebox/config.yml for a friendly name)"

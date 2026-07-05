@@ -314,9 +314,12 @@ vz backend. This one-time setup is the sole exception to the runtime no-sudo rul
 
 Consequences:
 
-- **No Mac `127.0.0.1` involvement** → macOS apps holding ports on localhost never
-  conflict with workloads. Project A and Project B can both use `:8080` (distinct
-  VM IPs).
+- **Distinct VM IP per project = collision-free.** Project A and Project B can both
+  publish `:8080` and reach them at their own `192.168.64.x:8080` — no clash. NOTE:
+  colima *also* forwards each published port to the Mac's `localhost:<port>` (an
+  immediate convenience, like Docker Desktop), and **that** path collides if two
+  projects share a port. So the standard is the **VM IP**; treat `localhost:<port>`
+  as a single-project-at-a-time fallback, not the reachability model.
 - **No port bands, no loopback-alias pool, no LaunchDaemon.** Publish normally;
   address by VM IP.
 - **Friendly names, no sudo:** if `network.hostname` is set, the wrapper reads
@@ -326,6 +329,14 @@ Consequences:
 - **IP stability:** a recreated VM may get a new IP. The wrapper reads the current
   IP on each start and includes it in the paste-block so the human can update the
   hosts entry if they use one.
+- **Reachable-IP startup delay — poll, don't sleep.** The reachable interface
+  (`col0` in the VM / vmnet via `bridge100` on the Mac) lags `colima start
+  --network-address` by a couple of seconds; the VM reports its address before it's
+  actually pingable. There is **no clean "ready" log** to watch — on the vz backend
+  colima uses the Virtualization.framework vmnet (no `socket_vmnet` daemon runs, no
+  pidfile/log), so the readiness signal is **reachability itself**. Tooling polls
+  it (`cb_wait_reachable` pings the VM IP with a bounded timeout; `cb-browser watch`
+  polls the noVNC port) instead of fixed-sleeping.
 
 ## Sudo policy
 
