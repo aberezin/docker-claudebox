@@ -83,7 +83,7 @@ targets* — not the mount itself.
 the image seeded into each project VM from the shared `cb-infra` profile:
 
 ```mermaid
-flowchart TB
+xflowchart TB
     browser["Browser / curl on the Mac"]
     wrap["claudebox (wrapper.sh)"]
     cfg[".claudebox/config.yml<br/>id · vm sizing · hostname"]
@@ -290,11 +290,27 @@ to the **per-project** dir: `-v ~/.config/claudebox/projects/<id>/claude:/home/c
 ## Networking
 
 Each project VM gets its **own routable IP**. The wrapper starts project VMs with
-`colima start … --network-address` (sudo-free on the vz backend), so a workload
-that publishes `-p 8080:8080` binds `0.0.0.0:8080` **inside its VM** and is
-reachable from the Mac at `http://<vm-ip>:8080`. `cb-infra` is only an image store
-and deliberately gets no reachable IP. `claudebox ip` (alias `net`) prints the
-project VM's IP and browse guidance; interactive runs print it too.
+`colima start … --network-address`, so a workload that publishes `-p 8080:8080`
+binds `0.0.0.0:8080` **inside its VM** and is reachable from the Mac at
+`http://<vm-ip>:8080`. `cb-infra` is only an image store and deliberately gets no
+reachable IP. `claudebox ip` (alias `net`) prints the project VM's IP and browse
+guidance; interactive runs print it too.
+
+**Prerequisite — `socket_vmnet` (one-time sudo):** on macOS, a reachable VM IP
+(`--network-address`) requires `socket_vmnet`. Without it, Colima falls back to a
+sudo-based `vmnet` and **prompts for the password on every VM start**. The fix is a
+one-time setup — install `socket_vmnet` (`port install socket_vmnet` /
+`brew install socket_vmnet`) and authorize it once:
+
+```bash
+limactl sudoers | sudo tee /etc/sudoers.d/lima      # one-time
+limactl sudoers --check /etc/sudoers.d/lima
+```
+
+`limactl sudoers` auto-detects the binary path (MacPorts `/opt/local/bin` or
+Homebrew), so the generated sudoers file is correct either way. After this,
+`colima start --network-address` runs with **no password prompt** — verified on the
+vz backend. This one-time setup is the sole exception to the runtime no-sudo rule.
 
 Consequences:
 
@@ -313,15 +329,19 @@ Consequences:
 
 ## Sudo policy
 
-No macOS `sudo` at runtime. Specifically:
+No macOS `sudo` **at runtime**. Specifically:
 
 - `/etc/hosts`: read-only from the wrapper; changes are emitted as a paste-block.
-- Colima create/start/stop/delete on the vz (Virtualization.framework) backend do
-  not need sudo; keep it that way (no socket_vmnet-style setups).
-- `install.sh`: default to a **no-sudo** install into a user-writable `PATH` dir
-  (e.g. `~/.local/bin`); only fall back to `sudo /usr/local/bin` if the user opts
-  in. (Current code sudo-installs to `/usr/local/bin` — to be changed.)
-- When sudo is ever unavoidable, surface it explicitly with the reason.
+- Colima create/start/stop/delete need no runtime sudo — **except** the reachable
+  VM IP (`--network-address`), which needs `socket_vmnet`. That is a **one-time**
+  passwordless-sudo setup (`limactl sudoers | sudo tee /etc/sudoers.d/lima`, see
+  [Networking](#networking)); after it, VM starts prompt for nothing. This one-time
+  setup is the only sanctioned sudo.
+- `install.sh`: defaults to a **no-sudo** install into a user-writable `PATH` dir
+  (`~/.local/bin`); only falls back to `sudo /usr/local/bin` if the user picks a
+  root-owned dir.
+- When sudo is ever unavoidable, surface it explicitly with the reason; never
+  invoke it silently.
 
 ## Responsibility split
 

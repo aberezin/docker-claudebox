@@ -33,7 +33,22 @@ Beyond just running Claude Code in Docker, claudebox adds skill injection (auto-
 
 ## Requirements
 
-Docker installed and running. That's it.
+This fork runs on **macOS under [Colima](https://github.com/abiosoft/colima)** and gives every project its own Colima VM (see [docs/design/per-project-vm.md](docs/design/per-project-vm.md)). You need:
+
+- **Colima + the Docker CLI** — `port install colima docker` (MacPorts) or `brew install colima docker`.
+- **`socket_vmnet`** — required so each project VM gets a **host-reachable IP** (workloads become browsable at `http://<vm-ip>:<port>`). Install it (`port install socket_vmnet` / `brew install socket_vmnet`), then do the **one-time** passwordless-sudo setup below.
+
+### One-time networking setup (`socket_vmnet`)
+
+Project VMs are started with `colima start --network-address` to get a reachable IP. Without `socket_vmnet` configured, that prompts for your macOS password on **every** VM start. To make it sudo-free, install `socket_vmnet` and authorize it once:
+
+```bash
+# after installing socket_vmnet (port/brew):
+limactl sudoers | sudo tee /etc/sudoers.d/lima     # one-time; the only sudo claudebox needs
+limactl sudoers --check /etc/sudoers.d/lima        # validate
+```
+
+`limactl sudoers` auto-detects the `socket_vmnet` path (MacPorts `/opt/local/bin` or Homebrew), so the generated file is correct either way. After this, `claudebox` never prompts for a password at runtime.
 
 ## Quick Start
 
