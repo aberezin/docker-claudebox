@@ -76,8 +76,9 @@ ssh-keygen -t ed25519 -C "claude@claude.ai" -f "$HOME/.ssh/claudebox/id_ed25519"
 make build
 # or minimal: make build-minimal
 
-# 4. install the wrapper script as a command
-sudo install -m 755 wrapper.sh /usr/local/bin/claudebox
+# 4. install the wrapper script as a command (no sudo — user-writable dir)
+mkdir -p ~/.local/bin && install -m 755 wrapper.sh ~/.local/bin/claudebox
+# make sure ~/.local/bin is on your PATH (add to ~/.zshrc if needed)
 ```
 
 ## Image Variants

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 
 BIN_NAME="${1:-${CLAUDEBOX_BIN_NAME:-${CLAUDE_BIN_NAME:-claudebox}}}"
-INSTALL_DIR="${CLAUDEBOX_INSTALL_DIR:-${CLAUDE_INSTALL_DIR:-/usr/local/bin}}"
+# Default to a user-writable dir so install needs no sudo (this fork avoids macOS
+# sudo). Override with CLAUDEBOX_INSTALL_DIR (e.g. /usr/local/bin) if you prefer.
+INSTALL_DIR="${CLAUDEBOX_INSTALL_DIR:-${CLAUDE_INSTALL_DIR:-$HOME/.local/bin}}"
 BIN_PATH="$INSTALL_DIR/$BIN_NAME"
 
 echo "🚀 Starting Claude Code setup (binary: $BIN_NAME)..."
@@ -95,10 +97,33 @@ if [ ! -s "$WRAPPER_TMP" ]; then
 fi
 
 echo "📝 Installing $BIN_NAME to $BIN_PATH..."
-sudo install -m 755 "$WRAPPER_TMP" "$BIN_PATH"
+mkdir -p "$INSTALL_DIR" 2>/dev/null
+if [ -w "$INSTALL_DIR" ]; then
+	install -m 755 "$WRAPPER_TMP" "$BIN_PATH"
+elif command -v sudo >/dev/null 2>&1; then
+	echo "⚠️  $INSTALL_DIR isn't writable; falling back to sudo."
+	echo "    (set CLAUDEBOX_INSTALL_DIR to a user-writable dir like ~/.local/bin to avoid sudo)"
+	sudo mkdir -p "$INSTALL_DIR" && sudo install -m 755 "$WRAPPER_TMP" "$BIN_PATH"
+else
+	echo "❌ $INSTALL_DIR isn't writable and sudo is unavailable."
+	echo "   Set CLAUDEBOX_INSTALL_DIR to a writable directory and re-run."
+	rm -f "$WRAPPER_TMP"
+	exit 1
+fi
 rm -f "$WRAPPER_TMP"
 
 echo "✅ Claude Code setup complete! You can now use '$BIN_NAME' command from any directory."
+
+# Nudge if the install dir isn't on PATH (common for ~/.local/bin on macOS)
+case ":$PATH:" in
+	*":$INSTALL_DIR:"*) ;;
+	*)
+		echo ""
+		echo "ℹ️  $INSTALL_DIR is not on your PATH. Add it, e.g.:"
+		echo "     echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.zshrc && exec \$SHELL"
+		;;
+esac
+
 echo ""
 echo "🔑 Don't forget to add your public key to GitHub:"
 echo "   $HOME/.ssh/claudebox/id_ed25519.pub"

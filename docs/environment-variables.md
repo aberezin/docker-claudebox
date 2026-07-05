@@ -10,7 +10,7 @@ All wrapper/installer config uses the `CLAUDEBOX_*` prefix. Anything you want av
 | `CLAUDEBOX_GIT_EMAIL`      | Git `user.email` inside the container                                                      | _(none)_                  |
 | `CLAUDEBOX_DATA_DIR`       | Override the `.claude` data directory on the host                                          | `~/.claude`               |
 | `CLAUDEBOX_SSH_DIR`        | Override the SSH key directory mounted into the container                                  | `~/.ssh/claudebox`        |
-| `CLAUDEBOX_INSTALL_DIR`    | Where to install the wrapper binary (install-time only)                                    | `/usr/local/bin`          |
+| `CLAUDEBOX_INSTALL_DIR`    | Where to install the wrapper binary (install-time only; no sudo if user-writable)          | `~/.local/bin`            |
 | `CLAUDEBOX_BIN_NAME`       | Name of the wrapper binary (install-time only)                                             | `claudebox`               |
 | `CLAUDEBOX_IMAGE`          | Override the full image reference used by the wrapper                                       | `claudebox:latest`        |
 | `CLAUDEBOX_IMAGE_NAME`     | Override just the local image repo name (tag appended per variant)                         | `claudebox`               |
