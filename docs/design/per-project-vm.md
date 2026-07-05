@@ -191,6 +191,7 @@ not need the default VM at all).
   | `claudebox down` | `colima stop -p cb-<id>` (free RAM, keep disk) |
   | `claudebox destroy` | `colima delete -p cb-<id>` (nuke VM + its containers/volumes) |
   | `claudebox vm ls` | list claudebox VMs; must never display/act on `default` |
+  | `claudebox ip` (alias `net`) | print the project VM's reachable IP + `/etc/hosts` guidance |
 
 ## Running claudebox on its VM
 
@@ -215,10 +216,12 @@ to the **per-project** dir: `-v ~/.config/claudebox/projects/<id>/claude:/home/c
 
 ## Networking
 
-Each Colima profile gets its **own routable IP** (the default VM already shows
-`192.168.64.3` in `colima status`; the reachable-address network is enabled). A
-workload that publishes `-p 8080:8080` binds `0.0.0.0:8080` **inside its VM** and
-is reachable from the Mac at `http://<vm-ip>:8080`.
+Each project VM gets its **own routable IP**. The wrapper starts project VMs with
+`colima start … --network-address` (sudo-free on the vz backend), so a workload
+that publishes `-p 8080:8080` binds `0.0.0.0:8080` **inside its VM** and is
+reachable from the Mac at `http://<vm-ip>:8080`. `cb-infra` is only an image store
+and deliberately gets no reachable IP. `claudebox ip` (alias `net`) prints the
+project VM's IP and browse guidance; interactive runs print it too.
 
 Consequences:
 

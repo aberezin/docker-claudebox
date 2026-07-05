@@ -306,8 +306,12 @@ cb_ensure_vm() {
             *) mount_args=(--mount "$root:w") ;;   # outside $HOME — mount it writable
         esac
         echo "🟢 starting colima VM '$profile' (cpu=$(cb_num "$cpu") mem=$(cb_num "$mem")GiB disk=$(cb_num "$disk")GiB)..." >&2
+        # --network-address gives the VM a host-reachable IP so published workload
+        # ports are browsable from the Mac (Phase 5). On the vz backend this needs
+        # no sudo. cb-infra is just an image store and deliberately gets no IP.
         cb_colima_start -p "$profile" \
             --cpu "$(cb_num "$cpu")" --memory "$(cb_num "$mem")" --disk "$(cb_num "$disk")" \
+            --network-address \
             "${mount_args[@]}" || return 1
     fi
     cb_ensure_image "$ctx" || return 1
@@ -341,6 +345,79 @@ cb_vm_ls() {
     fi
     [ -n "$infra" ] && printf 'infra (cb-infra): %s\n' "$infra"
     return 0
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Networking — Phase 5 of docs/design/per-project-vm.md
+#
+# Project VMs get a host-reachable IP (--network-address), so workloads that
+# publish ports are browsable at http://<vm-ip>:<port> from the Mac — no port
+# bands, no loopback pool. An optional per-project network.hostname maps to that
+# IP via /etc/hosts, which the wrapper NEVER writes: it emits a paste-block for
+# the human (no sudo from claudebox). Pure helpers below are unit-tested.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# read `colima list --json` on stdin -> "name<TAB>address" (address empty if none)
+cb_parse_vm_addr() {
+    awk '{
+        name=""; addr="";
+        if (match($0, /"name":"[^"]*"/))    name=substr($0, RSTART+8,  RLENGTH-9);
+        if (match($0, /"address":"[^"]*"/)) addr=substr($0, RSTART+11, RLENGTH-12);
+        if (name != "") print name "\t" addr;
+    }'
+}
+
+# from "name<TAB>address" stdin -> address of $1 (empty if none)
+cb_addr_of() { awk -F'\t' -v p="$1" '$1==p { print $2; exit }'; }
+
+# the project VM's reachable IP (empty if the VM has none / isn't up)
+cb_vm_address() { _cb_vm_list_json | cb_parse_vm_addr | cb_addr_of "$1"; }
+
+# project network.hostname from config (empty/blank if unset)
+cb_project_hostname() { _cb_yaml_get "$(cb_project_config_path "$1")" network.hostname; }
+
+# the IP currently mapped to HOSTNAME in an /etc/hosts-style FILE (empty if none)
+cb_hosts_ip() {
+    [ -f "$1" ] || return 0
+    awk -v h="$2" '
+        /^[[:space:]]*#/ { next }
+        { for (i = 2; i <= NF; i++) if ($i == h) { print $1; exit } }
+    ' "$1"
+}
+
+# ok | missing | stale — compare desired IP against what /etc/hosts FILE has
+cb_hosts_status() {
+    local cur; cur="$(cb_hosts_ip "$1" "$2")"
+    if   [ -z "$cur" ];      then printf 'missing'
+    elif [ "$cur" = "$3" ];  then printf 'ok'
+    else                          printf 'stale'; fi
+}
+
+# print how to reach the project VM's workloads; emit an /etc/hosts paste-block
+# if a network.hostname is set but the host entry is missing/stale (never writes)
+cb_network_info() {
+    local root="$1" id="$2" profile ip host status line
+    profile="$(cb_project_profile "$id")"
+    ip="$(cb_vm_address "$profile")"
+    if [ -z "$ip" ]; then
+        echo "🌐 VM $profile has no reachable IP yet (is it running? try 'claudebox')."
+        return 0
+    fi
+    echo "🌐 project VM $profile: $ip"
+    echo "   browse a published workload at  http://$ip:<port>"
+    host="$(cb_project_hostname "$root")"
+    if [ -z "$host" ]; then
+        echo "   (set network.hostname in .claudebox/config.yml for a friendly name)"
+        return 0
+    fi
+    line="$ip  $host"
+    case "$(cb_hosts_status /etc/hosts "$host" "$ip")" in
+        ok)      echo "   /etc/hosts: $host → $ip ✓   browse  http://$host:<port>" ;;
+        missing) echo "   add to /etc/hosts (claudebox won't edit it — one-time, your call):"
+                 echo "       echo \"$line\" | sudo tee -a /etc/hosts" ;;
+        stale)   echo "   /etc/hosts has a STALE IP for $host — update that line to:"
+                 echo "       $line" ;;
+    esac
 }
 
 # load functions only (for tests) without running the wrapper body
@@ -519,6 +596,13 @@ if [ "${1:-}" = "clear-session" ]; then
     else
         echo "no session found for $PWD (looked in $project_dir)"
     fi
+    exit 0
+fi
+
+# ip / net — show the project VM's reachable IP + how to browse workloads
+if [ "${1:-}" = "ip" ] || [ "${1:-}" = "net" ]; then
+    cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
+    cb_network_info "$CB_PROJECT_ROOT" "$CB_PROJECT_ID"
     exit 0
 fi
 
@@ -732,6 +816,7 @@ fi
 
 # Interactive — ensure the project VM (+ image) is up first
 cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
+cb_network_info "$CB_PROJECT_ROOT" "$CB_PROJECT_ID"
 
 # Wait for container to not be running (another session might be using it)
 if "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
