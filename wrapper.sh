@@ -436,6 +436,76 @@ cb_network_info() {
     esac
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Approach B (opt-in): CDP bridge to the human's real macOS Chrome
+# See docs/design/browser-testing.md. A dedicated debug Chrome is driven by
+# claudebot over the Chrome DevTools Protocol. CDP binds 127.0.0.1 only, so a tiny
+# Python TCP forwarder (no socat/sudo dependency) republishes it on the Mac's
+# reachable-network gateway (bridge100, 192.168.64.1) — reachable by the project
+# VMs but NOT the LAN. Containers connect to it by IP (not hostname — Chrome
+# rejects non-IP Host headers). Off by default; you run `browser-bridge up`.
+# ─────────────────────────────────────────────────────────────────────────────
+CB_CDP_PORT="${CLAUDEBOX_CDP_PORT:-9223}"                 # forwarder listen (Mac side)
+CB_CDP_CHROME_PORT="${CLAUDEBOX_CDP_CHROME_PORT:-9222}"   # Chrome --remote-debugging-port
+CB_CDP_BIND="${CLAUDEBOX_CDP_BIND:-192.168.64.1}"         # Mac reachable-net gateway (colima-only, not LAN)
+cb_cdp_home() { printf '%s/claudebox/cdp' "$(cb_config_home)"; }
+cb_cdp_marker() { printf '%s/claudebox/projects/%s/.cdp-url' "$(cb_config_home)" "$1"; }  # $1=id
+
+cb_bridge_up() {   # $1=id
+    local id="$1" chrome home profile fwd url
+    chrome="${CLAUDEBOX_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+    [ -x "$chrome" ] || { echo "❌ Chrome not found at: $chrome (set CLAUDEBOX_CHROME)" >&2; return 1; }
+    home="$(cb_cdp_home)"; mkdir -p "$home"; profile="$home/profile"; fwd="$home/forward.py"
+    cat > "$fwd" <<PYEOF
+import socket, threading
+LISTEN=('$CB_CDP_BIND', $CB_CDP_PORT); DEST=('127.0.0.1', $CB_CDP_CHROME_PORT)
+def pipe(a,b):
+    try:
+        while True:
+            d=a.recv(65536)
+            if not d: break
+            b.sendall(d)
+    except OSError: pass
+    finally:
+        for s in (a,b):
+            try: s.shutdown(socket.SHUT_RDWR)
+            except OSError: pass
+def handle(c):
+    try: d=socket.create_connection(DEST)
+    except OSError: c.close(); return
+    threading.Thread(target=pipe,args=(c,d),daemon=True).start(); pipe(d,c)
+s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
+s.bind(LISTEN); s.listen(64)
+while True:
+    c,_=s.accept(); threading.Thread(target=handle,args=(c,),daemon=True).start()
+PYEOF
+    if [ -f "$home/pids" ] && kill -0 $(cat "$home/pids") 2>/dev/null; then
+        echo "🔗 CDP bridge already running"
+    else
+        "$chrome" --remote-debugging-port="$CB_CDP_CHROME_PORT" --user-data-dir="$profile" \
+            --no-first-run --no-default-browser-check about:blank >/dev/null 2>&1 &
+        local cpid=$!
+        sleep 2
+        python3 "$fwd" >"$home/forward.log" 2>&1 &
+        local fpid=$!
+        echo "$cpid $fpid" > "$home/pids"
+    fi
+    url="http://$CB_CDP_BIND:$CB_CDP_PORT"
+    local marker; marker="$(cb_cdp_marker "$id")"; mkdir -p "$(dirname "$marker")"; printf '%s' "$url" > "$marker"
+    echo "🔗 CDP bridge up — a dedicated debug Chrome window is open; claudebot can drive it."
+    echo "   in claudebot:  cb-browser cdp <url>   (uses CLAUDEBOX_HOST_CDP_URL=$url)"
+    echo "   restart the claudebox session so the container picks up the bridge URL."
+    echo "   stop:  claudebox browser-bridge down"
+    echo "   ⚠️  this hands claudebot full control of that Chrome instance (dedicated profile)."
+}
+
+cb_bridge_down() {  # $1=id
+    local id="$1" home; home="$(cb_cdp_home)"
+    [ -f "$home/pids" ] && { kill $(cat "$home/pids") 2>/dev/null; rm -f "$home/pids"; }
+    rm -f "$(cb_cdp_marker "$id")"
+    echo "🔗 CDP bridge down"
+}
+
 # load functions only (for tests) without running the wrapper body
 [ -n "${CLAUDEBOX_SOURCE_ONLY:-}" ] && return 0 2>/dev/null || true
 
@@ -499,6 +569,14 @@ case "${1:-}" in
         if [ -z "$_cbid" ]; then echo "no claudebox VM for this project (no .claudebox/config.yml)"; exit 0; fi
         cb_vm_destroy "$_cbid"; exit $?
         ;;
+    browser-bridge)
+        _cbid="$(cb_project_id "$CB_PROJECT_ROOT")"
+        case "${2:-}" in
+            up)   cb_bridge_up "$_cbid"; exit $? ;;
+            down) cb_bridge_down "$_cbid"; exit $? ;;
+            *)    echo "usage: claudebox browser-bridge up|down  (opt-in: let claudebot drive your real Chrome via CDP)" >&2; exit 1 ;;
+        esac
+        ;;
 esac
 
 # ── project identity → colima context (Phase 4) ──────────────────────────────
@@ -531,6 +609,14 @@ DOCKER_ARGS=(
     -v "$PWD:$PWD"
     -v /var/run/docker.sock:/var/run/docker.sock
 )
+
+# Approach B: if a CDP bridge is up for this project, inject its URL so claudebot
+# can drive the human's Chrome (cb-browser cdp). Marker written by browser-bridge up.
+_cdp_marker="$(cb_cdp_marker "$CB_PROJECT_ID")"
+if [ -f "$_cdp_marker" ]; then
+    DOCKER_ARGS+=(-e "CLAUDEBOX_HOST_CDP_URL=$(cat "$_cdp_marker")")
+    dbg "CDP bridge URL injected: $(cat "$_cdp_marker")"
+fi
 
 # forward env vars to the container
 [ -n "$ANTHROPIC_API_KEY" ] && DOCKER_ARGS+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")

@@ -38,6 +38,8 @@ usage:
   cb-browser watch <url> [port]           open a HEADFUL browser on <url> with a noVNC web UI you watch/drive
                                           from your Mac at http://<project-vm-ip>:<port> (default $WATCH_PORT)
   cb-browser watch-stop                   stop the watch browser
+  cb-browser cdp <url> [out-dir]          drive the HUMAN's real Chrome (opt-in) to <url> via the CDP bridge
+                                          — requires 'claudebox browser-bridge up' on the Mac first
   cb-browser net                          ensure/print the shared network name
 
 Put the workloads you test on the '$NET' network so they're reachable by name.
@@ -124,6 +126,31 @@ RUNNER
 
   watch-stop)
     docker rm -f "$WATCH_NAME" >/dev/null 2>&1 && echo "cb-browser: watch stopped" || echo "cb-browser: no watch running" ;;
+
+  cdp)
+    url="${1:-}"; [ -n "$url" ] || _usage
+    [ -n "${CLAUDEBOX_HOST_CDP_URL:-}" ] || {
+        echo "cb-browser: no host CDP bridge. On the Mac run 'claudebox browser-bridge up', then restart this session." >&2; exit 1; }
+    outdir="${2:-${CB_BROWSER_OUT:-$PWD/cb-browser-out}}"; mkdir -p "$outdir"
+    read -r -d '' runner <<'RUNNER' || true
+const { chromium } = require("playwright");
+(async () => {
+  const b = await chromium.connectOverCDP(process.env.CDP_URL);
+  const ctx = b.contexts()[0] || (await b.newContext());
+  const page = await ctx.newPage();
+  const resp = await page.goto(process.env.TARGET, { waitUntil: "load", timeout: 30000 });
+  await page.waitForTimeout(500);
+  try { await page.screenshot({ path: "/out/cdp.png" }); } catch (e) {}
+  console.log("cb-browser cdp: drove your Chrome -> status=" + (resp && resp.status()) +
+              " title=" + JSON.stringify(await page.title()));
+  await b.close(); // disconnects; does NOT close your Chrome
+})().catch(e => { console.error("cb-browser cdp error:", e.message); process.exit(1); });
+RUNNER
+    # --network host so the container reaches the Mac's bridge (192.168.64.1) via col0
+    docker run --rm --network host -e TARGET="$url" -e CDP_URL="$CLAUDEBOX_HOST_CDP_URL" -e CBR_RUNNER="$runner" \
+        -v "$outdir:/out" "$PW_IMAGE" \
+        bash -lc "$INSTALL && printf '%s' \"\$CBR_RUNNER\" > /tmp/cdp.cjs && NODE_PATH=/pw/node_modules node /tmp/cdp.cjs"
+    echo "cb-browser: opened $url in your Chrome (screenshot -> $outdir/cdp.png)" ;;
 
   ""|-h|--help) _usage 0 ;;
   *) echo "cb-browser: unknown command '$cmd'" >&2; _usage ;;

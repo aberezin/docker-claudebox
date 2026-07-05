@@ -42,8 +42,16 @@ Approach A2 (watch live, still no host coupling)
    headful browser + noVNC in a container ──(Mac->VM, existing networking)──> you watch at http://<vm-ip>:7900
 
 Approach B (opt-in): drive your real Chrome
-   [ project VM ] claudebot ──CDP──> [Mac] socat bridge -> 127.0.0.1:9222 -> your Chrome
+   [ project VM ] claudebot ──CDP over col0──> [Mac] 192.168.64.1:9223
+                                                 └─ python forwarder ─> 127.0.0.1:9222 -> debug Chrome
 ```
+
+> **Status: implemented & verified (2026-07-05).** `claudebox browser-bridge up`
+> launches the debug Chrome + a dependency-free Python TCP forwarder bound to the
+> Colima gateway `192.168.64.1:9223`, and injects `CLAUDEBOX_HOST_CDP_URL` into the
+> container. `cb-browser cdp <url>` then drives your Chrome. End-to-end proof: a
+> container in a `--network-address` VM ran `connectOverCDP(192.168.64.1:9223)` and
+> navigated the Mac's Chrome to example.com. See "What shipped" below.
 
 ## Approach A — self-contained browser in the VM (default)
 
@@ -84,23 +92,27 @@ Use this only when you need claudebot in **your actual Chrome** — your logged-
 profile, your extensions, your session — or to hand a live tab back to you. The
 mechanism is the **Chrome DevTools Protocol**, not the extension:
 
-1. **Launch a debug Chrome on the Mac** with `--remote-debugging-port=9222` — and,
-   for safety, a **dedicated profile** (`--user-data-dir=<temp>`) rather than your
-   main one.
+1. **Launch a debug Chrome on the Mac** with `--remote-debugging-port=9222` and a
+   **dedicated profile** (`--user-data-dir=<state>/claudebox/cdp/profile`), never
+   your main one — so B carries no ambient logins unless you opt each one in.
 2. **Bridge the debug port to the VM.** CDP binds to `127.0.0.1:9222` only (by
-   design — it's total control of the browser). A small **`socat` (or SSH) forward
-   on the Mac** exposes it *only* on the Colima network interface the project VM
-   can reach — never `0.0.0.0`:
-   `socat TCP-LISTEN:9222,bind=<mac-colima-iface-ip>,reuseaddr,fork TCP:127.0.0.1:9222`
-3. **Connect from the container.** claudebot uses Playwright/Puppeteer
-   `chromium.connectOverCDP("http://<mac-reachable-addr>:9222")` and drives tabs.
-   Under Colima the container reaches the Mac via `host.docker.internal` / the
-   gateway (`gatewayAddress: 192.168.5.2` in the profile config).
+   design — it's total control of the browser). A tiny **dependency-free Python TCP
+   forwarder** on the Mac re-exposes it on the **Colima gateway address
+   `192.168.64.1:9223`** — the interface the project VM reaches over `col0`, and
+   which the Mac *can* bind (unlike the vz NAT address `192.168.5.2`). It is
+   **colima-only, not on your LAN**. We use Python rather than `socat` so B has no
+   install prerequisite; `socat` would work identically.
+3. **Connect from the container.** claudebot uses Playwright
+   `chromium.connectOverCDP("http://192.168.64.1:9223")` from a `--network host`
+   container, which reaches `192.168.64.1` directly over the VM's `col0` interface.
+   **Note: the URL must be an IP, not a hostname** — Chrome's CDP endpoint rejects
+   requests whose `Host` header isn't an IP or `localhost`.
 
-The fork provides a host-side helper (e.g. `claudebox browser-bridge up`) that
-launches the dedicated debug Chrome + the scoped `socat` tunnel and injects the
-reachable CDP URL into the container (e.g. `CLAUDEBOX_HOST_CDP_URL`); `down` tears
-it all down. All userspace — **no sudo**.
+The fork provides the host-side helper `claudebox browser-bridge up`, which
+launches the dedicated debug Chrome + the Python forwarder and writes the reachable
+CDP URL to a per-project marker (`~/.config/claudebox/projects/<id>/.cdp-url`); the
+wrapper injects it as `CLAUDEBOX_HOST_CDP_URL` on the next `docker run`. `down`
+kills both and removes the marker. All userspace — **no sudo**.
 
 ### Security (why B is opt-in)
 
@@ -110,29 +122,49 @@ all required for B:
 
 - **Dedicated Chrome profile**, not your main one (no ambient logins unless you
   choose).
-- **Scoped bind** — the `socat` listener binds only the specific Colima interface
-  the project VM uses, never `0.0.0.0`; torn down after the session.
-- **Off by default**, enabled per project via config, with an explicit warning.
+- **Scoped bind** — the Python forwarder binds only `192.168.64.1` (the Colima
+  gateway the project VM reaches), **never `0.0.0.0`**, so it is not exposed on your
+  LAN; torn down after the session.
+- **Off unless you start it** — the bridge exists only while `browser-bridge up` is
+  running; there is nothing to leak when it's down. Running the command *is* the
+  opt-in, and it prints an explicit control-handover warning.
 
 ## Config / CLI surface
 
 - **A** is the default and needs no opt-in. Ship the convention as an
   always-skill and/or a small baked-in helper so every project's Claude tests the
   same way (shared project network, headless + artifacts, or the A2 noVNC runner).
-- **B** is gated in `.claudebox/config.yml`:
-  ```yaml
-  browser:
-    host_cdp: false        # opt in per project; drives your real Chrome via CDP
+- **B** needs no config flag to stay safe: the bridge only exists while you run
+  `claudebox browser-bridge up` on the Mac, and the container only sees a CDP URL
+  when the marker is present. Starting the bridge is the per-session opt-in.
   ```
-  and driven by a host command: `claudebox browser-bridge up|down`.
+  claudebox browser-bridge up      # launch debug Chrome + forwarder, write marker
+  # ...restart the claudebox session so the container picks up CLAUDEBOX_HOST_CDP_URL...
+  cb-browser cdp https://example.com   # (inside claudebot) drive your Chrome
+  claudebox browser-bridge down    # kill both, remove marker
+  ```
+  Overridable via env: `CLAUDEBOX_CDP_BIND` (default `192.168.64.1`),
+  `CLAUDEBOX_CDP_PORT` (`9223`), `CLAUDEBOX_CHROME` (Chrome binary path).
+
+### What shipped (B)
+
+- Host: `wrapper.sh` — `cb_bridge_up` / `cb_bridge_down` and the `browser-bridge
+  up|down` subcommand; a per-project marker at
+  `~/.config/claudebox/projects/<id>/.cdp-url`; the wrapper injects
+  `CLAUDEBOX_HOST_CDP_URL` into the container when the marker exists.
+- Container: `cb-browser cdp <url>` — `connectOverCDP($CLAUDEBOX_HOST_CDP_URL)` on a
+  `--network host` container, navigates your Chrome, drops a screenshot in the
+  workspace.
+- Forwarder: a ~20-line embedded Python TCP relay (`192.168.64.1:9223 →
+  127.0.0.1:9222`) — no `socat`/sudo dependency.
 
 ## Responsibility split
 
 - **claudebox (this project):** define and enforce the standard so Project-A and
   Project-B test identically — the A convention (network + Playwright + artifact
   location, or the A2 noVNC image) and the B bridge (dedicated Chrome + scoped
-  `socat` + CDP-URL injection + the security guardrails). The boundary and the
-  bridge live here, not in each project.
+  Python forwarder + CDP-URL injection + the security guardrails). The boundary and
+  the bridge live here, not in each project.
 - **A project's Claude:** use the provided convention/helper; don't hand-roll
   ad-hoc port exposures or point CDP at `0.0.0.0`.
 
@@ -146,30 +178,34 @@ A), not the extension.
 
 ## Phased implementation plan
 
-1. **A1 convention** — a per-project shared docker network for workloads + the
-   browser runner; an always-skill (or baked helper) documenting: install/run
-   Playwright headless, address workloads by container name, write
-   screenshots/traces to the workspace. Optionally bake Playwright+Chromium into
-   the full image to avoid first-run install cost.
-2. **A2 runner** — a standard headful+noVNC browser container recipe, published on
-   the VM so it's watchable at `http://<vm-ip>:<port>` (reuses Mac→VM networking).
-3. **B bridge** — `claudebox browser-bridge up|down`: launch dedicated debug
-   Chrome (`--remote-debugging-port`, temp `--user-data-dir`) + scoped `socat`
-   tunnel on the Mac's Colima interface; inject `CLAUDEBOX_HOST_CDP_URL` into the
-   container; tear down on `down`.
-4. **B gate + docs** — `.claudebox/config.yml → browser.host_cdp`, security
-   warnings, and a note that this is the privileged path.
-5. **Tests** — A1 end-to-end (spin a trivial server workload, drive it headless,
-   assert on a screenshot/DOM); B smoke test behind the opt-in.
+1. **A1 convention** ✅ — `cb-browser shot`/`script`: a per-project shared docker
+   network (`cb-net`) for workloads + the browser runner (official Playwright image,
+   runtime `npm i playwright`), addresses workloads by container name, writes
+   screenshots/`page.json` to the workspace.
+2. **A2 runner** ✅ — `cb-browser watch`: a headful+noVNC browser container
+   (`linuxserver/chromium`), published on the VM so it's watchable at
+   `http://<vm-ip>:<port>` (reuses Mac→VM networking). Verified via VNC.
+3. **B bridge** ✅ — `claudebox browser-bridge up|down`: launches dedicated debug
+   Chrome (`--remote-debugging-port`, dedicated `--user-data-dir`) + a **Python TCP
+   forwarder** bound to `192.168.64.1:9223` (Colima gateway, not `socat`, not
+   `0.0.0.0`); injects `CLAUDEBOX_HOST_CDP_URL` into the container; tears down on
+   `down`. `cb-browser cdp <url>` drives your Chrome. Verified end-to-end.
+4. **B security** ✅ — dedicated profile, colima-only bind, opt-in = running the
+   command, explicit control-handover warning.
+5. **Tests** — A1/A2/B verified manually end-to-end on throwaway `--network-address`
+   VMs. TODO: fold a B smoke test into the bash suite behind the opt-in.
 
 ## Open questions
 
 - **A: bake Playwright + Chromium into the full image** (bigger image, instant) vs
-  install on first use (slower first run, smaller image)?
-- **A2: which noVNC image** and default port; is one standard recipe enough or do
-  projects need to choose the browser?
-- **B: exact Mac-side bind target** — the Colima gateway IP vs a dedicated vmnet
-  interface — and how claudebot discovers the CDP URL (env var vs a well-known
-  file in the workspace).
-- **B: dedicated vs real Chrome profile** — dedicated is safer; a real profile is
-  more realistic (your logins/extensions). Default dedicated, allow override?
+  install on first use (slower first run, smaller image)? — still open; currently
+  runtime `npm i` (fast, browsers pre-cached in the image).
+- **A2: which noVNC image** and default port — resolved: `linuxserver/chromium`,
+  default port `3010`, overridable.
+- ~~**B: exact Mac-side bind target** / CDP-URL discovery~~ — resolved: bind
+  `192.168.64.1:9223` (Colima gateway, reachable from a `--network host` container
+  over `col0`); discovery via `CLAUDEBOX_HOST_CDP_URL` injected from a per-project
+  marker file.
+- ~~**B: dedicated vs real Chrome profile**~~ — resolved: **dedicated** profile
+  (`--user-data-dir`), overridable via `CLAUDEBOX_CHROME`/env if you want your real
+  one.

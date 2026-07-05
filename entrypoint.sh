@@ -168,6 +168,10 @@ so they're reachable by name:
 - `cb-browser watch http://api:8080` → headful browser with a noVNC web UI the human watches/drives live at http://<project-vm-ip>:<port>; `cb-browser watch-stop` to stop
 - `cb-browser net` → the network name to attach workloads to
 This is the standard way to browser-test here; prefer it over ad-hoc setups.
+Opt-in extra: if the human ran `claudebox browser-bridge up` on their Mac, the env
+var `CLAUDEBOX_HOST_CDP_URL` is set and `cb-browser cdp <url>` drives THEIR real
+Chrome via CDP (dedicated debug profile). Only available when they explicitly start
+the bridge; don't rely on it — the self-contained A modes above are the default.
 
 ## Notes
 - You have passwordless sudo access
