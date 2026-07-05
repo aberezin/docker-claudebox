@@ -667,6 +667,15 @@ CLAUDE_SSH="${CLAUDEBOX_SSH_DIR:-${CLAUDE_SSH_DIR:-$HOME/.ssh/claudebox}}"
 ANTHROPIC_API_KEY="${CLAUDEBOX_ENV_ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY:-}}"
 CLAUDE_CODE_OAUTH_TOKEN="${CLAUDEBOX_ENV_CLAUDE_CODE_OAUTH_TOKEN:-${CLAUDE_CODE_OAUTH_TOKEN:-}}"
 
+# Normalize to the PHYSICAL workspace path, resolving symlinks (notably macOS
+# /tmp -> /private/tmp). Lima shares the resolved path into the VM (it uses the git
+# toplevel / realpath), so the container bind-mount (-v $PWD:$PWD) and WORKSPACE
+# must use that same resolved path — otherwise the workspace mounts EMPTY inside the
+# VM (the symlinked path doesn't exist there) and claudebot can't see its files.
+# A no-op for paths with no symlinks (e.g. under $HOME).
+cd -P "$PWD" 2>/dev/null || true
+dbg "PWD (physical)=$PWD"
+
 # Convert PWD to a valid container name (slashes to underscores)
 sanitized_pwd=$(echo "$PWD" | sed 's/\//_/g')
 container_name="${CLAUDEBOX_CONTAINER_NAME:-${CLAUDE_CONTAINER_NAME:-claude-${sanitized_pwd}}}"
