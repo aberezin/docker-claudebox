@@ -77,6 +77,79 @@ daemon. Claude's `docker run` then creates **siblings alongside claudebox-A in
 VM-A**. What changes versus today is only *which VM/context the whole invocation
 targets* — not the mount itself.
 
+## Architecture diagrams
+
+**Topology** — one Colima VM per project, the human's `default` VM untouched, and
+the image seeded into each project VM from the shared `cb-infra` profile:
+
+```mermaid
+flowchart TB
+    browser["Browser / curl on the Mac"]
+    wrap["claudebox (wrapper.sh)"]
+    cfg[".claudebox/config.yml<br/>id · vm sizing · hostname"]
+    data["~/.config/claudebox/projects/ID/claude<br/>shared-nothing per project"]
+
+    subgraph host["macOS host — colima"]
+      subgraph defvm["profile: default — RESERVED for the human"]
+        human["the human's own containers"]
+      end
+      subgraph infra["profile: cb-infra — image store (no reachable IP)"]
+        img["claudebox:latest image"]
+      end
+      subgraph pa["profile: cb-idA — project A · IP 192.168.64.5"]
+        da["dockerd (VM-private)"]
+        ha["claudebox harness<br/>Claude runs here"]
+        apia["cb_A_api :8080"]
+        pga["cb_A_postgres :5432"]
+        da --- ha
+        da --- apia
+        da --- pga
+      end
+      subgraph pb["profile: cb-idB — project B · IP 192.168.64.6"]
+        db["dockerd (VM-private)"]
+        hb["claudebox harness"]
+        apib["cb_B_api :8080"]
+        db --- hb
+        db --- apib
+      end
+    end
+
+    wrap -->|"reads / creates"| cfg
+    wrap -->|"mounts /home/claude/.claude"| data
+    wrap -->|"docker --context colima-cb-idA"| da
+    wrap -. never touches .-> defvm
+    img ==>|"save / load (one-time)"| da
+    img ==>|"save / load (one-time)"| db
+    browser -->|"http://192.168.64.5:8080"| apia
+    browser -->|"http://192.168.64.6:8080"| apib
+```
+
+**One `claudebox` invocation** — identity, VM lifecycle, image seeding, then an
+isolated run on the project's own daemon:
+
+```mermaid
+sequenceDiagram
+    actor U as You (in a project dir)
+    participant W as claudebox (wrapper.sh)
+    participant C as colima
+    participant I as cb-infra
+    participant V as project VM (cb-ID)
+
+    U->>W: claudebox
+    W->>W: resolve project id from .claudebox/config.yml
+    W->>C: cb_ensure_vm — colima start -p cb-ID --network-address
+    Note over W,C: enforce warn_max/hard_max; restore human's docker context
+    W->>V: is claudebox:latest present?
+    alt missing (first run)
+        W->>I: docker --context colima-cb-infra save
+        I-->>V: docker --context colima-cb-ID load
+    end
+    W->>V: docker --context colima-cb-ID run harness<br/>(mounts per-project .claude + workspace)
+    V-->>U: isolated Claude session
+    U->>V: Claude spins up cb_api / cb_db workloads
+    U->>V: browse http://vm-ip:port
+```
+
 ## Project identity
 
 Identity must travel with the project directory so moving/renaming it on the host
