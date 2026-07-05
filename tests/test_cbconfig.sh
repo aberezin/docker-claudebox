@@ -3,6 +3,11 @@
 # Pure host-side — no docker, no colima, no auth token needed.
 #
 # Run:  bash tests/test_cbconfig.sh
+#
+# Standalone runner: if sourced (e.g. by test.sh's tests/test_*.sh glob), do
+# nothing — don't leak `set -u`/traps or run assertions into the caller's shell.
+[ "${BASH_SOURCE[0]}" != "${0}" ] && return 0 2>/dev/null
+
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

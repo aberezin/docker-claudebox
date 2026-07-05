@@ -8,28 +8,30 @@ WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXTRA_CONTAINERS=()
 ALL_TESTS=()
 
-# load .env
+# load .env if present (optional — environment variables also work)
 ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.env"
-if [ ! -f "$ENV_FILE" ]; then
-    echo "tests/.env not found — create it with CLAUDE_CODE_OAUTH_TOKEN=..." >&2
-    exit 1
-fi
 # shellcheck disable=SC1090
-source "$ENV_FILE"
+[ -f "$ENV_FILE" ] && source "$ENV_FILE"
 
-if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-    echo "CLAUDE_CODE_OAUTH_TOKEN not set in .env" >&2
+# accept either an OAuth token or an API key (from .env or the environment)
+if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+    echo "no auth: set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in tests/.env or the environment" >&2
     exit 1
 fi
 
 # model to use for tests — haiku is fast and cheap
 TEST_MODEL="haiku"
 
+# auth env forwarded into every test container (whichever is set)
+AUTH_ENV_ARGS=()
+[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && AUTH_ENV_ARGS+=(-e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
+[ -n "${ANTHROPIC_API_KEY:-}" ]       && AUTH_ENV_ARGS+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
+
 # common docker args for running claude
 DOCKER_RUN_ARGS=(
     --rm
     --network host
-    -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN"
+    "${AUTH_ENV_ARGS[@]}"
     -e "CLAUDE_WORKSPACE=/workspace"
     -e "CLAUDE_CONTAINER_NAME=${CONTAINER_PREFIX}"
 )
