@@ -20,12 +20,16 @@ _wrapper_cleanup() {
 
 _wrapper_run() {
     [ -z "$TEST_DATA_DIR" ] && { echo "BUG: _wrapper_setup not called"; return 1; }
+    # run from the throwaway workspace so the wrapper targets the test VM, and
+    # forward whichever auth exists (safe under set -u)
+    ( cd "$CBX_TEST_WS" && \
     CLAUDE_IMAGE="$IMAGE" \
     CLAUDE_DATA_DIR="$TEST_DATA_DIR" \
     CLAUDE_SSH_DIR="$TEST_SSH_DIR" \
-    CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     CLAUDE_CONTAINER_NAME="$_wrapper_container_name" \
-    bash "$WRAPPER" "$@"
+    bash "$WRAPPER" "$@" )
 }
 
 # ── table: passthrough commands ──────────────────────────────────────────────
@@ -157,8 +161,9 @@ test_wrapper_stop() {
 test_wrapper_clear_session() {
     _wrapper_setup
 
+    # the wrapper runs from $CBX_TEST_WS, so its session key is derived from THAT path
     local project_path
-    project_path="${PWD//\//-}"
+    project_path="${CBX_TEST_WS//\//-}"
     mkdir -p "$TEST_DATA_DIR/projects/${project_path}"
     echo "fake session" > "$TEST_DATA_DIR/projects/${project_path}/session.jsonl"
 
@@ -198,11 +203,12 @@ test_wrapper_env_forwarding() {
 
     # tell claude to run a bash command that prints the env var — proves it's actually inside the container
     local out
-    out=$(CLAUDE_ENV_MY_TEST_VAR="ENVFORWARD42" \
+    out=$( cd "$CBX_TEST_WS" && CLAUDE_ENV_MY_TEST_VAR="ENVFORWARD42" \
     CLAUDE_IMAGE="$IMAGE" \
     CLAUDE_DATA_DIR="$TEST_DATA_DIR" \
     CLAUDE_SSH_DIR="$TEST_SSH_DIR" \
-    CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     CLAUDE_CONTAINER_NAME="$_wrapper_container_name" \
     bash "$WRAPPER" -p 'run: echo $MY_TEST_VAR' \
         --model "$TEST_MODEL" --output-format text --no-continue 2>&1)
@@ -222,11 +228,12 @@ test_wrapper_volume_mounting() {
 
     # verify mount works: tell claude to read the file from inside the container
     local out
-    out=$(CLAUDE_MOUNT_TESTDIR="$mount_dir" \
+    out=$( cd "$CBX_TEST_WS" && CLAUDE_MOUNT_TESTDIR="$mount_dir" \
     CLAUDE_IMAGE="$IMAGE" \
     CLAUDE_DATA_DIR="$TEST_DATA_DIR" \
     CLAUDE_SSH_DIR="$TEST_SSH_DIR" \
-    CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     CLAUDE_CONTAINER_NAME="${_wrapper_container_name}-mnt" \
     bash "$WRAPPER" -p "run: cat $mount_dir/testfile.txt" --model "$TEST_MODEL" --output-format text --no-continue 2>&1)
     assert_contains "$out" "MOUNTTEST99" "CLAUDE_MOUNT_* file accessible inside container"
@@ -242,11 +249,12 @@ test_wrapper_env_forwarding_claudebox() {
     _wrapper_setup
 
     local out
-    out=$(CLAUDEBOX_ENV_MY_TEST_VAR="ENVFORWARD_CB42" \
+    out=$( cd "$CBX_TEST_WS" && CLAUDEBOX_ENV_MY_TEST_VAR="ENVFORWARD_CB42" \
     CLAUDEBOX_IMAGE="$IMAGE" \
     CLAUDEBOX_DATA_DIR="$TEST_DATA_DIR" \
     CLAUDEBOX_SSH_DIR="$TEST_SSH_DIR" \
-    CLAUDEBOX_ENV_CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    CLAUDEBOX_ENV_CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     CLAUDEBOX_CONTAINER_NAME="$_wrapper_container_name" \
     bash "$WRAPPER" -p 'run: echo $MY_TEST_VAR' \
         --model "$TEST_MODEL" --output-format text --no-continue 2>&1)
@@ -265,11 +273,12 @@ test_wrapper_volume_mounting_claudebox() {
     echo "MOUNTTEST_CB99" > "$mount_dir/testfile.txt"
 
     local out
-    out=$(CLAUDEBOX_MOUNT_TESTDIR="$mount_dir" \
+    out=$( cd "$CBX_TEST_WS" && CLAUDEBOX_MOUNT_TESTDIR="$mount_dir" \
     CLAUDEBOX_IMAGE="$IMAGE" \
     CLAUDEBOX_DATA_DIR="$TEST_DATA_DIR" \
     CLAUDEBOX_SSH_DIR="$TEST_SSH_DIR" \
-    CLAUDEBOX_ENV_CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    CLAUDEBOX_ENV_CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     CLAUDEBOX_CONTAINER_NAME="${_wrapper_container_name}-mnt" \
     bash "$WRAPPER" -p "run: cat $mount_dir/testfile.txt" --model "$TEST_MODEL" --output-format text --no-continue 2>&1)
     assert_contains "$out" "MOUNTTEST_CB99" "CLAUDEBOX_MOUNT_* file accessible inside container"

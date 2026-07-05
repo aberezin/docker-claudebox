@@ -20,24 +20,28 @@ _prog_cleanup() {
 
 _prog_run() {
     [ -z "$_prog_data_dir" ] && { echo "BUG: _prog_setup not called"; return 1; }
+    ( cd "$CBX_TEST_WS" && \
     CLAUDE_IMAGE="$IMAGE" \
     CLAUDE_DATA_DIR="$_prog_data_dir" \
     CLAUDE_SSH_DIR="$_prog_ssh_dir" \
-    CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
+    ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
     CLAUDE_CONTAINER_NAME="$_prog_container_name" \
-    bash "$WORKDIR/wrapper.sh" "$@"
+    bash "$WORKDIR/wrapper.sh" "$@" )
 }
 
 _prog_run_with_token() {
     [ -z "$_prog_data_dir" ] && { echo "BUG: _prog_setup not called"; return 1; }
     local token="$1"
     shift
+    ( cd "$CBX_TEST_WS" && \
     CLAUDE_IMAGE="$IMAGE" \
     CLAUDE_DATA_DIR="$_prog_data_dir" \
     CLAUDE_SSH_DIR="$_prog_ssh_dir" \
+    ANTHROPIC_API_KEY="" \
     CLAUDE_CODE_OAUTH_TOKEN="$token" \
     CLAUDE_CONTAINER_NAME="$_prog_container_name" \
-    bash "$WORKDIR/wrapper.sh" "$@"
+    bash "$WORKDIR/wrapper.sh" "$@" )
 }
 
 # ── table: prompts with expected output ──────────────────────────────────────
@@ -112,15 +116,18 @@ test_programmatic_system_prompts() {
 test_programmatic_bad_auth() {
     _prog_setup
 
-    # use a completely separate container name to avoid reusing a container with valid auth
+    # use a completely separate container name to avoid reusing a container with valid auth.
+    # ANTHROPIC_API_KEY is cleared so only the invalid OAuth token is presented.
     local bad_name="${CONTAINER_PREFIX}-badauth-$$-$RANDOM"
+    ( cd "$CBX_TEST_WS" && \
     CLAUDE_IMAGE="$IMAGE" \
     CLAUDE_DATA_DIR="$_prog_data_dir" \
     CLAUDE_SSH_DIR="$_prog_ssh_dir" \
+    ANTHROPIC_API_KEY="" \
     CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-INVALID" \
     CLAUDE_CONTAINER_NAME="$bad_name" \
     bash "$WORKDIR/wrapper.sh" \
-        -p "hello" --output-format text --model "$TEST_MODEL" --no-continue >/dev/null 2>&1
+        -p "hello" --output-format text --model "$TEST_MODEL" --no-continue >/dev/null 2>&1 )
     local rc=$?
     docker rm -f "$bad_name" "${bad_name}_prog" >/dev/null 2>&1 || true
 

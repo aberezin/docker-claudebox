@@ -9,11 +9,11 @@ _cron_setup_dirs() {
     CRON_TMP=$(mktemp -d "$WORKDIR/tests/.fixtures/cron-XXXXX")
     chmod 777 "$CRON_TMP"
     mkdir -p "$CRON_TMP/home/.claude" "$CRON_TMP/workspace"
-    chown -R 1000:1000 "$CRON_TMP" 2>/dev/null || sudo chown -R 1000:1000 "$CRON_TMP"
+    chmod -R a+rwX "$CRON_TMP" 2>/dev/null || true
 }
 
 _cron_cleanup_dirs() {
-    [ -n "${CRON_TMP:-}" ] && { rm -rf "$CRON_TMP" 2>/dev/null || sudo rm -rf "$CRON_TMP"; }
+    [ -n "${CRON_TMP:-}" ] && { rm -rf "$CRON_TMP" 2>/dev/null || true; }
     CRON_TMP=""
 }
 
@@ -26,7 +26,7 @@ test_cron_invalid_yaml_fails() {
 # missing 'jobs' key
 foo: bar
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local cname="claudebox-cron-test-$$-$RANDOM"
     local out rc
@@ -36,6 +36,7 @@ EOF
         -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
         -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
         -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \
@@ -63,6 +64,7 @@ test_cron_missing_file_env_fails() {
         --network host \
         -e "CLAUDEBOX_MODE_CRON=1" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         "$IMAGE" 2>&1)
     rc=$?
     docker rm -f "$cname" >/dev/null 2>&1 || true
@@ -87,7 +89,7 @@ jobs:
     instruction: |
       This job will essentially never fire during the test.
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local cname="claudebox-cron-test-$$-$RANDOM"
 
@@ -98,6 +100,7 @@ EOF
         -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
         -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "DEBUG=true" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
@@ -129,7 +132,7 @@ jobs:
     schedule: "* * * * *"
     instruction: hi
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local cname="claudebox-cron-test-$$-$RANDOM"
     local out rc
@@ -160,7 +163,7 @@ jobs:
     schedule: "not a cron"
     instruction: hi
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local cname="claudebox-cron-test-$$-$RANDOM"
     local out rc
@@ -191,7 +194,7 @@ jobs:
     schedule: "0 0 1 1 *"
     instruction: legacy never fires
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local cname="claudebox-cron-test-$$-$RANDOM"
 
@@ -228,7 +231,7 @@ jobs:
     instruction: |
       Respond with exactly the single word CRONPONG and nothing else.
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local cname="claudebox-cron-test-$$-$RANDOM"
     local started_at_epoch
@@ -240,6 +243,7 @@ EOF
         -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
         -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "DEBUG=true" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
@@ -362,7 +366,7 @@ jobs:
     system_prompt: "Override at {system_datetime} for {job_name}."
     instruction: never fires either
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local cname="claudebox-cron-test-$$-$RANDOM"
     docker run -d --name "$cname" \
@@ -410,7 +414,7 @@ jobs:
     instruction: |
       What is 2+2?
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local cname="claudebox-cron-test-$$-$RANDOM"
     local started_at_epoch
@@ -422,6 +426,7 @@ EOF
         -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
         -e "CLAUDEBOX_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
         -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \

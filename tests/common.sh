@@ -1,12 +1,24 @@
 #!/bin/bash
 
-IMAGE_NAME="psyb0t/claudebox"
+IMAGE_NAME="claudebox"           # local, bare name (no registry) — matches the fork
 TEST_TAG="test"
 IMAGE="${IMAGE_NAME}:${TEST_TAG}"
 CONTAINER_PREFIX="claudebox-test"
 WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXTRA_CONTAINERS=()
 ALL_TESTS=()
+
+# The whole suite runs against ONE dedicated throwaway colima profile so it never
+# touches the human's `default` VM. The test image is built into it, it becomes the
+# active docker context for the run, and the wrapper (which derives its VM from a
+# project's .claudebox/config.yml) is pointed at it via a fixed-id test workspace.
+CBX_TEST_ID="cbxtest"
+CBX_TEST_PROFILE="cb-${CBX_TEST_ID}"
+CBX_TEST_CTX="colima-${CBX_TEST_PROFILE}"
+# workspace lives OUTSIDE the repo git tree (under $HOME so colima auto-mounts it),
+# so the wrapper resolves the project root to it (not the repo) and pollutes nothing.
+CBX_TEST_WS="$HOME/.cache/claudebox-test-ws"
+CBX_PREV_CTX=""
 
 # load .env if present (optional — environment variables also work)
 ENV_FILE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/.env"
@@ -18,6 +30,10 @@ if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; the
     echo "no auth: set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY in tests/.env or the environment" >&2
     exit 1
 fi
+# define both so `set -u` references (test.sh runs with set -euo pipefail) never
+# hit an unbound variable when only one is provided
+export CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+export ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}"
 
 # model to use for tests — haiku is fast and cheap
 TEST_MODEL="haiku"
@@ -157,8 +173,31 @@ start_container() {
 # ── setup / cleanup ─────────────────────────────────────────────────────────
 
 setup() {
-    echo "building claudebox image (--target minimal)..."
-    docker build --target minimal -t "$IMAGE" "$WORKDIR" >/dev/null 2>&1
+    echo "creating throwaway test VM ($CBX_TEST_PROFILE)..."
+    # a plain VM (no --network-address — tests don't need reachable IPs, and it
+    # keeps the profile light and socket_vmnet out of the picture)
+    colima start -p "$CBX_TEST_PROFILE" --cpu 4 --memory 4 --disk 30 >/dev/null 2>&1
+
+    echo "building claudebox test image ($IMAGE) into $CBX_TEST_PROFILE..."
+    docker --context "$CBX_TEST_CTX" build --target minimal -t "$IMAGE" "$WORKDIR" >/dev/null 2>&1
+
+    # run the whole suite against the test VM: bare `docker ...` in tests, and the
+    # wrapper's explicit `docker --context $CBX_TEST_CTX`, both resolve to it.
+    CBX_PREV_CTX="$(docker context show 2>/dev/null)"
+    docker context use "$CBX_TEST_CTX" >/dev/null 2>&1
+
+    # fixed-id workspace so the wrapper resolves to $CBX_TEST_PROFILE (already up,
+    # so cb_ensure_vm reuses it and never adds --network-address).
+    rm -rf "$CBX_TEST_WS"
+    mkdir -p "$CBX_TEST_WS/.claudebox"
+    cat > "$CBX_TEST_WS/.claudebox/config.yml" <<EOF
+id: $CBX_TEST_ID
+vm:
+  cpu: 4
+  memory: 4GiB
+  disk: 30GiB
+EOF
+
     mkdir -p "$WORKDIR/tests/.fixtures/mounts"
 }
 
@@ -166,7 +205,11 @@ cleanup() {
     for c in "${EXTRA_CONTAINERS[@]+"${EXTRA_CONTAINERS[@]}"}"; do
         docker rm -f "$c" >/dev/null 2>&1 || true
     done
-    docker rmi -f "$IMAGE" >/dev/null 2>&1 || true
+    # restore the human's docker context, then nuke the throwaway VM (removes its
+    # containers + the test image with it) and the test workspace.
+    [ -n "$CBX_PREV_CTX" ] && docker context use "$CBX_PREV_CTX" >/dev/null 2>&1
+    colima delete -f -p "$CBX_TEST_PROFILE" >/dev/null 2>&1 || true
+    rm -rf "$CBX_TEST_WS"
 }
 
 test_setup() { :; }

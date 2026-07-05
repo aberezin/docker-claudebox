@@ -12,6 +12,7 @@ _api_start() {
     start_container "$name" \
         --rm --network host \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "CLAUDE_MODE_API=1" \
         -e "CLAUDE_MODE_API_PORT=$API_PORT" \
         -v "$_api_claude_tmp:/home/claude/.claude" \

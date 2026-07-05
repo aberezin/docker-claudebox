@@ -46,11 +46,11 @@ _e2e_setup_dirs() {
     E2E_TMP=$(mktemp -d "$WORKDIR/tests/.fixtures/e2e-tg-XXXXX")
     chmod 777 "$E2E_TMP"
     mkdir -p "$E2E_TMP/home/.claude/cron" "$E2E_TMP/workspace"
-    chown -R 1000:1000 "$E2E_TMP" 2>/dev/null || sudo chown -R 1000:1000 "$E2E_TMP"
+    chmod -R a+rwX "$E2E_TMP" 2>/dev/null || true
 }
 
 _e2e_cleanup_dirs() {
-    [ -n "${E2E_TMP:-}" ] && { rm -rf "$E2E_TMP" 2>/dev/null || sudo rm -rf "$E2E_TMP"; }
+    [ -n "${E2E_TMP:-}" ] && { rm -rf "$E2E_TMP" 2>/dev/null || true; }
     E2E_TMP=""
 }
 
@@ -65,7 +65,7 @@ default:
   effort: low
   continue: true
 EOF
-    chown 1000:1000 "$path" 2>/dev/null || sudo chown 1000:1000 "$path"
+    chmod a+rw "$path" 2>/dev/null || true
 }
 
 # Pick a free localhost port for the telethon-plus HTTP API.
@@ -265,6 +265,7 @@ _e2e_run_claudebox_cron_tg() {
         -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
         -e "CLAUDEBOX_WORKSPACE=$E2E_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "CLAUDEBOX_TELEGRAM_BOT_TOKEN=$CLAUDEBOX_TELEGRAM_BOT_TOKEN" \
         -e "DEBUG=true" \
         -v "$cron_file:/cron.yaml:ro" \
@@ -301,7 +302,7 @@ jobs:
       ## **Docker Health**
       \`mt5-httpapi-mt5-1\` is **unhealthy**.
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local baseline
     baseline=$(tg_latest_msg_id)
@@ -389,7 +390,7 @@ jobs:
     instruction: |
       Respond with exactly the single token CRONREPLYTARGET and nothing else.
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     local baseline
     baseline=$(tg_latest_msg_id)
@@ -448,7 +449,7 @@ jobs:
     schedule: "0 0 1 1 *"
     instruction: never fires
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     _e2e_run_claudebox_cron_tg "$cron_file"
     sleep 6   # let the bot register its long-poll
@@ -491,7 +492,7 @@ jobs:
     schedule: "0 0 1 1 *"
     instruction: never fires
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     _e2e_run_claudebox_cron_tg "$cron_file"
     sleep 6

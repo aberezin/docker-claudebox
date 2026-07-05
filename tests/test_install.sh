@@ -1,127 +1,81 @@
 #!/bin/bash
 
-# Tests install.sh end-to-end inside an isolated Ubuntu runner container (DinD via shared docker.sock).
-# Builds the minimal claudebox image from local Dockerfile, runs install.sh inside the runner,
-# verifies binary placement/permissions, then exercises the installed `claudebox` programmatically.
+# Tests install.sh's host-side logic with colima/docker/sudo STUBBED (option B).
+# This exercises the parts that don't need a real colima VM: docker/colima
+# presence checks, Dockerfile detection, ssh-key + ~/.claude creation, the
+# no-sudo install into a user-writable dir, the PATH nudge, and that sudo is
+# never invoked. See task: "Revisit test_install" for a real end-to-end test.
 
-INSTALL_RUNNER_IMAGE="claudebox-install-runner:test"
-MINIMAL_IMAGE_TAG="psyb0t/claudebox:latest-minimal"
+test_install_host_logic() {
+    local tmp stub repo home instdir out rc pass m
+    tmp=$(mktemp -d "$WORKDIR/tests/.tmp-install-XXXXX")
+    stub="$tmp/stub-bin"; repo="$tmp/repo"; home="$tmp/home"; instdir="$tmp/bin"
+    mkdir -p "$stub" "$repo" "$home" "$instdir"
 
-_install_build_runner() {
-    local dockerfile_dir
-    dockerfile_dir=$(mktemp -d "$WORKDIR/tests/.tmp-install-runner-XXXXX")
-    cat > "$dockerfile_dir/Dockerfile" <<'EOF'
-FROM ubuntu:24.04
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    docker.io openssh-client curl ca-certificates sudo bash jq && \
-    rm -rf /var/lib/apt/lists/*
-RUN userdel -r ubuntu 2>/dev/null || true && \
-    useradd -m -s /bin/bash -u 1000 tester && \
-    echo "tester ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/tester
-USER tester
-WORKDIR /home/tester
+    # stub colima + docker as no-ops that succeed; stub sudo to record if ever
+    # called (and fail, so an unexpected sudo path is caught).
+    printf '#!/bin/bash\nexit 0\n' > "$stub/colima"
+    printf '#!/bin/bash\nexit 0\n' > "$stub/docker"
+    cat > "$stub/sudo" <<EOF
+#!/bin/bash
+echo "SUDO_CALLED: \$*" >> "$tmp/sudo-called"
+exit 1
 EOF
-    docker build -t "$INSTALL_RUNNER_IMAGE" "$dockerfile_dir" >/dev/null 2>&1
-    local rc=$?
-    rm -rf "$dockerfile_dir"
-    return $rc
-}
+    chmod 755 "$stub/colima" "$stub/docker" "$stub/sudo"
 
-_install_build_minimal() {
-    docker build --target minimal -t "$MINIMAL_IMAGE_TAG" "$WORKDIR" >/dev/null 2>&1
-}
+    # a minimal repo checkout: install.sh + wrapper.sh + a (dummy) Dockerfile
+    cp "$WORKDIR/install.sh" "$repo/install.sh"
+    cp "$WORKDIR/wrapper.sh" "$repo/wrapper.sh"
+    echo "FROM scratch" > "$repo/Dockerfile"
+    chmod 755 "$repo/install.sh" "$repo/wrapper.sh"
 
-test_install_minimal_end_to_end() {
-    echo "  building install runner image..."
-    if ! _install_build_runner; then
-        echo "  FAIL: failed to build install runner image"
-        return 1
-    fi
-
-    echo "  building minimal claudebox image (target=minimal)..."
-    if ! _install_build_minimal; then
-        echo "  FAIL: failed to build $MINIMAL_IMAGE_TAG"
-        return 1
-    fi
-
-    # host-side scratch dir mapped into the runner at the SAME path so that any
-    # `docker run -v <path>:...` issued from inside the runner resolves on the host.
-    local host_dir
-    host_dir=$(mktemp -d "$WORKDIR/tests/.tmp-install-XXXXX")
-    chmod 777 "$host_dir"
-    mkdir -p "$host_dir/home" "$host_dir/workspace" "$host_dir/repo"
-    cp "$WORKDIR/install.sh" "$host_dir/repo/install.sh"
-    cp "$WORKDIR/wrapper.sh" "$host_dir/repo/wrapper.sh"
-    chmod 755 "$host_dir/repo/install.sh" "$host_dir/repo/wrapper.sh"
-    # tester uid is 1000 inside the runner; chown so it can write
-    chown -R 1000:1000 "$host_dir" 2>/dev/null || sudo chown -R 1000:1000 "$host_dir"
-
-    local sock_gid
-    sock_gid=$(stat -c '%g' /var/run/docker.sock)
-
-    local container_name="claudebox-install-test-$$-$RANDOM"
-
-    # run install.sh + invoke claudebox programmatically inside the runner
-    local out rc
-    out=$(docker run --rm \
-        --name "$container_name" \
-        -v /var/run/docker.sock:/var/run/docker.sock \
-        --group-add "$sock_gid" \
-        -v "$host_dir:$host_dir" \
-        -e HOME="$host_dir/home" \
-        -e CLAUDEBOX_MINIMAL=1 \
-        -e CLAUDEBOX_ENV_CLAUDE_CODE_OAUTH_TOKEN="$CLAUDE_CODE_OAUTH_TOKEN" \
-        -e TEST_HOST_DIR="$host_dir" \
-        -e TEST_MODEL="$TEST_MODEL" \
-        "$INSTALL_RUNNER_IMAGE" bash -c '
-set -e
-cd "$TEST_HOST_DIR/repo"
-bash ./install.sh
-
-# verify binary exists, is executable, mode 755, in /usr/local/bin
-BIN=/usr/local/bin/claudebox
-[ -x "$BIN" ] || { echo "MARKER_FAIL_BIN_MISSING"; exit 10; }
-mode=$(stat -c %a "$BIN")
-[ "$mode" = "755" ] || { echo "MARKER_FAIL_BIN_MODE=$mode"; exit 11; }
-owner=$(stat -c %U "$BIN")
-[ "$owner" = "root" ] || { echo "MARKER_FAIL_BIN_OWNER=$owner"; exit 12; }
-
-# verify ssh key created in $HOME/.ssh/claudebox
-[ -f "$HOME/.ssh/claudebox/id_ed25519" ] || { echo "MARKER_FAIL_SSHKEY_MISSING"; exit 13; }
-[ -f "$HOME/.ssh/claudebox/id_ed25519.pub" ] || { echo "MARKER_FAIL_SSHPUB_MISSING"; exit 14; }
-key_mode=$(stat -c %a "$HOME/.ssh/claudebox/id_ed25519")
-# ssh-keygen creates with 600
-[ "$key_mode" = "600" ] || { echo "MARKER_FAIL_SSHKEY_MODE=$key_mode"; exit 15; }
-
-# verify ~/.claude dir exists
-[ -d "$HOME/.claude" ] || { echo "MARKER_FAIL_CLAUDEDIR_MISSING"; exit 16; }
-
-echo "MARKER_INSTALL_OK"
-
-# now run claudebox programmatically (relies on docker socket -> host daemon)
-cd "$TEST_HOST_DIR/workspace"
-claudebox -p "respond with exactly INSTALLPONG" \
-    --model "$TEST_MODEL" --output-format text --no-continue
-' 2>&1)
+    # run install.sh with stubs first on PATH, a fresh HOME (no ssh-key prompt),
+    # and a writable user install dir (so the no-sudo path is taken).
+    out=$( cd "$repo" && PATH="$stub:$PATH" HOME="$home" \
+        CLAUDEBOX_MINIMAL=1 CLAUDEBOX_INSTALL_DIR="$instdir" \
+        bash ./install.sh 2>&1 )
     rc=$?
 
-    # cleanup workspace prog containers spawned via wrapper
-    docker ps -a --format '{{.Names}}' | grep "^claude-${host_dir//\//_}_workspace" | xargs -r docker rm -f >/dev/null 2>&1 || true
-    rm -rf "$host_dir" 2>/dev/null || sudo rm -rf "$host_dir"
-    docker rmi -f "$INSTALL_RUNNER_IMAGE" >/dev/null 2>&1 || true
+    pass=0
 
-    if [ $rc -ne 0 ]; then
-        echo "  FAIL: installer test exited $rc"
-        echo "  output (last 50 lines):"
-        echo "$out" | tail -50 | sed 's/^/    /'
-        return 1
+    # 1. wrapper installed (no sudo), executable, and is actually the wrapper
+    if [ -x "$instdir/claudebox" ] && grep -q "cb_project_id" "$instdir/claudebox" 2>/dev/null; then
+        echo "  OK: wrapper installed to \$CLAUDEBOX_INSTALL_DIR (no sudo)"
+    else
+        echo "  FAIL: wrapper not installed at $instdir/claudebox"; pass=1
     fi
 
-    assert_contains "$out" "MARKER_INSTALL_OK" "installer placed binary, key, dirs correctly" || return 1
-    assert_contains "$out" "INSTALLPONG" "claudebox runs programmatically post-install" || return 1
-    assert_not_contains "$out" "MARKER_FAIL_" "no install verification failures" || return 1
+    # 2. sudo was never invoked
+    if [ ! -f "$tmp/sudo-called" ]; then
+        echo "  OK: sudo never invoked"
+    else
+        echo "  FAIL: sudo was called: $(cat "$tmp/sudo-called")"; pass=1
+    fi
+
+    # 3. ssh key + ~/.claude created in the fresh HOME
+    if [ -f "$home/.ssh/claudebox/id_ed25519" ] && [ -f "$home/.ssh/claudebox/id_ed25519.pub" ]; then
+        echo "  OK: ssh keypair generated"
+    else
+        echo "  FAIL: ssh keypair missing"; pass=1
+    fi
+    [ -d "$home/.claude" ] && echo "  OK: ~/.claude created" || { echo "  FAIL: ~/.claude missing"; pass=1; }
+
+    # 4. PATH nudge shown (instdir is not on PATH)
+    if echo "$out" | grep -q "not on your PATH"; then
+        echo "  OK: PATH nudge shown"
+    else
+        echo "  FAIL: no PATH nudge (out tail: ${out: -200})"; pass=1
+    fi
+
+    rm -rf "$tmp"
+    if [ "$rc" -ne 0 ]; then
+        echo "  FAIL: install.sh exited $rc"
+        echo "$out" | tail -20 | sed 's/^/    /'
+        return 1
+    fi
+    return "$pass"
 }
 
 ALL_TESTS+=(
-    test_install_minimal_end_to_end
+    test_install_host_logic
 )

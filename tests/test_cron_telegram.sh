@@ -11,11 +11,11 @@ _ct_setup_dirs() {
     CT_TMP=$(mktemp -d "$WORKDIR/tests/.fixtures/cron-tg-XXXXX")
     chmod 777 "$CT_TMP"
     mkdir -p "$CT_TMP/home/.claude/cron" "$CT_TMP/workspace"
-    chown -R 1000:1000 "$CT_TMP" 2>/dev/null || sudo chown -R 1000:1000 "$CT_TMP"
+    chmod -R a+rwX "$CT_TMP" 2>/dev/null || true
 }
 
 _ct_cleanup_dirs() {
-    [ -n "${CT_TMP:-}" ] && { rm -rf "$CT_TMP" 2>/dev/null || sudo rm -rf "$CT_TMP"; }
+    [ -n "${CT_TMP:-}" ] && { rm -rf "$CT_TMP" 2>/dev/null || true; }
     CT_TMP=""
 }
 
@@ -217,7 +217,7 @@ jobs:
     schedule: "0 0 1 1 *"
     instruction: this never fires during the test
 EOF
-    chown 1000:1000 "$cron_file" 2>/dev/null || sudo chown 1000:1000 "$cron_file"
+    chmod a+rw "$cron_file" 2>/dev/null || true
 
     # no BOT_TOKEN — telegram bot will exit immediately after startup attempt,
     # but we can verify both processes were launched by checking logs

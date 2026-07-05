@@ -37,7 +37,9 @@ test_entrypoint_behaviors() {
 
 test_entrypoint_uid_matching() {
     local tmpdir host_uid
-    tmpdir=$(mktemp -d)
+    # must live under $HOME (via $WORKDIR) so colima actually mounts it into the VM;
+    # a /var/folders mktemp isn't mounted, so the entrypoint would see uid 0 and skip.
+    tmpdir=$(mktemp -d "$WORKDIR/tests/.tmp-uid-XXXXX")
     host_uid=$(id -u)
 
     if [ "$host_uid" = "0" ]; then
@@ -89,7 +91,7 @@ test_entrypoint_config_patching() {
 test_entrypoint_initd() {
     local img
     img=$(docker build -q -f - "$WORKDIR" <<'DEOF'
-FROM psyb0t/claudebox:test
+FROM claudebox:test
 RUN mkdir -p /home/claude/.claude/init.d && \
     printf '#!/bin/bash\necho INITRAN > /tmp/init-marker\n' > /home/claude/.claude/init.d/01-test.sh && \
     chmod +x /home/claude/.claude/init.d/01-test.sh
@@ -113,6 +115,7 @@ test_entrypoint_auto_continue() {
     local out
     out=$(docker run --rm \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "CLAUDE_WORKSPACE=/workspace" \
         -e "CLAUDE_CONTAINER_NAME=${CONTAINER_PREFIX}-autocont" \
         "$IMAGE" \
