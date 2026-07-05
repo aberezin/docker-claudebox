@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# cb-browser — self-contained headless browser testing (Approach A1).
+#
+# Runs a headless Chromium (via the official Playwright image) as a SIBLING
+# container on a shared project docker network, against a URL, and writes
+# artifacts into your workspace. No host coupling: the browser and the workload
+# both live in this project's colima VM. See docs/design/browser-testing.md.
+#
+# The official Playwright image ships the browsers but not the `playwright` npm
+# module, so we `npm i` it at run time (the pinned version matches the image's
+# pre-cached browsers, so no browser download happens — it's quick).
+#
+# Convention: start the web workloads you want to test on the shared network
+# ($CB_BROWSER_NET, default "cb-net") so this reaches them by container name:
+#     docker run -d --name api --network cb-net your/image
+#     cb-browser shot http://api:8080            # -> ./cb-browser-out/{screenshot.png,page.json}
+#     cb-browser script ./test.cjs               # run a Playwright script (require('playwright'))
+#
+# Env: CB_BROWSER_NET, CB_BROWSER_IMAGE, CB_BROWSER_PWVER, CB_BROWSER_OUT
+set -euo pipefail
+
+PW_VER="${CB_BROWSER_PWVER:-1.48.0}"
+PW_IMAGE="${CB_BROWSER_IMAGE:-mcr.microsoft.com/playwright:v${PW_VER}-jammy}"
+NET="${CB_BROWSER_NET:-cb-net}"
+# browsers are cached in the image; only the JS package is fetched
+INSTALL="npm i --no-save --prefix /pw playwright@${PW_VER} >/dev/null 2>&1"
+
+_usage() {
+    cat >&2 <<EOF
+usage:
+  cb-browser shot <url> [out-dir]         navigate + full-page screenshot + page.json (title/text/console)
+  cb-browser script <file.cjs> [args...]  run a Playwright script (mounted read-only at /work; use require('playwright'))
+  cb-browser net                          ensure/print the shared network name
+
+Put the workloads you test on the '$NET' network so they're reachable by name.
+Artifacts default to ./cb-browser-out in the current workspace.
+EOF
+    exit "${1:-1}"
+}
+
+_ensure_net() { docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET" >/dev/null; }
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  net)
+    _ensure_net; echo "$NET" ;;
+
+  shot)
+    url="${1:-}"; [ -n "$url" ] || _usage
+    outdir="${2:-${CB_BROWSER_OUT:-$PWD/cb-browser-out}}"; mkdir -p "$outdir"
+    _ensure_net
+    # The runner is passed via an env var and written INSIDE the container — a
+    # mounted temp file wouldn't work (docker-out-of-docker: -v paths are resolved
+    # by the VM daemon, which can't see the client's /tmp). The workspace-relative
+    # out-dir IS visible to the VM (it's under the $PWD:$PWD mount).
+    read -r -d '' runner <<'RUNNER' || true
+const { chromium } = require("playwright");
+(async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage();
+  const errs = [];
+  page.on("console", m => { if (m.type() === "error") errs.push(m.text()); });
+  const resp = await page.goto(process.env.TARGET, { waitUntil: "load", timeout: 20000 });
+  await page.waitForTimeout(1000);
+  await page.screenshot({ path: "/out/screenshot.png", fullPage: true });
+  const info = {
+    url: process.env.TARGET,
+    status: resp && resp.status(),
+    title: await page.title(),
+    text: (await page.evaluate(() => document.body ? document.body.innerText : "")).slice(0, 2000),
+    consoleErrors: errs,
+  };
+  require("fs").writeFileSync("/out/page.json", JSON.stringify(info, null, 2));
+  console.log("cb-browser: status=" + info.status + " title=" + JSON.stringify(info.title) +
+              (errs.length ? " consoleErrors=" + errs.length : ""));
+  await browser.close();
+})().catch(e => { console.error("cb-browser error:", e.message); process.exit(1); });
+RUNNER
+    docker run --rm --network "$NET" -e TARGET="$url" -e CBR_RUNNER="$runner" \
+        -v "$outdir:/out" "$PW_IMAGE" \
+        bash -lc "$INSTALL && printf '%s' \"\$CBR_RUNNER\" > /tmp/shot.cjs && NODE_PATH=/pw/node_modules node /tmp/shot.cjs"
+    echo "cb-browser: artifacts -> $outdir/ (screenshot.png, page.json)" ;;
+
+  script)
+    script="${1:-}"; [ -f "$script" ] || _usage; shift
+    sdir="$(cd "$(dirname "$script")" && pwd)"; sfile="$(basename "$script")"
+    outdir="${CB_BROWSER_OUT:-$PWD/cb-browser-out}"; mkdir -p "$outdir"
+    _ensure_net
+    docker run --rm --network "$NET" -v "$sdir:/work:ro" -v "$outdir:/out" -w /work "$PW_IMAGE" \
+        bash -lc "$INSTALL && NODE_PATH=/pw/node_modules node /work/$sfile $*" ;;
+
+  ""|-h|--help) _usage 0 ;;
+  *) echo "cb-browser: unknown command '$cmd'" >&2; _usage ;;
+esac

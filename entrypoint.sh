@@ -157,6 +157,17 @@ CLAUDEMD_MINIMAL
 
 		cat <<'CLAUDEMD_NOTES'
 
+## Browser testing (self-contained)
+To test a web workload you spin up, use the baked-in `cb-browser` helper — it runs
+headless Chromium (Playwright) in a sibling container against your workload and
+writes artifacts into the workspace. Put workloads on the shared `cb-net` network
+so they're reachable by name:
+- `docker run -d --name api --network cb-net your/image`
+- `cb-browser shot http://api:8080` → `./cb-browser-out/{screenshot.png,page.json}` (page.json has status/title/text/consoleErrors)
+- `cb-browser script ./test.cjs` → run your own Playwright script (use `require('playwright')`)
+- `cb-browser net` → the network name to attach workloads to
+This is the standard way to browser-test here; prefer it over ad-hoc setups.
+
 ## Notes
 - You have passwordless sudo access
 - Docker socket may be mounted for docker-in-docker. The workspace is mounted at the exact same path as on the host, so when running docker commands with volume mounts, use the workspace path as the base (e.g. -v "$PWD/data:/data" will resolve correctly on the host)
