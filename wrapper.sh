@@ -267,28 +267,44 @@ cb_ensure_infra() {
     cb_colima_start -p "$CB_INFRA_PROFILE"
 }
 
-# seed $CLAUDE_IMAGE into a target docker context (save|load from cb-infra) if missing
-cb_ensure_image() {
-    local ctx="$1" src
-    docker --context "$ctx" image inspect "$CLAUDE_IMAGE" >/dev/null 2>&1 && return 0
+# Assert the image can be sourced from cb-infra: start cb-infra if it's stopped and
+# confirm the image is actually present in it. cb-infra is the seed source for any
+# project VM that doesn't already carry the image, so this doubles as a PRE-BOOT gate
+# (see cb_ensure_vm) — verify it BEFORE spending minutes provisioning a project VM we
+# could never populate.
+cb_require_image_source() {
     cb_ensure_infra || return 1
-    src="$(cb_infra_context)"
-    if ! docker --context "$src" image inspect "$CLAUDE_IMAGE" >/dev/null 2>&1; then
+    if ! docker --context "$(cb_infra_context)" image inspect "$CLAUDE_IMAGE" >/dev/null 2>&1; then
         echo "❌ $CLAUDE_IMAGE not present in $CB_INFRA_PROFILE — build it: make build (or make build-minimal)" >&2
         return 1
     fi
+}
+
+# seed $CLAUDE_IMAGE into a target docker context (save|load from cb-infra) if missing
+cb_ensure_image() {
+    local ctx="$1"
+    docker --context "$ctx" image inspect "$CLAUDE_IMAGE" >/dev/null 2>&1 && return 0
+    cb_require_image_source || return 1
     echo "📦 seeding $CLAUDE_IMAGE into project VM (one-time save|load)..." >&2
-    docker --context "$src" save "$CLAUDE_IMAGE" | docker --context "$ctx" load >/dev/null
+    docker --context "$(cb_infra_context)" save "$CLAUDE_IMAGE" | docker --context "$ctx" load >/dev/null
 }
 
 # cb_ensure_vm ROOT ID — start the project VM if needed (enforces limits), then
 # make sure the claudebox image is present in it.
 cb_ensure_vm() {
-    local root="$1" id="$2" profile ctx cpu mem disk count warn hard decision
+    local root="$1" id="$2" profile ctx cpu mem disk count warn hard decision status
     profile="$(cb_project_profile "$id")"
     ctx="$(cb_project_context "$id")"
     cb_guard_profile "$profile" || return 1
-    if ! cb_vm_running "$profile"; then
+    status="$(cb_vm_status "$profile")"
+    if [ "$status" != "Running" ]; then
+        # A brand-new (absent) VM carries no image and can only be seeded from
+        # cb-infra. Verify that source BEFORE the multi-minute provision so a missing
+        # image fails fast instead of leaving an orphan VM running (the pre-fix
+        # footgun). A merely-stopped VM may already hold the image — checked post-boot.
+        if [ "$status" = "absent" ]; then
+            cb_require_image_source || return 1
+        fi
         count="$(cb_running_cb_count)"
         warn="$(cb_machine_get vm.warn_max)"
         hard="$(cb_machine_get vm.hard_max)"
@@ -540,6 +556,14 @@ cb_preflight() {
     else echo "  ⚠ python3 — recommended (the browser-bridge CDP forwarder uses it)"; fi
     if [ -x "${CLAUDEBOX_SOCKET_VMNET:-/opt/local/bin/socket_vmnet}" ]; then echo "  ✓ socket_vmnet"
     else echo "  ⚠ socket_vmnet — recommended (reachable per-VM IPs: colima --network-address)"; fi
+    # The claudebox image must live in cb-infra to seed project VMs. Warn (don't
+    # abort): scaffolding / --brief-only / --no-start need no image, and the actual
+    # boot enforces it via cb_require_image_source before provisioning a project VM.
+    # Skipped when CLAUDE_IMAGE is unresolved (source-only unit tests).
+    if [ -n "${CLAUDE_IMAGE:-}" ]; then
+        if docker --context "$(cb_infra_context)" image inspect "$CLAUDE_IMAGE" >/dev/null 2>&1; then echo "  ✓ image ($CLAUDE_IMAGE in $CB_INFRA_PROFILE)"
+        else echo "  ⚠ image — $CLAUDE_IMAGE not built in $CB_INFRA_PROFILE; run 'make build' (or 'make build-minimal') before claudebot can start"; fi
+    fi
     if [ "$missing" -gt 0 ]; then
         echo "❌ preflight: $missing required tool(s) missing — install them, or set CLAUDEBOX_SKIP_PREFLIGHT=1 to override" >&2
         return 1
