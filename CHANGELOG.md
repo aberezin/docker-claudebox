@@ -4,7 +4,29 @@ All notable changes to **claudebox** (formerly `docker-claude-code`).
 
 Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions before `v1.0.0` are pre-release; the rename to `claudebox` at `v1.0.0` is the only breaking change in the project's history.
 
-> **Fork note:** the versioned history below is upstream claudebox's (by [psyb0t](https://github.com/psyb0t/docker-claudebox)) up to the fork point. This fork's changes are tracked in the git log and summarized in the README's [What's different in this fork](README.md#whats-different-in-this-fork) section, not here.
+> **Fork note:** this fork maintains its **own** semver line (starting at `0.1.0`,
+> 2026-07-06) and records it here going forward — one entry per version bump. The
+> `v1.x` history further below is upstream claudebox's (by
+> [psyb0t](https://github.com/psyb0t/docker-claudebox)) up to the fork point.
+> Detailed fork changes *between* the fork point and `0.1.0` were **not** recorded
+> here (see the git history and the README's
+> [What's different in this fork](README.md#whats-different-in-this-fork)); the
+> changelog is authoritative from `0.1.0` onward. Release process:
+> [docs/versioning.md](docs/versioning.md).
+
+## [0.1.0] — 2026-07-06 _(fork)_
+
+First versioned release of this fork — it establishes the fork's own semver line,
+distinct from the upstream `1.x` history below. Changes from the upstream fork point
+through `0.1.0` are **not itemized here** (they predate this policy — see the git
+history / the README); from `0.1.0` on, every version bump gets an entry.
+
+### Added
+- **Semantic versioning** for the host↔image contract: a `VERSION` file +
+  `CLAUDEBOX_VERSION` in `wrapper.sh` (kept in sync by a test) + an image stamp
+  (`LABEL org.claudebox.version`). `claudebox version` prints the wrapper's semver;
+  `claudebox checkversion` compares it against the claudebot image and warns on
+  drift. See [docs/versioning.md](docs/versioning.md).
 
 ## [v1.11.0] — 2026-04-30
 

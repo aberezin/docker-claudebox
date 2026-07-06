@@ -88,6 +88,9 @@ COPY cron.py /home/claude/cron.py
 COPY jsonpipe.py /home/claude/jsonpipe.py
 COPY cb-browser /usr/local/bin/cb-browser
 COPY cb-report-bug /usr/local/bin/cb-report-bug
+# Bake the harness changelog OUTSIDE the mount (/home/claude/.claude is shadowed) so
+# claudebot can read it; the entrypoint points claudebot here and flags version bumps.
+COPY CHANGELOG.md /home/claude/CHANGELOG.md
 RUN chmod +x /home/claude/entrypoint.sh /usr/local/bin/cb-browser /usr/local/bin/cb-report-bug
 
 ENTRYPOINT ["/home/claude/entrypoint.sh"]

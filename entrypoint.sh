@@ -256,10 +256,29 @@ fi
 SYSTEM_HINT_FILE="/home/claude/.claude/system-hint.txt"
 if [ ! -f "$SYSTEM_HINT_FILE" ]; then
 	cat > "$SYSTEM_HINT_FILE" <<SYSHINT
-You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .claudebox/BRIEF.md exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work. If you hit a bug in the claudebox FRAMEWORK itself (the wrapper/entrypoint/image/networking that runs you, not your project), file it with the \`cb-report-bug\` command rather than working around it silently.
+You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .claudebox/BRIEF.md exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work. If you hit a bug in the claudebox FRAMEWORK itself (the wrapper/entrypoint/image/networking that runs you, not your project), file it with the \`cb-report-bug\` command rather than working around it silently. The harness changelog is at ~/CHANGELOG.md — consult it to see what claudebox features and conventions exist and what recently changed (especially if a harness behavior surprises you).
 SYSHINT
 	chown claude:claude "$SYSTEM_HINT_FILE"
 	dbg "system hint created"
+fi
+
+# Harness-update awareness: compare the image's baked semver ($CLAUDEBOX_VERSION, set
+# as an ENV in the Dockerfile) against the last version THIS project saw. On a change
+# (i.e. the image was rebuilt to a new version), set a note that the append-system-
+# prompt assembly below injects — so claudebot is told to read the changelog after an
+# update, reaching every project regardless of the once-generated hint/template. This
+# fires once per bump (the seen-version file is then updated). Unstamped/old images
+# ($CLAUDEBOX_VERSION unset) are skipped, so no false notes.
+HARNESS_VER_FILE="/home/claude/.claude/.harness-version"
+HARNESS_UPDATE_NOTE=""
+if [ -n "${CLAUDEBOX_VERSION:-}" ]; then
+	_seen=""; [ -f "$HARNESS_VER_FILE" ] && _seen="$(cat "$HARNESS_VER_FILE" 2>/dev/null)"
+	if [ -n "$_seen" ] && [ "$_seen" != "$CLAUDEBOX_VERSION" ]; then
+		HARNESS_UPDATE_NOTE="NOTE: the claudebox harness was updated from v${_seen} to v${CLAUDEBOX_VERSION} since this project last ran. Read ~/CHANGELOG.md (top entry) for what changed before relying on prior assumptions about how the harness behaves."
+		dbg "harness update detected: $_seen -> $CLAUDEBOX_VERSION"
+	fi
+	printf '%s' "$CLAUDEBOX_VERSION" > "$HARNESS_VER_FILE" 2>/dev/null || true
+	chown claude:claude "$HARNESS_VER_FILE" 2>/dev/null || true
 fi
 
 # copy template to workspace if CLAUDE.md doesn't exist there
@@ -458,10 +477,15 @@ fi
 ARGS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-args"
 UPDATE_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-update"
 
-# build combined append-system-prompt: hint + always-skills
+# build combined append-system-prompt: hint + harness-update note + always-skills
 COMBINED_APPEND=""
 if [ -f "$SYSTEM_HINT_FILE" ]; then
 	COMBINED_APPEND=$(cat "$SYSTEM_HINT_FILE")
+fi
+if [ -n "$HARNESS_UPDATE_NOTE" ]; then
+	COMBINED_APPEND="${COMBINED_APPEND:+$COMBINED_APPEND
+
+}$HARNESS_UPDATE_NOTE"
 fi
 ALWAYS_SKILLS_DIR="/home/claude/.claude/.always-skills"
 if [ -d "$ALWAYS_SKILLS_DIR" ]; then
