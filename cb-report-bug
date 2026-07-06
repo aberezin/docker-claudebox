@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# cb-report-bug — file a report about a suspected bug in the CLAUDEBOX FRAMEWORK
+# (the wrapper / entrypoint / image / networking that runs you), NOT a bug in the
+# project you are building. Reports are written to a shared, host-visible drop dir
+# mounted into every container, so the maintainer collects them across all projects
+# with `claudebox framework-bugs` on the Mac.
+#
+# The detailed body is read from --body-file or stdin (a heredoc is ideal). Use the
+# template the baked CLAUDE.md describes: what you were doing, expected vs actual,
+# minimal repro, and your hypothesis.
+#
+#   cb-report-bug "workspace empty under /tmp" --layer wrapper <<'EOF'
+#   ## What I was doing
+#   Bootstrapped a project under /tmp and started claudebot.
+#   ## Expected vs actual
+#   Expected the workspace files; got an empty directory.
+#   ## Repro / hypothesis
+#   macOS /tmp -> /private/tmp symlink; the bind-mount path didn't match the VM share.
+#   EOF
+set -euo pipefail
+
+DIR="${CLAUDEBOX_FRAMEWORK_BUGS_DIR:-/home/claude/framework-bugs}"
+PID="${CLAUDEBOX_PROJECT_ID:-unknown}"
+LAYER="other"
+TITLE=""
+BODY_FILE=""
+
+usage() {
+    cat >&2 <<EOF
+usage: cb-report-bug "<title>" [--layer wrapper|entrypoint|image|networking|other] [--body-file F]
+  File a claudebox FRAMEWORK bug report (not a bug in your project).
+  The report body comes from --body-file or stdin.
+EOF
+    exit "${1:-1}"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --layer)     LAYER="${2:-other}"; shift ;;
+        --body-file) BODY_FILE="${2:-}"; shift ;;
+        -h|--help)   usage 0 ;;
+        --)          shift; break ;;
+        -*)          echo "cb-report-bug: unknown flag '$1'" >&2; usage ;;
+        *)           if [ -z "$TITLE" ]; then TITLE="$1"; else TITLE="$TITLE $1"; fi ;;
+    esac
+    shift
+done
+[ -n "$TITLE" ] || usage
+
+if [ -n "$BODY_FILE" ]; then
+    BODY="$(cat "$BODY_FILE")"
+elif [ ! -t 0 ]; then
+    BODY="$(cat)"                      # piped / heredoc body
+else
+    BODY="_(no details provided — rerun with a body via stdin or --body-file)_"
+fi
+
+# Prefer the shared host-mounted drop dir; fall back to a per-project file if the
+# mount isn't present (older host wrapper, or the mount failed).
+APPEND=""
+if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then
+    echo "cb-report-bug: shared report dir unavailable ($DIR); falling back to ./.claudebox/FRAMEWORK-BUGS.md" >&2
+    DIR="$(pwd)/.claudebox"; mkdir -p "$DIR"
+    OUT="$DIR/FRAMEWORK-BUGS.md"; APPEND=1
+fi
+
+TS="$(date +%Y-%m-%dT%H-%M-%S 2>/dev/null || echo unknown)"
+SLUG="$(printf '%s' "$TITLE" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' | cut -c1-40)"
+[ -n "${OUT:-}" ] || OUT="$DIR/${PID}-${TS}-${SLUG}.md"
+
+{
+    [ -n "$APPEND" ] && echo "---"
+    echo "# ${TITLE}"
+    echo ""
+    echo "- **layer:** ${LAYER}"
+    echo "- **project id:** ${PID}"
+    echo "- **filed:** ${TS}"
+    echo "- **image variant:** ${CLAUDE_IMAGE_VARIANT:-unknown}"
+    echo ""
+    printf '%s\n' "$BODY"
+    echo ""
+} >> "$OUT"
+
+echo "cb-report-bug: filed framework bug report -> $OUT"

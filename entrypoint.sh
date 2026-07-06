@@ -173,6 +173,23 @@ var `CLAUDEBOX_HOST_CDP_URL` is set and `cb-browser cdp <url>` drives THEIR real
 Chrome via CDP (dedicated debug profile). Only available when they explicitly start
 the bridge; don't rely on it — the self-contained A modes above are the default.
 
+## Reporting a bug in the claudebox FRAMEWORK
+If you hit something that looks like a bug in the harness that runs you — the
+wrapper, this entrypoint, the image, or the Colima/Docker networking — as opposed
+to a bug in the project you're building, FILE IT with `cb-report-bug`. Don't try to
+patch the framework from inside a project, and don't just mention it in passing —
+the report is the durable signal that reaches the maintainer.
+```
+cb-report-bug "<short title>" --layer wrapper|entrypoint|image|networking|other <<'EOF'
+## What I was doing
+## Expected vs actual
+## Minimal repro
+## Hypothesis
+EOF
+```
+Reports go to a shared host-visible location the maintainer reviews across all
+projects. Use it whenever the framework — not your code — is what's misbehaving.
+
 ## Notes
 - You have passwordless sudo access
 - Docker socket may be mounted for docker-in-docker. The workspace is mounted at the exact same path as on the host, so when running docker commands with volume mounts, use the workspace path as the base (e.g. -v "$PWD/data:/data" will resolve correctly on the host)
@@ -193,7 +210,7 @@ fi
 SYSTEM_HINT_FILE="/home/claude/.claude/system-hint.txt"
 if [ ! -f "$SYSTEM_HINT_FILE" ]; then
 	cat > "$SYSTEM_HINT_FILE" <<SYSHINT
-You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .claudebox/BRIEF.md exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work.
+You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .claudebox/BRIEF.md exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work. If you hit a bug in the claudebox FRAMEWORK itself (the wrapper/entrypoint/image/networking that runs you, not your project), file it with the \`cb-report-bug\` command rather than working around it silently.
 SYSHINT
 	chown claude:claude "$SYSTEM_HINT_FILE"
 	dbg "system hint created"

@@ -1,0 +1,53 @@
+# Framework bug reporting
+
+## The problem
+
+A claudebot building a project may discover a bug in the **claudebox framework**
+itself — the wrapper, the entrypoint, the image, or the Colima/Docker networking —
+as opposed to a bug in the project it's building. It must not try to patch the
+framework from inside a project (it can't, cleanly, and shouldn't), and a mention in
+its final message is lost the moment the session ends. It needs a **standard,
+persistent channel** that reaches the maintainer.
+
+Motivating case: during the `examples/todo-app` demo, claudebot booted into an empty
+workspace (the macOS `/tmp` → `/private/tmp` mount bug) and flagged it *in prose*.
+That was only caught because a human was watching. A standard channel makes it a
+durable, first-class signal.
+
+## Mechanism
+
+1. **`cb-report-bug` (baked helper, container side).** Mirrors `cb-browser`:
+   ```
+   cb-report-bug "<title>" --layer wrapper|entrypoint|image|networking|other <<'EOF'
+   ## What I was doing
+   ## Expected vs actual
+   ## Minimal repro
+   ## Hypothesis
+   EOF
+   ```
+   It wraps the body with metadata (layer, project id, timestamp, image variant) and
+   writes one Markdown file per report. claudebot doesn't have to remember a path or
+   format — just run the command.
+
+2. **Shared host drop dir (deliberate shared-nothing exception).** The wrapper
+   mounts `~/.config/claudebox/framework-bugs/` into **every** container at
+   `/home/claude/framework-bugs` and passes `CLAUDEBOX_FRAMEWORK_BUGS_DIR` +
+   `CLAUDEBOX_PROJECT_ID`. Reports from *any* project collect in one place. This is
+   the one intentional break from the per-project shared-nothing model, because
+   framework feedback is inherently cross-project. If the mount is somehow absent,
+   `cb-report-bug` falls back to `./.claudebox/FRAMEWORK-BUGS.md` in the workspace.
+
+3. **Host surfacing.** `claudebox framework-bugs` lists the reports (title + file);
+   `claudebox framework-bugs clear` empties them. Any normal `claudebox` run prints
+   `⚠ N framework bug report(s) on file` when the dir is non-empty, so they don't sit
+   unnoticed.
+
+4. **Always-on guidance.** The baked `CLAUDE.md` notes and the always-appended
+   system hint tell claudebot to use `cb-report-bug` for framework bugs (not project
+   bugs) instead of working around them silently.
+
+## Not in scope (yet)
+
+- Auto-filing GitHub issues (couples every container to `gh` auth + the repo).
+- De-duplication across reports (the maintainer triages; volume is expected to be
+  low).

@@ -451,6 +451,11 @@ CB_CDP_BIND="${CLAUDEBOX_CDP_BIND:-192.168.64.1}"         # Mac reachable-net ga
 cb_cdp_home() { printf '%s/claudebox/cdp' "$(cb_config_home)"; }
 cb_cdp_marker() { printf '%s/claudebox/projects/%s/.cdp-url' "$(cb_config_home)" "$1"; }  # $1=id
 
+# Shared cross-project sink for FRAMEWORK bug reports (cb-report-bug inside the
+# container writes here; `claudebox framework-bugs` reads it). Deliberately shared
+# across all projects — framework feedback spans projects, unlike per-project data.
+cb_fwbugs_home() { printf '%s/claudebox/framework-bugs' "$(cb_config_home)"; }
+
 cb_bridge_up() {   # $1=id
     local id="$1" chrome home profile fwd url
     chrome="${CLAUDEBOX_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
@@ -713,6 +718,26 @@ case "${1:-}" in
             *)    echo "usage: claudebox browser-bridge up|down  (opt-in: let claudebot drive your real Chrome via CDP)" >&2; exit 1 ;;
         esac
         ;;
+    framework-bugs)
+        # review FRAMEWORK bug reports claudebot filed via cb-report-bug (any project)
+        _fwb="$(cb_fwbugs_home)"
+        case "${2:-list}" in
+            list)
+                shopt -s nullglob; _reports=("$_fwb"/*.md); shopt -u nullglob
+                if [ "${#_reports[@]}" -eq 0 ]; then
+                    echo "no framework bug reports in $_fwb"
+                else
+                    echo "framework bug reports (${#_reports[@]}) in $_fwb:"
+                    for _r in "${_reports[@]}"; do
+                        printf '  - %s\n      %s\n' "$(basename "$_r")" "$(grep -m1 '^# ' "$_r" | sed 's/^# //')"
+                    done
+                    echo ""; echo "view one:  cat \"$_fwb\"/<file>     clear all:  claudebox framework-bugs clear"
+                fi ;;
+            clear) rm -f "$_fwb"/*.md 2>/dev/null; echo "cleared framework bug reports in $_fwb" ;;
+            *)     echo "usage: claudebox framework-bugs [list|clear]" >&2; exit 1 ;;
+        esac
+        exit 0
+        ;;
     bootstrap)
         # scaffold a new claudebot project in $PWD + write the mission brief.
         shift
@@ -788,6 +813,15 @@ if [ -f "$_cdp_marker" ]; then
     DOCKER_ARGS+=(-e "CLAUDEBOX_HOST_CDP_URL=$(cat "$_cdp_marker")")
     dbg "CDP bridge URL injected: $(cat "$_cdp_marker")"
 fi
+
+# Shared framework-bug drop dir — mount it into every container so cb-report-bug can
+# file suspected FRAMEWORK bugs (wrapper/entrypoint/image/networking) to one place.
+_fwbugs="$(cb_fwbugs_home)"; mkdir -p "$_fwbugs" 2>/dev/null || true
+DOCKER_ARGS+=(-v "$_fwbugs:/home/claude/framework-bugs")
+DOCKER_ARGS+=(-e "CLAUDEBOX_FRAMEWORK_BUGS_DIR=/home/claude/framework-bugs")
+DOCKER_ARGS+=(-e "CLAUDEBOX_PROJECT_ID=$CB_PROJECT_ID")
+_fwb_n=$(find "$_fwbugs" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+[ "${_fwb_n:-0}" -gt 0 ] && echo "⚠ $_fwb_n framework bug report(s) on file — review: claudebox framework-bugs" >&2
 
 # forward env vars to the container
 [ -n "$ANTHROPIC_API_KEY" ] && DOCKER_ARGS+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")

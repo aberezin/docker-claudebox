@@ -70,7 +70,8 @@ COPY telegram_utils.py /home/claude/telegram_utils.py
 COPY cron.py /home/claude/cron.py
 COPY jsonpipe.py /home/claude/jsonpipe.py
 COPY cb-browser /usr/local/bin/cb-browser
-RUN chmod +x /home/claude/entrypoint.sh /usr/local/bin/cb-browser
+COPY cb-report-bug /usr/local/bin/cb-report-bug
+RUN chmod +x /home/claude/entrypoint.sh /usr/local/bin/cb-browser /usr/local/bin/cb-report-bug
 
 ENTRYPOINT ["/home/claude/entrypoint.sh"]
 
