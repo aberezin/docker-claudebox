@@ -6,13 +6,14 @@ TAG ?= latest
 
 # The image is built into a dedicated colima profile (cb-infra), never the
 # human's `default` VM. Project VMs are seeded from cb-infra via save|load at
-# run time (see docs/design/per-project-vm.md). Sizing is generous enough to
-# build the full image.
+# run time (see docs/design/per-project-vm.md). cb-infra only builds + serves the
+# image (no workloads), so it's kept light — bump CB_INFRA_MEMORY if a `full` build
+# ever runs short.
 CB_INFRA_PROFILE ?= cb-infra
 CB_INFRA_CTX      := colima-$(CB_INFRA_PROFILE)
-CB_INFRA_CPU      ?= 4
-CB_INFRA_MEMORY   ?= 8
-CB_INFRA_DISK     ?= 80
+CB_INFRA_CPU      ?= 2
+CB_INFRA_MEMORY   ?= 4
+CB_INFRA_DISK     ?= 40
 DOCKER_INFRA      := docker --context $(CB_INFRA_CTX)
 
 .PHONY: build build-minimal build-all infra-up test clean help

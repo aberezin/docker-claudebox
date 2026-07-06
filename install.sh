@@ -66,8 +66,11 @@ CB_INFRA_PROFILE="${CLAUDEBOX_INFRA_PROFILE:-cb-infra}"
 CB_INFRA_CTX="colima-$CB_INFRA_PROFILE"
 if ! colima status -p "$CB_INFRA_PROFILE" >/dev/null 2>&1; then
 	echo "🟢 Starting '$CB_INFRA_PROFILE' colima VM (image store, one-time)..."
+	# cb-infra only builds + serves the image (via save|load); it runs no workloads,
+	# so it stays light. Idle use is ~430MB. Bump CLAUDEBOX_INFRA_MEMORY (e.g. 6) if
+	# building the heavier `full` image ever runs short on memory.
 	if ! colima start -p "$CB_INFRA_PROFILE" \
-		--cpu "${CLAUDEBOX_INFRA_CPU:-4}" --memory "${CLAUDEBOX_INFRA_MEMORY:-8}" --disk "${CLAUDEBOX_INFRA_DISK:-80}"; then
+		--cpu "${CLAUDEBOX_INFRA_CPU:-2}" --memory "${CLAUDEBOX_INFRA_MEMORY:-4}" --disk "${CLAUDEBOX_INFRA_DISK:-40}"; then
 		echo "❌ Failed to start the $CB_INFRA_PROFILE colima VM."
 		exit 1
 	fi
