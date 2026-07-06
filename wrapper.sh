@@ -420,6 +420,94 @@ cb_vm_ls() {
     return 0
 }
 
+# bytes -> human (portable; avoids a numfmt dependency)
+cb_h() { awk -v b="${1:-0}" 'BEGIN{split("B K M G T P",u," ");i=1;while(b>=1024&&i<6){b/=1024;i++};printf((b==int(b))?"%d%s":"%.1f%s"),b,u[i]}'; }
+# actual host KB used by a path (0 if missing) — measures the sparse file's real footprint
+cb_du_k() { if [ -e "$1" ]; then du -sk "$1" 2>/dev/null | awk '{print $1; exit}'; else echo 0; fi; }
+
+# `claudebox vm usage` — how much Mac disk each claudebox VM (and each orphaned disk)
+# actually occupies. VM disks are sparse: the "MAX" cap rarely reflects real usage, and
+# `colima delete` leaks disks, so this surfaces both live footprint and reclaimable junk.
+cb_vm_usage() {
+    local lh statuses live="" orph="" name max inuse profile status tag act dk ik
+    local proj_k=0 infra_k=0 def_k=0 orph_k=0
+    lh="$(cb_lima_home)" || { echo "colima LIMA_HOME not found (is colima installed?)" >&2; return 1; }
+    command -v limactl >/dev/null 2>&1 || { echo "limactl not found — cannot read disk usage" >&2; return 1; }
+    statuses="$(_cb_vm_list_json | cb_parse_vm_lines)"
+    while IFS="$(printf '\t')" read -r name max inuse; do
+        [ -n "$name" ] || continue
+        profile="${name#colima-}"; [ "$name" = colima ] && profile="default"
+        dk="$(cb_du_k "$lh/_disks/$name")"; ik=0
+        [ -n "$inuse" ] && ik="$(cb_du_k "$lh/$inuse")"
+        act=$((dk + ik))
+        if [ -z "$inuse" ]; then
+            orph="$orph$name\t$(cb_h $((act * 1024)))\t$max\n"; orph_k=$((orph_k + act))
+        else
+            status="$(printf '%s\n' "$statuses" | awk -F'\t' -v p="$profile" '$1==p{print $2}')"
+            [ -n "$status" ] || status="?"
+            tag=""
+            case "$name" in
+                colima)          def_k=$((def_k + act)); tag=" (human)" ;;
+                colima-cb-infra) infra_k=$((infra_k + act)) ;;
+                colima-cb-*)     proj_k=$((proj_k + act)) ;;
+            esac
+            live="$live$profile$tag\t$status\t$(cb_h $((act * 1024)))\t$max\n"
+        fi
+    done < <(LIMA_HOME="$lh" limactl disk ls 2>/dev/null | awk 'NR>1{iu=(NF>=5?$5:""); print $1"\t"$2"\t"iu}')
+
+    echo "claudebox VM disk usage (actual on the Mac / provisioned max):"
+    { printf 'PROFILE\tSTATUS\tON-DISK\tMAX\n'; printf '%b' "$live"; } | column -t -s "$(printf '\t')"
+    if [ -n "$orph" ]; then
+        echo ""
+        echo "orphaned disks — no VM owns these (reclaim with 'claudebox vm gc'):"
+        { printf 'DISK\tON-DISK\tMAX\n'; printf '%b' "$orph"; } | column -t -s "$(printf '\t')"
+    fi
+    echo ""
+    printf 'totals — projects: %s   cb-infra: %s   default(human): %s   orphaned: %s\n' \
+        "$(cb_h $((proj_k * 1024)))" "$(cb_h $((infra_k * 1024)))" "$(cb_h $((def_k * 1024)))" "$(cb_h $((orph_k * 1024)))"
+    return 0
+}
+
+# `claudebox vm gc` — reclaim Mac disk: delete orphaned lima disks colima left behind,
+# then fstrim every running claudebox VM (cb-* incl. cb-infra) so freed blocks return to
+# macOS. The human's `default` VM is deliberately left untouched.
+cb_vm_gc() {
+    local lh before after freed orphans n p trimmed=0
+    lh="$(cb_lima_home)" || { echo "colima LIMA_HOME not found (is colima installed?)" >&2; return 1; }
+    command -v limactl >/dev/null 2>&1 || { echo "limactl not found — cannot gc" >&2; return 1; }
+    before="$(cb_du_k "$lh")"
+
+    echo "🧹 pruning orphaned lima disks (no owning VM)…"
+    orphans="$(LIMA_HOME="$lh" limactl disk ls 2>/dev/null | awk 'NR>1 && NF<5 {print $1}')"
+    if [ -n "$orphans" ]; then
+        printf '   - %s\n' $orphans
+        # shellcheck disable=SC2086
+        if LIMA_HOME="$lh" limactl disk delete $orphans >/dev/null 2>&1; then
+            n="$(printf '%s\n' "$orphans" | grep -c .)"; echo "   ✓ deleted $n orphaned disk(s)"
+        else echo "   ⚠ some orphaned disks could not be deleted" >&2; fi
+    else
+        echo "   (none)"
+    fi
+
+    echo "🧻 fstrim on running claudebox VMs (return freed blocks to macOS)…"
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        printf '   - %s … ' "$p"
+        # </dev/null: `colima ssh` reads stdin and would otherwise swallow the rest of
+        # this loop's input (process substitution), stopping after the first VM.
+        if colima ssh -p "$p" -- sudo fstrim -av </dev/null >/dev/null 2>&1; then echo "ok"; trimmed=$((trimmed + 1))
+        else echo "skipped (unreachable?)"; fi
+    done < <(_cb_vm_list_json | cb_parse_vm_lines | awk -F'\t' '$1 ~ /^cb-/ && $2 == "Running" {print $1}')
+    [ "$trimmed" -eq 0 ] && echo "   (no running claudebox VMs)"
+
+    after="$(cb_du_k "$lh")"
+    freed=$(( (before - after) * 1024 )); [ "$freed" -lt 0 ] && freed=0
+    echo ""
+    echo "✅ vm gc done — reclaimed ~$(cb_h "$freed"); colima now uses $(cb_h $((after * 1024)))."
+    echo "   (default/human VM left untouched — trim it yourself: colima ssh -p default -- sudo fstrim -av)"
+    return 0
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Networking — Phase 5 of docs/design/per-project-vm.md
 #
@@ -777,8 +865,10 @@ dbg "CB_PROJECT_ROOT=$CB_PROJECT_ROOT"
 case "${1:-}" in
     vm)
         case "${2:-}" in
-            ls|list|"") cb_vm_ls; exit 0 ;;
-            *) echo "usage: claudebox vm ls" >&2; exit 1 ;;
+            ls|list|"")  cb_vm_ls; exit 0 ;;
+            usage|df)    cb_vm_usage; exit $? ;;
+            gc)          cb_vm_gc; exit $? ;;
+            *) echo "usage: claudebox vm [ls|usage|gc]" >&2; exit 1 ;;
         esac
         ;;
     down)

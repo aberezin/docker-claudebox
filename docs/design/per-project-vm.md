@@ -262,8 +262,10 @@ not need the default VM at all).
   | `claudebox` | ensure VM up, run/attach the harness container |
   | `claudebox stop` | stop the harness container; **leave the VM running** (fast restart) |
   | `claudebox down` | `colima stop -p cb-<id>` (free RAM, keep disk) |
-  | `claudebox destroy` | `colima delete -p cb-<id>` (nuke VM + its containers/volumes) |
+  | `claudebox destroy` | `colima delete -p cb-<id>` **+ `limactl disk delete`** (nuke VM + reap its leaked datadisk) |
   | `claudebox vm ls` | list claudebox VMs; must never display/act on `default` |
+  | `claudebox vm usage` | per-VM **actual** Mac disk footprint (sparse, so ≠ the max) + any orphaned disks |
+  | `claudebox vm gc` | reclaim disk: delete orphaned disks + `fstrim` running cb-* VMs (leaves `default` alone) |
   | `claudebox ip` (alias `net`) | print the project VM's reachable IP + `/etc/hosts` guidance |
 
 ## Running claudebox on its VM
@@ -385,15 +387,17 @@ No macOS `sudo` **at runtime**. Specifically:
   up to the whole `disk:` size) behind — so with a VM per project these pile up as GBs
   of dead weight. `cb_vm_destroy` therefore also runs `limactl disk delete
   colima-<profile>` after `colima delete` (limactl refuses an in-use disk, so it can't
-  touch a live VM). To reap disks leaked by *older* claudebox versions:
-  `LIMA_HOME=~/.config/colima/_lima limactl disk ls` → delete any row with an empty
-  `IN-USE-BY`.
+  touch a live VM). Disks leaked by *older* claudebox versions are reaped by
+  **`claudebox vm gc`** (or manually: `LIMA_HOME=~/.config/colima/_lima limactl disk
+  ls` → delete any row with an empty `IN-USE-BY`).
 - **VM disks are sparse and never shrink on their own.** Deleting images/containers
   (or pruning build cache) frees space *inside* the guest, but the host raw disk file
-  keeps its high-water mark until the guest issues TRIM. Reclaim it with
-  `colima ssh -p <profile> -- sudo fstrim -av` (on the vz backend the discard passes
-  through to the sparse file — e.g. an image-store VM went 39G→8.4G on the Mac).
-  Consider running it periodically or after large deletes.
+  keeps its high-water mark until the guest issues TRIM. **`claudebox vm gc`** fstrims
+  every running cb-* VM (on the vz backend the discard passes through to the sparse
+  file — e.g. an image-store VM went 39G→8.4G on the Mac); `claudebox vm usage` shows
+  the actual footprint. Run `gc` periodically or after large deletes. (`default` is
+  the human's VM and is left untouched — trim it yourself with
+  `colima ssh -p default -- sudo fstrim -av`.)
 - **File ownership / UID-matching is a no-op under Colima.** The entrypoint's
   Linux-style UID/GID matching (adjust the `claude` user to the workspace owner so
   Claude's files aren't root/`1000`-owned on the host) is unnecessary here: Colima's

@@ -83,6 +83,14 @@ if ( COLIMA_HOME= XDG_CONFIG_HOME="$TMP/none" HOME="$TMP/none" cb_lima_home >/de
     bad "cb_lima_home returned 0 with no existing home"
 else ok "cb_lima_home fails when no home exists"; fi
 
+echo "--- cb_h (bytes -> human; used by 'vm usage'/'vm gc') ---"
+eq "0 bytes"      "$(cb_h 0)"          "0B"
+eq "512 bytes"    "$(cb_h 512)"        "512B"
+eq "1 KiB"        "$(cb_h 1024)"       "1K"
+eq "1.5 KiB"      "$(cb_h 1536)"       "1.5K"
+eq "1 GiB"        "$(cb_h 1073741824)" "1G"
+eq "empty -> 0B"  "$(cb_h)"            "0B"
+
 echo ""
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
