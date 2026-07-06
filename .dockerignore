@@ -4,6 +4,7 @@ tests/
 .github/
 base/
 *.md
+!CHANGELOG.md
 desc.txt
 git-update.sh
 docker-compose.dev.yaml
