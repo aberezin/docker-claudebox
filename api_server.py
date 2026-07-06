@@ -303,6 +303,11 @@ async def _run_claude_text(
 ) -> tuple[str, dict]:
     """Run claude with --output-format json. Returns (result_text, usage_dict)."""
     ws = _resolve_workspace(workspace)
+    # The conversational surfaces (OpenAI/MCP) auto-create the workspace so a client
+    # can just set a workspace header and go — unlike /run, which 400s if it's
+    # missing. Without this, running with cwd=<new workspace> crashes with
+    # FileNotFoundError (a 500) on the first request to a fresh workspace name.
+    os.makedirs(ws, exist_ok=True)
     if ws in busy_workspaces:
         raise HTTPException(status_code=409, detail="workspace busy, retry later")
     log.debug("_run_claude_text ws=%s model=%s continue=%s", ws, model, not no_continue)
@@ -1047,6 +1052,7 @@ async def openai_chat_completions(
         }
 
     workspace = _resolve_workspace(x_claude_workspace)
+    os.makedirs(workspace, exist_ok=True)  # auto-create for the streaming path too (see _run_claude_text)
 
     if workspace in busy_workspaces:
         raise HTTPException(status_code=409, detail="workspace busy, retry later")

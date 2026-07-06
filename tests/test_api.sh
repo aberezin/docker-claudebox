@@ -470,11 +470,13 @@ test_api_openai_multiturn_workspace() {
         -H "Content-Type: application/json" \
         -H "X-Claude-Workspace: mtwsws" \
         -d "{\"model\":\"$TEST_MODEL\",\"messages\":[
-            {\"role\":\"user\",\"content\":\"the secret password is QUINOA42\"},
+            {\"role\":\"user\",\"content\":\"my lucky number is 4291\"},
             {\"role\":\"assistant\",\"content\":\"got it\"},
-            {\"role\":\"user\",\"content\":\"reply with exactly the password I told you, nothing else\"}
+            {\"role\":\"user\",\"content\":\"what lucky number did I mention? reply with just the number\"}
         ]}")
-    assert_contains "$out" "QUINOA42" "openai multiturn+workspace: recalls earlier turn" || { _api_stop "${API_CONTAINER}-oai-mtw"; return 1; }
+    # a neutral fact-recall (not a 'secret password' echo, which reads as a prompt-
+    # injection probe and gets refused) — this verifies earlier turns reach the model
+    assert_contains "$out" "4291" "openai multiturn+workspace: recalls earlier turn" || { _api_stop "${API_CONTAINER}-oai-mtw"; return 1; }
 
     echo "OK: api_openai_multiturn_workspace"
     _api_stop "${API_CONTAINER}-oai-mtw"
