@@ -612,6 +612,10 @@ cb_image_status() {
 }
 # a concrete comparable semver, or empty for unstamped/unavailable/blank
 cb_real_ver() { case "$1" in ''|unstamped|unavailable) : ;; *) printf '%s' "$1" ;; esac; }
+# stamped semver for $CLAUDE_IMAGE in a docker context ($1), or "" if unstamped/absent.
+# Version-or-empty view over cb_image_status, for callers that just want a comparable
+# version (e.g. cb_ensure_image's auto-reseed).
+cb_image_version() { cb_real_ver "$(cb_image_status "$1")"; }
 
 # `claudebox checkversion` — report the host wrapper's semver alongside the version
 # baked into the claudebot image (cb-infra source + this project's VM), and warn on

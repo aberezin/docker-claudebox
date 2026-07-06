@@ -130,6 +130,13 @@ grep -q PURGED "$PTMP/out" && ok "purge removes the project's data dir" || bad "
 grep -q SIBOK  "$PTMP/out" && ok "purge leaves other projects untouched" || bad "purge touched a sibling project"
 rm -rf "$PTMP"
 
+echo "--- lint: every cb_* function CALLED is DEFINED (catches rename/undefined regressions) ---"
+_defined="$(grep -oE '^[[:space:]]*_?cb_[a-z0-9_]+\(\)' "$WRAPPER" | grep -oE '_?cb_[a-z0-9_]+' | sort -u)"
+_used="$(sed 's/#.*//' "$WRAPPER" | grep -oE '_?cb_[a-z0-9_]+' | sort -u)"
+_missing=""
+for _f in $_used; do printf '%s\n' "$_defined" | grep -qx "$_f" || _missing="$_missing $_f"; done
+[ -z "$_missing" ] && ok "no undefined cb_* function calls" || bad "undefined cb_* funcs called:$_missing"
+
 echo ""
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
