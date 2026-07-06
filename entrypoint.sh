@@ -195,7 +195,10 @@ writes artifacts into the workspace. Put workloads on the shared `cb-net` networ
 so they're reachable by name:
 - `docker run -d --name api --network cb-net your/image`
 - `cb-browser shot http://api:8080` → `./cb-browser-out/{screenshot.png,page.json}` (page.json has status/title/text/consoleErrors)
-- `cb-browser script ./test.cjs` → run your own Playwright script (use `require('playwright')`)
+- `cb-browser script ./test.cjs` → run your own Playwright script (`require('playwright')`). Your script is
+  READ-ONLY at `/work`; write ALL artifacts (screenshots, JSON, logs) to **`/out`** — it maps to
+  `./cb-browser-out` in the workspace (also in `$CB_OUT`). cwd is `/out`, so `page.screenshot({path:'shot.png'})`
+  lands there. Writing to `/work` or a workspace path fails with `EROFS` — use `/out` instead of dropping the output.
 - `cb-browser watch http://api:8080` → headful browser with a noVNC web UI the human watches/drives live at http://<project-vm-ip>:<port>; `cb-browser watch-stop` to stop
 - `cb-browser net` → the network name to attach workloads to
 This is the standard way to browser-test here; prefer it over ad-hoc setups.
@@ -210,6 +213,14 @@ wrapper, this entrypoint, the image, or the Colima/Docker networking — as oppo
 to a bug in the project you're building, FILE IT with `cb-report-bug`. Don't try to
 patch the framework from inside a project, and don't just mention it in passing —
 the report is the durable signal that reaches the maintainer.
+
+This also covers a baked helper (`cb-browser`, `cb-report-bug`, the `cb-net`/VM
+setup, etc.) behaving surprisingly, being under-documented, or forcing you into a
+workaround or a degraded approach — **file it EVEN IF you found a workaround or
+worked around the limitation.** A silent workaround means the maintainer never
+learns the tool tripped you up, so the friction never gets fixed. If a tool made
+you change your plan ("the mount is read-only, so I'll skip screenshots"), that is
+exactly the signal worth reporting.
 ```
 cb-report-bug "<short title>" --layer wrapper|entrypoint|image|networking|other <<'EOF'
 ## What I was doing

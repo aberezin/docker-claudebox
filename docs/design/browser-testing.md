@@ -70,6 +70,12 @@ trivial. Two flavors:
   workspace**. Because the workspace round-trips through virtiofs, those artifacts
   land on your Mac **owned by you** (see the ownership note in per-project-vm.md),
   so you open them in Finder/your editor.
+- **Where a `cb-browser script` writes:** its script is mounted **read-only at
+  `/work`** (so a test run can't mutate your source); the one writable path is
+  **`/out`** (= `./cb-browser-out`, also `$CB_OUT`), and the runner's cwd is `/out`.
+  So `page.screenshot({path:'shot.png'})` just works; writing to `/work` or a
+  workspace path fails with `EROFS` — write to `/out` rather than dropping the
+  artifact. (`cb-browser shot` already writes `/out/{screenshot.png,page.json}`.)
 - This is the standard way to automate web-app testing: reproducible, isolated, no
   host dependency, safe by default.
 

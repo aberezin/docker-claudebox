@@ -34,7 +34,9 @@ _usage() {
     cat >&2 <<EOF
 usage:
   cb-browser shot <url> [out-dir]         navigate + full-page screenshot + page.json (title/text/console)
-  cb-browser script <file.cjs> [args...]  run a Playwright script (mounted read-only at /work; use require('playwright'))
+  cb-browser script <file.cjs> [args...]  run a Playwright script (require('playwright')). Your script is
+                                          READ-ONLY at /work; write ALL artifacts to /out (= ./cb-browser-out,
+                                          also \$CB_OUT). cwd is /out, so screenshot({path:'shot.png'}) just works.
   cb-browser watch <url> [port]           open a HEADFUL browser on <url> with a noVNC web UI you watch/drive
                                           from your Mac at http://<project-vm-ip>:<port> (default $WATCH_PORT)
   cb-browser watch-stop                   stop the watch browser
@@ -96,8 +98,13 @@ RUNNER
     sdir="$(cd "$(dirname "$script")" && pwd)"; sfile="$(basename "$script")"
     outdir="${CB_BROWSER_OUT:-$PWD/cb-browser-out}"; mkdir -p "$outdir"
     _ensure_net
-    docker run --rm --network "$NET" -v "$sdir:/work:ro" -v "$outdir:/out" -w /work "$PW_IMAGE" \
-        bash -lc "$INSTALL && NODE_PATH=/pw/node_modules node /work/$sfile $*" ;;
+    # /work is read-only (your script + its dir); /out is the ONE writable path and
+    # maps to ./cb-browser-out in the workspace. cwd is /out so a naive
+    # page.screenshot({path:'shot.png'}) lands there; CB_OUT=/out is the explicit
+    # handle. The script still loads via its absolute /work path + NODE_PATH.
+    docker run --rm --network "$NET" -e CB_OUT=/out -v "$sdir:/work:ro" -v "$outdir:/out" -w /out "$PW_IMAGE" \
+        bash -lc "$INSTALL && NODE_PATH=/pw/node_modules node /work/$sfile $*"
+    echo "cb-browser: /out -> $outdir/  (write artifacts to /out; /work is read-only)" ;;
 
   watch)
     url="${1:-}"; [ -n "$url" ] || _usage
