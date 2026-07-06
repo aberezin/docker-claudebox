@@ -841,6 +841,8 @@ _fwb_n=$(find "$_fwbugs" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' 
 [ -n "$ANTHROPIC_API_KEY" ] && DOCKER_ARGS+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
 [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && DOCKER_ARGS+=(-e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
 [ "$DEBUG" = "true" ] && DOCKER_ARGS+=(-e "DEBUG=true")
+# opt out of the baked default plugin set (entrypoint seeds settings.json otherwise)
+[ -n "${CLAUDEBOX_DEFAULT_PLUGINS:-}" ] && DOCKER_ARGS+=(-e "CLAUDEBOX_DEFAULT_PLUGINS=$CLAUDEBOX_DEFAULT_PLUGINS")
 
 
 # forward CLAUDEBOX_ENV_* / CLAUDE_ENV_* vars (strip prefix: FOO=bar)

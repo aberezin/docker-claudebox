@@ -18,6 +18,7 @@ All wrapper/installer config uses the `CLAUDEBOX_*` prefix. Anything you want av
 | `CLAUDEBOX_INFRA_CPU`      | CPUs for the shared `cb-infra` image-store VM (install-time only)                           | `2`                       |
 | `CLAUDEBOX_INFRA_MEMORY`   | Memory (GiB) for `cb-infra` (install-time; bump if a `full` build runs short)              | `4`                       |
 | `CLAUDEBOX_INFRA_DISK`     | Disk (GiB) for `cb-infra` (install-time only)                                               | `40`                      |
+| `CLAUDEBOX_DEFAULT_PLUGINS` | Set to `0` to skip seeding the default plugin set (`settings.json`) on first run           | `1` (seed if no settings) |
 | `CLAUDEBOX_CONTAINER_NAME` | Override the per-workspace container name                                                  | derived from `$PWD`       |
 | `CLAUDEBOX_ENV_*`          | Forward env vars into the container (prefix stripped: `CLAUDEBOX_ENV_FOO=bar` → `FOO=bar`) | _(none)_                  |
 | `CLAUDEBOX_MOUNT_*`        | Mount extra host directories into the container                                            | _(none)_                  |

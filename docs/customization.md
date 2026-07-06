@@ -111,3 +111,41 @@ claudebox mcp add my-server -- npx -y @some/mcp-server
 **Inspect what's loaded:** run `/mcp` inside an interactive session.
 
 This is how cron and Telegram modes reach external systems — drop your server config in `.mcp.json` (project) or `~/.claude.json` (global) and reference it from the instruction.
+
+## Plugins
+
+Claude Code plugins bundle slash commands, agents, hooks, MCP servers, and skills, and are declared **non-interactively** in `settings.json` — no `/plugin` commands required. Two keys drive it: `extraKnownMarketplaces` (register a marketplace) and `enabledPlugins` (turn plugins on). The claudebox entrypoint manages `.claude.json` but leaves `settings.json` to you, so it won't clobber your config.
+
+### Baked default
+
+On the **first interactive session** in a project, the entrypoint installs the official **`commit-commands`** plugin (git commit / push / PR workflows — language- and framework-agnostic) by running, as the `claude` user, the equivalent of:
+
+```bash
+claude plugin install commit-commands@claude-plugins-official --scope user
+```
+
+Why the CLI install and not just a `settings.json` file: declaring a plugin in `settings.json` (`extraKnownMarketplaces` + `enabledPlugins`) does **not** activate it on its own — Claude Code has to clone the marketplace and register the plugin, which only the install command does. So the entrypoint runs it once (it writes the same `settings.json` keys and clones the marketplace cache into the project's `.claude`).
+
+It's deliberately scoped to be cheap and unobtrusive:
+
+- **Interactive only** — skipped for daemon modes (API/Telegram/cron), programmatic (`-p`) runs, and `setup-token`, so it never delays a server start or an ephemeral/CI container.
+- **Once per project** — a marker in the project's `.claude` is set after a successful install, so it runs at most once (a failed attempt, e.g. offline, retries on a later interactive session).
+- **Best-effort + time-bounded** — if it can't reach GitHub it prints a note and moves on; it never blocks the session.
+
+Opt out entirely with `CLAUDEBOX_DEFAULT_PLUGINS=0`. Remove it from a project with `claude plugin uninstall commit-commands@claude-plugins-official` — the one-shot marker means it won't be reinstalled.
+
+### Specifying your own plugins — three scopes
+
+`settings.json` (and thus plugin config) is read from, in order of precedence:
+
+| Scope        | Path                                                | Use case                                                  |
+| ------------ | --------------------------------------------------- | --------------------------------------------------------- |
+| This project | `$(claudebox claude-dir)/settings.json`             | just this claudebot (per-project host `.claude`, mounted) |
+| Committed    | `<workspace>/.claude/settings.json`                 | versioned with the repo; travels with the project / team  |
+| Every project | bake into the entrypoint (as the default above does) | one standard set across all claudebots                    |
+
+To add a plugin, put its marketplace under `extraKnownMarketplaces` and enable it under `enabledPlugins` with the key `"<plugin-name>@<marketplace-key>"`. Make the marketplace **key match the marketplace's manifest `name`** to avoid resolution ambiguity (that's why the default uses `claude-plugins-official` for both). Plugins auto-load on the next run — their commands/agents/hooks/MCP servers/skills become available with no further steps.
+
+**Interactive alternative:** run `claudebox` and use `/plugin marketplace add <repo>` / `/plugin install <name>@<marketplace>`; it writes to the project's mounted `.claude`, so it persists.
+
+**Note:** the plugin cache (`~/.claude/plugins/cache/`) is per-project, so the same plugin enabled across N projects is fetched N times. For a single shared standard, prefer the baked default (scope #3).

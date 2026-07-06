@@ -444,6 +444,36 @@ _strip_no_continue() {
 	done
 }
 
+# Default plugin (INTERACTIVE sessions only): install the official git commit-commands
+# plugin once per project. Declaring it in settings.json does NOT activate it — Claude
+# Code must clone the marketplace and register the plugin — so we run the CLI install,
+# best-effort and time-bounded. Deliberately skipped for daemon modes (already exec'd
+# above), programmatic (-p) and setup-token runs, and when already installed — so it
+# never delays a daemon start or an ephemeral/test container, only real human sessions
+# where a commit helper is useful. Opt out with CLAUDEBOX_DEFAULT_PLUGINS=0.
+_maybe_install_default_plugin() {
+	case "${CLAUDEBOX_DEFAULT_PLUGINS:-1}" in 0|false) return 0 ;; esac
+	[ "${1:-}" = "setup-token" ] && return 0
+	[ -f "$ARGS_FILE" ] && return 0                       # programmatic (subsequent) run
+	local a; for a in "$@"; do case "$a" in -p|--print) return 0 ;; esac; done
+	# One-shot marker (on the per-project mount) — set after a SUCCESSFUL install so we
+	# never reinstall: a user who later `plugin uninstall`s it isn't fought. On failure
+	# (e.g. offline) the marker isn't set, so a later interactive session retries.
+	local marker="$CLAUDE_CONFIG_DIR/.claudebox-default-plugins"
+	[ -f "$marker" ] && return 0
+	dbg "installing default plugin commit-commands (first interactive run)…"
+	if timeout 90 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
+		bash -c 'export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:$PATH; exec claude plugin install commit-commands@claude-plugins-official --scope user' \
+		>/dev/null 2>&1
+	then
+		touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
+		dbg "default plugin installed"
+	else
+		echo "note: default plugin (commit-commands) not installed (offline?) — set CLAUDEBOX_DEFAULT_PLUGINS=0 to silence" >&2
+	fi
+}
+_maybe_install_default_plugin "$@"
+
 if [ "${1:-}" = "setup-token" ]; then
 	dbg "mode: setup-token"
 	CMD="$CMD && exec claude setup-token"
