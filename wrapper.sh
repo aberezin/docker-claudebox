@@ -155,7 +155,7 @@ vm:
   disk: 60GiB
   autostop: false         # stop the VM when the harness container exits
 network:
-  hostname:               # optional /etc/hosts alias -> the VM's current IP; blank = raw IP
+  hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'claudebox net'); blank = raw IP
 CBSAMPLE
 }
 
@@ -179,7 +179,7 @@ vm:
   disk: $disk
   autostop: false         # stop the VM when the harness container exits
 network:
-  hostname:               # optional /etc/hosts alias -> the VM's current IP; blank = raw IP
+  hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'claudebox net'); blank = raw IP
 CBCONF
     fi
     cb_write_sample "$root"
@@ -663,7 +663,9 @@ cb_network_info() {
     echo "   browse a published workload at  http://$ip:<port>  (or http://localhost:<port>, colima-forwarded but collides across projects)"
     host="$(cb_project_hostname "$root")"
     if [ -z "$host" ]; then
-        echo "   (set network.hostname in .claudebox/config.yml for a friendly name)"
+        local suggest; suggest="$(basename "$root")"
+        echo "   tip: for a friendly name, set  network.hostname: $suggest  in .claudebox/config.yml —"
+        echo "        then 'claudebox net' prints a one-line /etc/hosts entry so you can browse http://$suggest:<port>"
         return 0
     fi
     line="$ip  $host"
