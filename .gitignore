@@ -1,4 +1,7 @@
+# ignore auto-generated per-workspace CLAUDE.md copies anywhere in the tree,
+# but keep the repo's own project-instructions file at the root committed
 CLAUDE.md
+!/CLAUDE.md
 __pycache__
 *.pyc
 .research_files

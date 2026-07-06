@@ -4,6 +4,8 @@ All notable changes to **claudebox** (formerly `docker-claude-code`).
 
 Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions before `v1.0.0` are pre-release; the rename to `claudebox` at `v1.0.0` is the only breaking change in the project's history.
 
+> **Fork note:** the versioned history below is upstream claudebox's (by [psyb0t](https://github.com/psyb0t/docker-claudebox)) up to the fork point. This fork's changes are tracked in the git log and summarized in the README's [What's different in this fork](README.md#whats-different-in-this-fork) section, not here.
+
 ## [v1.11.0] — 2026-04-30
 
 ### Added
