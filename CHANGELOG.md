@@ -4,22 +4,25 @@ All notable changes to **claudebox** (formerly `docker-claude-code`).
 
 Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions before `v1.0.0` are pre-release; the rename to `claudebox` at `v1.0.0` is the only breaking change in the project's history.
 
-> **Fork note:** this fork maintains its **own** semver line (starting at `0.1.0`,
-> 2026-07-06) and records it here going forward — one entry per version bump. The
-> `v1.x` history further below is upstream claudebox's (by
+> **Fork note:** this fork maintains its **own** semver line, starting at `2.0.0`
+> (2026-07-06) — deliberately **above** upstream's highest pre-fork tag (`v1.11.0`)
+> so the fork's versions/tags never collide with the inherited upstream history and
+> sort cleanly above it (useful if upstream ever pulls from us, or we pull from
+> them). The `v1.x` history further below is upstream claudebox's (by
 > [psyb0t](https://github.com/psyb0t/docker-claudebox)) up to the fork point.
-> Detailed fork changes *between* the fork point and `0.1.0` were **not** recorded
+> Detailed fork changes *between* the fork point and `2.0.0` were **not** recorded
 > here (see the git history and the README's
 > [What's different in this fork](README.md#whats-different-in-this-fork)); the
-> changelog is authoritative from `0.1.0` onward. Release process:
+> changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
-## [0.1.0] — 2026-07-06 _(fork)_
+## [2.0.0] — 2026-07-06 _(fork)_
 
-First versioned release of this fork — it establishes the fork's own semver line,
-distinct from the upstream `1.x` history below. Changes from the upstream fork point
-through `0.1.0` are **not itemized here** (they predate this policy — see the git
-history / the README); from `0.1.0` on, every version bump gets an entry.
+First versioned release of this fork. It opens the fork's own `2.x` line — chosen to
+sit above upstream's `1.x` (highest pre-fork tag `v1.11.0`) so versions/tags never
+collide and order coherently across the shared lineage. Changes from the upstream
+fork point through `2.0.0` are **not itemized here** (they predate this policy — see
+the git history / the README); from `2.0.0` on, every version bump gets an entry.
 
 ### Added
 - **Semantic versioning** for the host↔image contract: a `VERSION` file +

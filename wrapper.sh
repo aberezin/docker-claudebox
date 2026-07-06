@@ -6,8 +6,10 @@
 # filenames/formats, env conventions, /out, secrets injection). Bump this in the repo
 # VERSION file AND here on any contract change; `claudebox checkversion` compares this
 # host version against the image the project's claudebot runs and warns on drift.
-# Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match).
-CLAUDEBOX_VERSION="0.1.0"
+# Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
+# runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
+# so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
+CLAUDEBOX_VERSION="2.0.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md

@@ -1,9 +1,11 @@
 # Versioning & releases
 
 This fork uses [semantic versioning](https://semver.org) on its **own** version
-line, independent of upstream claudebox's `1.x` history. It starts at **0.1.0**
-(2026-07-06); the upstream history is preserved in `CHANGELOG.md` below the fork's
-entries.
+line, starting at **2.0.0** (2026-07-06). We deliberately start **above** upstream
+claudebox's highest pre-fork tag (`v1.11.0`) so the fork's versions and tags never
+collide with the inherited upstream history and sort cleanly above it — which also
+keeps things coherent if upstream ever pulls from us or we pull from them. Upstream's
+`1.x` history is preserved in `CHANGELOG.md` below the fork's entries.
 
 ## Why a version matters here
 
@@ -33,12 +35,14 @@ one but not the other — you get subtle, confusing breakage. The version makes 
 
 ## When to bump (semver)
 
-- **PATCH** (`0.1.0 → 0.1.1`) — fixes/docs, no contract change.
-- **MINOR** (`0.1.0 → 0.2.0`) — new features, **or any change to the host↔container
-  IPC contract** (new/renamed sidecar file, changed forwarded env, changed baked
-  helper behavior). While in `0.x`, MINOR is the "the contract changed" signal.
-- **MAJOR** (`→ 1.0.0`) — first stable release / the contract is declared stable;
-  thereafter breaking contract changes bump MAJOR.
+- **PATCH** (`2.0.0 → 2.0.1`) — fixes/docs, no contract change.
+- **MINOR** (`2.0.0 → 2.1.0`) — new features, **or a backward-compatible (additive)
+  change to the host↔container IPC contract**: a new sidecar file / forwarded env /
+  baked helper that a newer peer adds and an older peer safely ignores (e.g. adding
+  the `-secrets` sidecar).
+- **MAJOR** (`2.0.0 → 3.0.0`) — a **breaking** contract change: a renamed/removed
+  sidecar, or a changed format/semantics an older peer would misread. This is what
+  `checkversion`'s drift warning most wants to catch.
 
 ## Release steps
 
@@ -59,9 +63,9 @@ one but not the other — you get subtle, confusing breakage. The version makes 
 ## Changelog policy
 
 Every version bump gets a `CHANGELOG.md` entry. Detailed fork changes **between the
-upstream fork point and 0.1.0 were not recorded** in the changelog (they live in the
+upstream fork point and 2.0.0 were not recorded** in the changelog (they live in the
 git history / are summarized in the README's "What's different in this fork"); the
-changelog is **authoritative from 0.1.0 onward**.
+changelog is **authoritative from 2.0.0 onward**.
 
 ## See also
 
