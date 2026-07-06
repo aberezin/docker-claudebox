@@ -738,6 +738,20 @@ case "${1:-}" in
         esac
         exit 0
         ;;
+    claude-dir)
+        # print the host .claude data dir for THIS project (read-only; no config init,
+        # no VM). Authoritative — respects a CLAUDEBOX_DATA_DIR override and the
+        # machine data_root. Used by the cbx-claude-dir shell helper.
+        _dd="${CLAUDEBOX_DATA_DIR:-${CLAUDE_DATA_DIR:-}}"
+        if [ -n "$_dd" ]; then
+            printf '%s\n' "$_dd"
+        else
+            _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
+            [ -n "$_cbid" ] || { echo "no claudebox project here (.claudebox/config.yml missing)" >&2; exit 1; }
+            printf '%s\n' "$(cb_project_data_dir "$_cbid")"
+        fi
+        exit 0
+        ;;
     bootstrap)
         # scaffold a new claudebot project in $PWD + write the mission brief.
         shift

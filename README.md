@@ -131,7 +131,13 @@ cbx-sh <name> node -v  # or run a one-off command in it
 cbx-logs <name> -f     # docker logs for a container
 cbx-vm                 # ssh into the project VM (the Lima guest) itself
 cbx-claude             # shell into claudebot's own harness container (when a session is up)
+cbx-claude-dir [-o]    # print (or -o open) this project's host .claude data dir
 ```
+
+Each project's claudebot config/session/auth lives in its own host dir
+(`~/.config/claudebox/projects/<id>/claude`, mounted at `/home/claude/.claude`) —
+this fork is shared-nothing, so there's no global `~/.claude`. `claudebox claude-dir`
+prints that path for the current project.
 
 Skip installing them with `CLAUDEBOX_SKIP_SHELL_HELPERS=1 ./install.sh`, or source
 `claudebox-shell.sh` manually from a checkout.

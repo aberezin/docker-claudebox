@@ -19,6 +19,7 @@
 #     cbx-logs <name> [args] docker logs for a container in this project's VM
 #     cbx-vm [cmd…]          ssh into the project VM itself (no cmd = interactive)
 #     cbx-claude             shell into this workspace's claudebot harness container
+#     cbx-claude-dir [-o]    print this project's host .claude data dir (-o opens it)
 
 # resolve the project id by walking up for .claudebox/config.yml
 _cbx_id() {
@@ -73,6 +74,20 @@ cbx-claude() {
         return 1
     fi
     docker --context "$c" exec -it "$n" bash 2>/dev/null || docker --context "$c" exec -it "$n" sh
+}
+
+# print this project's host .claude data dir (authoritative — asks the wrapper so it
+# respects any data_root / CLAUDEBOX_DATA_DIR override). `-o` opens it (macOS Finder).
+cbx-claude-dir() {
+    local d
+    if command -v claudebox >/dev/null 2>&1; then
+        d="$(claudebox claude-dir)" || return 1
+    else
+        local id; id="$(_cbx_id)" || return 1
+        d="${XDG_CONFIG_HOME:-$HOME/.config}/claudebox/projects/$id/claude"
+    fi
+    if [ "${1:-}" = "-o" ]; then command open "$d" 2>/dev/null || printf '%s\n' "$d"
+    else printf '%s\n' "$d"; fi
 }
 
 # ── tab-completion: complete container names for cbx-sh / cbx-logs ────────────
