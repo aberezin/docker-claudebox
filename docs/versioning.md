@@ -47,7 +47,11 @@ one but not the other — you get subtle, confusing breakage. The version makes 
 2. Add a **`CHANGELOG.md`** entry under a new `## [X.Y.Z] — <date>` heading — one
    entry per bump (see the changelog policy below).
 3. Commit, then **tag**: `git tag -a vX.Y.Z -m "vX.Y.Z"` and push it
-   (`git push <remote> vX.Y.Z`).
+   (`git push <remote> vX.Y.Z`). **Fork gotcha:** the clone inherited upstream's
+   `v0.x`–`v1.x` tags locally, so `git tag vX.Y.Z` may collide with an ancient
+   upstream tag pointing at the wrong commit. Verify with `git rev-list -n1 vX.Y.Z`,
+   and use `git tag -f -a vX.Y.Z HEAD` (then `git push --force <remote> vX.Y.Z`) if it
+   resolved to an upstream commit. The remote fork only carries the tags we push.
 4. `make build` to stamp the image; reinstall the wrapper (`./install.sh`, or
    `install -m 755 wrapper.sh ~/.local/bin/claudebox`). `claudebox checkversion`
    should then read **in sync**.
