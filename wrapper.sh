@@ -275,6 +275,20 @@ cb_running_cb_count() { _cb_vm_list_json | cb_parse_vm_lines | cb_running_cb_pro
 CB_INFRA_PROFILE="cb-infra"
 cb_infra_context() { printf 'colima-%s' "$CB_INFRA_PROFILE"; }
 
+# colima's LIMA_HOME — where per-profile lima instances and their named 'datadisk's
+# live. `colima delete` removes the instance but LEAKS the datadisk, so we delete the
+# disk ourselves (cb_vm_destroy) via limactl and need this path. Prefer an existing
+# location; colima uses $COLIMA_HOME/_lima (XDG ~/.config/colima, legacy ~/.colima).
+cb_lima_home() {
+    local h
+    for h in "${COLIMA_HOME:+$COLIMA_HOME/_lima}" \
+             "${XDG_CONFIG_HOME:-$HOME/.config}/colima/_lima" \
+             "$HOME/.colima/_lima"; do
+        [ -n "$h" ] && [ -d "$h" ] && { printf '%s' "$h"; return 0; }
+    done
+    return 1
+}
+
 # `colima start` hijacks the global active docker context. We address every VM
 # explicitly via `docker --context`, so restore the human's previously-active
 # context afterward — otherwise their bare `docker` would silently point at a
@@ -373,11 +387,23 @@ cb_vm_down() {
 }
 
 cb_vm_destroy() {
-    local profile; profile="$(cb_project_profile "$1")"
+    local profile lh; profile="$(cb_project_profile "$1")"
     cb_guard_profile "$profile" || return 1
-    if [ "$(cb_vm_status "$profile")" = "absent" ]; then echo "no VM for this project ($profile)"; return 0; fi
-    echo "🗑  deleting colima VM '$profile' and all its containers/volumes..."
-    colima delete -f -p "$profile"
+    if [ "$(cb_vm_status "$profile")" = "absent" ]; then
+        echo "no VM for this project ($profile)"
+    else
+        echo "🗑  deleting colima VM '$profile' and all its containers/volumes..."
+        colima delete -f -p "$profile"
+    fi
+    # colima delete LEAKS the per-profile lima datadisk (a whole sparse disk per
+    # destroyed project VM — they pile up as ~GBs of dead weight). Remove it too.
+    # Runs even when the VM was already absent, so it also reaps a previously-leaked
+    # disk. limactl refuses an in-use disk, so this can't touch a live VM's disk.
+    if command -v limactl >/dev/null 2>&1 && lh="$(cb_lima_home)"; then
+        if LIMA_HOME="$lh" limactl disk delete "colima-$profile" >/dev/null 2>&1; then
+            echo "   ✓ freed leaked lima datadisk (colima-$profile)"
+        fi
+    fi
 }
 
 cb_vm_ls() {

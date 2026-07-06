@@ -75,6 +75,14 @@ mkdir -p "$TMP/.claudebox"
 printf 'id: abc1234f\n' > "$TMP/.claudebox/config.yml"
 eq "reads existing id" "$(cb_project_id_ro "$TMP")" "abc1234f"
 
+echo "--- cb_lima_home (colima delete leaks the datadisk; cb_vm_destroy reaps it) ---"
+LH="$TMP/colima/_lima"; mkdir -p "$LH"
+eq "COLIMA_HOME wins when set+exists" "$(COLIMA_HOME="$TMP/colima" XDG_CONFIG_HOME=/nope HOME=/nope cb_lima_home)" "$LH"
+eq "falls back to XDG_CONFIG_HOME"    "$(COLIMA_HOME= XDG_CONFIG_HOME="$TMP" HOME=/nope cb_lima_home 2>/dev/null)" "$TMP/colima/_lima"
+if ( COLIMA_HOME= XDG_CONFIG_HOME="$TMP/none" HOME="$TMP/none" cb_lima_home >/dev/null 2>&1 ); then
+    bad "cb_lima_home returned 0 with no existing home"
+else ok "cb_lima_home fails when no home exists"; fi
+
 echo ""
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

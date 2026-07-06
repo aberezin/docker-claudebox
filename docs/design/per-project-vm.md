@@ -380,6 +380,20 @@ No macOS `sudo` **at runtime**. Specifically:
   whatever dir you first run in — the marker file still makes it rehome-safe.
 - **Resource exhaustion:** many projects = many VMs. `claudebox vm ls` + explicit
   `down`/`destroy` are the management surface; `autostop` is available per project.
+- **`colima delete` leaks the VM's datadisk.** It removes the lima *instance* but
+  leaves the per-profile named disk (`~/.config/colima/_lima/_disks/colima-<profile>`,
+  up to the whole `disk:` size) behind — so with a VM per project these pile up as GBs
+  of dead weight. `cb_vm_destroy` therefore also runs `limactl disk delete
+  colima-<profile>` after `colima delete` (limactl refuses an in-use disk, so it can't
+  touch a live VM). To reap disks leaked by *older* claudebox versions:
+  `LIMA_HOME=~/.config/colima/_lima limactl disk ls` → delete any row with an empty
+  `IN-USE-BY`.
+- **VM disks are sparse and never shrink on their own.** Deleting images/containers
+  (or pruning build cache) frees space *inside* the guest, but the host raw disk file
+  keeps its high-water mark until the guest issues TRIM. Reclaim it with
+  `colima ssh -p <profile> -- sudo fstrim -av` (on the vz backend the discard passes
+  through to the sparse file — e.g. an image-store VM went 39G→8.4G on the Mac).
+  Consider running it periodically or after large deletes.
 - **File ownership / UID-matching is a no-op under Colima.** The entrypoint's
   Linux-style UID/GID matching (adjust the `claude` user to the workspace owner so
   Claude's files aren't root/`1000`-owned on the host) is unnecessary here: Colima's
