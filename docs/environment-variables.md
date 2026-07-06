@@ -6,8 +6,8 @@ All wrapper/installer config uses the `CLAUDEBOX_*` prefix. Anything you want av
 
 | Variable                   | Description                                                                                | Default                   |
 | -------------------------- | ------------------------------------------------------------------------------------------ | ------------------------- |
-| `CLAUDEBOX_GIT_NAME`       | Git `user.name` inside the container                                                       | _(none)_                  |
-| `CLAUDEBOX_GIT_EMAIL`      | Git `user.email` inside the container                                                      | _(none)_                  |
+| `CLAUDEBOX_GIT_NAME`       | Git `user.name` inside the container. If unset, falls back to the host's `git config --global user.name` | host git config           |
+| `CLAUDEBOX_GIT_EMAIL`      | Git `user.email` inside the container. If unset, falls back to the host's `git config --global user.email` | host git config           |
 | `CLAUDEBOX_DATA_DIR`       | Override the `.claude` data directory on the host                                          | `~/.claude`               |
 | `CLAUDEBOX_SSH_DIR`        | Override the SSH key directory mounted into the container                                  | `~/.ssh/claudebox`        |
 | `CLAUDEBOX_INSTALL_DIR`    | Where to install the wrapper binary (install-time only; no sudo if user-writable)          | `~/.local/bin`            |

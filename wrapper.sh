@@ -922,6 +922,12 @@ fi
 
 CLAUDE_GIT_NAME="${CLAUDEBOX_GIT_NAME:-${CLAUDE_GIT_NAME:-}}"
 CLAUDE_GIT_EMAIL="${CLAUDEBOX_GIT_EMAIL:-${CLAUDE_GIT_EMAIL:-}}"
+# Fall back to the HOST's own git identity so a fresh claudebot can commit without the
+# human pre-setting CLAUDEBOX_GIT_*. Without an identity, git dies on the first commit
+# with "Author identity unknown". Explicit CLAUDEBOX_GIT_* still wins; the entrypoint
+# writes these to the container's ~/.gitconfig, which persists across restarts.
+[ -n "$CLAUDE_GIT_NAME" ]  || CLAUDE_GIT_NAME="$(git config --global --get user.name 2>/dev/null || true)"
+[ -n "$CLAUDE_GIT_EMAIL" ] || CLAUDE_GIT_EMAIL="$(git config --global --get user.email 2>/dev/null || true)"
 # Per-project shared-nothing data dir (Phase 3 of docs/design/per-project-vm.md).
 # An explicit CLAUDEBOX_DATA_DIR / CLAUDE_DATA_DIR override still wins; otherwise
 # CLAUDE_DIR is resolved per project after the VM subcommands (needs the id).

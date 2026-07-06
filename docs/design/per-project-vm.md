@@ -266,6 +266,8 @@ not need the default VM at all).
   | `claudebox vm ls` | list claudebox VMs; must never display/act on `default` |
   | `claudebox vm usage` | per-VM **actual** Mac disk footprint (sparse, so ≠ the max) + any orphaned disks |
   | `claudebox vm gc` | reclaim disk: delete orphaned disks + `fstrim` running cb-* VMs (leaves `default` alone) |
+  | `claudebox version` | print the host wrapper's semver |
+  | `claudebox checkversion` | compare the wrapper's semver against the claudebot image's stamp; warn on drift |
   | `claudebox ip` (alias `net`) | print the project VM's reachable IP + `/etc/hosts` guidance |
 
 ## Running claudebox on its VM
