@@ -445,7 +445,9 @@ test_api_openai_finish_reason() {
         -H "Content-Type: application/json" \
         -d "{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"respond with exactly FRSTREAM\"}],\"stream\":true}")
     assert_contains "$stream" "FRSTREAM" "openai finish_reason stream: produced response" || { _api_stop "${API_CONTAINER}-oai-fr"; return 1; }
-    assert_contains "$stream" '"finish_reason":"stop"' "openai finish_reason stream: final chunk has finish_reason=stop" || { _api_stop "${API_CONTAINER}-oai-fr"; return 1; }
+    # spacing-agnostic: the server serializes with json.dumps (spaced separators),
+    # so the final chunk is `"finish_reason": "stop"`; strip spaces before matching.
+    assert_contains "$(echo "$stream" | tr -d ' ')" '"finish_reason":"stop"' "openai finish_reason stream: final chunk has finish_reason=stop" || { _api_stop "${API_CONTAINER}-oai-fr"; return 1; }
 
     echo "OK: api_openai_finish_reason"
     _api_stop "${API_CONTAINER}-oai-fr"
