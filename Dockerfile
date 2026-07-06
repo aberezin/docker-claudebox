@@ -2,6 +2,14 @@ FROM ubuntu:24.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Fork semver — stamped from the VERSION file at build time (Makefile/install.sh pass
+# --build-arg). Both a LABEL (read by `claudebox checkversion` via image inspect) and
+# an ENV (visible to the running container). Bump VERSION + wrapper.sh on IPC-contract
+# changes so host/container drift is detectable.
+ARG CLAUDEBOX_VERSION=0.0.0
+ENV CLAUDEBOX_VERSION=$CLAUDEBOX_VERSION
+LABEL org.claudebox.version=$CLAUDEBOX_VERSION
+
 # faster apt mirror — Cloudflare
 RUN sed -i 's|http://archive.ubuntu.com|http://cloudflaremirrors.com|g; s|http://security.ubuntu.com|http://cloudflaremirrors.com|g' /etc/apt/sources.list.d/ubuntu.sources || true
 

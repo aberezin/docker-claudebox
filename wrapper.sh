@@ -2,6 +2,13 @@
 
 # CLAUDEBOX_* is the canonical prefix. CLAUDE_* names remain supported for backwards compat.
 
+# Fork semver — the host wrapper and the built image share an IPC contract (sidecar
+# filenames/formats, env conventions, /out, secrets injection). Bump this in the repo
+# VERSION file AND here on any contract change; `claudebox checkversion` compares this
+# host version against the image the project's claudebot runs and warns on drift.
+# Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match).
+CLAUDEBOX_VERSION="0.1.0"
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
 #
@@ -228,6 +235,21 @@ cb_project_id_ro() {
 
 # strip a unit suffix to the bare number colima wants (8GiB -> 8, 60GiB -> 60)
 cb_num() { local s="${1//[!0-9.]/}"; printf '%s' "${s:-0}"; }
+
+# compare dotted versions X.Y.Z -> prints gt|lt|eq for $1 vs $2. Non-numeric/suffix
+# parts (0.1.0-rc1) are reduced to their leading digits; missing fields count as 0.
+cb_semver_cmp() {
+    local i x y; local -a A B
+    IFS=. read -r -a A <<<"$1"; IFS=. read -r -a B <<<"$2"
+    for i in 0 1 2; do
+        x="${A[$i]:-0}"; y="${B[$i]:-0}"       # :- guards unset fields under set -u
+        x="${x%%[!0-9]*}"; y="${y%%[!0-9]*}"   # keep leading digits only (0-rc1 -> 0)
+        x=$((10#${x:-0})); y=$((10#${y:-0}))
+        [ "$x" -gt "$y" ] && { printf gt; return; }
+        [ "$x" -lt "$y" ] && { printf lt; return; }
+    done
+    printf eq
+}
 
 # only ever act on a real claudebox profile — never 'default', never empty
 cb_guard_profile() {
@@ -505,6 +527,50 @@ cb_vm_gc() {
     echo ""
     echo "✅ vm gc done — reclaimed ~$(cb_h "$freed"); colima now uses $(cb_h $((after * 1024)))."
     echo "   (default/human VM left untouched — trim it yourself: colima ssh -p default -- sudo fstrim -av)"
+    return 0
+}
+
+# read the semver stamped into $CLAUDE_IMAGE in a docker context (empty if the image
+# is absent, the VM is down, or the image predates versioning). $1=docker context.
+cb_image_version() {
+    docker --context "$1" image inspect "$CLAUDE_IMAGE" \
+        --format '{{index .Config.Labels "org.claudebox.version"}}' 2>/dev/null
+}
+
+# `claudebox checkversion` — report the host wrapper's semver alongside the version
+# baked into the claudebot image (cb-infra source + this project's VM), and warn on
+# drift. Read-only: never boots a VM; reports "down"/"unstamped" gracefully.
+cb_checkversion() {
+    local wv="$CLAUDEBOX_VERSION" civ pv cid ctx cmp
+    echo "claudebox versions:"
+    echo "  wrapper (host):        $wv"
+    civ="$(cb_image_version "$(cb_infra_context)")"
+    echo "  image (cb-infra):      ${civ:-<unstamped or cb-infra down>}"
+    cid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
+    if [ -n "$cid" ]; then
+        ctx="$(cb_project_context "$cid")"
+        pv="$(cb_image_version "$ctx")"
+        echo "  image (this project):  ${pv:-<not seeded / VM down>}   (VM $(cb_project_profile "$cid"))"
+    else
+        echo "  image (this project):  <no .claudebox project in $PWD>"
+    fi
+    echo ""
+    cmp="${pv:-$civ}"   # prefer the project's actual image; fall back to cb-infra
+    if [ -z "$cmp" ]; then
+        echo "ℹ️  no image version readable (VMs down, or image predates versioning). Rebuild to stamp it: make build"
+        return 0
+    fi
+    if [ "$cmp" = "$wv" ]; then
+        echo "✅ in sync — wrapper and claudebot image are both $wv."
+        return 0
+    fi
+    echo "⚠️  version drift: wrapper $wv vs claudebot image $cmp."
+    case "$(cb_semver_cmp "$wv" "$cmp")" in
+        gt) echo "   the host wrapper is NEWER — rebuild the image so the container matches, then restart it:  make build" ;;
+        lt) echo "   the claudebot image is NEWER — update the host wrapper:  ./install.sh  (or reinstall wrapper.sh)" ;;
+        *)  echo "   versions differ — align them (make build and/or reinstall the wrapper)." ;;
+    esac
+    echo "   they share an IPC contract (sidecar files, env, /out, secrets) — drift can cause subtle breakage."
     return 0
 }
 
@@ -882,6 +948,14 @@ case "${1:-}" in
             gc)          cb_vm_gc; exit $? ;;
             *) echo "usage: claudebox vm [ls|usage|gc]" >&2; exit 1 ;;
         esac
+        ;;
+    version)
+        # the host wrapper's own semver (cheap; no docker). See also: checkversion.
+        printf 'claudebox %s\n' "$CLAUDEBOX_VERSION"; exit 0
+        ;;
+    checkversion)
+        # host wrapper vs claudebot image semver + drift warning (read-only).
+        cb_checkversion; exit $?
         ;;
     down)
         _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"

@@ -4,6 +4,9 @@
 IMAGE_NAME ?= claudebox
 TAG ?= latest
 
+# Fork semver stamped into the image (LABEL + ENV); read by `claudebox checkversion`.
+CLAUDEBOX_VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
+
 # The image is built into a dedicated colima profile (cb-infra), never the
 # human's `default` VM. Project VMs are seeded from cb-infra via save|load at
 # run time (see docs/design/per-project-vm.md). cb-infra only builds + serves the
@@ -28,11 +31,11 @@ infra-up:
 
 # Build the full image into cb-infra
 build: infra-up
-	$(DOCKER_INFRA) build --target full -t $(IMAGE_NAME):$(TAG) .
+	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target full -t $(IMAGE_NAME):$(TAG) .
 
 # Build the minimal image into cb-infra
 build-minimal: infra-up
-	$(DOCKER_INFRA) build --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
+	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
 
 # Build both
 build-all: build build-minimal

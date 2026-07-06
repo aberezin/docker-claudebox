@@ -98,6 +98,17 @@ case "$(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" in
     *) bad "default profile path unexpected: $(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" ;;
 esac
 
+echo "--- versioning (host wrapper must match the VERSION file) ---"
+VFILE="$(cat "$SCRIPT_DIR/../VERSION" 2>/dev/null | tr -d '[:space:]')"
+eq "wrapper CLAUDEBOX_VERSION == VERSION file" "$CLAUDEBOX_VERSION" "$VFILE"
+echo "--- cb_semver_cmp ---"
+eq "equal"          "$(cb_semver_cmp 0.1.0 0.1.0)" "eq"
+eq "patch greater"  "$(cb_semver_cmp 0.1.2 0.1.0)" "gt"
+eq "minor less"     "$(cb_semver_cmp 0.1.0 0.2.0)" "lt"
+eq "major greater"  "$(cb_semver_cmp 1.0.0 0.9.9)" "gt"
+eq "missing fields" "$(cb_semver_cmp 1 1.0.0)"     "eq"
+eq "suffix ignored" "$(cb_semver_cmp 0.1.0-rc1 0.1.0)" "eq"
+
 echo ""
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

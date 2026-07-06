@@ -76,8 +76,10 @@ if ! colima status -p "$CB_INFRA_PROFILE" >/dev/null 2>&1; then
 	fi
 fi
 
-echo "🔨 Building local Claude Code image into $CB_INFRA_PROFILE ($IMAGE_NAME:$CLAUDE_TAG, target: $BUILD_TARGET)..."
-if ! docker --context "$CB_INFRA_CTX" build --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
+# stamp the fork semver into the image (LABEL + ENV); `claudebox checkversion` reads it
+CLAUDEBOX_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 0.0.0)"
+echo "🔨 Building local Claude Code image into $CB_INFRA_PROFILE ($IMAGE_NAME:$CLAUDE_TAG v$CLAUDEBOX_VERSION, target: $BUILD_TARGET)..."
+if ! docker --context "$CB_INFRA_CTX" build --build-arg CLAUDEBOX_VERSION="$CLAUDEBOX_VERSION" --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
 	echo "❌ Image build failed."
 	exit 1
 fi
