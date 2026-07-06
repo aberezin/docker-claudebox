@@ -253,6 +253,19 @@ cb_semver_cmp() {
     printf eq
 }
 
+# the level at which two dotted versions FIRST differ: major|minor|patch|none. Maps to
+# rebuild urgency: major = breaking IPC contract (MUST), minor = additive (SHOULD),
+# patch = fixes only (OPTIONAL). See docs/versioning.md "when to bump".
+cb_semver_severity() {
+    local i x y; local -a A B N=(major minor patch)
+    IFS=. read -r -a A <<<"$1"; IFS=. read -r -a B <<<"$2"
+    for i in 0 1 2; do
+        x="${A[$i]:-0}"; y="${B[$i]:-0}"; x="${x%%[!0-9]*}"; y="${y%%[!0-9]*}"
+        [ "$((10#${x:-0}))" != "$((10#${y:-0}))" ] && { printf '%s' "${N[$i]}"; return; }
+    done
+    printf none
+}
+
 # only ever act on a real claudebox profile — never 'default', never empty
 cb_guard_profile() {
     case "${1:-}" in
@@ -351,11 +364,42 @@ cb_require_image_source() {
 
 # seed $CLAUDE_IMAGE into a target docker context (save|load from cb-infra) if missing
 cb_ensure_image() {
-    local ctx="$1"
-    docker --context "$ctx" image inspect "$CLAUDE_IMAGE" >/dev/null 2>&1 && return 0
+    local ctx="$1" have want
+    if docker --context "$ctx" image inspect "$CLAUDE_IMAGE" >/dev/null 2>&1; then
+        # Image present. Auto-reseed if cb-infra is ALREADY running and holds a
+        # newer-versioned image (e.g. right after `make build`), so a rebuild reaches
+        # existing project VMs without a manual `rmi`. Only when cb-infra is up — never
+        # boot it just to check (keeps normal startup cheap when nothing changed).
+        if cb_vm_running "$CB_INFRA_PROFILE"; then
+            have="$(cb_image_version "$ctx")"; want="$(cb_image_version "$(cb_infra_context)")"
+            if [ -n "$want" ] && [ "$want" != "$have" ] && { [ -z "$have" ] || [ "$(cb_semver_cmp "$want" "$have")" = gt ]; }; then
+                echo "📦 project image (${have:-unstamped}) is behind cb-infra ($want) — reseeding..." >&2
+                docker --context "$(cb_infra_context)" save "$CLAUDE_IMAGE" | docker --context "$ctx" load >/dev/null
+            fi
+        fi
+        return 0
+    fi
     cb_require_image_source || return 1
     echo "📦 seeding $CLAUDE_IMAGE into project VM (one-time save|load)..." >&2
     docker --context "$(cb_infra_context)" save "$CLAUDE_IMAGE" | docker --context "$ctx" load >/dev/null
+}
+
+# Recreate the project's container if it was created from a now-stale image (e.g. after
+# cb_ensure_image reseeded a rebuild) — a plain `docker start` otherwise keeps running
+# the OLD image. Compares the container's image id to the current tag's id and removes
+# the container so the run path recreates it. Session state survives (host ~/.claude
+# mount); container-fs scratch (runtime apt/npm installs) does not. No-op if the
+# container is absent or already current. $1=ctx  $2=container name.
+cb_refresh_container() {
+    local ctx="$1" name="$2" cimg iimg
+    cimg="$(docker --context "$ctx" inspect --format '{{.Image}}' "$name" 2>/dev/null)" || return 0
+    [ -n "$cimg" ] || return 0
+    iimg="$(docker --context "$ctx" image inspect --format '{{.Id}}' "$CLAUDE_IMAGE" 2>/dev/null)"
+    [ -n "$iimg" ] || return 0
+    if [ "$cimg" != "$iimg" ]; then
+        echo "🔁 harness image changed — recreating '$name' on the new image (session preserved; runtime-installed tools are not)." >&2
+        docker --context "$ctx" rm -f "$name" >/dev/null 2>&1 || true
+    fi
 }
 
 # cb_ensure_vm ROOT ID — start the project VM if needed (enforces limits), then
@@ -427,6 +471,28 @@ cb_vm_destroy() {
         if LIMA_HOME="$lh" limactl disk delete "colima-$profile" >/dev/null 2>&1; then
             echo "   ✓ freed leaked lima datadisk (colima-$profile)"
         fi
+    fi
+}
+
+# cb_purge_data ID — delete this project's HOST data dir (Claude session history +
+# --continue state, auth/secrets sidecars, settings, plugins, init.d). This is the
+# per-project shared-nothing ~/.claude; a plain `destroy` leaves it (session survives),
+# `destroy --purge` calls this for a truly clean slate. Guarded: only ever removes a
+# real <data_root>/<id> dir, and refuses when a CLAUDEBOX_DATA_DIR override is in effect
+# (that path is arbitrary/user-owned — the human removes it).
+cb_purge_data() {
+    local id="$1" root proj
+    case "$id" in ''|*[!0-9a-f]*|*/*) echo "refusing to purge — unexpected project id: '$id'" >&2; return 1 ;; esac
+    if [ -n "${CLAUDEBOX_DATA_DIR:-${CLAUDE_DATA_DIR:-}}" ]; then
+        echo "⚠ CLAUDEBOX_DATA_DIR override is set — not auto-deleting it; remove it yourself: ${CLAUDEBOX_DATA_DIR:-$CLAUDE_DATA_DIR}" >&2
+        return 0
+    fi
+    root="$(cb_data_root)"; proj="$root/$id"
+    case "$proj" in "$root"/?*) : ;; *) echo "refusing to purge unexpected path: $proj" >&2; return 1 ;; esac
+    if [ -d "$proj" ]; then
+        rm -rf "$proj" && echo "🗑  purged this project's session/data dir ($proj) — history & sidecars gone"
+    else
+        echo "no per-project data dir to purge ($proj)"
     fi
 }
 
@@ -566,7 +632,17 @@ cb_checkversion() {
         echo "  image (this project):  <no .claudebox project in $PWD>"
     fi
     echo ""
-    cmp="$(cb_real_ver "$pv")"; [ -n "$cmp" ] || cmp="$(cb_real_ver "$civ")"
+    local pver cver; pver="$(cb_real_ver "$pv")"; cver="$(cb_real_ver "$civ")"
+    # What claudebot ACTUALLY runs is the project image; prefer it. When it's unstamped
+    # (built before versioning) but cb-infra has a newer stamped image, that's the
+    # rebuilt-image-not-reseeded gap — flag it rather than silently trusting cb-infra.
+    if [ -z "$pver" ] && [ -n "$cid" ] && [ -n "$cver" ]; then
+        echo "ℹ️  this project's VM image is ${pv} but cb-infra has ${cver} — the project VM wasn't reseeded."
+        echo "    update it:  docker --context $(cb_project_context "$cid") rmi $CLAUDE_IMAGE  &&  claudebox"
+    elif [ -n "$pver" ] && [ -n "$cver" ] && [ "$pver" != "$cver" ]; then
+        echo "ℹ️  project image ($pver) differs from cb-infra ($cver) — reseed the project VM to update it."
+    fi
+    cmp="${pver:-$cver}"
     if [ -z "$cmp" ]; then
         if [ "$pv" = unstamped ] || [ "$civ" = unstamped ]; then
             echo "ℹ️  the claudebot image predates versioning (no stamp). Rebuild to stamp it: make build"
@@ -579,13 +655,17 @@ cb_checkversion() {
         echo "✅ in sync — wrapper and claudebot image are both $wv."
         return 0
     fi
+    # classify how urgent a rebuild/update is by WHERE the versions first differ
     echo "⚠️  version drift: wrapper $wv vs claudebot image $cmp."
-    case "$(cb_semver_cmp "$wv" "$cmp")" in
-        gt) echo "   the host wrapper is NEWER — rebuild the image, then restart the container:  make build" ;;
-        lt) echo "   the claudebot image is NEWER — update the host wrapper:  ./install.sh" ;;
-        *)  echo "   versions differ — align them (make build and/or reinstall the wrapper)." ;;
+    case "$(cb_semver_severity "$wv" "$cmp")" in
+        major) echo "   🔴 MAJOR drift — rebuild/update REQUIRED (breaking IPC-contract change; peers may be incompatible)." ;;
+        minor) echo "   🟠 MINOR drift — you SHOULD rebuild/update (new features / additive contract change; still compatible)." ;;
+        patch) echo "   🟡 PATCH drift — rebuild OPTIONAL (fixes/docs only, no contract change)." ;;
     esac
-    echo "   they share an IPC contract (sidecar files, env, /out, secrets) — drift can cause subtle breakage."
+    case "$(cb_semver_cmp "$wv" "$cmp")" in
+        gt) echo "      host wrapper is newer → rebuild the image, then restart:  make build" ;;
+        lt) echo "      claudebot image is newer → update the host wrapper:  ./install.sh" ;;
+    esac
     return 0
 }
 
@@ -986,9 +1066,17 @@ case "${1:-}" in
         cb_vm_down "$_cbid"; exit $?
         ;;
     destroy)
+        _purge=
+        case "${2:-}" in
+            --purge|--purge-data) _purge=1 ;;
+            "") : ;;
+            *) echo "usage: claudebox destroy [--purge]   (--purge also deletes this project's session/data dir)" >&2; exit 1 ;;
+        esac
         _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
-        if [ -z "$_cbid" ]; then echo "no claudebox VM for this project (no .claudebox/config.yml)"; exit 0; fi
-        cb_vm_destroy "$_cbid"; exit $?
+        if [ -z "$_cbid" ]; then echo "no claudebox project here (.claudebox/config.yml missing)"; exit 0; fi
+        cb_vm_destroy "$_cbid" || exit $?
+        [ -n "$_purge" ] && cb_purge_data "$_cbid"
+        exit 0
         ;;
     browser-bridge)
         _cbid="$(cb_project_id "$CB_PROJECT_ROOT")"
@@ -1420,6 +1508,7 @@ if [ $# -gt 0 ]; then
         # Programmatic mode — own container, no TTY
         prog_name="${container_name}_prog"
         dbg "prog container: $prog_name"
+        cb_refresh_container "$CB_CONTEXT" "$prog_name"   # recreate if image was reseeded
         prog_rc=0
         if ! "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${prog_name}$"; then
             dbg "prog: container does not exist, creating with docker run"
@@ -1484,6 +1573,7 @@ if "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
 fi
 
 # Interactive — start existing container or create new one
+cb_refresh_container "$CB_CONTEXT" "$container_name"   # recreate if the image was reseeded (e.g. after make build)
 if "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
     echo "🔄 Starting container '$container_name'..."
     "${DOCKER[@]}" start -ai "$container_name"

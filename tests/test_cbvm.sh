@@ -108,6 +108,27 @@ eq "minor less"     "$(cb_semver_cmp 0.1.0 0.2.0)" "lt"
 eq "major greater"  "$(cb_semver_cmp 1.0.0 0.9.9)" "gt"
 eq "missing fields" "$(cb_semver_cmp 1 1.0.0)"     "eq"
 eq "suffix ignored" "$(cb_semver_cmp 0.1.0-rc1 0.1.0)" "eq"
+echo "--- cb_semver_severity (drift urgency: major=must / minor=should / patch=optional) ---"
+eq "same"      "$(cb_semver_severity 2.0.0 2.0.0)" "none"
+eq "patch"     "$(cb_semver_severity 2.0.1 2.0.0)" "patch"
+eq "minor"     "$(cb_semver_severity 2.1.0 2.0.9)" "minor"
+eq "major"     "$(cb_semver_severity 3.0.0 2.9.9)" "major"
+eq "major beats minor" "$(cb_semver_severity 3.1.0 2.9.0)" "major"
+
+echo "--- cb_purge_data (destroy --purge) guards ---"
+if ( cb_purge_data "" >/dev/null 2>&1 ); then bad "purge accepted empty id"; else ok "purge refuses empty id"; fi
+if ( cb_purge_data "../etc" >/dev/null 2>&1 ); then bad "purge accepted path-y id"; else ok "purge refuses path-like id"; fi
+if ( CLAUDEBOX_DATA_DIR=/whatever cb_purge_data deadbeef 2>&1 | grep -q 'not auto-deleting' ); then ok "purge refuses when DATA_DIR override set"; else bad "purge ignored DATA_DIR override"; fi
+# real purge under a temp data root
+PTMP="$(mktemp -d)"; ( export XDG_CONFIG_HOME="$PTMP"
+  DDIR="$(cb_data_root)/deadbeef/claude"; mkdir -p "$DDIR"; touch "$DDIR/session.jsonl"
+  SIB="$(cb_data_root)/cafe0000/claude"; mkdir -p "$SIB"
+  cb_purge_data deadbeef >/dev/null 2>&1
+  [ ! -e "$(cb_data_root)/deadbeef" ] && echo PURGED || echo KEPT
+  [ -d "$SIB" ] && echo SIBOK || echo SIBGONE ) > "$PTMP/out"
+grep -q PURGED "$PTMP/out" && ok "purge removes the project's data dir" || bad "purge did not remove data dir"
+grep -q SIBOK  "$PTMP/out" && ok "purge leaves other projects untouched" || bad "purge touched a sibling project"
+rm -rf "$PTMP"
 
 echo ""
 echo "  $PASS passed, $FAIL failed"

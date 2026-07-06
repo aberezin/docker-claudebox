@@ -236,6 +236,20 @@ EOF
 Reports go to a shared host-visible location the maintainer reviews across all
 projects. Use it whenever the framework — not your code — is what's misbehaving.
 
+## What survives a rebuild / restart (and what doesn't)
+Your **workspace** and your **Claude session** (history, `--continue`, settings,
+plugins — everything under `~/.claude`) live on HOST bind-mounts, so they SURVIVE the
+container being rebuilt or recreated: you resume right where you left off. The harness
+recreates this container when the image is updated (you'll see a "recreating on the
+new image" message), and that's safe for your session.
+What does NOT survive: anything written to the container's own filesystem OUTSIDE
+those mounts — packages you `apt install` / `npm i -g` at runtime, and scratch files
+outside the workspace and `~/.claude`. After a rebuild/recreate they're gone.
+- Make setup durable: put it in `~/.claude/init.d/<name>.sh` (runs on container
+  create, lives in the mount) instead of running it ad-hoc — it re-applies next time.
+- If a tool you keep needing isn't in the image, that's framework feedback: file it
+  with `cb-report-bug` so it gets baked in, rather than reinstalling every session.
+
 ## Notes
 - You have passwordless sudo access
 - Docker socket may be mounted for docker-in-docker. The workspace is mounted at the exact same path as on the host, so when running docker commands with volume mounts, use the workspace path as the base (e.g. -v "$PWD/data:/data" will resolve correctly on the host)
