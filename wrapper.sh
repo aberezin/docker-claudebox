@@ -530,34 +530,47 @@ cb_vm_gc() {
     return 0
 }
 
-# read the semver stamped into $CLAUDE_IMAGE in a docker context (empty if the image
-# is absent, the VM is down, or the image predates versioning). $1=docker context.
-cb_image_version() {
-    docker --context "$1" image inspect "$CLAUDE_IMAGE" \
-        --format '{{index .Config.Labels "org.claudebox.version"}}' 2>/dev/null
+# version stamped into $CLAUDE_IMAGE in a docker context ($1). Distinguishes three
+# states: the semver, "unstamped" (image present but built pre-versioning = empty
+# label), or "unavailable" (image absent / VM or context down). image inspect returns
+# "" for a missing label but nonzero for a missing image, so the two don't conflate.
+cb_image_status() {
+    local out
+    if ! out="$(docker --context "$1" image inspect "$CLAUDE_IMAGE" \
+                 --format '{{index .Config.Labels "org.claudebox.version"}}' 2>/dev/null)"; then
+        printf 'unavailable'; return
+    fi
+    case "$out" in ''|'<no value>') printf 'unstamped' ;; *) printf '%s' "$out" ;; esac
 }
+# a concrete comparable semver, or empty for unstamped/unavailable/blank
+cb_real_ver() { case "$1" in ''|unstamped|unavailable) : ;; *) printf '%s' "$1" ;; esac; }
 
 # `claudebox checkversion` — report the host wrapper's semver alongside the version
 # baked into the claudebot image (cb-infra source + this project's VM), and warn on
-# drift. Read-only: never boots a VM; reports "down"/"unstamped" gracefully.
+# drift. Read-only: never boots a VM; reports down/unstamped distinctly.
 cb_checkversion() {
     local wv="$CLAUDEBOX_VERSION" civ pv cid ctx cmp
     echo "claudebox versions:"
     echo "  wrapper (host):        $wv"
-    civ="$(cb_image_version "$(cb_infra_context)")"
-    echo "  image (cb-infra):      ${civ:-<unstamped or cb-infra down>}"
+    civ="$(cb_image_status "$(cb_infra_context)")"
+    echo "  image (cb-infra):      $civ"
     cid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
     if [ -n "$cid" ]; then
         ctx="$(cb_project_context "$cid")"
-        pv="$(cb_image_version "$ctx")"
-        echo "  image (this project):  ${pv:-<not seeded / VM down>}   (VM $(cb_project_profile "$cid"))"
+        pv="$(cb_image_status "$ctx")"
+        echo "  image (this project):  $pv   (VM $(cb_project_profile "$cid"))"
     else
+        pv=""
         echo "  image (this project):  <no .claudebox project in $PWD>"
     fi
     echo ""
-    cmp="${pv:-$civ}"   # prefer the project's actual image; fall back to cb-infra
+    cmp="$(cb_real_ver "$pv")"; [ -n "$cmp" ] || cmp="$(cb_real_ver "$civ")"
     if [ -z "$cmp" ]; then
-        echo "ℹ️  no image version readable (VMs down, or image predates versioning). Rebuild to stamp it: make build"
+        if [ "$pv" = unstamped ] || [ "$civ" = unstamped ]; then
+            echo "ℹ️  the claudebot image predates versioning (no stamp). Rebuild to stamp it: make build"
+        else
+            echo "ℹ️  no built image reachable to compare (VMs down / not built yet): make build"
+        fi
         return 0
     fi
     if [ "$cmp" = "$wv" ]; then
@@ -566,8 +579,8 @@ cb_checkversion() {
     fi
     echo "⚠️  version drift: wrapper $wv vs claudebot image $cmp."
     case "$(cb_semver_cmp "$wv" "$cmp")" in
-        gt) echo "   the host wrapper is NEWER — rebuild the image so the container matches, then restart it:  make build" ;;
-        lt) echo "   the claudebot image is NEWER — update the host wrapper:  ./install.sh  (or reinstall wrapper.sh)" ;;
+        gt) echo "   the host wrapper is NEWER — rebuild the image, then restart the container:  make build" ;;
+        lt) echo "   the claudebot image is NEWER — update the host wrapper:  ./install.sh" ;;
         *)  echo "   versions differ — align them (make build and/or reinstall the wrapper)." ;;
     esac
     echo "   they share an IPC contract (sidecar files, env, /out, secrets) — drift can cause subtle breakage."
