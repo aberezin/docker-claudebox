@@ -91,6 +91,13 @@ eq "1.5 KiB"      "$(cb_h 1536)"       "1.5K"
 eq "1 GiB"        "$(cb_h 1073741824)" "1G"
 eq "empty -> 0B"  "$(cb_h)"            "0B"
 
+echo "--- cb_cdp_profile (tunable debug-Chrome profile dir) ---"
+eq "CLAUDEBOX_CDP_PROFILE override" "$(CLAUDEBOX_CDP_PROFILE=/tmp/my-cdp cb_cdp_profile)" "/tmp/my-cdp"
+case "$(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" in
+    */claudebox/cdp/chrome-debug-profile) ok "default is clearly-named under cdp home" ;;
+    *) bad "default profile path unexpected: $(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" ;;
+esac
+
 echo ""
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -98,9 +98,12 @@ Use this only when you need claudebot in **your actual Chrome** — your logged-
 profile, your extensions, your session — or to hand a live tab back to you. The
 mechanism is the **Chrome DevTools Protocol**, not the extension:
 
-1. **Launch a debug Chrome on the Mac** with `--remote-debugging-port=9222` and a
-   **dedicated profile** (`--user-data-dir=<state>/claudebox/cdp/profile`), never
-   your main one — so B carries no ambient logins unless you opt each one in.
+1. **Launch a debug Chrome on the Mac** with `--remote-debugging-port=9222`,
+   `--remote-allow-origins=*` (Chrome ≥111 otherwise 403s the CDP WebSocket
+   upgrade), and a **dedicated profile** — `--user-data-dir` defaults to a clearly
+   named `<state>/claudebox/cdp/chrome-debug-profile` and is tunable via
+   `CLAUDEBOX_CDP_PROFILE`. Never point it at your main profile — so B carries no
+   ambient logins unless you opt each one in.
 2. **Bridge the debug port to the VM.** CDP binds to `127.0.0.1:9222` only (by
    design — it's total control of the browser). A tiny **dependency-free Python TCP
    forwarder** on the Mac re-exposes it on the **Colima gateway address
@@ -118,7 +121,18 @@ The fork provides the host-side helper `claudebox browser-bridge up`, which
 launches the dedicated debug Chrome + the Python forwarder and writes the reachable
 CDP URL to a per-project marker (`~/.config/claudebox/projects/<id>/.cdp-url`); the
 wrapper injects it as `CLAUDEBOX_HOST_CDP_URL` on the next `docker run`. `down`
-kills both and removes the marker. All userspace — **no sudo**.
+kills both and removes the marker. All userspace — **no sudo**. (One shared bridge —
+single Chrome, fixed forwarder port — serves every project, so the profile is global,
+not per-id.)
+
+**Target-reachability caveat (esp. for websocket apps).** In Approach B the browser
+runs *on the Mac*, so the `<url>` you pass to `cb-browser cdp` — and every websocket
+the page opens — must be reachable **from the Mac**: the project VM's IP
+(`http://<vm-ip>:<port>`) or `localhost:<port>`, **not** a `cb-net` container name
+like `http://api:8080` (the Mac's Chrome can't resolve those). This is the inverse of
+Approach A, whose runner lives *inside* the VM on `cb-net` and addresses workloads by
+name. So for a workload only reachable in-VM (or whose websocket endpoint is in-VM),
+use Approach A (`shot`/`script`/`watch`); reserve B for Mac-reachable targets.
 
 ### Security (why B is opt-in)
 

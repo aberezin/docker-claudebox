@@ -41,7 +41,10 @@ usage:
                                           from your Mac at http://<project-vm-ip>:<port> (default $WATCH_PORT)
   cb-browser watch-stop                   stop the watch browser
   cb-browser cdp <url> [out-dir]          drive the HUMAN's real Chrome (opt-in) to <url> via the CDP bridge
-                                          — requires 'claudebox browser-bridge up' on the Mac first
+                                          — requires 'claudebox browser-bridge up' on the Mac first.
+                                          <url> must be reachable FROM THE MAC (VM IP / localhost), NOT a
+                                          cb-net container name — the Mac's Chrome can't resolve those.
+                                          For cb-net / in-VM targets (incl. their websockets) use shot/script.
   cb-browser net                          ensure/print the shared network name
 
 Put the workloads you test on the '$NET' network so they're reachable by name.

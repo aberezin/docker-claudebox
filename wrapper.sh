@@ -611,6 +611,12 @@ CB_CDP_CHROME_PORT="${CLAUDEBOX_CDP_CHROME_PORT:-9222}"   # Chrome --remote-debu
 CB_CDP_BIND="${CLAUDEBOX_CDP_BIND:-192.168.64.1}"         # Mac reachable-net gateway (colima-only, not LAN)
 cb_cdp_home() { printf '%s/claudebox/cdp' "$(cb_config_home)"; }
 cb_cdp_marker() { printf '%s/claudebox/projects/%s/.cdp-url' "$(cb_config_home)" "$1"; }  # $1=id
+# The dedicated debug-Chrome user-data-dir. One shared bridge (single Chrome + fixed
+# forwarder port) serves every project, so this is intentionally global, not per-id.
+# Tunable: point CLAUDEBOX_CDP_PROFILE at your own throwaway dir to relocate/rename it.
+# NOTE: never aim it at your normal Chrome profile — the bridge hands claudebot full
+# control of that instance. Default name says what it is if you spot it on disk.
+cb_cdp_profile() { printf '%s' "${CLAUDEBOX_CDP_PROFILE:-$(cb_cdp_home)/chrome-debug-profile}"; }
 
 # Shared cross-project sink for FRAMEWORK bug reports (cb-report-bug inside the
 # container writes here; `claudebox framework-bugs` reads it). Deliberately shared
@@ -621,7 +627,7 @@ cb_bridge_up() {   # $1=id
     local id="$1" chrome home profile fwd url
     chrome="${CLAUDEBOX_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
     [ -x "$chrome" ] || { echo "❌ Chrome not found at: $chrome (set CLAUDEBOX_CHROME)" >&2; return 1; }
-    home="$(cb_cdp_home)"; mkdir -p "$home"; profile="$home/profile"; fwd="$home/forward.py"
+    home="$(cb_cdp_home)"; mkdir -p "$home"; profile="$(cb_cdp_profile)"; fwd="$home/forward.py"
     cat > "$fwd" <<PYEOF
 import socket, threading
 LISTEN=('$CB_CDP_BIND', $CB_CDP_PORT); DEST=('127.0.0.1', $CB_CDP_CHROME_PORT)
@@ -648,7 +654,10 @@ PYEOF
     if [ -f "$home/pids" ] && kill -0 $(cat "$home/pids") 2>/dev/null; then
         echo "🔗 CDP bridge already running"
     else
+        # --remote-allow-origins=* : Chrome >=111 rejects the CDP WebSocket upgrade
+        # from a disallowed Origin; without this, Playwright connectOverCDP can 403.
         "$chrome" --remote-debugging-port="$CB_CDP_CHROME_PORT" --user-data-dir="$profile" \
+            --remote-allow-origins='*' \
             --no-first-run --no-default-browser-check about:blank >/dev/null 2>&1 &
         local cpid=$!
         sleep 2
@@ -660,6 +669,9 @@ PYEOF
     local marker; marker="$(cb_cdp_marker "$id")"; mkdir -p "$(dirname "$marker")"; printf '%s' "$url" > "$marker"
     echo "🔗 CDP bridge up — a dedicated debug Chrome window is open; claudebot can drive it."
     echo "   in claudebot:  cb-browser cdp <url>   (uses CLAUDEBOX_HOST_CDP_URL=$url)"
+    echo "   ⚠️  targets must be reachable FROM THIS MAC (VM IP or localhost) — the human's"
+    echo "       Chrome can't resolve cb-net container names; use shot/script for those."
+    echo "   profile: $profile   (override with CLAUDEBOX_CDP_PROFILE)"
     echo "   restart the claudebox session so the container picks up the bridge URL."
     echo "   stop:  claudebox browser-bridge down"
     echo "   ⚠️  this hands claudebot full control of that Chrome instance (dedicated profile)."

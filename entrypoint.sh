@@ -206,6 +206,10 @@ Opt-in extra: if the human ran `claudebox browser-bridge up` on their Mac, the e
 var `CLAUDEBOX_HOST_CDP_URL` is set and `cb-browser cdp <url>` drives THEIR real
 Chrome via CDP (dedicated debug profile). Only available when they explicitly start
 the bridge; don't rely on it — the self-contained A modes above are the default.
+Important: in `cdp` mode the browser runs on the MAC, so `<url>` (and any websockets
+the app opens) must be reachable **from the Mac** — the project VM's IP or
+`localhost:<port>`, NOT a `cb-net` container name like `http://api:8080` (the Mac's
+Chrome can't resolve those). For cb-net / in-VM targets, use `shot`/`script` instead.
 
 ## Reporting a bug in the claudebox FRAMEWORK
 If you hit something that looks like a bug in the harness that runs you — the
