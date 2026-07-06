@@ -462,8 +462,11 @@ _maybe_install_default_plugin() {
 	local marker="$CLAUDE_CONFIG_DIR/.claudebox-default-plugins"
 	[ -f "$marker" ] && return 0
 	dbg "installing default plugin commit-commands (first interactive run)…"
+	# Two steps: register the marketplace (clones it), then install the plugin by
+	# name@marketplace. `plugin install` alone fails ("not found in marketplace") if
+	# the marketplace was never added.
 	if timeout 90 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
-		bash -c 'export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:$PATH; exec claude plugin install commit-commands@claude-plugins-official --scope user' \
+		bash -c 'export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:$PATH; claude plugin marketplace add anthropics/claude-plugins-official && exec claude plugin install commit-commands@claude-plugins-official --scope user' \
 		>/dev/null 2>&1
 	then
 		touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
