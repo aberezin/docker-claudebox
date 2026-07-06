@@ -117,6 +117,25 @@ this, then tells you to `cd project-a && claudebox`), `--brief-only` (just the b
 works it keeps the brief's *Progress / handoff log* current, so any later session
 catches up from one file. See [docs/design/bootstrap.md](docs/design/bootstrap.md).
 
+### Shell into a project's VM and containers (`cbx-*` helpers)
+
+`install.sh` also installs `claudebox-shell.sh` and sources it from your rc, adding
+convenience functions (with tab-completion) for getting a shell into the layers of a
+project — all scoped to that project's Colima VM (resolved from `.claudebox/config.yml`,
+so they work from any subdirectory):
+
+```bash
+cbx-ps                 # list containers running in this project's VM
+cbx-sh <name>          # interactive shell in a container  (cbx-sh <TAB> completes names)
+cbx-sh <name> node -v  # or run a one-off command in it
+cbx-logs <name> -f     # docker logs for a container
+cbx-vm                 # ssh into the project VM (the Lima guest) itself
+cbx-claude             # shell into claudebot's own harness container (when a session is up)
+```
+
+Skip installing them with `CLAUDEBOX_SKIP_SHELL_HELPERS=1 ./install.sh`, or source
+`claudebox-shell.sh` manually from a checkout.
+
 ## Image Variants
 
 ### `claudebox:latest` (full)

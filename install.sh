@@ -112,6 +112,27 @@ else
 fi
 rm -f "$WRAPPER_TMP"
 
+# Install the shell helpers (cbx-ps / cbx-sh / cbx-vm / cbx-claude + tab-completion)
+# and source them from your rc. Skip with CLAUDEBOX_SKIP_SHELL_HELPERS=1.
+if [ -z "${CLAUDEBOX_SKIP_SHELL_HELPERS:-}" ] && [ -f "$SCRIPT_DIR/claudebox-shell.sh" ]; then
+	SHARE_DIR="${CLAUDEBOX_SHARE_DIR:-$HOME/.local/share/claudebox}"
+	mkdir -p "$SHARE_DIR"
+	install -m 644 "$SCRIPT_DIR/claudebox-shell.sh" "$SHARE_DIR/claudebox-shell.sh"
+	MARKER="# claudebox-shell helpers"
+	case "${SHELL##*/}" in
+		zsh) RC="$HOME/.zshrc" ;;
+		*)   RC="$HOME/.bashrc" ;;
+	esac
+	if [ -f "$RC" ] && grep -qF "$MARKER" "$RC"; then
+		echo "🐚 Shell helpers already sourced from $RC (updated $SHARE_DIR/claudebox-shell.sh)"
+	else
+		{ echo ""; echo "$MARKER"; echo "source \"$SHARE_DIR/claudebox-shell.sh\""; } >> "$RC"
+		echo "🐚 Installed shell helpers -> $SHARE_DIR/claudebox-shell.sh (sourced from $RC)"
+		echo "   new commands: cbx-ps, cbx-sh, cbx-logs, cbx-vm, cbx-claude"
+		echo "   run 'source $RC' or open a new shell to use them."
+	fi
+fi
+
 echo "✅ Claude Code setup complete! You can now use '$BIN_NAME' command from any directory."
 
 # Nudge if the install dir isn't on PATH (common for ~/.local/bin on macOS)
