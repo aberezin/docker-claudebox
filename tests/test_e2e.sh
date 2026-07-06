@@ -71,7 +71,44 @@ test_e2e_workload_reachable() {
     return 1
 }
 
+# ── 3. upstream init.d hooks still fire exactly once on first container create ─
+# The per-project-VM migration moved the .claude dir (now per-project) — verify the
+# inherited feature still works: ~/.claude/init.d/*.sh runs ONCE when the container
+# is created, and is SKIPPED on reuse (marker /var/run/claude-initialized lives in
+# the container fs, which persists across docker start). The data dir lives under
+# $HOME so the cbxtest VM mounts it and the hook's output round-trips to the host.
+_e2e_prog_run() {   # $1=container $2=datadir $3=sshdir $4=prompt
+    ( cd "$CBX_TEST_WS" && \
+        CLAUDE_IMAGE="$IMAGE" CLAUDE_DATA_DIR="$2" CLAUDE_SSH_DIR="$3" \
+        ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+        CLAUDE_CONTAINER_NAME="$1" \
+        bash "$WRAPPER" -p --model "$TEST_MODEL" --no-continue "$4" >/dev/null 2>&1 )
+}
+
+test_e2e_init_hook_runs_once() {
+    local ddir sdir cname n
+    ddir="$(mktemp -d "$WORKDIR/tests/.tmp-init-data-XXXXX")"
+    sdir="$(mktemp -d "$WORKDIR/tests/.tmp-init-ssh-XXXXX")"
+    cname="${CONTAINER_PREFIX}-inithook-$$"
+    # an init hook that appends one line to a file in the (mounted) .claude data dir
+    mkdir -p "$ddir/init.d"
+    cat > "$ddir/init.d/00-fired.sh" <<'HOOK'
+#!/bin/bash
+echo "fired" >> /home/claude/.claude/init-fired.log
+HOOK
+    chmod +x "$ddir/init.d/00-fired.sh"
+
+    _e2e_prog_run "$cname" "$ddir" "$sdir" "reply with the single word ok"   # create -> should fire
+    _e2e_prog_run "$cname" "$ddir" "$sdir" "reply with the single word ok"   # reuse  -> should be skipped
+
+    n="$(wc -l < "$ddir/init-fired.log" 2>/dev/null | tr -d ' ')"
+    docker rm -f "$cname" "${cname}_prog" >/dev/null 2>&1 || true
+    rm -rf "$ddir" "$sdir"
+    assert_eq "${n:-0}" "1" "init.d hook fires exactly once (create then reuse)"
+}
+
 ALL_TESTS+=(
     test_e2e_workspace_mount_symlink
     test_e2e_workload_reachable
+    test_e2e_init_hook_runs_once
 )

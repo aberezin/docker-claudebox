@@ -139,6 +139,12 @@ Each project's claudebot config/session/auth lives in its own host dir
 this fork is shared-nothing, so there's no global `~/.claude`. `claudebox claude-dir`
 prints that path for the current project.
 
+**Init hooks.** Drop executable `*.sh` scripts in that dir's `init.d/` (i.e.
+`$(claudebox claude-dir)/init.d/`) and the entrypoint runs them **once**, on first
+container create, before starting claudebot — handy for per-project setup. They're
+skipped on container reuse (a marker in the container filesystem). This inherited
+behavior is covered by `tests/test_e2e.sh::test_e2e_init_hook_runs_once`.
+
 Skip installing them with `CLAUDEBOX_SKIP_SHELL_HELPERS=1 ./install.sh`, or source
 `claudebox-shell.sh` manually from a checkout.
 
