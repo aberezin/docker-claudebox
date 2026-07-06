@@ -43,7 +43,9 @@ Operability release — the day-to-day human/agent tooling on top of 2.0.0's cor
 - **git identity fallback** — uses the host's `git config` when `CLAUDEBOX_GIT_*`
   are unset, so a fresh claudebot can always commit.
 - **`network.hostname` discoverability** — `ip`/`net` and the generated config now
-  suggest a friendly name.
+  suggest a friendly name, and **`claudebox net <hostname>`** sets it directly (no
+  hand-editing YAML) then prints the `/etc/hosts` line.
+- **`claudebox --help`** (`-h`) — a top-level usage summary of all commands + key env.
 
 ## [2.0.0] — 2026-07-06 _(fork)_
 

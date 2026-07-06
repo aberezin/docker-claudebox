@@ -772,6 +772,24 @@ cb_wait_reachable() {   # $1=profile  $2=max_seconds (default 20)
 # project network.hostname from config (empty/blank if unset)
 cb_project_hostname() { _cb_yaml_get "$(cb_project_config_path "$1")" network.hostname; }
 
+# cb_set_hostname ROOT NAME — set network.hostname in .claudebox/config.yml (so
+# `claudebox net` can then print the /etc/hosts line). Validated to hostname chars;
+# portable rewrite via temp file (no sed -i). $1=root $2=name.
+cb_set_hostname() {
+    local root="$1" name="$2" cfg tmp
+    case "$name" in ''|*[!a-zA-Z0-9._-]*) echo "invalid hostname '$name' (letters, digits, '.', '-', '_' only)" >&2; return 1 ;; esac
+    cfg="$(cb_project_config_path "$root")"
+    [ -f "$cfg" ] || { echo "no .claudebox/config.yml here — run 'claudebox' first to initialize" >&2; return 1; }
+    tmp="$(mktemp)"
+    if grep -qE '^[[:space:]]*hostname:' "$cfg"; then
+        sed -E "s|^([[:space:]]*)hostname:.*|\\1hostname: $name|" "$cfg" > "$tmp" && cat "$tmp" > "$cfg"
+    else
+        cat "$cfg" > "$tmp"; printf 'network:\n  hostname: %s\n' "$name" >> "$tmp"; cat "$tmp" > "$cfg"
+    fi
+    rm -f "$tmp"
+    echo "  ✓ set network.hostname: $name  (.claudebox/config.yml)"
+}
+
 # the IP currently mapped to HOSTNAME in an /etc/hosts-style FILE (empty if none)
 cb_hosts_ip() {
     [ -f "$1" ] || return 0
@@ -805,8 +823,9 @@ cb_network_info() {
     host="$(cb_project_hostname "$root")"
     if [ -z "$host" ]; then
         local suggest; suggest="$(basename "$root")"
-        echo "   tip: for a friendly name, set  network.hostname: $suggest  in .claudebox/config.yml —"
-        echo "        then 'claudebox net' prints a one-line /etc/hosts entry so you can browse http://$suggest:<port>"
+        echo "   no network.hostname set (so no friendly name yet). To add one, run:"
+        echo "       claudebox net $suggest"
+        echo "   — that sets it, then prints a one-line /etc/hosts entry for http://$suggest:<port>"
         return 0
     fi
     line="$ip  $host"
@@ -1119,6 +1138,50 @@ dbg "PWD=$PWD"
 CB_PROJECT_ROOT="$(cb_project_root "$PWD")"
 dbg "CB_PROJECT_ROOT=$CB_PROJECT_ROOT"
 case "${1:-}" in
+    -h|--help|help)
+        cat <<HELP
+claudebox $CLAUDEBOX_VERSION — run Claude Code in a per-project Colima VM.
+
+USAGE
+  claudebox [claude args...]        start/attach the interactive claudebot for \$PWD
+  claudebox -p "<prompt>" [...]     one-shot programmatic run (JSON via --output-format)
+  claudebox <command>               a management command (below)
+
+PROJECT
+  bootstrap [--gh-token] [...]      scaffold a project + mission brief (see --help on it)
+  info | status                    at-a-glance: versions, paths, VM, network
+  ip                               the project VM's reachable IP + how to browse
+  net [<hostname>]                 same as ip; with a name, sets network.hostname + prints
+                                   the /etc/hosts line so you can browse http://<name>:<port>
+  stop                             stop the claudebot container (keep the VM)
+  clear-session                    forget the resumable session for \$PWD
+
+VM / DISK
+  vm ls                            list this fork's project VMs
+  vm usage                         per-VM disk footprint (+ orphaned disks)
+  vm gc                            reclaim disk: prune orphaned disks + fstrim running VMs
+  down                             stop the project VM (keep its disk)
+  destroy [--purge]                delete the VM (+ --purge: also its session/data dir)
+
+VERSION
+  version                          print this wrapper's semver
+  checkversion                     compare wrapper vs image; warn on drift (must/should/optional)
+
+OTHER
+  browser-bridge up|down           opt-in: let claudebot drive your real Chrome via CDP
+  framework-bugs [list|clear]      review bugs claudebot filed with cb-report-bug
+  setup-token                      run 'claude setup-token' in a throwaway container
+  -v | --version | doctor | auth | mcp    passthrough to the claude CLI
+
+USEFUL ENV
+  CLAUDEBOX_CAFFEINATE=1           keep the Mac awake during a foreground session (macOS)
+  CLAUDEBOX_MINIMAL=1              use the minimal image variant
+  CLAUDEBOX_ENV_FOO=bar           forward FOO=bar into the container
+  DEBUG / CLAUDEBOX_ENV_DEBUG      verbose wrapper logging
+  See docs/environment-variables.md for the full list; docs/versioning.md for releases.
+HELP
+        exit 0
+        ;;
     vm)
         case "${2:-}" in
             ls|list|"")  cb_vm_ls; exit 0 ;;
@@ -1414,8 +1477,13 @@ if [ "${1:-}" = "clear-session" ]; then
     exit 0
 fi
 
-# ip / net — show the project VM's reachable IP + how to browse workloads
+# ip / net — show the project VM's reachable IP + how to browse workloads.
+# `net <hostname>` first SETS network.hostname in config.yml (no hand-editing YAML),
+# then prints the /etc/hosts line for it.
 if [ "${1:-}" = "ip" ] || [ "${1:-}" = "net" ]; then
+    if [ "${1:-}" = "net" ] && [ -n "${2:-}" ]; then
+        cb_set_hostname "$CB_PROJECT_ROOT" "$2" || exit 1
+    fi
     cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
     cb_network_info "$CB_PROJECT_ROOT" "$CB_PROJECT_ID"
     exit 0
