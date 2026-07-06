@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.0.0"
+CLAUDEBOX_VERSION="2.1.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -1048,6 +1048,22 @@ DEBUG="${CLAUDEBOX_ENV_DEBUG:-${DEBUG:-}}"
 
 dbg() { [ "${DEBUG:-}" = "true" ] && echo "[DEBUG $(date +%H:%M:%S.%3N)] $*" >&2; }
 
+# Keep the Mac awake for the duration of a FOREGROUND claudebox run, so a long claudebot
+# session (or a build the VM is doing) doesn't stall when the machine idles to sleep and
+# Colima suspends. Opt-in via CLAUDEBOX_CAFFEINATE=1; macOS-only; self-cleaning — the
+# `-w $$` ties it to THIS wrapper process, so it exits when your session ends. `-dimsu`:
+# no display/idle/disk/system sleep, assert user active. (System sleep is only fully
+# held on AC power — a macOS limitation.) Idempotent within one invocation.
+_cb_caffeinated=
+cb_caffeinate() {
+    [ -n "$_cb_caffeinated" ] && return 0
+    case "${CLAUDEBOX_CAFFEINATE:-${CLAUDE_CAFFEINATE:-}}" in ''|0|false|no) return 0 ;; esac
+    command -v caffeinate >/dev/null 2>&1 || { dbg "caffeinate requested but not found (not macOS?)"; return 0; }
+    caffeinate -dimsu -w "$$" >/dev/null 2>&1 &
+    _cb_caffeinated=1
+    dbg "caffeinate: holding the Mac awake until this claudebox exits (wrapper pid $$)"
+}
+
 # This fork uses a locally-built image (see install.sh / `make build`), NOT the
 # upstream psyb0t/claudebox on Docker Hub. The bare repo name has no registry
 # prefix, so Docker never tries to pull it — a missing image is a hard error,
@@ -1571,6 +1587,7 @@ if [ $# -gt 0 ]; then
         # Programmatic mode — own container, no TTY
         prog_name="${container_name}_prog"
         dbg "prog container: $prog_name"
+        cb_caffeinate   # opt-in (CLAUDEBOX_CAFFEINATE=1): keep the Mac awake for this run
         cb_refresh_container "$CB_CONTEXT" "$prog_name"   # recreate if image was reseeded
         prog_rc=0
         if ! "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${prog_name}$"; then
@@ -1636,6 +1653,7 @@ if "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
 fi
 
 # Interactive — start existing container or create new one
+cb_caffeinate   # opt-in (CLAUDEBOX_CAFFEINATE=1): keep the Mac awake for this session
 cb_refresh_container "$CB_CONTEXT" "$container_name"   # recreate if the image was reseeded (e.g. after make build)
 if "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
     echo "🔄 Starting container '$container_name'..."

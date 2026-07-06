@@ -117,6 +117,15 @@ else
 fi
 rm -f "$WRAPPER_TMP"
 
+# Install the /claudebox Claude Code skill (human status glance) into the user's global
+# skills dir, so /claudebox works in any project. Skip with CLAUDEBOX_SKIP_SKILL=1.
+if [ -z "${CLAUDEBOX_SKIP_SKILL:-}" ] && [ -d "$SCRIPT_DIR/skills" ]; then
+	SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
+	if mkdir -p "$SKILLS_DIR" 2>/dev/null && cp -R "$SCRIPT_DIR/skills/." "$SKILLS_DIR/" 2>/dev/null; then
+		echo "📝 Installed Claude Code skill(s) to $SKILLS_DIR (use /claudebox in a project)"
+	fi
+fi
+
 # Install the shell helpers (cbx-ps / cbx-sh / cbx-vm / cbx-claude + tab-completion)
 # and source them from your rc. Skip with CLAUDEBOX_SKIP_SHELL_HELPERS=1.
 if [ -z "${CLAUDEBOX_SKIP_SHELL_HELPERS:-}" ] && [ -f "$SCRIPT_DIR/claudebox-shell.sh" ]; then

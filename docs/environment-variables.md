@@ -15,6 +15,7 @@ All wrapper/installer config uses the `CLAUDEBOX_*` prefix. Anything you want av
 | `CLAUDEBOX_IMAGE`          | Override the full image reference used by the wrapper                                       | `claudebox:latest`        |
 | `CLAUDEBOX_IMAGE_NAME`     | Override just the local image repo name (tag appended per variant)                         | `claudebox`               |
 | `CLAUDEBOX_MINIMAL`        | When set, use the minimal image variant                                                    | _(none)_                  |
+| `CLAUDEBOX_CAFFEINATE`     | Set to `1` to keep the Mac awake for a foreground claudebox session (macOS `caffeinate -w $$`); prevents Colima suspending mid-run. System sleep is only fully held on AC power. Detached daemons (cron/api/telegram) aren't covered. | _(off)_ |
 | `CLAUDEBOX_INFRA_CPU`      | CPUs for the shared `cb-infra` image-store VM (install-time only)                           | `2`                       |
 | `CLAUDEBOX_INFRA_MEMORY`   | Memory (GiB) for `cb-infra` (install-time; bump if a `full` build runs short)              | `4`                       |
 | `CLAUDEBOX_INFRA_DISK`     | Disk (GiB) for `cb-infra` (install-time only)                                               | `40`                      |

@@ -132,7 +132,10 @@ rm -rf "$PTMP"
 
 echo "--- lint: every cb_* function CALLED is DEFINED (catches rename/undefined regressions) ---"
 _defined="$(grep -oE '^[[:space:]]*_?cb_[a-z0-9_]+\(\)' "$WRAPPER" | grep -oE '_?cb_[a-z0-9_]+' | sort -u)"
-_used="$(sed 's/#.*//' "$WRAPPER" | grep -oE '_?cb_[a-z0-9_]+' | sort -u)"
+# "used" = cb_* in CALL position: strip comments, then variable refs ($cb_x) and
+# assignments (cb_x=) so vars aren't mistaken for undefined functions. Command
+# substitution $(cb_x ...) is preserved (that IS a call).
+_used="$(sed 's/#.*//' "$WRAPPER" | sed -E 's/\$_?cb_[a-z0-9_]+//g; s/_?cb_[a-z0-9_]+=/=/g' | grep -oE '_?cb_[a-z0-9_]+' | sort -u)"
 _missing=""
 for _f in $_used; do printf '%s\n' "$_defined" | grep -qx "$_f" || _missing="$_missing $_f"; done
 [ -z "$_missing" ] && ok "no undefined cb_* function calls" || bad "undefined cb_* funcs called:$_missing"

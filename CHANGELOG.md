@@ -16,6 +16,35 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.1.0] — 2026-07-06 _(fork)_
+
+Operability release — the day-to-day human/agent tooling on top of 2.0.0's core.
+
+### Added
+- **`claudebox info`** (alias `status`) — human at-a-glance dashboard: versions
+  (wrapper / cb-infra / project image), the paths that matter (config.yml,
+  secrets.env, per-project data dir), VM + container status, and network (VM IP,
+  hostname, cb-net).
+- **`/claudebox` Claude Code skill** — runs `claudebox info` from any project;
+  shipped in the repo (`skills/`) and installed to `~/.claude/skills/` by
+  `install.sh` (skip with `CLAUDEBOX_SKIP_SKILL=1`).
+- **`CLAUDEBOX_CAFFEINATE=1`** — opt-in; keeps the Mac awake for the duration of a
+  foreground claudebox session (interactive / programmatic) via `caffeinate -w $$`,
+  so a long claudebot run doesn't stall when the machine sleeps and Colima suspends.
+- **`claudebox destroy --purge`** — also delete the project's host data dir (session
+  history, `--continue`, auth/secrets sidecars, settings) for a clean slate.
+- **`claudebox vm usage` / `vm gc`** — per-VM disk footprint, and reclaim
+  (orphaned-disk prune + `fstrim` of running cb-* VMs). `vm destroy` also reaps the
+  lima datadisk `colima delete` leaks.
+- **`claudebox checkversion` severity** — classifies drift as MAJOR (must rebuild) /
+  MINOR (should) / PATCH (optional).
+- **Auto image propagation** — a rebuilt image auto-reseeds into a running project VM
+  and the container is recreated on it (no manual `rmi`); session state preserved.
+- **git identity fallback** — uses the host's `git config` when `CLAUDEBOX_GIT_*`
+  are unset, so a fresh claudebot can always commit.
+- **`network.hostname` discoverability** — `ip`/`net` and the generated config now
+  suggest a friendly name.
+
 ## [2.0.0] — 2026-07-06 _(fork)_
 
 First versioned release of this fork. It opens the fork's own `2.x` line — chosen to
