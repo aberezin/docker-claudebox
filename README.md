@@ -1,7 +1,8 @@
 # claudebox
 
-[![Docker Hub](https://img.shields.io/docker/pulls/psyb0t/claudebox?style=flat-square)](https://hub.docker.com/r/psyb0t/claudebox)
 [![License: WTFPL](https://img.shields.io/badge/License-WTFPL-brightgreen.svg?style=flat-square)](http://www.wtfpl.net/)
+
+> **This is a fork.** claudebox was created by [psyb0t](https://github.com/psyb0t/docker-claudebox). This fork keeps the same interfaces but re-targets it to run under **[Colima](https://github.com/abiosoft/colima) with an isolated per-project VM** and adds **docker-out-of-docker orchestration** (claudebot spins up and wires sibling workload containers), a **no-sudo local-build install**, and per-project bootstrapping, browser testing, and plugins. It builds the image **locally** and pulls nothing from Docker Hub. See [What's different in this fork](#whats-different-in-this-fork).
 
 A runtime harness for [Claude Code](https://claude.com/product/claude-code) — the agentic coding CLI from Anthropic — running in a fully isolated Docker container with every dev tool pre-installed, passwordless sudo, docker-in-docker support, and `--dangerously-skip-permissions` enabled by default.
 
@@ -17,10 +18,29 @@ claudebox wraps Claude Code with several distinct interfaces:
 
 Beyond just running Claude Code in Docker, claudebox adds skill injection (auto-load `SKILL.md` files into every session), init hooks, custom script directories, structured JSON logging, and a workspace management layer that handles multi-tenant isolation with automatic busy/idle tracking.
 
-> **Renamed from `docker-claude-code`:** This project was previously called `docker-claude-code` with the Docker image at `psyb0t/claude-code`. Starting with v1.0.0, it is `claudebox` — the Docker image is now `psyb0t/claudebox`, the default binary name is `claudebox`, the GitHub repository is `psyb0t/docker-claudebox`, and the SSH key directory defaults to `~/.ssh/claudebox`. If you were using the old names, update your image references, wrapper scripts, and SSH paths accordingly.
+## What's different in this fork
+
+Everything above is inherited from upstream claudebox. This fork re-targets it for a
+Colima-based, orchestration-first workflow:
+
+- **A dedicated Colima VM per project** (`cb-<id>`), shared-nothing — the default VM
+  stays human-only, and each claudebot only ever sees/manages its own containers. See
+  [docs/design/per-project-vm.md](docs/design/per-project-vm.md).
+- **Docker-out-of-docker orchestration** — claudebot spins up and networks *sibling*
+  workload containers (an API server, a database, …) under its VM, so it can build and
+  test multi-tier apps. The [todo-app example](examples/todo-app/) does this end-to-end.
+- **Local build only** — nothing is pulled from Docker Hub; the wrapper runs the
+  `claudebox:latest` image you build from this checkout (into a `cb-infra` image-store VM).
+- **No-sudo userspace install** — installs to `~/.local/bin` by default.
+- **Reachable per-project VM IPs** — published workloads are browsable from your Mac at
+  the VM's own IP (collision-free across projects).
+- **Project workflow additions** — `claudebox bootstrap` (mission-brief handoff),
+  `cb-browser` + an opt-in CDP bridge (browser testing), `cb-report-bug` (framework bug
+  reports), per-project plugins, and `cbx-*` shell helpers.
 
 ## Table of Contents
 
+- [What's different in this fork](#whats-different-in-this-fork)
 - [Requirements](#requirements)
 - [Quick Start](#quick-start)
 - [Image Variants](#image-variants)
@@ -52,7 +72,7 @@ limactl sudoers --check /etc/sudoers.d/lima        # validate
 
 ## Quick Start
 
-> **This is a local-build fork.** Unlike upstream, nothing is pulled from Docker Hub — you build the image from this checkout and the wrapper runs that local image (`claudebox:latest`). Intended to run under [Colima](https://github.com/abiosoft/colima).
+> **Local build, no registry.** Nothing is pulled from Docker Hub — the installer builds the image from this checkout with `docker build`, and the wrapper runs that local `claudebox:latest`.
 
 ### Install
 
