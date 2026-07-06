@@ -14,6 +14,14 @@ workspace (the macOS `/tmp` → `/private/tmp` mount bug) and flagged it *in pro
 That was only caught because a human was watching. A standard channel makes it a
 durable, first-class signal.
 
+A second, subtler failure mode: friction the agent can simply **work around** never
+gets reported at all. In a later session a claudebot hit `EROFS` writing screenshots
+to `cb-browser`'s read-only `/work` mount (the writable `/out` path was undocumented),
+and instead of filing it, *degraded its own test* ("rewrite without screenshots") and
+moved on. So the baked instruction tells claudebot to report a surprising or
+under-documented baked helper **even when it found a workaround** — a silent
+workaround is exactly how DX bugs stay invisible.
+
 ## Mechanism
 
 1. **`cb-report-bug` (baked helper, container side).** Mirrors `cb-browser`:
