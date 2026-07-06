@@ -157,6 +157,22 @@ CLAUDEMD_MINIMAL
 
 		cat <<'CLAUDEMD_NOTES'
 
+## Orchestrating & exposing workloads
+You run with the Docker socket mounted (docker-out-of-docker) against this project's
+own Colima VM. Containers you start are SIBLINGS on that VM — detached ones outlive
+your session, and the human can reach them.
+- Build workloads as SELF-CONTAINED images (a Dockerfile that COPYs the code in). Do
+  NOT `-v`/bind-mount the workspace into a sibling container — the workspace path is
+  not visible to the VM daemon, so the mount comes up empty. COPY the code instead.
+- Put workloads that talk to each other on the shared `cb-net` network so they reach
+  each other by container name (`http://api:8080`); `cb-browser net` prints the name.
+- To let the HUMAN reach a workload from their Mac's browser, publish the port and run
+  it detached: `docker run -d --restart unless-stopped -p 8080:8080 <image>`. It is
+  then reachable at **this project's VM IP** — the collision-free address; tell the
+  human to run `claudebox ip` on their Mac to get it, e.g. `http://<vm-ip>:8080`.
+  (`http://localhost:8080` also works via colima's port-forward, but it COLLIDES if
+  another project publishes the same port — so give them the VM IP, not localhost.)
+
 ## Browser testing (self-contained)
 To test a web workload you spin up, use the baked-in `cb-browser` helper — it runs
 headless Chromium (Playwright) in a sibling container against your workload and
