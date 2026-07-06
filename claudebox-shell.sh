@@ -58,10 +58,20 @@ cbx-vm() {
     if [ "$#" -gt 0 ]; then colima ssh -p "cb-$id" -- "$@"; else colima ssh -p "cb-$id"; fi
 }
 
-# shell into THIS workspace's claudebot harness container (only up during a session)
+# shell into THIS workspace's claudebot harness container. That container only runs
+# during an INTERACTIVE session (`claudebox`); `claudebox -p` uses an ephemeral
+# _prog container that exits. If it isn't up, say how to start one rather than
+# emitting a raw "container is not running" daemon error.
 cbx-claude() {
-    local c n; c="$(_cbx_ctx)" || return 1
+    local c n st; c="$(_cbx_ctx)" || return 1
     n="claude-$(cd -P "$PWD" 2>/dev/null && pwd | sed 's:/:_:g')"
+    st="$(docker --context "$c" inspect -f '{{.State.Running}}' "$n" 2>/dev/null)"
+    if [ "$st" != "true" ]; then
+        echo "cbx-claude: claudebot's harness container ('$n') isn't running." >&2
+        echo "  It only runs during an interactive session — start one with:  claudebox" >&2
+        echo "  To shell into a workload container instead:  cbx-ps   then   cbx-sh <name>" >&2
+        return 1
+    fi
     docker --context "$c" exec -it "$n" bash 2>/dev/null || docker --context "$c" exec -it "$n" sh
 }
 
