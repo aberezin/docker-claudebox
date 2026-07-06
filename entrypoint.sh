@@ -173,6 +173,21 @@ your session, and the human can reach them.
   (`http://localhost:8080` also works via colima's port-forward, but it COLLIDES if
   another project publishes the same port — so give them the VM IP, not localhost.)
 
+## Secrets & credentials
+NEVER put a secret value on a command line — arguments leak into shell history, `ps`,
+process listings, and logs. This is a hard rule for the flows you build here AND for
+anything you tell the human to run.
+- This project's secrets live in `.claudebox/secrets.env` on the host (gitignored,
+  chmod 600, `KEY=VALUE` per line); the harness injects them into you as env on every
+  run. Read a credential from its env var — never hardcode, echo, or commit it.
+- Need a NEW secret from the human? Ask them to add a line to `.claudebox/secrets.env`
+  (or to bootstrap with `--gh-token` / `--secrets-file`) — never ask them to paste it
+  as a command argument or inline in a prompt.
+- GitHub is pre-wired: if `GH_TOKEN` is set, `gh` and `git push https://…` are already
+  authenticated (no `gh auth login`). Pass secrets to sibling workloads through their
+  environment (`docker run -e NAME` inheriting from your env, or an env-file) — never
+  baked into an image layer.
+
 ## Browser testing (self-contained)
 To test a web workload you spin up, use the baked-in `cb-browser` helper — it runs
 headless Chromium (Playwright) in a sibling container against your workload and
@@ -404,6 +419,25 @@ if [ -f "$AUTH_FILE" ]; then
 			CMD="$CMD && export $name=$(printf '%q' "$value")"
 		fi
 	done < "$AUTH_FILE"
+fi
+
+# load machine-local project secrets the same way (see wrapper.sh: .claudebox/secrets.env
+# -> this sidecar). Read from the mount, not `docker run -e`, so they survive restarts.
+# When GH_TOKEN is present, gh reads it automatically; we also point git-over-https at
+# gh so plain `git push https://github.com/...` is authenticated — i.e. claudebot boots
+# logged in to GitHub with no interactive `gh auth login`.
+SECRETS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-secrets"
+dbg "secrets file: $SECRETS_FILE (exists: $([ -f "$SECRETS_FILE" ] && echo yes || echo no))"
+if [ -f "$SECRETS_FILE" ]; then
+	while IFS='=' read -r name value; do
+		case "$name" in ''|\#*) continue ;; esac
+		if [ -n "$value" ]; then
+			dbg "secret: loading $name from file"
+			CMD="$CMD && export $name=$(printf '%q' "$value")"
+		fi
+	done < "$SECRETS_FILE"
+	# idempotent; guarded so a bad/absent token never blocks startup
+	CMD="$CMD && { [ -n \"\${GH_TOKEN:-}\" ] && gh auth setup-git >/dev/null 2>&1 || true; }"
 fi
 
 ARGS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-args"

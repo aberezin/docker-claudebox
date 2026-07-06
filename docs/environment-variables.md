@@ -41,6 +41,26 @@ The `CLAUDEBOX_ENV_` prefix injects arbitrary env vars into the container. The p
 CLAUDEBOX_ENV_GITHUB_TOKEN=xxx CLAUDEBOX_ENV_MY_VAR=hello claudebox "do stuff"
 ```
 
+`CLAUDEBOX_ENV_*` is injected via `docker run -e`, so it only applies on the **first** run of a container. A restarted (`docker start`) container does **not** see it. For anything that must survive restarts — especially **secrets** — use the per-project secrets file below.
+
+## Secrets — `.claudebox/secrets.env`
+
+Per-project credentials live in `.claudebox/secrets.env` (gitignored, `chmod 600`, `KEY=VALUE` per line — comments with `#` allowed). Unlike `CLAUDEBOX_ENV_*`, the wrapper re-injects it on **every** invocation and persists it to a sidecar the entrypoint re-reads on each start, so secrets survive `docker start`. **Secrets are never accepted on the command line** — put them in this file (or seed it at bootstrap):
+
+```bash
+# seed GH_TOKEN from your own host login → claudebot boots authed to GitHub (no `gh auth login`)
+claudebox bootstrap --gh-token "build project-A"
+
+# or provide a whole file of KEY=VALUE lines (merged into .claudebox/secrets.env)
+claudebox bootstrap --secrets-file ./my-secrets.env "build project-A"
+
+# or just edit .claudebox/secrets.env by hand:
+#   GH_TOKEN=ghp_...
+#   NPM_TOKEN=npm_...
+```
+
+`GH_TOKEN` (or `GITHUB_TOKEN`) is picked up by `gh` automatically; the entrypoint additionally runs `gh auth setup-git` so plain `git push https://github.com/...` is authenticated too. Secrets are host-local and never committed — `secrets.env` is auto-added to the project `.gitignore`.
+
 ## Extra volume mounts
 
 The `CLAUDEBOX_MOUNT_` prefix mounts additional host directories into the container:

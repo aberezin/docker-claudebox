@@ -111,6 +111,31 @@ hooks both:
 - **First run:** if a brief exists, the entrypoint prepends a short mission banner
   to the workspace `CLAUDE.md` pointing at it, so it's unmissable in context.
 
+### 4. Secrets — `.claudebox/secrets.env` (credentials the project needs)
+
+Some projects need claudebot to start up already holding a credential — e.g. a
+GitHub token so `gh` / `git push` work without an interactive `gh auth login`. The
+mechanism is deliberately **file-based, never command-line**, so secrets are never
+echoed into shell history or process listings.
+
+- **Source of truth:** `.claudebox/secrets.env` — `KEY=VALUE` per line, **gitignored**
+  and `chmod 600`. It is the sibling of the committed `BRIEF.md`: the brief travels
+  with the repo, the secrets never do.
+- **Durable injection:** the wrapper reads it on every invocation and both (a) passes
+  each var as container env and (b) persists it to per-role sidecars
+  (`.<container>{,_prog,_cron}-secrets`) the entrypoint re-`export`s on each start.
+  This is the same pattern as the auth files, and it's why secrets survive
+  `docker start` — which, unlike `docker run`, cannot take new `-e` env.
+- **GitHub, specifically:** a `GH_TOKEN` line is all it takes — `gh` reads it
+  automatically and the entrypoint runs `gh auth setup-git` so `git push https://…`
+  is authenticated too. Seed it without typing the token:
+  - `claudebox bootstrap --gh-token "intent…"` pulls from the host's own
+    `gh auth token` (you're already logged in on the Mac).
+  - `claudebox bootstrap --secrets-file F "intent…"` merges a file of `KEY=VALUE`
+    lines (for non-GitHub creds, or a specific scoped PAT).
+- **Trust boundary:** secrets are host-local, human-authorized material — treated
+  like auth tokens, not like untrusted input.
+
 ## Decisions
 
 1. **Scope — full scaffolder by default.** `claudebox bootstrap` stands up a whole

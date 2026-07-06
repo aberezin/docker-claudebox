@@ -95,15 +95,46 @@ cb_project_root() {
 
 cb_project_config_path() { printf '%s/.claudebox/config.yml' "$1"; }
 
-# wire /.claudebox/config.yml into .gitignore, but only inside a real git repo
+# wire the machine-local .claudebox files (config + secrets) into .gitignore, but
+# only inside a real git repo — NEITHER may ever be committed (secrets.env holds
+# credentials; config.yml is host-local VM sizing/identity).
 cb_ensure_gitignore() {
-    local root="$1" gi="$1/.gitignore" line="/.claudebox/config.yml"
+    local root="$1" gi="$1/.gitignore" line
     [ -d "$root/.git" ] || return 0
-    if [ -f "$gi" ]; then
-        grep -qxF "$line" "$gi" 2>/dev/null || printf '%s\n' "$line" >> "$gi"
-    else
-        printf '%s\n' "$line" > "$gi"
+    for line in /.claudebox/config.yml /.claudebox/secrets.env; do
+        if [ -f "$gi" ]; then
+            grep -qxF "$line" "$gi" 2>/dev/null || printf '%s\n' "$line" >> "$gi"
+        else
+            printf '%s\n' "$line" > "$gi"
+        fi
+    done
+}
+
+# ── project secrets (machine-local, gitignored, chmod 600) ───────────────────
+# Source of truth is .claudebox/secrets.env (KEY=VALUE lines). It is injected into
+# the container as env on every run and — crucially — persisted to a per-container
+# sidecar the entrypoint re-reads on each start, so secrets survive `docker start`
+# (which, unlike `docker run`, can't inject new env). A GH_TOKEN line = a claudebot
+# that boots authenticated to GitHub with no interactive `gh auth login`.
+cb_secrets_path() { printf '%s/.claudebox/secrets.env' "$1"; }  # $1=root; gitignored
+
+# cb_secrets_put ROOT KEY VALUE — set/replace KEY in .claudebox/secrets.env (create
+# with a header + chmod 600 if absent). Never echoes the value. Used by bootstrap
+# --gh-token / --secrets-file; secrets are NEVER accepted on the command line.
+cb_secrets_put() {
+    local root="$1" key="$2" val="$3" sf tmp
+    sf="$(cb_secrets_path "$root")"; mkdir -p "$(dirname "$sf")"
+    if [ ! -f "$sf" ]; then
+        printf '%s\n%s\n' \
+            '# .claudebox/secrets.env — machine-local, gitignored, chmod 600. KEY=VALUE per line.' \
+            '# Injected into the container as env on every run (survives restarts). NEVER commit.' > "$sf"
+        chmod 600 "$sf"
     fi
+    tmp="$(mktemp)"
+    grep -vE "^[[:space:]]*${key}=" "$sf" > "$tmp" 2>/dev/null || true
+    printf '%s=%s\n' "$key" "$val" >> "$tmp"
+    cat "$tmp" > "$sf"; rm -f "$tmp"
+    chmod 600 "$sf"
 }
 
 cb_write_sample() {
@@ -779,17 +810,25 @@ case "${1:-}" in
     bootstrap)
         # scaffold a new claudebot project in $PWD + write the mission brief.
         shift
-        _bs_mode=full _bs_force= _bs_start=1 _bs_intent= _bs_file=
+        _bs_mode=full _bs_force= _bs_start=1 _bs_intent= _bs_file= _bs_secfile= _bs_ghtoken=
         while [ $# -gt 0 ]; do
             case "$1" in
                 --brief-only) _bs_mode=brief; _bs_start= ;;
                 --no-start)   _bs_start= ;;
                 --force)      _bs_force=1 ;;
                 --brief-file) _bs_file="${2:-}"; shift ;;
+                --secrets-file) _bs_secfile="${2:-}"; shift ;;
+                --gh-token)   _bs_ghtoken=1 ;;
                 -h|--help)
-                    echo "usage: claudebox bootstrap [--brief-only] [--no-start] [--force] [--brief-file F] [\"intent…\"]"
+                    echo "usage: claudebox bootstrap [--brief-only] [--no-start] [--force] [--brief-file F]"
+                    echo "                           [--secrets-file F] [--gh-token] [\"intent…\"]"
                     echo "  scaffold a claudebot project in the current directory + write .claudebox/BRIEF.md."
                     echo "  intent comes from the arg, --brief-file, or stdin. Default boots claudebot after."
+                    echo ""
+                    echo "  secrets (never typed on the command line — file-based only):"
+                    echo "    --secrets-file F  merge KEY=VALUE lines from F into .claudebox/secrets.env"
+                    echo "    --gh-token        seed GH_TOKEN from the host's own 'gh auth token' (boot authed to GitHub)"
+                    echo "  secrets.env is gitignored + chmod 600 and injected into claudebot as env each run."
                     exit 0 ;;
                 --) shift; break ;;
                 -*) echo "bootstrap: unknown flag '$1'" >&2; exit 1 ;;
@@ -804,6 +843,25 @@ case "${1:-}" in
             _bs_intent="$(cat)"   # piped/heredoc intent (host-Claude path)
         fi
         cb_bootstrap "$PWD" "$_bs_intent" "$_bs_mode" "$_bs_force" || exit $?
+        # secrets: file-based only, so nothing sensitive is echoed or shell-history'd.
+        if [ -n "$_bs_secfile" ]; then
+            [ -f "$_bs_secfile" ] || { echo "bootstrap: --secrets-file not found: $_bs_secfile" >&2; exit 1; }
+            _sn=0
+            while IFS='=' read -r _k _v; do
+                case "$_k" in ''|\#*) continue ;; esac
+                cb_secrets_put "$PWD" "$_k" "$_v"; _sn=$((_sn + 1))
+            done < "$_bs_secfile"
+            echo "  ✓ .claudebox/secrets.env ($_sn key(s) from $_bs_secfile; gitignored, chmod 600)"
+        fi
+        if [ -n "$_bs_ghtoken" ]; then
+            _tok="$(gh auth token 2>/dev/null)"
+            if [ -n "$_tok" ]; then
+                cb_secrets_put "$PWD" GH_TOKEN "$_tok"
+                echo "  ✓ .claudebox/secrets.env: GH_TOKEN (from host 'gh auth token'; gitignored, chmod 600)"
+            else
+                echo "  ⚠ --gh-token: host 'gh auth token' returned nothing — run 'gh auth login' on the Mac first; skipped" >&2
+            fi
+        fi
         if [ -n "$_bs_start" ]; then
             echo "  ▶ starting claudebot…"
             exec "$0"   # re-enter the wrapper normally → boots the VM + claudebot with the brief
@@ -899,6 +957,24 @@ chmod 600 "$CLAUDE_DIR/.${container_name}_prog-auth"
 echo "$AUTH_CONTENT" > "$CLAUDE_DIR/.${container_name}_cron-auth"
 chmod 600 "$CLAUDE_DIR/.${container_name}_cron-auth"
 dbg "wrote auth files"
+
+# ── inject machine-local project secrets (.claudebox/secrets.env) ────────────
+# (a) forward each KEY=VALUE as env for THIS run and (b) persist to per-container
+# sidecars the entrypoint re-reads on every start — so secrets survive `docker
+# start` (which can't take new env). Same durable pattern as the auth files above.
+SECRETS_SRC="$(cb_secrets_path "$CB_PROJECT_ROOT")"
+if [ -f "$SECRETS_SRC" ]; then
+    while IFS='=' read -r _sname _sval; do
+        case "$_sname" in ''|\#*) continue ;; esac
+        DOCKER_ARGS+=(-e "$_sname=$_sval")
+        dbg "forwarding secret: $_sname"
+    done < "$SECRETS_SRC"
+    for _srole in "" _prog _cron; do
+        cp "$SECRETS_SRC" "$CLAUDE_DIR/.${container_name}${_srole}-secrets"
+        chmod 600 "$CLAUDE_DIR/.${container_name}${_srole}-secrets"
+    done
+    dbg "wrote secrets sidecars from $SECRETS_SRC"
+fi
 
 # updates are disabled by default; pass --update to opt in
 DO_UPDATE=0

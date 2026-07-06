@@ -84,6 +84,32 @@ P3="$TMP/proj-empty"; mkdir -p "$P3"
 cb_bootstrap "$P3" "" brief "" >/dev/null 2>&1
 has "TODO" "$P3/.claudebox/BRIEF.md" && ok "empty intent -> TODO placeholder" || bad "empty intent: no placeholder"
 
+# ── secrets: cb_secrets_put + gitignore wiring (file-based, chmod 600) ────────
+SF="$(cb_secrets_path "$P1")"
+[ "$SF" = "$P1/.claudebox/secrets.env" ] && ok "secrets: path derived" || bad "secrets: wrong path ($SF)"
+# secrets.env must be gitignored (git repo P1) so credentials never get committed
+has "secrets.env" "$P1/.gitignore" && ok "secrets: secrets.env gitignored" || bad "secrets: secrets.env not gitignored"
+
+cb_secrets_put "$P1" GH_TOKEN "ghp_abc123"
+[ -f "$SF" ]                        && ok "secrets: file created"        || bad "secrets: file missing"
+has "^GH_TOKEN=ghp_abc123$" "$SF"   && ok "secrets: value written"       || bad "secrets: value not written"
+perm="$(stat -c '%a' "$SF" 2>/dev/null)"
+[ "$perm" = "600" ]                 && ok "secrets: chmod 600"           || bad "secrets: perms not 600 ($perm)"
+
+# replace (not duplicate) an existing key
+cb_secrets_put "$P1" GH_TOKEN "ghp_replaced"
+n="$(grep -c '^GH_TOKEN=' "$SF")"
+[ "$n" = "1" ]                      && ok "secrets: key replaced not duped" || bad "secrets: key duplicated ($n)"
+has "^GH_TOKEN=ghp_replaced$" "$SF" && ok "secrets: new value wins"        || bad "secrets: replacement failed"
+
+# a second, distinct key coexists
+cb_secrets_put "$P1" NPM_TOKEN "npm_xyz"
+has "^GH_TOKEN=ghp_replaced$" "$SF" && has "^NPM_TOKEN=npm_xyz$" "$SF" \
+    && ok "secrets: multiple keys coexist" || bad "secrets: second key clobbered first"
+# a value containing '=' survives (split on first '=' only)
+cb_secrets_put "$P1" ODD "a=b=c"
+has "^ODD=a=b=c$" "$SF"             && ok "secrets: '=' in value preserved" || bad "secrets: '=' value mangled"
+
 echo ""
 echo "bootstrap: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
