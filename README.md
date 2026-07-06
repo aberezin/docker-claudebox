@@ -132,7 +132,15 @@ cbx-logs <name> -f     # docker logs for a container
 cbx-vm                 # ssh into the project VM (the Lima guest) itself
 cbx-claude             # shell into claudebot's own harness container (when a session is up)
 cbx-claude-dir [-o]    # print (or -o open) this project's host .claude data dir
+cbx-up                 # ensure this project's VM (+ its workloads) is running
+cbx-up-all             # ensure EVERY claudebox VM (+ workloads) is running
 ```
+
+After a Colima or Mac restart, all per-project VMs (and their workloads) are down.
+`cbx-up-all` starts every `cb-*` VM; workloads with `--restart` policies return with
+the daemon, and any stopped workload containers without one are started too (the
+ephemeral `claude-*` harness containers are skipped). `cbx-up` does the same for just
+the current project.
 
 Each project's claudebot config/session/auth lives in its own host dir
 (`~/.config/claudebox/projects/<id>/claude`, mounted at `/home/claude/.claude`) —
