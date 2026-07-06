@@ -2,10 +2,11 @@
 # End-to-end example: bootstrap a claudebot project, then have claudebot build AND
 # run a small todo web app fully autonomously — reachable from your Mac's browser.
 #
-# This exercises the whole fork: `claudebox bootstrap` (intent handoff) -> a
-# dedicated per-project Colima VM with a reachable IP -> claudebot building the app
-# -> docker-out-of-docker orchestration (it runs the app as a published sibling
-# container) -> the workload reachable from the host.
+# This exercises the whole stack: `claudebox bootstrap` (intent handoff) -> a
+# dedicated per-project Colima VM with a reachable IP -> a per-project TypeScript LSP
+# plugin (via an init.d hook) -> claudebot building the app -> docker-out-of-docker
+# orchestration (it runs the app as a published sibling container) -> the workload
+# reachable from the host.
 #
 # Prereqs:
 #   - `claudebox` installed on PATH (install.sh, or: install -m755 wrapper.sh ~/.local/bin/claudebox)
@@ -28,6 +29,15 @@ export CLAUDEBOX_MINIMAL=1   # only the minimal image is built by `make build-mi
 echo "==> bootstrapping project at $PROJ"
 mkdir -p "$PROJ" && cd "$PROJ"
 claudebox bootstrap --no-start --force --brief-file "$HERE/BRIEF.md"
+
+# Install the TypeScript LSP plugin for this project via an init.d hook. The hook
+# runs once when claudebot's container is first created (during the build below), so
+# claudebot has TS code intelligence while it works. It's per-project — it lands in
+# this project's own ~/.claude, not globally.
+echo "==> adding the TypeScript LSP plugin (init.d hook)"
+HOOK_DIR="$(claudebox claude-dir)/init.d"
+mkdir -p "$HOOK_DIR"
+install -m 755 "$HERE/init.d/10-typescript-lsp.sh" "$HOOK_DIR/10-typescript-lsp.sh"
 
 echo ""
 echo "==> driving claudebot to build + run the app (autonomous, no prompts)…"

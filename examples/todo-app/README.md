@@ -1,9 +1,9 @@
 # Example: claudebot builds a todo app end-to-end
 
-This is the canonical end-to-end demo of the fork. One command bootstraps a project
-and hands claudebot a mission brief; claudebot then **autonomously** builds a small
-Node + TypeScript todo web app and runs it as a **published container on its own
-Colima VM**, reachable from your Mac's browser — no prompts, no hand-holding.
+This is the canonical end-to-end demo. One command bootstraps a project and hands
+claudebot a mission brief; claudebot then **autonomously** builds a small Node +
+TypeScript todo web app and runs it as a **published container on its own Colima
+VM**, reachable from your Mac's browser — no prompts, no hand-holding.
 
 It exercises every layer:
 
@@ -11,6 +11,7 @@ It exercises every layer:
 |-------|---------------|
 | `claudebox bootstrap` | intent handoff — the committed `.claudebox/BRIEF.md` tells claudebot *why* it exists |
 | per-project VM | a dedicated `cb-<id>` Colima VM with a host-reachable IP (`--network-address`) |
+| per-project plugin | a TypeScript LSP plugin installed for this project via an init.d hook, giving claudebot TS code intelligence |
 | autonomous build | claudebot writes the app (TS + Express, in-memory store) with `--dangerously-skip-permissions` (yolo) |
 | docker-out-of-docker | claudebot builds an image and runs the app as a **sibling** container on the VM daemon |
 | networking | the published workload is reachable from the Mac at the VM IP (and `localhost` as fallback) |
@@ -51,6 +52,17 @@ cd /tmp/todo-app && CLAUDEBOX_MINIMAL=1 claudebox     # interactive session in t
 It can see everything it built (`src/server.ts`, `Dockerfile`, …) and the running
 `todo-app` container. The `.claudebox/BRIEF.md` *Progress / handoff log* records what
 it did.
+
+## Plugins
+
+`run.sh` drops an init.d hook (`init.d/10-typescript-lsp.sh`) into this project's
+`~/.claude` before the build, so on first container-create claudebot installs the
+official **`typescript-lsp`** plugin — a TypeScript/JavaScript language server that
+gives it real code intelligence (go-to-definition, diagnostics, refactors) while it
+writes the app. It's **per-project**: it lands in this project's own `.claude`, not
+globally. Check it inside an interactive session with `claude plugin list`. (Separately,
+the first *interactive* session also gets the baked default `commit-commands` plugin —
+see `docs/customization.md`.)
 
 ## Tear down
 

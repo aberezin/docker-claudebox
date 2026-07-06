@@ -55,7 +55,16 @@ ENV DISABLE_AUTOUPDATER=1
 # back to root for entrypoint
 USER root
 
-# copy default claude config to /claude for entrypoint to use as template
+# ⚠️  HEADS UP (people & bots): anything you bake into /home/claude/.claude here is
+# SHADOWED AT RUNTIME. The wrapper bind-mounts a per-project host dir over
+# /home/claude/.claude (see docs/design/per-project-vm.md), so image-baked files
+# there are invisible inside the running container. To ship default .claude content
+# (config, settings.json, plugins, skills, init.d hooks) you must SEED IT AT RUNTIME
+# from the entrypoint into the mounted dir — copy a template that lives OUTSIDE the
+# mount (the /claude pattern below), or write/install it in entrypoint.sh. Do NOT add
+# `COPY ... /home/claude/.claude/...` expecting it to appear at runtime; it won't.
+#
+# copy default claude config to /claude (OUTSIDE the mount) for the entrypoint to seed
 RUN mkdir -p /claude && \
     cp /home/claude/.claude.json /claude/.claude.json
 
