@@ -673,6 +673,61 @@ cb_checkversion() {
     return 0
 }
 
+# `claudebox info` — a human-facing at-a-glance summary for the CURRENT project:
+# versions, the paths that matter (config, secrets, data dir), the VM + network, and
+# where to browse. Read-only and fast: reads state, never boots a VM or polls. $1=root.
+cb_info() {
+    local root="$1" id ctx profile status ip host cfg sf dd pv civ cname cstat keys
+    id="$(cb_project_id_ro "$root")"
+    echo "claudebox — info"
+    echo ""
+    echo "versions:"
+    printf '  %-18s %s   (%s)\n' "wrapper (host):" "$CLAUDEBOX_VERSION" "$(command -v claudebox 2>/dev/null || echo "$0")"
+    civ="$(cb_image_status "$(cb_infra_context)")"
+    printf '  %-18s %s\n' "image (cb-infra):" "$civ"
+    if [ -n "$id" ]; then
+        ctx="$(cb_project_context "$id")"; profile="$(cb_project_profile "$id")"
+        printf '  %-18s %s\n' "image (project):" "$(cb_image_status "$ctx")"
+    fi
+    echo ""
+    echo "project:"
+    printf '  %-18s %s\n' "workspace:" "$root"
+    if [ -z "$id" ]; then
+        echo "  (not a claudebox project yet — run 'claudebox' here to initialize)"
+    else
+        status="$(cb_vm_status "$profile")"
+        printf '  %-18s %s\n' "project id:" "$id"
+        printf '  %-18s %s   (%s)\n' "VM:" "$profile" "$status"
+        printf '  %-18s %s\n' "config.yml:" "$(cb_project_config_path "$root")"
+        sf="$(cb_secrets_path "$root")"
+        if [ -f "$sf" ]; then keys="$(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' "$sf" 2>/dev/null)"
+            printf '  %-18s %s   (%s key(s), chmod %s)\n' "secrets.env:" "$sf" "${keys:-0}" "$(stat -c '%a' "$sf" 2>/dev/null)"
+        else printf '  %-18s %s\n' "secrets.env:" "(none — 'claudebox bootstrap --gh-token' or add .claudebox/secrets.env)"; fi
+        printf '  %-18s %s\n' "data dir:" "$(cb_project_data_dir "$id")   (session history, settings, plugins)"
+        cname="claude-$(printf '%s' "$PWD" | sed 's#/#_#g')"
+        cstat="$(docker --context "$ctx" ps -a --filter "name=^${cname}\$" --format '{{.Status}}' 2>/dev/null | head -1)"
+        printf '  %-18s %s   %s\n' "container:" "$cname" "${cstat:-<none>}"
+        echo ""
+        echo "network:"
+        ip="$(cb_vm_address "$profile")"; host="$(cb_project_hostname "$root")"
+        if [ -n "$ip" ]; then
+            printf '  %-18s %s\n' "VM IP:" "$ip"
+            printf '  %-18s %s\n' "browse:" "http://$ip:<port>   (or http://localhost:<port>, collides across projects)"
+        else
+            printf '  %-18s %s\n' "VM IP:" "(VM not running — start with 'claudebox')"
+        fi
+        if [ -n "$host" ]; then printf '  %-18s %s   → http://%s:<port>   ('\''claudebox net'\'' for the /etc/hosts line)\n' "hostname:" "$host" "$host"
+        else printf '  %-18s %s\n' "hostname:" "(unset — set network.hostname in config.yml for a friendly name)"; fi
+        printf '  %-18s %s\n' "cb-net:" "cb-net   (attach sibling workloads: docker run --network cb-net ...)"
+    fi
+    echo ""
+    echo "machine:"
+    printf '  %-18s %s\n' "machine config:" "$(cb_machine_config_path)"
+    printf '  %-18s %s\n' "data root:" "$(cb_data_root)"
+    printf '  %-18s %s   (%s)\n' "cb-infra:" "$(cb_vm_status "$CB_INFRA_PROFILE")" "image store"
+    return 0
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Networking — Phase 5 of docs/design/per-project-vm.md
 #
@@ -1063,6 +1118,10 @@ case "${1:-}" in
     checkversion)
         # host wrapper vs claudebot image semver + drift warning (read-only).
         cb_checkversion; exit $?
+        ;;
+    info|status)
+        # human-facing at-a-glance: versions, paths, VM + network (read-only, fast).
+        cb_info "$CB_PROJECT_ROOT"; exit $?
         ;;
     down)
         _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
