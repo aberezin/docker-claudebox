@@ -644,14 +644,15 @@ cb_checkversion() {
     fi
     echo ""
     local pver cver; pver="$(cb_real_ver "$pv")"; cver="$(cb_real_ver "$civ")"
-    # What claudebot ACTUALLY runs is the project image; prefer it. When it's unstamped
-    # (built before versioning) but cb-infra has a newer stamped image, that's the
-    # rebuilt-image-not-reseeded gap — flag it rather than silently trusting cb-infra.
-    if [ -z "$pver" ] && [ -n "$cid" ] && [ -n "$cver" ]; then
-        echo "ℹ️  this project's VM image is ${pv} but cb-infra has ${cver} — the project VM wasn't reseeded."
-        echo "    update it:  docker --context $(cb_project_context "$cid") rmi $CLAUDE_IMAGE  &&  claudebox"
-    elif [ -n "$pver" ] && [ -n "$cver" ] && [ "$pver" != "$cver" ]; then
-        echo "ℹ️  project image ($pver) differs from cb-infra ($cver) — reseed the project VM to update it."
+    # Case: the image is already BUILT current (cb-infra == wrapper) but this project's
+    # VM still runs an older/unstamped image — it just needs a reseed, NOT a rebuild.
+    # Say exactly that (running `claudebox` here auto-reseeds + recreates) and stop, so
+    # we don't also print misleading "make build" advice.
+    if [ -n "$cid" ] && [ -n "$cver" ] && [ "$cver" = "$wv" ] && [ "$pver" != "$cver" ]; then
+        echo "ℹ️  cb-infra is current ($cver); this project's VM still runs ${pver:-$pv}."
+        echo "   → run 'claudebox' in this project — it auto-reseeds $cver and recreates the container"
+        echo "     (session preserved). No rebuild needed."
+        return 0
     fi
     cmp="${pver:-$cver}"
     if [ -z "$cmp" ]; then
