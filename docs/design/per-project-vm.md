@@ -265,7 +265,7 @@ not need the default VM at all).
   | `claudebox destroy` | `colima delete -p cb-<id>` **+ `limactl disk delete`** (nuke VM + reap its leaked datadisk) |
   | `claudebox vm ls` | list claudebox VMs; must never display/act on `default` |
   | `claudebox vm usage` | per-VM **actual** Mac disk footprint (sparse, so ≠ the max) + any orphaned disks |
-  | `claudebox vm gc` | reclaim disk: delete orphaned disks + `fstrim` running cb-* VMs (leaves `default` alone) |
+  | `claudebox vm gc` | reclaim disk: delete orphaned disks + prune dangling (old) images + `fstrim` running cb-* VMs (leaves `default` alone) |
   | `claudebox info` (alias `status`) | at-a-glance human summary: versions, config/secrets/data paths, VM + network |
   | `claudebox version` | print the host wrapper's semver |
   | `claudebox checkversion` | compare the wrapper's semver against the claudebot image's stamp; warn on drift |

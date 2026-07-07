@@ -562,7 +562,7 @@ cb_vm_usage() {
 # then fstrim every running claudebox VM (cb-* incl. cb-infra) so freed blocks return to
 # macOS. The human's `default` VM is deliberately left untouched.
 cb_vm_gc() {
-    local lh before after freed orphans n p trimmed=0
+    local lh before after freed orphans n p trimmed=0 _pr
     lh="$(cb_lima_home)" || { echo "colima LIMA_HOME not found (is colima installed?)" >&2; return 1; }
     command -v limactl >/dev/null 2>&1 || { echo "limactl not found — cannot gc" >&2; return 1; }
     before="$(cb_du_k "$lh")"
@@ -578,6 +578,13 @@ cb_vm_gc() {
     else
         echo "   (none)"
     fi
+
+    echo "🖼  pruning dangling (old) docker images in running claudebox VMs…"
+    while IFS= read -r p; do
+        [ -n "$p" ] || continue
+        _pr="$(docker --context "colima-$p" image prune -f 2>/dev/null | grep -i 'reclaimed' | sed 's/.*: //')"
+        printf '   - %-14s reclaimed %s\n' "$p" "${_pr:-0B}"
+    done < <(_cb_vm_list_json | cb_parse_vm_lines | awk -F'\t' '$1 ~ /^cb-/ && $2 == "Running" {print $1}')
 
     echo "🧻 fstrim on running claudebox VMs (return freed blocks to macOS)…"
     while IFS= read -r p; do
@@ -1159,7 +1166,7 @@ PROJECT
 VM / DISK
   vm ls                            list this fork's project VMs
   vm usage                         per-VM disk footprint (+ orphaned disks)
-  vm gc                            reclaim disk: prune orphaned disks + fstrim running VMs
+  vm gc                            reclaim disk: prune orphaned disks + old images + fstrim VMs
   down                             stop the project VM (keep its disk)
   destroy [--purge]                delete the VM (+ --purge: also its session/data dir)
 

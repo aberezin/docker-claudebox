@@ -34,8 +34,10 @@ Operability release — the day-to-day human/agent tooling on top of 2.0.0's cor
 - **`claudebox destroy --purge`** — also delete the project's host data dir (session
   history, `--continue`, auth/secrets sidecars, settings) for a clean slate.
 - **`claudebox vm usage` / `vm gc`** — per-VM disk footprint, and reclaim
-  (orphaned-disk prune + `fstrim` of running cb-* VMs). `vm destroy` also reaps the
-  lima datadisk `colima delete` leaks.
+  (orphaned-disk prune + **dangling (old) image prune** + `fstrim` of running cb-*
+  VMs). `make build` also prunes the image it just superseded, so repeated builds
+  don't pile up `<none>` images in cb-infra. `vm destroy` reaps the lima datadisk
+  `colima delete` leaks.
 - **`claudebox checkversion` severity** — classifies drift as MAJOR (must rebuild) /
   MINOR (should) / PATCH (optional).
 - **Auto image propagation** — a rebuilt image auto-reseeds into a running project VM

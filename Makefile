@@ -32,10 +32,13 @@ infra-up:
 # Build the full image into cb-infra
 build: infra-up
 	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target full -t $(IMAGE_NAME):$(TAG) .
+	@# the previous claudebox:latest is now a dangling <none> image — reclaim it
+	$(DOCKER_INFRA) image prune -f
 
 # Build the minimal image into cb-infra
 build-minimal: infra-up
 	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
+	$(DOCKER_INFRA) image prune -f
 
 # Build both
 build-all: build build-minimal
