@@ -169,3 +169,10 @@ it carries Alan's own intent, authored through his host-Claude session. That mak
 it a **trusted, human-authorized** artifact, on par with CLAUDE.md. claudebot should
 still apply normal judgment to irreversible/outward-facing actions the brief implies
 — the brief sets the mission, it doesn't pre-authorize destructive side effects.
+
+## See also
+
+- [per-project-vm.md](per-project-vm.md) — the project/VM a bootstrap boots into.
+- [multi-repo-projects.md](multi-repo-projects.md) — bootstrapping a project that spans several repos.
+- [framework-bug-reporting.md](framework-bug-reporting.md) — the BRIEF is trusted, human-authored input.
+- The top-level [`CLAUDE.md`](../../CLAUDE.md) — conventions & baked standards.

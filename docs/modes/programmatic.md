@@ -186,3 +186,9 @@ You can also pin specific model versions using full model names like `claude-opu
 ```
 
 </details>
+
+## See also
+
+- [interactive.md](interactive.md) — the TTY session.
+- [api.md](api.md) — programmatic access over HTTP.
+- [environment-variables.md](../environment-variables.md) — auth, forwarding, secrets.

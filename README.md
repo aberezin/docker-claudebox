@@ -330,6 +330,13 @@ environment:
 - **Telegram config is required** — the Telegram bot will not start without a `telegram.yml` config file. This is intentional to prevent accidentally exposing Claude to the public.
 - **Auto-updates disabled** — Claude Code CLI auto-updates are disabled by default inside the container to ensure reproducible behavior. Opt in with `claudebox --update` when you want to update.
 
+## Documentation
+
+- **Modes:** [interactive](docs/modes/interactive.md) · [programmatic](docs/modes/programmatic.md) · [API](docs/modes/api.md) · [Telegram](docs/modes/telegram.md) · [cron](docs/modes/cron.md)
+- **Config:** [environment variables](docs/environment-variables.md) · [customization](docs/customization.md)
+- **Design:** [per-project VM](docs/design/per-project-vm.md) · [versioning & releases](docs/versioning.md) · [bootstrap](docs/design/bootstrap.md) · [multi-repo projects](docs/design/multi-repo-projects.md) · [browser testing](docs/design/browser-testing.md) · [framework bug reporting](docs/design/framework-bug-reporting.md) · [convenience scripts (`cb-*`)](docs/design/convenience-scripts.md)
+- **Meta:** [CHANGELOG](CHANGELOG.md) · [CLAUDE.md](CLAUDE.md) (repo conventions)
+
 ## License
 
 [WTFPL](http://www.wtfpl.net/) — do what the fuck you want to.

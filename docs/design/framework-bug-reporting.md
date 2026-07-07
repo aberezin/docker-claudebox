@@ -59,3 +59,9 @@ workaround is exactly how DX bugs stay invisible.
 - Auto-filing GitHub issues (couples every container to `gh` auth + the repo).
 - De-duplication across reports (the maintainer triages; volume is expected to be
   low).
+
+## See also
+
+- [convenience-scripts.md](convenience-scripts.md) — `cb-report-bug` and the `cb-*` convention.
+- [browser-testing.md](browser-testing.md) — a common source of reportable tool friction.
+- The top-level [`CLAUDE.md`](../../CLAUDE.md) — when to file vs. work around.

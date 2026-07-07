@@ -229,3 +229,10 @@ A), not the extension.
 - ~~**B: dedicated vs real Chrome profile**~~ — resolved: **dedicated** profile
   (`--user-data-dir`), overridable via `CLAUDEBOX_CHROME`/env if you want your real
   one.
+
+## See also
+
+- [per-project-vm.md](per-project-vm.md) — the VM IP / `cb-net` networking browser tests rely on.
+- [convenience-scripts.md](convenience-scripts.md) — `cb-browser` and the `cb-*` convention.
+- [framework-bug-reporting.md](framework-bug-reporting.md) — report harness/browser-tool friction with `cb-report-bug`.
+- [environment-variables.md](../environment-variables.md) — `CLAUDEBOX_CDP_*` and related knobs.

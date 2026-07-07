@@ -149,3 +149,10 @@ To add a plugin, put its marketplace under `extraKnownMarketplaces` and enable i
 **Interactive alternative:** run `claudebox` and use `/plugin marketplace add <repo>` / `/plugin install <name>@<marketplace>`; it writes to the project's mounted `.claude`, so it persists.
 
 **Note:** the plugin cache (`~/.claude/plugins/cache/`) is per-project, so the same plugin enabled across N projects is fetched N times. For a single shared standard, prefer the baked default (scope #3).
+
+## See also
+
+- [environment-variables.md](environment-variables.md) — the full env-var surface.
+- [design/per-project-vm.md](design/per-project-vm.md) — per-project `~/.claude`, `init.d`, plugins.
+- [design/convenience-scripts.md](design/convenience-scripts.md) — adding `cb-*` helpers.
+- The top-level [`CLAUDE.md`](../CLAUDE.md).

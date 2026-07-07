@@ -169,3 +169,9 @@ jobs:
 | `DEBUG`                    | Set to `true` for per-tick + per-line debug logs             | _(none)_     |
 
 > Legacy `CLAUDE_MODE_CRON`, `CLAUDE_MODE_CRON_FILE`, `CLAUDE_WORKSPACE` are still accepted as fallbacks.
+
+## See also
+
+- [telegram.md](telegram.md) — pairs with cron for notifications.
+- [api.md](api.md) — the other long-running daemon.
+- [environment-variables.md](../environment-variables.md) — `CLAUDEBOX_MODE_CRON_*`.

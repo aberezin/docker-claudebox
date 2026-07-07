@@ -74,3 +74,9 @@ CLAUDEBOX_MOUNT_RO=/data:/data:ro claudebox "read the data"                # rea
 ```
 
 If the value contains `:`, it is passed directly as Docker `-v` syntax. Otherwise, the same path is used on both host and container sides.
+
+## See also
+
+- [design/per-project-vm.md](design/per-project-vm.md) — data dir, secrets, VM sizing.
+- [modes/interactive.md](modes/interactive.md) · [modes/programmatic.md](modes/programmatic.md) · [modes/api.md](modes/api.md) — where these vars apply.
+- [versioning.md](versioning.md) — `CLAUDEBOX_VERSION` and drift.

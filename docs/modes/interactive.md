@@ -25,3 +25,10 @@ claudebox setup-token    # interactive OAuth token setup
 claudebox stop           # stop the running interactive container for this workspace
 claudebox clear-session  # delete session history for this workspace
 ```
+
+## See also
+
+- [programmatic.md](programmatic.md) — non-interactive `-p` runs.
+- [api.md](api.md) — the HTTP/OpenAI/MCP server.
+- [environment-variables.md](../environment-variables.md) — auth and in-container env.
+- The [README](../../README.md) — overview of all modes.

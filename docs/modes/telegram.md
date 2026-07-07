@@ -93,3 +93,9 @@ Claude can send files back by including `[SEND_FILE: relative/path]` in its resp
 ## Combined with cron mode
 
 If you also set `CLAUDEBOX_MODE_CRON=1` in the same container, finished cron jobs are posted to Telegram and you can **reply to those messages** to interrogate the run with full job context auto-injected (job name, instruction, result). The whole chat also gets a rolling summary of recent cron runs in its system prompt so Claude can answer cron questions anywhere in the conversation. See [Cron Mode → Combined cron + telegram mode](cron.md#combined-cron--telegram-mode) for the full setup.
+
+## See also
+
+- [cron.md](cron.md) — scheduled runs that can notify Telegram.
+- [api.md](api.md) — the HTTP daemon mode.
+- [environment-variables.md](../environment-variables.md) — bot token and gating.

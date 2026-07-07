@@ -460,3 +460,11 @@ run all `docker`/`colima` calls against that throwaway profile's context.
 - VM count — machine-wide `warn_max` / `hard_max` in `~/.config/claudebox/config.yml`
   with baked-in defaults.
 - Test suite — runs against a **dedicated throwaway Colima profile**.
+
+## See also
+
+- [versioning.md](../versioning.md) — `version` / `checkversion` and host↔image drift.
+- [multi-repo-projects.md](multi-repo-projects.md) — one project/VM spanning several repos.
+- [bootstrap.md](bootstrap.md) — scaffolding a project onto a VM.
+- [browser-testing.md](browser-testing.md) — reaching workloads by VM IP / `cb-net`.
+- [environment-variables.md](../environment-variables.md) — data dir, image, and VM knobs.

@@ -269,3 +269,9 @@ If your MCP client does not support custom headers, you can pass the API token a
 | `read_file`   | Read the contents of a file from the workspace                                                                                                                          |
 | `write_file`  | Write content to a file in the workspace (creates parent directories automatically)                                                                                     |
 | `delete_file` | Delete a file from the workspace                                                                                                                                        |
+
+## See also
+
+- [programmatic.md](programmatic.md) — one-shot CLI runs.
+- [cron.md](cron.md) & [telegram.md](telegram.md) — the other daemon modes.
+- [environment-variables.md](../environment-variables.md) — `CLAUDEBOX_MODE_API_*` and auth.
