@@ -204,7 +204,9 @@ RUN curl https://pyenv.run | bash && \
     echo 'export PATH="$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PATH"' >> /etc/profile.d/pyenv.sh
 
 # python linters/formatters
-RUN pip install --no-cache-dir flake8 black isort autoflake pyright mypy vulture
+# pyright is installed via npm above (fully build-time baked, provides pyright-langserver
+# for the pyright-lsp plugin); the pip package only lazily downloads node at first run.
+RUN pip install --no-cache-dir flake8 black isort autoflake mypy vulture
 
 # python testing
 RUN pip install --no-cache-dir pytest pytest-cov

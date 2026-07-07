@@ -219,8 +219,9 @@ Use `~/.claude/init.d/*.sh` hooks (see [Init Hooks](docs/customization.md#init-h
 
 - **Go 1.26.1** with the full toolchain — golangci-lint, gopls, delve, staticcheck, gofumpt, gotests, impl, gomodifytags
 - **Python 3.12.11** via pyenv — flake8, black, isort, autoflake, pyright, mypy, vulture, pytest, poetry, pipenv, plus common libraries (requests, beautifulsoup4, lxml, pyyaml, toml)
-- **Node.js LTS** — eslint, prettier, typescript, ts-node, yarn, pnpm, nodemon, pm2, framework CLIs (React, Vue, Angular), newman, http-server, serve, lighthouse, storybook
+- **Node.js LTS** — eslint, prettier, typescript, typescript-language-server, ts-node, yarn, pnpm, nodemon, pm2, framework CLIs (React, Vue, Angular), newman, http-server, serve, lighthouse, storybook
 - **C/C++** — gcc, g++, make, cmake, clang-format, valgrind, gdb, strace, ltrace
+- **Language servers (for the `*-lsp` code-intelligence plugins):** `gopls` (Go), `typescript-language-server` (TS/JS), `pyright` (Python) — baked so their plugins work once enabled (via a [profile](docs/design/profiles.md) or init.d). Heavy/niche servers install per profile.
 
 **DevOps and infrastructure:**
 
@@ -242,6 +243,9 @@ Use `~/.claude/init.d/*.sh` hooks (see [Init Hooks](docs/customization.md#init-h
 - Git identity auto-configured from environment variables
 - Claude Code CLI with auto-updates disabled by default (opt in with `--update`)
 - Workspace trust dialog pre-accepted — no interactive prompts
+- Baked **`cb-*` helper commands** — `cb-browser` (self-contained browser testing), `cb-report-bug` (file a framework bug to the host), `cb-help` (list them). See [convenience scripts](docs/design/convenience-scripts.md).
+- **Profiles** — opt-in tool bundles (`profiles: [typescript, python, …]` in `.claudebox/config.yml`) that enable code-intelligence plugins on first run. See [profiles](docs/design/profiles.md).
+- A container-side **`/claudebox` skill** so the claudebot can self-report its harness version, tools, and environment.
 - Custom scripts via `~/.claude/bin` (added to PATH automatically)
 - Init hooks via `~/.claude/init.d/*.sh` (run once on first container create)
 - Always-active skills via `~/.claude/.always-skills/` (injected into every invocation)
