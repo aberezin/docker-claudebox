@@ -181,7 +181,9 @@ RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.31/deb/Release.key | gpg --d
 RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # node.js tools (global)
-RUN npm install -g eslint prettier typescript ts-node @typescript-eslint/parser @typescript-eslint/eslint-plugin
+# typescript-language-server: the LSP the `typescript-lsp` Claude Code plugin needs on
+# PATH (the plugin ships no binary). Baked here so it's universal, like Go's gopls.
+RUN npm install -g eslint prettier typescript typescript-language-server ts-node @typescript-eslint/parser @typescript-eslint/eslint-plugin
 RUN npm install -g nodemon pm2 yarn pnpm
 RUN npm install -g create-react-app @vue/cli @angular/cli express-generator
 RUN npm install -g newman http-server serve lighthouse @storybook/cli

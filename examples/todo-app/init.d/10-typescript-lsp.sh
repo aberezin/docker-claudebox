@@ -3,7 +3,9 @@
 #
 # This is a Node + TypeScript project, so the TypeScript language-server plugin gives
 # claudebot real code intelligence (go-to-definition, diagnostics, safe refactors)
-# while it works. init.d hooks run ONCE on first container create, as root — so we
+# while it works. The plugin ships NO binary — it needs `typescript-language-server` on
+# PATH; the full image bakes that (and `typescript`) so this hook only has to turn the
+# plugin on. init.d hooks run ONCE on first container create, as root — so we
 # drop to the `claude` user to install into the mounted per-project ~/.claude with the
 # right ownership. Best-effort: if the marketplace can't be reached, the build still
 # proceeds. See docs/customization.md (Init hooks + Plugins).

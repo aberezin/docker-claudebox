@@ -16,6 +16,16 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.3.0] — 2026-07-07 _(fork)_
+
+### Added / Fixed
+- **Bake `typescript-language-server`** into the full image (next to `typescript`).
+  The official `typescript-lsp` Claude Code plugin ships **no binary** — it needs the
+  language server on PATH — so it was silently non-functional even where installed.
+  Now baked (like Go's `gopls`), so a TS/node claudebot gets working code intelligence
+  once the plugin is enabled. Fixes the `examples/todo-app` TS-LSP hook, which
+  installed the plugin but not its required server.
+
 ## [2.2.0] — 2026-07-06 _(fork)_
 
 Container-side convenience: a discoverable helper convention + an inside-the-container
