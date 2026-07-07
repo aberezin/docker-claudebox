@@ -529,6 +529,25 @@ if [ -f "$SECRETS_FILE" ]; then
 	CMD="$CMD && { [ -n \"\${GH_TOKEN:-}\" ] && gh auth setup-git >/dev/null 2>&1 || true; }"
 fi
 
+# load the host CDP bridge URL the same durable way (see wrapper.sh: browser-bridge up
+# writes a marker -> this sidecar). Read from the mount, not `docker run -e`, so an
+# already-created container picks up `browser-bridge up` on restart. Empty = bridge
+# down: UNSET so a stale URL baked in at `docker run` time doesn't linger.
+CDP_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-cdp"
+dbg "cdp file: $CDP_FILE (exists: $([ -f "$CDP_FILE" ] && echo yes || echo no))"
+if [ -f "$CDP_FILE" ]; then
+	while IFS='=' read -r name value; do
+		case "$name" in ''|\#*) continue ;; esac
+		if [ -n "$value" ]; then
+			dbg "cdp: loading $name from file"
+			CMD="$CMD && export $name=$(printf '%q' "$value")"
+		else
+			dbg "cdp: clearing $name (empty in file)"
+			CMD="$CMD && unset $name"
+		fi
+	done < "$CDP_FILE"
+fi
+
 ARGS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-args"
 UPDATE_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-update"
 

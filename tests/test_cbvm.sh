@@ -98,6 +98,20 @@ case "$(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" in
     *) bad "default profile path unexpected: $(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" ;;
 esac
 
+echo "--- CDP bridge sidecar contract (wrapper writes -cdp, entrypoint re-reads it) ---"
+# Regression for the 2.5.2 bug: CLAUDEBOX_HOST_CDP_URL was injected only via
+# `docker run -e`, so an already-running container never saw `browser-bridge up`.
+# The fix persists it to a durable `.<container>-cdp` sidecar the entrypoint re-reads
+# each start. This is a cross-file naming contract (like -auth/-secrets) — assert both
+# halves agree so they can't silently drift apart.
+ENTRYP="$SCRIPT_DIR/../entrypoint.sh"
+if grep -q 'container_name}${_crole}-cdp' "$WRAPPER"; then ok "wrapper writes -cdp sidecar (all roles)"; else bad "wrapper no longer writes the -cdp sidecar"; fi
+if grep -q '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP"; then ok "entrypoint re-reads the -cdp sidecar"; else bad "entrypoint no longer reads the -cdp sidecar"; fi
+# empty sidecar must UNSET (bridge-down must clear a stale URL, not leave it exported)
+if grep -A12 '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP" | grep -q 'unset \$name'; then ok "entrypoint unsets CDP url when sidecar empty"; else bad "entrypoint does not unset on empty -cdp (stale bridge url would linger)"; fi
+# wrapper writes the sidecar unconditionally (mirror), so bridge-down -> empty on next run
+if grep -q "printf 'CLAUDEBOX_HOST_CDP_URL=%s\\\\n' \"\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
+
 echo "--- cb_project_profiles (config 'profiles:' — flow + block + none) ---"
 PT="$(mktemp -d)"; mkdir -p "$PT/f/.claudebox" "$PT/b/.claudebox" "$PT/n/.claudebox"
 printf 'id: aaaa1111\nprofiles: [typescript, python]\nvm:\n  cpu: 4\n' > "$PT/f/.claudebox/config.yml"

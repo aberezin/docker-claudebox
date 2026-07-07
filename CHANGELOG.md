@@ -16,6 +16,22 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.5.2] — 2026-07-07 _(fork)_
+
+### Fixed
+- **`browser-bridge up` now reaches an already-running claudebot.** The CDP bridge URL
+  (`CLAUDEBOX_HOST_CDP_URL`) was injected **only** via `docker run -e`, so it never
+  landed in a container that already existed — a restart is `docker start`, which can't
+  add env, and there was no durable fallback (unlike auth/secrets). Bringing a bridge up
+  had no effect until the container was recreated. Now the wrapper also writes the URL
+  to a durable `.<container>-cdp` sidecar (empty when the bridge is down) that the
+  entrypoint re-reads on every start — so `browser-bridge up`/`down` take effect on the
+  next plain `claudebox` run, no recreation needed. The sidecar is a derived mirror of
+  the marker (rewritten each invocation, self-heals to empty, removed by `destroy
+  --purge`) — see [docs/design/browser-testing.md](docs/design/browser-testing.md).
+  **Needs `make build`** (entrypoint change); the rebuild auto-recreates existing
+  containers on next run.
+
 ## [2.5.1] — 2026-07-07 _(fork)_
 
 ### Fixed

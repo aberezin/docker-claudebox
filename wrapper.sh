@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.5.1"
+CLAUDEBOX_VERSION="2.5.2"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -994,7 +994,7 @@ PYEOF
     echo "   ⚠️  targets must be reachable FROM THIS MAC (VM IP or localhost) — the human's"
     echo "       Chrome can't resolve cb-net container names; use shot/script for those."
     echo "   profile: $profile   (override with CLAUDEBOX_CDP_PROFILE)"
-    echo "   restart the claudebox session so the container picks up the bridge URL."
+    echo "   restart claudebot (just re-run \`claudebox\`) to pick up the bridge URL."
     echo "   stop:  claudebox browser-bridge down"
     echo "   ⚠️  this hands claudebot full control of that Chrome instance (dedicated profile)."
 }
@@ -1460,11 +1460,20 @@ DOCKER_ARGS=(
 
 # Approach B: if a CDP bridge is up for this project, inject its URL so claudebot
 # can drive the human's Chrome (cb-browser cdp). Marker written by browser-bridge up.
+# The -e injection only reaches a FRESH container (docker run); an already-created
+# container restarted via `docker start` never sees it. So ALSO persist the URL to a
+# per-role sidecar the entrypoint re-reads on every start (same durability pattern as
+# auth/secrets) — this is what makes `browser-bridge up` take effect on the running
+# claudebot without recreating it. Empty sidecar = bridge down -> entrypoint unsets it.
 _cdp_marker="$(cb_cdp_marker "$CB_PROJECT_ID")"
-if [ -f "$_cdp_marker" ]; then
-    DOCKER_ARGS+=(-e "CLAUDEBOX_HOST_CDP_URL=$(cat "$_cdp_marker")")
-    dbg "CDP bridge URL injected: $(cat "$_cdp_marker")"
+_cdp_url=""; [ -f "$_cdp_marker" ] && _cdp_url="$(cat "$_cdp_marker" 2>/dev/null)"
+if [ -n "$_cdp_url" ]; then
+    DOCKER_ARGS+=(-e "CLAUDEBOX_HOST_CDP_URL=$_cdp_url")
+    dbg "CDP bridge URL injected: $_cdp_url"
 fi
+for _crole in "" _prog _cron; do
+    printf 'CLAUDEBOX_HOST_CDP_URL=%s\n' "$_cdp_url" > "$CLAUDE_DIR/.${container_name}${_crole}-cdp"
+done
 
 # Shared framework-bug drop dir — mount it into every container so cb-report-bug can
 # file suspected FRAMEWORK bugs (wrapper/entrypoint/image/networking) to one place.

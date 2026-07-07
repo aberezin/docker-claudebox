@@ -119,11 +119,28 @@ mechanism is the **Chrome DevTools Protocol**, not the extension:
 
 The fork provides the host-side helper `claudebox browser-bridge up`, which
 launches the dedicated debug Chrome + the Python forwarder and writes the reachable
-CDP URL to a per-project marker (`~/.config/claudebox/projects/<id>/.cdp-url`); the
-wrapper injects it as `CLAUDEBOX_HOST_CDP_URL` on the next `docker run`. `down`
-kills both and removes the marker. All userspace — **no sudo**. (One shared bridge —
-single Chrome, fixed forwarder port — serves every project, so the profile is global,
-not per-id.)
+CDP URL to a per-project **marker** (`~/.config/claudebox/projects/<id>/.cdp-url`).
+The wrapper exposes it as `CLAUDEBOX_HOST_CDP_URL` two ways: via `docker run -e` for
+a freshly-created container, **and** — because `-e` never reaches a container that
+already exists (a restart is `docker start`, which can't add env) — by writing a
+durable **`-cdp` sidecar** the entrypoint re-reads on every start. So a bridge you
+bring up (or down) takes effect on the *already-running* claudebot on its next
+`claudebox` invocation, no container recreation required. `down` kills both and
+removes the marker. All userspace — **no sudo**. (One shared bridge — single Chrome,
+fixed forwarder port — serves every project, so the profile is global, not per-id.)
+
+**Marker vs. sidecar — lifecycle (why the sidecar isn't stale junk).** The marker is
+the *source of truth*, owned explicitly: `browser-bridge up` creates it, `browser-bridge
+down` deletes it. The `-cdp` sidecar (`~/.claude/.<container>-cdp`, one per container
+role) is a *derived mirror* the wrapper **rewrites on every `claudebox` invocation** —
+the URL when the marker is present, **empty** when it isn't (empty → the entrypoint
+*unsets* `CLAUDEBOX_HOST_CDP_URL`, so a stale value baked in at `docker run` can't
+linger). Nobody has to garbage-collect it: it's a fixed set of files that never
+accumulate, self-heal to empty when the bridge is down, and are removed wholesale by
+`claudebox destroy --purge`. The only lag is the usual restart boundary — a container
+already running keeps the old value until its next start re-reads the file. This is the
+same durability pattern as the auth/secrets sidecars (see
+[per-project-vm.md](per-project-vm.md)).
 
 **Target-reachability caveat (esp. for websocket apps).** In Approach B the browser
 runs *on the Mac*, so the `<url>` you pass to `cb-browser cdp` — and every websocket
@@ -158,10 +175,10 @@ all required for B:
   `claudebox browser-bridge up` on the Mac, and the container only sees a CDP URL
   when the marker is present. Starting the bridge is the per-session opt-in.
   ```
-  claudebox browser-bridge up      # launch debug Chrome + forwarder, write marker
-  # ...restart the claudebox session so the container picks up CLAUDEBOX_HOST_CDP_URL...
+  claudebox browser-bridge up      # launch debug Chrome + forwarder, write marker + sidecar
+  # ...restart the claudebot session (plain `claudebox` — docker start re-reads the sidecar)...
   cb-browser cdp https://example.com   # (inside claudebot) drive your Chrome
-  claudebox browser-bridge down    # kill both, remove marker
+  claudebox browser-bridge down    # kill both, remove marker (sidecar blanks on next run)
   ```
   Overridable via env: `CLAUDEBOX_CDP_BIND` (default `192.168.64.1`),
   `CLAUDEBOX_CDP_PORT` (`9223`), `CLAUDEBOX_CHROME` (Chrome binary path).
@@ -170,8 +187,10 @@ all required for B:
 
 - Host: `wrapper.sh` — `cb_bridge_up` / `cb_bridge_down` and the `browser-bridge
   up|down` subcommand; a per-project marker at
-  `~/.config/claudebox/projects/<id>/.cdp-url`; the wrapper injects
-  `CLAUDEBOX_HOST_CDP_URL` into the container when the marker exists.
+  `~/.config/claudebox/projects/<id>/.cdp-url`; the wrapper exposes
+  `CLAUDEBOX_HOST_CDP_URL` both via `docker run -e` (fresh container) and via a
+  durable `.<container>-cdp` sidecar the entrypoint re-reads each start (so an
+  already-running container picks up the bridge on restart, no recreation).
 - Container: `cb-browser cdp <url>` — `connectOverCDP($CLAUDEBOX_HOST_CDP_URL)` on a
   `--network host` container, navigates your Chrome, drops a screenshot in the
   workspace.
