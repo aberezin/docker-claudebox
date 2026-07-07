@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.3.0"
+CLAUDEBOX_VERSION="2.4.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -158,6 +158,7 @@ vm:
   autostop: false         # stop the VM when the harness container exits
 network:
   hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'claudebox net'); blank = raw IP
+# profiles: []            # tool bundles to enable, e.g. [typescript, python] — list them: 'claudebox profiles'
 CBSAMPLE
 }
 
@@ -182,6 +183,7 @@ vm:
   autostop: false         # stop the VM when the harness container exits
 network:
   hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'claudebox net'); blank = raw IP
+# profiles: []            # tool bundles to enable, e.g. [typescript, python] — list them: 'claudebox profiles'
 CBCONF
     fi
     cb_write_sample "$root"
@@ -780,6 +782,46 @@ cb_wait_reachable() {   # $1=profile  $2=max_seconds (default 20)
 # project network.hostname from config (empty/blank if unset)
 cb_project_hostname() { _cb_yaml_get "$(cb_project_config_path "$1")" network.hostname; }
 
+# read the `profiles:` list from .claudebox/config.yml -> space-separated names. Supports
+# flow style (`profiles: [typescript, go]`) and block style (`profiles:` then `- name`).
+# Names are validated to profile-name chars; the entrypoint maps each to a baked installer.
+cb_project_profiles() {
+    local cfg; cfg="$(cb_project_config_path "$1")"
+    [ -f "$cfg" ] || return 0
+    awk '
+        /^[[:space:]]*profiles:[[:space:]]*\[/ {
+            s=$0; sub(/^[^[]*\[/,"",s); sub(/\].*/,"",s);
+            n=split(s,a,","); for(i=1;i<=n;i++){ gsub(/[^A-Za-z0-9_-]/,"",a[i]); if(a[i]!="") print a[i] }
+            inblock=0; next
+        }
+        /^[[:space:]]*profiles:[[:space:]]*(#.*)?$/ { inblock=1; next }
+        inblock && /^[[:space:]]*-[[:space:]]*/ { s=$0; sub(/^[[:space:]]*-[[:space:]]*/,"",s); sub(/[[:space:]]*#.*/,"",s); gsub(/[^A-Za-z0-9_-]/,"",s); if(s!="") print s; next }
+        inblock && /^[[:space:]]*(#.*)?$/ { next }
+        inblock { inblock=0 }
+    ' "$cfg" | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//'
+}
+
+# `claudebox profiles` — show this project's enabled profiles and the ones available in
+# the image (queried from cb-infra's image, best-effort). Read-only.
+cb_profiles_cmd() {
+    local root="$1" enabled avail
+    enabled="$(cb_project_profiles "$root")"
+    echo "enabled for this project (.claudebox/config.yml → profiles:):"
+    if [ -n "$enabled" ]; then printf '  %s\n' $enabled
+    else echo "  (none — add e.g.  profiles: [typescript, python]  to .claudebox/config.yml)"; fi
+    echo ""
+    avail="$(docker --context "$(cb_infra_context)" run --rm --entrypoint sh "$CLAUDE_IMAGE" -c \
+        'for f in /usr/local/lib/claudebox/profiles/*.sh; do [ -f "$f" ] || continue; printf "%s\t%s\n" "$(basename "$f" .sh)" "$(sed -n "s/^# summary: //p" "$f" | head -1)"; done' 2>/dev/null)"
+    if [ -n "$avail" ]; then
+        echo "available (baked in the image):"
+        printf '%s\n' "$avail" | awk -F'\t' '{printf "  %-14s %s\n", $1, $2}'
+    else
+        echo "available: (build the image to list — see docs/design/profiles.md)"
+    fi
+    echo ""
+    echo "enable: edit .claudebox/config.yml, then run 'claudebox' (installed once, on first enable)."
+}
+
 # cb_set_hostname ROOT NAME — set network.hostname in .claudebox/config.yml (so
 # `claudebox net` can then print the /etc/hosts line). Validated to hostname chars;
 # portable rewrite via temp file (no sed -i). $1=root $2=name.
@@ -1158,6 +1200,7 @@ USAGE
 PROJECT
   bootstrap [--gh-token] [...]      scaffold a project + mission brief (see --help on it)
   info | status                    at-a-glance: versions, paths, VM, network
+  profiles                         list enabled (config \`profiles:\`) + available tool bundles
   ip                               the project VM's reachable IP + how to browse
   net [<hostname>]                 same as ip; with a name, sets network.hostname + prints
                                    the /etc/hosts line so you can browse http://<name>:<port>
@@ -1209,6 +1252,10 @@ HELP
     info|status)
         # human-facing at-a-glance: versions, paths, VM + network (read-only, fast).
         cb_info "$CB_PROJECT_ROOT"; exit $?
+        ;;
+    profiles)
+        # list this project's enabled profiles + the ones available in the image.
+        cb_profiles_cmd "$CB_PROJECT_ROOT"; exit $?
         ;;
     down)
         _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
@@ -1437,6 +1484,18 @@ if [ -f "$SECRETS_SRC" ]; then
         chmod 600 "$CLAUDE_DIR/.${container_name}${_srole}-secrets"
     done
     dbg "wrote secrets sidecars from $SECRETS_SRC"
+fi
+
+# ── profiles: enabled tool bundles the entrypoint installs on first enable ────
+# Write the project's `profiles:` list to a sidecar the entrypoint reads each start and
+# installs from (once per profile, marker-guarded — see docs/design/profiles.md). Read
+# from the mount so adding a profile takes effect on the next run without recreating.
+_profiles="$(cb_project_profiles "$CB_PROJECT_ROOT")"
+if [ -n "$_profiles" ]; then
+    printf '%s\n' "$_profiles" > "$CLAUDE_DIR/.profiles"
+    dbg "enabled profiles: $_profiles"
+else
+    rm -f "$CLAUDE_DIR/.profiles" 2>/dev/null || true
 fi
 
 # updates are disabled by default; pass --update to opt in

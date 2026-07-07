@@ -334,7 +334,7 @@ environment:
 
 - **Modes:** [interactive](docs/modes/interactive.md) · [programmatic](docs/modes/programmatic.md) · [API](docs/modes/api.md) · [Telegram](docs/modes/telegram.md) · [cron](docs/modes/cron.md)
 - **Config:** [environment variables](docs/environment-variables.md) · [customization](docs/customization.md)
-- **Design:** [per-project VM](docs/design/per-project-vm.md) · [versioning & releases](docs/versioning.md) · [bootstrap](docs/design/bootstrap.md) · [multi-repo projects](docs/design/multi-repo-projects.md) · [browser testing](docs/design/browser-testing.md) · [framework bug reporting](docs/design/framework-bug-reporting.md) · [convenience scripts (`cb-*`)](docs/design/convenience-scripts.md)
+- **Design:** [per-project VM](docs/design/per-project-vm.md) · [versioning & releases](docs/versioning.md) · [bootstrap](docs/design/bootstrap.md) · [multi-repo projects](docs/design/multi-repo-projects.md) · [profiles](docs/design/profiles.md) · [browser testing](docs/design/browser-testing.md) · [framework bug reporting](docs/design/framework-bug-reporting.md) · [convenience scripts (`cb-*`)](docs/design/convenience-scripts.md)
 - **Meta:** [CHANGELOG](CHANGELOG.md) · [CLAUDE.md](CLAUDE.md) (repo conventions)
 
 ## License

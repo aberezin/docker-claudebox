@@ -16,6 +16,18 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.4.0] — 2026-07-07 _(fork)_
+
+### Added
+- **Profile system** — opt-in tool bundles per project. Declare `profiles: [typescript,
+  python, go]` in `.claudebox/config.yml`; the entrypoint installs each matching baked
+  installer (`/usr/local/lib/claudebox/profiles/<name>.sh`) once on first enable
+  (marker-guarded, retries on offline failure), as the `claude` user. Ships
+  `typescript` / `python` / `go` profiles (enable the respective `*-lsp` plugin; servers
+  are baked). `claudebox profiles` lists enabled + available; `init.d/*.sh` stays the
+  escape hatch. Policy — bake small/common LSP binaries, install heavy/niche per profile;
+  the profile hides which. See [docs/design/profiles.md](docs/design/profiles.md).
+
 ## [2.3.0] — 2026-07-07 _(fork)_
 
 ### Added / Fixed

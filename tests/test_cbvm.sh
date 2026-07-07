@@ -98,6 +98,16 @@ case "$(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" in
     *) bad "default profile path unexpected: $(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" ;;
 esac
 
+echo "--- cb_project_profiles (config 'profiles:' — flow + block + none) ---"
+PT="$(mktemp -d)"; mkdir -p "$PT/f/.claudebox" "$PT/b/.claudebox" "$PT/n/.claudebox"
+printf 'id: aaaa1111\nprofiles: [typescript, python]\nvm:\n  cpu: 4\n' > "$PT/f/.claudebox/config.yml"
+printf 'id: bbbb2222\nprofiles:\n  - typescript   # ts\n  - go\nnetwork:\n  hostname:\n' > "$PT/b/.claudebox/config.yml"
+printf 'id: cccc3333\nvm:\n  cpu: 4\n' > "$PT/n/.claudebox/config.yml"
+eq "flow style"  "$(cb_project_profiles "$PT/f")" "python typescript"
+eq "block style" "$(cb_project_profiles "$PT/b")" "go typescript"
+eq "none"        "$(cb_project_profiles "$PT/n")" ""
+rm -rf "$PT"
+
 echo "--- versioning (host wrapper must match the VERSION file) ---"
 VFILE="$(cat "$SCRIPT_DIR/../VERSION" 2>/dev/null | tr -d '[:space:]')"
 eq "wrapper CLAUDEBOX_VERSION == VERSION file" "$CLAUDEBOX_VERSION" "$VFILE"

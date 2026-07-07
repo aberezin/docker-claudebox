@@ -89,10 +89,14 @@ COPY jsonpipe.py /home/claude/jsonpipe.py
 COPY cb-browser /usr/local/bin/cb-browser
 COPY cb-report-bug /usr/local/bin/cb-report-bug
 COPY cb-help /usr/local/bin/cb-help
+# Profile installers: named tool bundles a project opts into (.claudebox config
+# `profiles:`); the entrypoint runs the matching one on first enable. See
+# docs/design/profiles.md.
+COPY profiles /usr/local/lib/claudebox/profiles
 # Bake the harness changelog OUTSIDE the mount (/home/claude/.claude is shadowed) so
 # claudebot can read it; the entrypoint points claudebot here and flags version bumps.
 COPY CHANGELOG.md /home/claude/CHANGELOG.md
-RUN chmod +x /home/claude/entrypoint.sh /usr/local/bin/cb-browser /usr/local/bin/cb-report-bug /usr/local/bin/cb-help
+RUN chmod +x /home/claude/entrypoint.sh /usr/local/bin/cb-browser /usr/local/bin/cb-report-bug /usr/local/bin/cb-help /usr/local/lib/claudebox/profiles/*.sh
 
 ENTRYPOINT ["/home/claude/entrypoint.sh"]
 

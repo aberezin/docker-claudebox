@@ -615,6 +615,34 @@ _maybe_install_default_plugin() {
 }
 _maybe_install_default_plugin "$@"
 
+# Install the project's enabled profiles (wrapper writes the list to ~/.claude/.profiles
+# from the .claudebox config `profiles:` field). Each is a baked installer at
+# /usr/local/lib/claudebox/profiles/<name>.sh; run once per profile, marker set only on
+# success (so an offline failure retries next start), as the `claude` user, best-effort.
+# See docs/design/profiles.md.
+_install_profiles() {
+	[ "${1:-}" = "setup-token" ] && return 0
+	local pf="$CLAUDE_CONFIG_DIR/.profiles" lib="/usr/local/lib/claudebox/profiles" prof marker
+	[ -f "$pf" ] || return 0
+	for prof in $(cat "$pf" 2>/dev/null); do
+		case "$prof" in ''|*[!A-Za-z0-9_-]*) continue ;; esac
+		marker="$CLAUDE_CONFIG_DIR/.profile-$prof"
+		[ -f "$marker" ] && continue
+		if [ ! -x "$lib/$prof.sh" ]; then echo "claudebox: unknown profile '$prof' (no $lib/$prof.sh)" >&2; continue; fi
+		dbg "installing profile: $prof"
+		if timeout 120 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
+			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:/home/claude/.claude/bin:\$PATH; exec '$lib/$prof.sh'" \
+			>/dev/null 2>&1
+		then
+			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
+			echo "claudebox: enabled profile '$prof'" >&2
+		else
+			echo "claudebox: profile '$prof' install failed (offline?) — retries next start" >&2
+		fi
+	done
+}
+_install_profiles "$@"
+
 if [ "${1:-}" = "setup-token" ]; then
 	dbg "mode: setup-token"
 	CMD="$CMD && exec claude setup-token"
