@@ -19,12 +19,13 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [2.3.0] — 2026-07-07 _(fork)_
 
 ### Added / Fixed
-- **Bake `typescript-language-server`** into the full image (next to `typescript`).
-  The official `typescript-lsp` Claude Code plugin ships **no binary** — it needs the
-  language server on PATH — so it was silently non-functional even where installed.
-  Now baked (like Go's `gopls`), so a TS/node claudebot gets working code intelligence
-  once the plugin is enabled. Fixes the `examples/todo-app` TS-LSP hook, which
-  installed the plugin but not its required server.
+- **Bake the common LSP servers** into the full image so their Claude Code `*-lsp`
+  plugins work — the plugins ship **no binary** (just a README descriptor), so they
+  were silently non-functional without the server on PATH. Added
+  **`typescript-language-server`** (TS/JS) and **`pyright`** (Python), joining the
+  already-baked **`gopls`** (Go). Policy: small, common language servers are baked
+  universally; heavy/niche ones stay per-profile (see task #14). Fixes the
+  `examples/todo-app` TS-LSP hook, which installed the plugin but not its server.
 
 ## [2.2.0] — 2026-07-06 _(fork)_
 
