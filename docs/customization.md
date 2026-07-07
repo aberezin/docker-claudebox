@@ -33,6 +33,16 @@ chmod +x ~/.claude/init.d/setup.sh
 
 This is particularly useful with the minimal image — pre-install your tools once on first run so Claude doesn't burn tokens and time running `apt-get` on every session.
 
+## Profiles (opt-in tool bundles)
+
+For **common** tooling — especially language servers — prefer **profiles** over a hand-written init.d hook. Add them to `.claudebox/config.yml`:
+
+```yaml
+profiles: [typescript, python]   # run `claudebox profiles` to list available ones
+```
+
+The harness ships curated installers (e.g. `typescript` / `python` / `go` enable the matching `*-lsp` plugin; their servers are baked into the image), installs each once on first enable, and re-checks on later runs so adding a profile doesn't need a fresh container. `init.d` remains the escape hatch for anything a profile doesn't cover. Full details, and how to add your own profile, in [design/profiles.md](design/profiles.md).
+
 ## Always-active skills (`~/.claude/.always-skills`)
 
 Skill files placed in `~/.claude/.always-skills/` are automatically injected into the system prompt of every Claude invocation — interactive, programmatic, API, OpenAI adapter, MCP, Telegram, all of them. No slash commands, no per-request headers, no configuration needed.

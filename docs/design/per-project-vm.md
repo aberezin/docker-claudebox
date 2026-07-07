@@ -183,6 +183,7 @@ vm:
   autostop: false         # stop the VM when the harness container exits (restart is slow)
 network:
   hostname: cb-projectA   # optional /etc/hosts alias → the VM's current IP; blank = use raw IP
+profiles: [typescript]    # optional opt-in tool bundles; see docs/design/profiles.md
 ```
 
 Defaults written into the sample: 4 CPU / 8 GiB / 60 GiB, `autostop: false`.
