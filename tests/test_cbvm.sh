@@ -108,6 +108,12 @@ eq "block style" "$(cb_project_profiles "$PT/b")" "go typescript"
 eq "none"        "$(cb_project_profiles "$PT/n")" ""
 rm -rf "$PT"
 
+echo "--- cb_in_dotclaudebox (workspace guard predicate) ---"
+cb_in_dotclaudebox /Users/x/proj/.claudebox     && ok "flags .claudebox dir"        || bad "missed .claudebox"
+cb_in_dotclaudebox /Users/x/proj/.claudebox/sub && ok "flags .claudebox subpath"    || bad "missed .claudebox/sub"
+if cb_in_dotclaudebox /Users/x/proj;       then bad "false positive: project root"; else ok "project root not flagged"; fi
+if cb_in_dotclaudebox /Users/x/proj/apps;  then bad "false positive: normal subdir"; else ok "normal subdir not flagged"; fi
+
 echo "--- versioning (host wrapper must match the VERSION file) ---"
 VFILE="$(cat "$SCRIPT_DIR/../VERSION" 2>/dev/null | tr -d '[:space:]')"
 eq "wrapper CLAUDEBOX_VERSION == VERSION file" "$CLAUDEBOX_VERSION" "$VFILE"

@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.5.0"
+CLAUDEBOX_VERSION="2.5.1"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -100,6 +100,37 @@ cb_gen_id() {
 cb_project_root() {
     local start="${1:-$PWD}"
     git -C "$start" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$start"
+}
+
+# true if a path is inside a `.claudebox` metadata dir — i.e. an accidental workspace.
+cb_in_dotclaudebox() { case "${1:-$PWD}" in */.claudebox|*/.claudebox/*) return 0 ;; *) return 1 ;; esac; }
+
+# Guard against launching the claudebot with `.claudebox` as its workspace (running
+# `claudebox` from inside that metadata dir). The project VM is still correct (root is the
+# git toplevel), but the mounted workspace + container would be keyed to `.claudebox` — a
+# stray, almost-never-intended setup. Prompt if interactive; else abort (override:
+# CLAUDEBOX_ALLOW_SUBDIR=1). $1 = resolved project root (for the suggested cd).
+cb_guard_workspace() {
+    local root="$1" ans target
+    cb_in_dotclaudebox "$PWD" || return 0
+    target="${PWD%%/.claudebox*}"        # the dir CONTAINING .claudebox = the project root
+    [ -n "$target" ] || target="$root"
+    {
+        echo "⚠️  You're inside a '.claudebox' directory:"
+        echo "      $PWD"
+        echo "   claudebot would mount THIS dir as its workspace (not your project) and create a"
+        echo "   separate stray container for it. You almost certainly want the project root:"
+        echo "      cd $(printf '%q' "$target") && claudebox"
+    } >&2
+    case "${CLAUDEBOX_ALLOW_SUBDIR:-}" in 1|true|yes|on) echo "   (CLAUDEBOX_ALLOW_SUBDIR set — proceeding)" >&2; return 0 ;; esac
+    if [ -t 0 ]; then
+        printf "   Continue with this dir anyway? [y/N] " >&2
+        read -r ans
+        case "$ans" in y|Y|yes|YES) return 0 ;; esac
+        echo "   aborted — cd to the project root and re-run." >&2; return 1
+    fi
+    echo "   aborting (non-interactive) — set CLAUDEBOX_ALLOW_SUBDIR=1 to override." >&2
+    return 1
 }
 
 cb_project_config_path() { printf '%s/.claudebox/config.yml' "$1"; }
@@ -1386,6 +1417,14 @@ HELP
         echo "  (not started) enter later with:  cd $(printf '%q' "$PWD") && claudebox"
         exit 0
         ;;
+esac
+
+# Guard accidental "run from inside .claudebox" (see cb_guard_workspace). Skip for
+# management/throwaway commands that legitimately run from anywhere; catch the run paths
+# (interactive / programmatic / daemon) before any VM work.
+case "${1:-}" in
+    setup-token|-v|--version|doctor|auth|mcp|stop|clear-session) : ;;
+    *) cb_guard_workspace "$CB_PROJECT_ROOT" || exit 1 ;;
 esac
 
 # ── project identity → colima context (Phase 4) ──────────────────────────────

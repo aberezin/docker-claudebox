@@ -16,6 +16,16 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.5.1] — 2026-07-07 _(fork)_
+
+### Fixed
+- **Guard against running claudebot from inside `.claudebox`.** `cd`-ing into the
+  metadata dir and running `claudebox` used to silently create a *stray* container that
+  mounts `.claudebox` as the workspace (the VM/identity were still correct — the root is
+  the git toplevel). Now the wrapper detects it, warns with the right `cd <project-root>`
+  hint, and prompts (interactive) or aborts (non-interactive; override with
+  `CLAUDEBOX_ALLOW_SUBDIR=1`). Host-only — no `make build` needed.
+
 ## [2.5.0] — 2026-07-07 _(fork)_
 
 ### Added
