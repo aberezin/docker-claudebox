@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# summary: file a bug report about the claudebox FRAMEWORK (not your project) to the host
 # cb-report-bug — file a report about a suspected bug in the CLAUDEBOX FRAMEWORK
 # (the wrapper / entrypoint / image / networking that runs you), NOT a bug in the
 # project you are building. Reports are written to a shared, host-visible drop dir

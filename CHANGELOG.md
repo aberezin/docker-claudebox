@@ -16,6 +16,23 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.2.0] — 2026-07-06 _(fork)_
+
+Container-side convenience: a discoverable helper convention + an inside-the-container
+`/claudebox` skill. **Requires `make build`** (image changes) to reach a claudebot.
+
+### Added
+- **`cb-*` convenience-command convention** — helpers the claudebot runs *inside* the
+  container are named `cb-<name>`, carry a `# summary:` header, and are discovered by
+  the new **`cb-help`** (baked). Baked helpers live in `/usr/local/bin`; per-project
+  ones in `~/.claude/bin` (on PATH). `cb-browser` / `cb-report-bug` gained summaries.
+  See [docs/design/convenience-scripts.md](docs/design/convenience-scripts.md).
+- **Container-side `/claudebox` skill** — seeded into the claudebot by the entrypoint
+  (rewritten each start so it stays current). A harness self-report from *inside*:
+  version (`$CLAUDEBOX_VERSION`), `cb-help`, `~/CHANGELOG.md`, and the workspace/`cb-net`
+  environment. (Distinct from the host `/claudebox` skill, which runs `claudebox info`.)
+- The baked `CLAUDE.md` now tells the claudebot about `cb-help` and the `cb-*` convention.
+
 ## [2.1.0] — 2026-07-06 _(fork)_
 
 Operability release — the day-to-day human/agent tooling on top of 2.0.0's core.

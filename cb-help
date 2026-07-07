@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# summary: list the claudebox convenience commands (cb-*) available in this container
+#
+# Convention (see docs/design/convenience-scripts.md): every claudebox convenience
+# command is an executable named `cb-<name>` on PATH, carrying a one-line
+# `# summary: ...` header. Baked/shipped ones live in /usr/local/bin; per-project or
+# ad-hoc ones go in ~/.claude/bin (also on PATH, and it survives across rebuilds).
+# `cb-help` just discovers and lists them, so the set is self-describing as it grows.
+set -uo pipefail
+
+echo "claudebox convenience commands (cb-*):"
+{
+    IFS=: read -ra _dirs <<<"$PATH"
+    for _d in "${_dirs[@]}"; do
+        [ -d "$_d" ] || continue
+        for _f in "$_d"/cb-*; do
+            [ -f "$_f" ] && [ -x "$_f" ] || continue
+            _name="$(basename "$_f")"
+            _sum="$(sed -n 's/^# summary: //p' "$_f" 2>/dev/null | head -1)"
+            printf '%s\t%s\n' "$_name" "${_sum:-—}"
+        done
+    done
+} | sort -u -t"$(printf '\t')" -k1,1 | awk -F'\t' '{ printf "  %-16s %s\n", $1, $2 }'
+
+echo ""
+echo "  details: '<cmd> --help' or read its header comment."
+echo "  add your own: put an executable ~/.claude/bin/cb-<name> with a '# summary:' line (it's on PATH)."

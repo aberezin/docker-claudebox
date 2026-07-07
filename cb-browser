@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# summary: browser-test a workload (headless Chromium/Playwright); shot | script | watch | cdp
 # cb-browser — self-contained headless browser testing (Approach A1).
 #
 # Runs a headless Chromium (via the official Playwright image) as a SIBLING

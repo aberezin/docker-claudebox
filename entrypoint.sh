@@ -254,6 +254,10 @@ outside the workspace and `~/.claude`. After a rebuild/recreate they're gone.
 - You have passwordless sudo access
 - Docker socket may be mounted for docker-in-docker. The workspace is mounted at the exact same path as on the host, so when running docker commands with volume mounts, use the workspace path as the base (e.g. -v "$PWD/data:/data" will resolve correctly on the host)
 - claude CLI at ~/.claude (native install, can self-update)
+- Convenience commands are named `cb-*` (on PATH). Run **`cb-help`** to list them with
+  one-line summaries (e.g. `cb-browser`, `cb-report-bug`). Baked ones live in
+  /usr/local/bin; you can add your own as `~/.claude/bin/cb-<name>` (in PATH) — give it a
+  `# summary: ...` header line so `cb-help` describes it.
 - ~/.claude/bin is in PATH — custom scripts placed here by the user are available to you
 - ~/.claude/init.d/*.sh scripts run once on first container create (not on subsequent starts)
 - Extra host directories may be mounted via CLAUDEBOX_MOUNT_* env vars — check what's available if you need files outside the workspace
@@ -294,6 +298,37 @@ if [ -n "${CLAUDEBOX_VERSION:-}" ]; then
 	printf '%s' "$CLAUDEBOX_VERSION" > "$HARNESS_VER_FILE" 2>/dev/null || true
 	chown claude:claude "$HARNESS_VER_FILE" 2>/dev/null || true
 fi
+
+# Seed the container-side /claudebox skill: a harness self-report the claudebot can run
+# from INSIDE (the host `claudebox` binary isn't in here). Rewritten every start so it
+# stays current after an image update (it's shipped content, not user-editable).
+CB_SKILL_DIR="/home/claude/.claude/skills/claudebox"
+mkdir -p "$CB_SKILL_DIR"
+cat > "$CB_SKILL_DIR/SKILL.md" <<'CBSKILL'
+---
+name: claudebox
+description: Report the claudebox harness you are running inside — its version, what changed (CHANGELOG), the convenience commands available (cb-help), and this project's container environment (workspace, cb-net, exposing workloads). Use when asked about the claudebox harness/version, available cb-* tools, or the container environment. (You are INSIDE the container — the host `claudebox` CLI is not available here.)
+---
+
+# claudebox — harness self-report (from inside the container)
+
+You run INSIDE a claudebox container. Give a quick self-report of your harness
+environment. Do NOT try to run the host `claudebox` command — it isn't in here.
+
+1. **Version** — print the harness semver you're running: `echo "$CLAUDEBOX_VERSION"`.
+   If a "harness was updated" note appeared this session, mention it.
+2. **Convenience commands** — run `cb-help` and show the list of available `cb-*` tools.
+3. **What changed** — the harness changelog is at `~/CHANGELOG.md` (point the user there;
+   summarize the top entry if they ask).
+4. **Environment** — your workspace is `$CLAUDEBOX_WORKSPACE` (same path as on the host).
+   Sibling workloads go on the `cb-net` docker network and are reachable by container
+   name; publish ports and address them by the VM IP (the human runs `claudebox ip` on
+   their Mac). The full orchestration standard is in this project's `CLAUDE.md`.
+
+Keep it a concise self-report, not a deep dive.
+CBSKILL
+chown -R claude:claude "$CB_SKILL_DIR" 2>/dev/null || true
+dbg "seeded container /claudebox skill"
 
 # copy template to workspace if CLAUDE.md doesn't exist there
 if [ ! -f "$WORKSPACE_DIR/CLAUDE.md" ]; then
