@@ -500,6 +500,12 @@ if [ -f "$AUTH_FILE" ]; then
 		if [ -n "$value" ]; then
 			dbg "auth: loading $name from file"
 			CMD="$CMD && export $name=$(printf '%q' "$value")"
+		else
+			# empty in the sidecar = explicitly cleared (e.g. CLAUDEBOX_NO_API_KEY) — UNSET it
+			# so a value baked into this container's env at `docker run` time doesn't linger
+			# and override subscription auth.
+			dbg "auth: clearing $name (empty in file)"
+			CMD="$CMD && unset $name"
 		fi
 	done < "$AUTH_FILE"
 fi

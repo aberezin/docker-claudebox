@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.4.0"
+CLAUDEBOX_VERSION="2.5.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -1165,6 +1165,13 @@ CLAUDE_SSH="${CLAUDEBOX_SSH_DIR:-${CLAUDE_SSH_DIR:-$HOME/.ssh/claudebox}}"
 # auth: prefer CLAUDEBOX_ENV_*, fall back to legacy direct vars
 ANTHROPIC_API_KEY="${CLAUDEBOX_ENV_ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY:-}}"
 CLAUDE_CODE_OAUTH_TOKEN="${CLAUDEBOX_ENV_CLAUDE_CODE_OAUTH_TOKEN:-${CLAUDE_CODE_OAUTH_TOKEN:-}}"
+# CLAUDEBOX_NO_API_KEY=1 → never send an ANTHROPIC_API_KEY into the container, even if one
+# is exported on the Mac. Use the Claude subscription (browser OAuth / a setup-token) instead.
+# The empty value flows to the auth sidecar, and the entrypoint UNSETS the var so a
+# previously-created container's stale key is cleared too.
+case "${CLAUDEBOX_NO_API_KEY:-${CLAUDE_NO_API_KEY:-}}" in
+    1|true|yes|on) ANTHROPIC_API_KEY="" ;;
+esac
 
 # Normalize to the PHYSICAL workspace path, resolving symlinks (notably macOS
 # /tmp -> /private/tmp). Lima shares the resolved path into the VM (it uses the git

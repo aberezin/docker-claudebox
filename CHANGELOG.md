@@ -16,6 +16,16 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.5.0] — 2026-07-07 _(fork)_
+
+### Added
+- **`CLAUDEBOX_NO_API_KEY=1`** — never send an `ANTHROPIC_API_KEY` into the container,
+  even if one is exported on the Mac, so a claudebot uses your **Claude subscription**
+  (browser OAuth / `claudebox setup-token`) instead of pay-per-token API billing. The
+  wrapper drops the key; the entrypoint now **unsets** an empty auth value (rather than
+  skipping it), so a key baked into an already-created container's env at `docker run`
+  time is cleared too — the switch works on existing containers, not just fresh ones.
+
 ## [2.4.0] — 2026-07-07 _(fork)_
 
 ### Added

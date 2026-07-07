@@ -267,6 +267,18 @@ CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxx claudebox "do stuff"
 ANTHROPIC_API_KEY=sk-ant-api03-xxx claudebox "do stuff"
 ```
 
+**Using your Claude subscription (not the API):** claudebox forwards a host
+`ANTHROPIC_API_KEY` into the container, and Claude Code prefers it over subscription
+auth. If you usually want the **subscription** (browser OAuth via `claudebox
+setup-token`), block the key so it's never sent:
+
+```bash
+export CLAUDEBOX_NO_API_KEY=1   # put in ~/.zshrc to make it the default
+```
+
+This drops the API key even if one is exported on your Mac (and clears one already
+baked into an existing container), so claudebot falls through to the subscription.
+
 ## Modes
 
 claudebox can run in several modes — pick the one that matches how you want to use Claude Code. Each has its own page with full setup, env vars, and examples.
