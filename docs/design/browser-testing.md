@@ -145,11 +145,31 @@ same durability pattern as the auth/secrets sidecars (see
 **Target-reachability caveat (esp. for websocket apps).** In Approach B the browser
 runs *on the Mac*, so the `<url>` you pass to `cb-browser cdp` — and every websocket
 the page opens — must be reachable **from the Mac**: the project VM's IP
-(`http://<vm-ip>:<port>`) or `localhost:<port>`, **not** a `cb-net` container name
-like `http://api:8080` (the Mac's Chrome can't resolve those). This is the inverse of
-Approach A, whose runner lives *inside* the VM on `cb-net` and addresses workloads by
-name. So for a workload only reachable in-VM (or whose websocket endpoint is in-VM),
-use Approach A (`shot`/`script`/`watch`); reserve B for Mac-reachable targets.
+(`http://<vm-ip>:<port>`), **not** `localhost:<port>` (the Mac's own loopback — your
+VM's app isn't there unless colima happens to forward that exact port, which is fragile
+and collision-prone) and **not** a `cb-net` container name like `http://api:8080` (the
+Mac's Chrome can't resolve those). This is the inverse of Approach A, whose runner lives
+*inside* the VM on `cb-net` and addresses workloads by name. So for a workload only
+reachable in-VM (or whose websocket endpoint is in-VM), use Approach A
+(`shot`/`script`/`watch`); reserve B for Mac-reachable targets.
+
+**Where the claudebot gets the VM IP — and why it must read it fresh.** The claudebot
+container is on the VM's docker *bridge* (`172.x`); it **cannot self-discover** the VM's
+reachable `192.168.64.x` (col0) address. So the wrapper injects it as **`CLAUDEBOX_VM_IP`**
+(also `cb-browser ip` inside, `claudebox ip` on the Mac). Critically, that IP **rotates
+across VM restarts** (a real case here: `.13` → `.16`), so it is injected the same durable,
+self-healing way as the CDP url — a `-vmip` sidecar refreshed on *every* `claudebox` run —
+and **must never be hardcoded** in project source/config (`next.config.ts`
+`allowedDevOrigins`, Vite `server.allowedHosts`, CORS allowlists, `.env`, test base URLs).
+A stale baked IP is a top cause of "worked yesterday, blocked today". To spare the claudebot
+the rediscovery loop, `cb-browser cdp` **auto-rewrites** a `localhost`/`127.0.0.1`/`0.0.0.0`
+target to `$CLAUDEBOX_VM_IP` (with a printed note) instead of silently failing.
+
+**Prefer `cb-browser cdp`/`script` over a hand-rolled `connectOverCDP`.** Driving the
+human's *real* (non-Playwright) Chrome with your own `chromium.connectOverCDP(...)` can trip
+on `Browser.setDownloadBehavior` ("not supported") — a protocol quirk against a stock Chrome.
+The baked helpers connect cleanly; if you genuinely need raw control, use a `CDPSession`
+(`Page.navigate` / `Page.captureScreenshot`) rather than the high-level context/page API.
 
 ### Security (why B is opt-in)
 

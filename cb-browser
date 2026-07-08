@@ -47,6 +47,9 @@ usage:
                                           cb-net container name — the Mac's Chrome can't resolve those.
                                           For cb-net / in-VM targets (incl. their websockets) use shot/script.
   cb-browser net                          ensure/print the shared network name
+  cb-browser ip                           print this project VM's reachable IP (\$CLAUDEBOX_VM_IP) —
+                                          the address the human's Mac/Chrome uses; NOT localhost.
+                                          It rotates on VM restart, so read it fresh; never hardcode it.
 
 Put the workloads you test on the '$NET' network so they're reachable by name.
 Artifacts default to ./cb-browser-out in the current workspace.
@@ -56,10 +59,21 @@ EOF
 
 _ensure_net() { docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET" >/dev/null; }
 
+# The reachable VM IP the Mac (and its Chrome, over CDP) uses to hit a published
+# workload. The wrapper injects it as CLAUDEBOX_VM_IP (refreshed each run, so it tracks
+# rotation); the container can't self-discover it. Empty => bridge/VM not ready.
+_vm_ip() { printf '%s' "${CLAUDEBOX_VM_IP:-}"; }
+
 cmd="${1:-}"; shift || true
 case "$cmd" in
   net)
     _ensure_net; echo "$NET" ;;
+
+  ip)
+    ip="$(_vm_ip)"
+    if [ -n "$ip" ]; then echo "$ip"; else
+      echo "cb-browser: VM IP unknown (CLAUDEBOX_VM_IP unset). Restart this session so the wrapper re-injects it; on the Mac 'claudebox ip' prints it." >&2; exit 1
+    fi ;;
 
   shot)
     url="${1:-}"; [ -n "$url" ] || _usage
@@ -142,6 +156,22 @@ RUNNER
     url="${1:-}"; [ -n "$url" ] || _usage
     [ -n "${CLAUDEBOX_HOST_CDP_URL:-}" ] || {
         echo "cb-browser: no host CDP bridge. On the Mac run 'claudebox browser-bridge up', then restart this session." >&2; exit 1; }
+    # The browser is the human's Chrome, ON THE MAC. It cannot reach your workload via
+    # localhost/127.0.0.1 (that's the Mac's own loopback, not this VM) — only via the
+    # VM's reachable IP. Auto-rewrite so the claudebot doesn't burn cycles rediscovering
+    # this. (A cb-net container name like http://api:8080 is also unreachable from the
+    # Mac — use shot/script for those; we can't guess a port-map so we only warn.)
+    case "$url" in
+      *//localhost:*|*//localhost/*|*//127.0.0.1:*|*//127.0.0.1/*|*//0.0.0.0:*|*//0.0.0.0/*)
+        vmip="$(_vm_ip)"
+        if [ -n "$vmip" ]; then
+          newurl="$(printf '%s' "$url" | sed -E "s#//(localhost|127\.0\.0\.1|0\.0\.0\.0)([:/])#//${vmip}\2#")"
+          echo "cb-browser cdp: rewrote $url -> $newurl (the Mac's Chrome reaches this VM only at its IP, not localhost)" >&2
+          url="$newurl"
+        else
+          echo "cb-browser cdp: WARNING '$url' uses localhost — the Mac's Chrome can't reach this VM via localhost, and CLAUDEBOX_VM_IP is unset so I can't rewrite it. Use http://<vm-ip>:<port> (get it: cb-browser ip)." >&2
+        fi ;;
+    esac
     outdir="${2:-${CB_BROWSER_OUT:-$PWD/cb-browser-out}}"; mkdir -p "$outdir"
     read -r -d '' runner <<'RUNNER' || true
 const { chromium } = require("playwright");

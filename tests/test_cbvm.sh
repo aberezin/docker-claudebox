@@ -112,6 +112,16 @@ if grep -A12 '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP" | grep -q 'unset \$name'; 
 # wrapper writes the sidecar unconditionally (mirror), so bridge-down -> empty on next run
 if grep -q "printf 'CLAUDEBOX_HOST_CDP_URL=%s\\\\n' \"\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
 
+echo "--- VM-IP sidecar contract (wrapper injects CLAUDEBOX_VM_IP, entrypoint re-reads) ---"
+# The claudebot container can't self-discover the VM's reachable IP (it's on the 172.x
+# bridge), and the IP rotates across restarts — so the wrapper mirrors the CURRENT IP to
+# a durable `.<container>-vmip` sidecar every run and the entrypoint re-reads it. Assert
+# both halves of this cross-file contract agree.
+if grep -q 'container_name}${_crole}-vmip' "$WRAPPER"; then ok "wrapper writes -vmip sidecar (all roles)"; else bad "wrapper no longer writes the -vmip sidecar"; fi
+if grep -q '${CLAUDE_CONTAINER_NAME}-vmip' "$ENTRYP"; then ok "entrypoint re-reads the -vmip sidecar"; else bad "entrypoint no longer reads the -vmip sidecar"; fi
+if grep -q 'CLAUDEBOX_VM_IP=%s' "$WRAPPER"; then ok "wrapper mirrors current IP -> sidecar (tracks rotation)"; else bad "wrapper -vmip write is not the current-IP mirror"; fi
+if grep -A12 '${CLAUDE_CONTAINER_NAME}-vmip' "$ENTRYP" | grep -q 'unset \$name'; then ok "entrypoint unsets VM IP when sidecar empty"; else bad "entrypoint does not unset on empty -vmip"; fi
+
 echo "--- cb_project_profiles (config 'profiles:' — flow + block + none) ---"
 PT="$(mktemp -d)"; mkdir -p "$PT/f/.claudebox" "$PT/b/.claudebox" "$PT/n/.claudebox"
 printf 'id: aaaa1111\nprofiles: [typescript, python]\nvm:\n  cpu: 4\n' > "$PT/f/.claudebox/config.yml"

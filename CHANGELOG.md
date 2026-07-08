@@ -16,6 +16,35 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.6.0] — 2026-07-08 _(fork)_
+
+### Added
+- **`CLAUDEBOX_VM_IP` — the claudebot now knows its VM's reachable IP.** The container
+  sits on the VM's docker bridge (`172.x`) and cannot self-discover the reachable
+  `192.168.64.x` (col0) address — the *only* address the human's Mac (and its Chrome,
+  over CDP) can reach a published workload at. The wrapper now injects the current IP as
+  `CLAUDEBOX_VM_IP`, both via `docker run -e` and via a durable `-vmip` sidecar refreshed
+  every run — so it survives `docker start` **and self-heals when the IP rotates across
+  VM restarts** (a real failure here: `.13` → `.16` left a stale IP baked in
+  `next.config.ts`). New helpers: `cb-browser ip` (in-container) and `claudebox ip`
+  (host, bare scriptable IP; `claudebox net` keeps the full dashboard).
+
+### Fixed / Changed
+- **`cb-browser cdp` auto-rewrites `localhost`/`127.0.0.1`/`0.0.0.0` targets to the VM
+  IP** (with a printed note) instead of silently failing — the Mac's Chrome can't reach
+  a VM workload via localhost, and rediscovering that burned real cycles.
+- **Baked container guidance rewritten** for the VM-IP reachability model: the VM IP is
+  THE address for Mac/Chrome to reach workloads; it **rotates** so never hardcode it
+  (read `$CLAUDEBOX_VM_IP`/`cb-browser ip` fresh — not in `allowedDevOrigins`,
+  `server.allowedHosts`, CORS, `.env`, or test URLs); `localhost` demoted to a fragile,
+  collision-prone fallback; and prefer `cb-browser cdp`/`script` over a hand-rolled
+  `connectOverCDP` (which can trip on `Browser.setDownloadBehavior` vs a stock Chrome).
+- Docs: [docs/design/browser-testing.md](docs/design/browser-testing.md) gains a CDP
+  reachability + rotating-VM-IP tips section.
+
+**Needs `make build`** (entrypoint change); the rebuild auto-recreates existing
+containers on next run.
+
 ## [2.5.2] — 2026-07-07 _(fork)_
 
 ### Fixed

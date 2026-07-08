@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.5.2"
+CLAUDEBOX_VERSION="2.6.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -1475,6 +1475,20 @@ for _crole in "" _prog _cron; do
     printf 'CLAUDEBOX_HOST_CDP_URL=%s\n' "$_cdp_url" > "$CLAUDE_DIR/.${container_name}${_crole}-cdp"
 done
 
+# Reachable VM IP -> claudebot as CLAUDEBOX_VM_IP. The claudebot container sits on the
+# VM's docker bridge (172.x), so it CANNOT self-discover the VM's reachable col0 IP
+# (192.168.64.x) — the only address the human's Mac (and its Chrome, for CDP) can hit a
+# published workload at. We inject it here. Crucially the IP ROTATES across VM restarts,
+# so we mirror the CURRENT value to a per-role sidecar the entrypoint re-reads every
+# start (a stale baked -e can't linger) — the same durable/self-healing pattern as the
+# CDP url above. Empty (IP not up yet) -> entrypoint unsets it; next run fills it in.
+_vm_profile="$(cb_project_profile "$CB_PROJECT_ID")"
+_vm_ip="$(cb_vm_address "$_vm_profile" 2>/dev/null || true)"
+[ -n "$_vm_ip" ] && DOCKER_ARGS+=(-e "CLAUDEBOX_VM_IP=$_vm_ip")
+for _crole in "" _prog _cron; do
+    printf 'CLAUDEBOX_VM_IP=%s\n' "$_vm_ip" > "$CLAUDE_DIR/.${container_name}${_crole}-vmip"
+done
+
 # Shared framework-bug drop dir — mount it into every container so cb-report-bug can
 # file suspected FRAMEWORK bugs (wrapper/entrypoint/image/networking) to one place.
 _fwbugs="$(cb_fwbugs_home)"; mkdir -p "$_fwbugs" 2>/dev/null || true
@@ -1599,13 +1613,18 @@ if [ "${1:-}" = "clear-session" ]; then
     exit 0
 fi
 
-# ip / net — show the project VM's reachable IP + how to browse workloads.
-# `net <hostname>` first SETS network.hostname in config.yml (no hand-editing YAML),
-# then prints the /etc/hosts line for it.
-if [ "${1:-}" = "ip" ] || [ "${1:-}" = "net" ]; then
-    if [ "${1:-}" = "net" ] && [ -n "${2:-}" ]; then
-        cb_set_hostname "$CB_PROJECT_ROOT" "$2" || exit 1
-    fi
+# ip — print JUST the project VM's current reachable IP (scriptable, one line). The IP
+# rotates across VM restarts, so this is the fresh source to feed a config/allowlist;
+# never hardcode a past value. `net [hostname]` prints the full browse dashboard (and,
+# with a name, first SETS network.hostname in config.yml — no hand-editing YAML).
+if [ "${1:-}" = "ip" ]; then
+    cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
+    _ip="$(cb_wait_reachable "$(cb_project_profile "$CB_PROJECT_ID")")"
+    [ -n "$_ip" ] && { echo "$_ip"; exit 0; }
+    echo "VM has no reachable IP yet (try again in a moment)." >&2; exit 1
+fi
+if [ "${1:-}" = "net" ]; then
+    if [ -n "${2:-}" ]; then cb_set_hostname "$CB_PROJECT_ROOT" "$2" || exit 1; fi
     cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
     cb_network_info "$CB_PROJECT_ROOT" "$CB_PROJECT_ID"
     exit 0

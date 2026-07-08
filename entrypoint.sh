@@ -168,10 +168,18 @@ your session, and the human can reach them.
   each other by container name (`http://api:8080`); `cb-browser net` prints the name.
 - To let the HUMAN reach a workload from their Mac's browser, publish the port and run
   it detached: `docker run -d --restart unless-stopped -p 8080:8080 <image>`. It is
-  then reachable at **this project's VM IP** — the collision-free address; tell the
-  human to run `claudebox ip` on their Mac to get it, e.g. `http://<vm-ip>:8080`.
-  (`http://localhost:8080` also works via colima's port-forward, but it COLLIDES if
-  another project publishes the same port — so give them the VM IP, not localhost.)
+  then reachable at **this project's VM IP**, e.g. `http://<vm-ip>:8080`. That IP is in
+  your env as **`$CLAUDEBOX_VM_IP`** (also `cb-browser ip`) — the container can't
+  self-discover it, so use that var; the human gets it with `claudebox ip`.
+- **The VM IP ROTATES across VM restarts** (e.g. .13 → .16). So NEVER hardcode it in
+  project source or config — not in `next.config.ts` `allowedDevOrigins`, Vite
+  `server.allowedHosts`, CORS allowlists, `.env`, or a test's base URL. Read
+  `$CLAUDEBOX_VM_IP` fresh each run and feed it in (or configure the framework to accept
+  any host in dev). A stale baked IP is a top cause of "worked yesterday, 403/blocked
+  today". `$CLAUDEBOX_VM_IP` self-heals: the harness refreshes it every launch.
+- `http://localhost:8080` is NOT a reliable substitute: it only works if colima happens
+  to be forwarding that exact port to the Mac, and it COLLIDES when two projects publish
+  the same port. Always prefer the VM IP.
 
 ## Secrets & credentials
 NEVER put a secret value on a command line — arguments leak into shell history, `ps`,
@@ -206,10 +214,19 @@ Opt-in extra: if the human ran `claudebox browser-bridge up` on their Mac, the e
 var `CLAUDEBOX_HOST_CDP_URL` is set and `cb-browser cdp <url>` drives THEIR real
 Chrome via CDP (dedicated debug profile). Only available when they explicitly start
 the bridge; don't rely on it — the self-contained A modes above are the default.
-Important: in `cdp` mode the browser runs on the MAC, so `<url>` (and any websockets
-the app opens) must be reachable **from the Mac** — the project VM's IP or
-`localhost:<port>`, NOT a `cb-net` container name like `http://api:8080` (the Mac's
-Chrome can't resolve those). For cb-net / in-VM targets, use `shot`/`script` instead.
+CDP gotchas (these waste cycles if you rediscover them each time):
+- The browser runs **on the Mac**. `<url>` (and every websocket the page opens) must be
+  reachable FROM THE MAC = **`http://$CLAUDEBOX_VM_IP:<port>`**. NOT `localhost`/
+  `127.0.0.1` (that's the Mac's own loopback, not this VM — your app isn't there) and
+  NOT a `cb-net` name like `http://api:8080` (Chrome can't resolve it). `cb-browser cdp`
+  auto-rewrites a localhost URL to the VM IP for you, but pass the VM IP directly.
+- Same VM-IP-rotation rule as above: use `$CLAUDEBOX_VM_IP` fresh; don't paste a past IP.
+- Use `cb-browser cdp` / `cb-browser script` (Playwright is preinstalled and works over
+  this bridge). Rolling your OWN `chromium.connectOverCDP(...)` against the human's real
+  Chrome can trip on `Browser.setDownloadBehavior` (a CDP quirk vs a real, non-Playwright
+  Chrome); if you must go raw, use a `CDPSession` (`Page.navigate` / `Page.captureScreenshot`).
+- For cb-net / in-VM-only targets (incl. their websockets), use `shot`/`script` instead —
+  those run inside the VM on `cb-net` and reach workloads by container name.
 
 ## Reporting a bug in the claudebox FRAMEWORK
 If you hit something that looks like a bug in the harness that runs you — the
@@ -546,6 +563,25 @@ if [ -f "$CDP_FILE" ]; then
 			CMD="$CMD && unset $name"
 		fi
 	done < "$CDP_FILE"
+fi
+
+# load the reachable VM IP the same durable way (wrapper mirrors the CURRENT col0 IP
+# here each run). The container can't see the VM's 192.168.64.x itself, so this env is
+# claudebot's ONLY reliable source — and it self-heals when the IP rotates. Empty =
+# not up yet: UNSET so a stale value can't linger.
+VMIP_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-vmip"
+dbg "vmip file: $VMIP_FILE (exists: $([ -f "$VMIP_FILE" ] && echo yes || echo no))"
+if [ -f "$VMIP_FILE" ]; then
+	while IFS='=' read -r name value; do
+		case "$name" in ''|\#*) continue ;; esac
+		if [ -n "$value" ]; then
+			dbg "vmip: loading $name from file"
+			CMD="$CMD && export $name=$(printf '%q' "$value")"
+		else
+			dbg "vmip: clearing $name (empty in file)"
+			CMD="$CMD && unset $name"
+		fi
+	done < "$VMIP_FILE"
 fi
 
 ARGS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-args"
