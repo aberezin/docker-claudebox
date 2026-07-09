@@ -4,7 +4,7 @@ Documentation for this fork of claudebox — Claude Code in a per-project Colima
 New here? Start with the top-level [README](../README.md) for install + quick start,
 and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 
-## Reference
+## Reference  
 
 | Doc | What it covers |
 |---|---|
@@ -32,6 +32,8 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [profiles.md](design/profiles.md) | Opt-in tool bundles (`profiles: [...]`) and the bake-vs-install policy. |
 | [convenience-scripts.md](design/convenience-scripts.md) | The container-side `cb-*` command convention + `cb-help`. |
 | [browser-testing.md](design/browser-testing.md) | `cb-browser` (headless/noVNC) and the opt-in CDP bridge to your real Chrome. |
+| [n-tier-networking.md](design/n-tier-networking.md) | The standard for addressing/binding/CORS in multi-tier apps (service-name vs rotating VM IP). |
+| [framework-consult.md](design/framework-consult.md) | Supervised claudebot ↔ framework-Claude threads that turn recurring problems into baked standards. |
 | [framework-bug-reporting.md](design/framework-bug-reporting.md) | `cb-report-bug` — claudebot flags harness bugs to the host. |
 
 ## See also

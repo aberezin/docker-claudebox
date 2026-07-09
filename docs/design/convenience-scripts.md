@@ -55,4 +55,5 @@ belongs in `cb-*`, and host-side convenience belongs in `claudebox <subcommand>`
 
 - [browser-testing.md](browser-testing.md) — `cb-browser`.
 - [framework-bug-reporting.md](framework-bug-reporting.md) — `cb-report-bug`.
+- [framework-consult.md](framework-consult.md) — `cb-consult` (the container side of a consult).
 - The top-level `CLAUDE.md` "Conventions worth knowing".

@@ -77,6 +77,20 @@ CLAUDEBOX_MOUNT_RO=/data:/data:ro claudebox "read the data"                # rea
 
 If the value contains `:`, it is passed directly as Docker `-v` syntax. Otherwise, the same path is used on both host and container sides.
 
+## Provided to the container by the harness
+
+You don't set these — the wrapper injects them into the claudebot so it can reason about
+its environment. Read them; don't hardcode their values in project source.
+
+| Variable                       | What it is                                                                 |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `CLAUDEBOX_VM_IP`              | The project VM's current reachable IP (`192.168.64.x`). **Rotates** across VM restarts — the wrapper refreshes it every run (durable `-vmip` sidecar). The only address the Mac/browser reaches published workloads at. Also `cb-browser ip`; on the Mac, `claudebox ip`. See [design/n-tier-networking.md](design/n-tier-networking.md). |
+| `CLAUDEBOX_HOSTNAME`          | The stable `network.hostname` if the human set one via `claudebox net <name>` — the rotation-proof alias for the VM IP. Empty if unset. |
+| `CLAUDEBOX_HOST_CDP_URL`      | Present only while a CDP bridge is up (`claudebox browser-bridge up`) — the URL `cb-browser cdp` drives the human's Chrome through. |
+| `CLAUDEBOX_PROJECT_ID`        | This project's stable id (from `.claudebox/config.yml`).                    |
+| `CLAUDEBOX_CONSULT_DIR`       | Mount path for the shared consult substrate (`cb-consult`). See [design/framework-consult.md](design/framework-consult.md). |
+| `CLAUDEBOX_FRAMEWORK_BUGS_DIR`| Mount path for the shared framework-bug drop (`cb-report-bug`).             |
+
 ## See also
 
 - [design/per-project-vm.md](design/per-project-vm.md) — data dir, secrets, VM sizing.

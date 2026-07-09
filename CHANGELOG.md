@@ -16,6 +16,34 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.7.0] — 2026-07-08 _(fork)_
+
+### Added
+- **Framework consult — supervised claudebot ↔ framework-Claude collaboration.** A
+  claudebot can escalate a *general* framework/environment problem (one that would recur
+  in any claudebox project) to framework-Claude working on the harness, gated by the
+  human, so the resolution becomes a **baked-in standard** instead of a per-project
+  reinvention. Peer-to-peer via a shared file substrate (mounted at
+  `/home/claude/framework-consult`, `CLAUDEBOX_CONSULT_DIR`); the only sub-agent is the
+  Agent-tool **drafting sub-agent** framework-Claude spawns — the app-building claudebot
+  is never a sub-agent. Nothing reaches the claudebot until the human approves.
+  - New container helper **`cb-consult`** (`open`/`say`/`read`/`list`/`resolve`).
+  - New host verb **`claudebox consult`** (`list`/`show`/`approve`/`revise`/`reject`/`post`);
+    a normal `claudebox` run surfaces consults awaiting your approval or a framework draft.
+  - New **`framework-consult` skill** drives the hybrid auto-draft loop (draft with a
+    sub-agent → your approval → apply + reply with the commit hash).
+  - Design: [docs/design/framework-consult.md](docs/design/framework-consult.md).
+- **`docs/design/n-tier-networking.md` — the first standard this channel produced.** The
+  N-tier addressing/binding/CORS standard (service-name vs the rotating VM IP, bind
+  `0.0.0.0`, drive CORS/`allowedDevOrigins` from `$CLAUDEBOX_VM_IP`), with Next/Express/
+  FastAPI snippets, a worked Next+API+postgres layout, and a symptom→cause→fix table. A
+  concise version is baked into the container `CLAUDE.md`.
+- **`CLAUDEBOX_HOSTNAME`** injected into the container when `network.hostname` is set —
+  the rotation-proof stable alias for the VM IP (rides the `-vmip` sidecar).
+
+**Needs `make build`** (entrypoint + new `cb-consult` helper); the rebuild auto-recreates
+existing containers on next run.
+
 ## [2.6.0] — 2026-07-08 _(fork)_
 
 ### Added

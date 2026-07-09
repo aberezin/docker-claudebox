@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# summary: open/continue a supervised consult with framework-Claude about a FRAMEWORK best practice
+# cb-consult — escalate a claudebox FRAMEWORK / environment problem to framework-Claude
+# (the Claude working on the harness on the Mac), under the human's supervision. Use this
+# when a problem is (a) about the harness/environment — wrapper, entrypoint, image,
+# Colima/Docker networking, the cb-* tooling — NOT your app's own logic, AND (b) would
+# recur in ANY claudebox project (a general engineering concern), AND (c) isn't already
+# covered by your baked CLAUDE.md guidance/docs. For a concrete DEFECT (vs a "what's the
+# right pattern" question), use cb-report-bug instead. See docs/design/framework-consult.md.
+#
+# Replies come back ASYNC after the human approves them — re-check with `cb-consult read`.
+#
+#   cb-consult open "N-tier CORS keeps breaking on the rotating VM IP" --layer networking <<'EOF'
+#   ## Problem
+#   My browser tier is blocked by CORS/allowed-origins whenever the VM IP rotates.
+#   ## Why it's general
+#   Any N-tier claudebox app has a browser tier addressing services by the (rotating) VM IP.
+#   ## What I tried
+#   Hardcoded the IP in next.config.ts allowedDevOrigins; broke on the next restart.
+#   EOF
+#
+#   cb-consult read <id>          # see framework-Claude's reply (once approved)
+#   cb-consult say <id> <<'EOF'   # add more detail
+#   cb-consult list               # this project's threads + status
+#   cb-consult resolve <id> done  # mark it adopted
+set -euo pipefail
+
+DIR="${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}"
+PID="${CLAUDEBOX_PROJECT_ID:-unknown}"
+
+_ts() { date +%Y-%m-%dT%H-%M-%S 2>/dev/null || echo unknown; }
+
+usage() {
+    cat >&2 <<EOF
+usage:
+  cb-consult open "<title>" [--layer wrapper|entrypoint|image|networking|tooling|other]   (body on stdin)
+  cb-consult say <id>          add a turn (body on stdin)
+  cb-consult read <id>         print the thread (framework-Claude's reply shows here once the human approves it)
+  cb-consult list              this project's consults + status
+  cb-consult resolve <id> [note]   mark adopted
+Open one only for a GENERAL, framework/environment problem — not your app's own logic,
+and not already covered by your guidance. A concrete defect -> cb-report-bug instead.
+EOF
+    exit "${1:-1}"
+}
+
+# append the next numbered turn (body on stdin) to a thread dir
+_post() {
+    local td="$1" author="$2" n next
+    mkdir -p "$td"
+    n=$(find "$td" -maxdepth 1 -name '[0-9][0-9][0-9]-*.md' 2>/dev/null | wc -l | tr -d ' ')
+    next=$(printf '%03d' $((n + 1)))
+    cat > "$td/${next}-${author}.md"
+}
+
+_meta_set() {
+    local td="$1" k="$2" v="$3" m="$1/meta"
+    mkdir -p "$td"; touch "$m"
+    if grep -q "^${k}=" "$m" 2>/dev/null; then sed -i "s#^${k}=.*#${k}=${v}#" "$m"
+    else printf '%s=%s\n' "$k" "$v" >> "$m"; fi
+    if grep -q '^updated=' "$m"; then sed -i "s#^updated=.*#updated=$(_ts)#" "$m"; else printf 'updated=%s\n' "$(_ts)" >> "$m"; fi
+}
+
+_body() { if [ ! -t 0 ]; then cat; else echo "_(no body provided — pipe one via stdin/heredoc)_"; fi; }
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  open)
+    title=""; layer="other"
+    while [ $# -gt 0 ]; do case "$1" in
+        --layer) layer="${2:-other}"; shift ;;
+        -h|--help) usage 0 ;;
+        -*) echo "cb-consult: unknown flag '$1'" >&2; usage ;;
+        *) if [ -z "$title" ]; then title="$1"; else title="$title $1"; fi ;;
+    esac; shift; done
+    [ -n "$title" ] || usage
+    if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then
+        echo "cb-consult: consult dir unavailable ($DIR). Is this an up-to-date claudebox? Falling back to cb-report-bug is an option." >&2; exit 1; fi
+    slug="$(printf '%s' "$title" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' | cut -c1-40)"
+    id="$(_ts)-${PID}"; td="$DIR/$id"
+    mkdir -p "$td"
+    { printf 'id=%s\n' "$id"; printf 'project=%s\n' "$PID"; printf 'title=%s\n' "$title"
+      printf 'layer=%s\n' "$layer"; printf 'status=%s\n' "awaiting-framework"
+      printf 'created=%s\n' "$(_ts)"; printf 'updated=%s\n' "$(_ts)"; } > "$td/meta"
+    _body | _post "$td" claudebot
+    echo "cb-consult: opened consult $id (awaiting framework draft). Reply comes back async — check: cb-consult read $id"
+    ;;
+  say)
+    id="${1:-}"; [ -n "$id" ] || usage; td="$DIR/$id"; [ -d "$td" ] || { echo "no such consult: $id" >&2; exit 1; }
+    _body | _post "$td" claudebot; _meta_set "$td" status awaiting-framework
+    echo "cb-consult: added a turn to $id (awaiting framework)." ;;
+  read|show)
+    id="${1:-}"; [ -n "$id" ] || usage; td="$DIR/$id"; [ -d "$td" ] || { echo "no such consult: $id" >&2; exit 1; }
+    echo "=== consult $id ==="; cat "$td/meta"; echo ""
+    for m in "$td"/[0-9][0-9][0-9]-*.md; do [ -f "$m" ] || continue; echo "── $(basename "$m") ──"; cat "$m"; echo ""; done ;;
+  list)
+    [ -d "$DIR" ] || { echo "no consults yet."; exit 0; }
+    found=0
+    for td in "$DIR"/*/; do
+        [ -d "$td" ] || continue; td="${td%/}"
+        [ "$(sed -n 's/^project=//p' "$td/meta" 2>/dev/null | head -1)" = "$PID" ] || continue
+        found=1
+        printf '  %-28s [%s]  %s\n' "$(basename "$td")" "$(sed -n 's/^status=//p' "$td/meta" | tail -1)" "$(sed -n 's/^title=//p' "$td/meta" | head -1)"
+    done
+    [ "$found" = 0 ] && echo "no consults for this project yet." || echo "" && echo "read one: cb-consult read <id>" ;;
+  resolve)
+    id="${1:-}"; [ -n "$id" ] || usage; shift; td="$DIR/$id"; [ -d "$td" ] || { echo "no such consult: $id" >&2; exit 1; }
+    note="$*"; [ -n "$note" ] || note="adopted"
+    printf '%s\n' "$note" | _post "$td" claudebot; _meta_set "$td" status resolved
+    echo "cb-consult: marked $id resolved." ;;
+  ""|-h|--help) usage 0 ;;
+  *) echo "cb-consult: unknown command '$cmd'" >&2; usage ;;
+esac

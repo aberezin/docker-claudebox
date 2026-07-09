@@ -181,6 +181,24 @@ your session, and the human can reach them.
   to be forwarding that exact port to the Mac, and it COLLIDES when two projects publish
   the same port. Always prefer the VM IP.
 
+### N-tier apps: two addressing planes (the claudebox standard)
+For any multi-tier app (frontend + API + db …) there are TWO address spaces — keep them
+straight or you'll chase phantom CORS/connection bugs:
+- **Service ↔ service** (API→db, Next SSR→API): runs inside the VM on `cb-net` → address
+  by **container name** (`http://api:8080`, `postgres:5432`). Stable.
+- **Browser → service** (the human's Chrome / `cb-browser cdp`, on the Mac): reaches a
+  workload ONLY at **`http://$CLAUDEBOX_VM_IP:<port>`** (published port) — never a `cb-net`
+  name (Chrome can't resolve it), never `localhost`.
+Rules: bind services to **`0.0.0.0`** (not `127.0.0.1`) so they're reachable on both
+planes; the browser tier's API base URL must be the VM IP (e.g. `NEXT_PUBLIC_API_BASE=
+http://$CLAUDEBOX_VM_IP:8080`), while server-side code calls the API by container name;
+drive **CORS / `allowedDevOrigins`** from `$CLAUDEBOX_VM_IP` (and `$CLAUDEBOX_HOSTNAME` if
+the human set one via `claudebox net`) at server start — do NOT hardcode a rotating IP,
+and don't paper over it with wildcard CORS. This is a claudebox STANDARD (so every project
+does it the same way): the full spec — snippets, a worked Next+API+postgres layout, and a
+symptom→cause→fix table — is in `docs/design/n-tier-networking.md` on the host. If it's
+still unclear or you think the standard is wrong/incomplete, `cb-consult open` it.
+
 ## Secrets & credentials
 NEVER put a secret value on a command line — arguments leak into shell history, `ps`,
 process listings, and logs. This is a hard rule for the flows you build here AND for
@@ -252,6 +270,30 @@ EOF
 ```
 Reports go to a shared host-visible location the maintainer reviews across all
 projects. Use it whenever the framework — not your code — is what's misbehaving.
+
+## Escalating a framework BEST-PRACTICE question (cb-consult)
+Distinct from a bug: sometimes you're stuck on *how a claudebox project SHOULD do
+something* and the answer ought to be a claudebox standard, not a per-project
+reinvention. Open a **consult** — a supervised conversation with framework-Claude (the
+Claude working on the harness itself) that the human approves. Open one ONLY when ALL
+hold: (a) the problem is about the harness/ENVIRONMENT — networking, the VM, the image,
+the `cb-*` tooling — not your app's own logic; (b) it would recur in ANY claudebox
+project (a general engineering concern); (c) it isn't already answered by this guidance.
+The archetype: N-tier networking (how tiers address each other vs how the browser reaches
+them, the rotating VM IP, CORS/allowed-origins). If it's a concrete DEFECT rather than a
+"what's the right pattern" question, use `cb-report-bug` instead.
+```
+cb-consult open "<short title>" --layer networking <<'EOF'
+## Problem            (what you're stuck on)
+## Why it's general   (why any claudebox N-tier project hits this)
+## What I tried       (and why it didn't hold — e.g. hardcoded IP broke on rotation)
+EOF
+```
+The reply comes back **async** after the human approves it — re-check with
+`cb-consult read <id>`. When you get it, ADOPT it and `cb-consult resolve <id>`. The
+resolution usually also updates this baked guidance, so it becomes the standard every
+future claudebot inherits — which is the whole point. See the `cb-consult` help for the
+full verb set (open/say/read/list/resolve).
 
 ## What survives a rebuild / restart (and what doesn't)
 Your **workspace** and your **Claude session** (history, `--continue`, settings,

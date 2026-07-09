@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.6.0"
+CLAUDEBOX_VERSION="2.7.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -945,6 +945,32 @@ cb_cdp_profile() { printf '%s' "${CLAUDEBOX_CDP_PROFILE:-$(cb_cdp_home)/chrome-d
 # across all projects — framework feedback spans projects, unlike per-project data.
 cb_fwbugs_home() { printf '%s/claudebox/framework-bugs' "$(cb_config_home)"; }
 
+# Shared cross-project sink for CONSULTS — supervised claudebot<->framework-Claude
+# threads (cb-consult in the container + `claudebox consult` on the host both read/write
+# here). See docs/design/framework-consult.md. Shared like framework-bugs; all files.
+cb_consult_home() { printf '%s/claudebox/consult' "$(cb_config_home)"; }
+
+# cb_consult_status DIR/<id> — echo a thread's status (from its meta), or "" if none.
+cb_consult_status() { local m="$1/meta"; [ -f "$m" ] && sed -n 's/^status=//p' "$m" | tail -1; }
+
+# cb_consult_meta_set DIR/<id> KEY VALUE — set/replace KEY in a thread's meta file.
+cb_consult_meta_set() {
+    local td="$1" k="$2" v="$3" m="$1/meta"
+    mkdir -p "$td"; touch "$m"
+    if grep -q "^${k}=" "$m" 2>/dev/null; then sed -i "s#^${k}=.*#${k}=${v}#" "$m"
+    else printf '%s=%s\n' "$k" "$v" >> "$m"; fi
+    grep -q '^updated=' "$m" && sed -i "s#^updated=.*#updated=$(date +%Y-%m-%dT%H-%M-%S)#" "$m" || printf 'updated=%s\n' "$(date +%Y-%m-%dT%H-%M-%S)" >> "$m"
+}
+
+# cb_consult_post DIR/<id> AUTHOR  (body on stdin) — append the next numbered turn.
+cb_consult_post() {
+    local td="$1" author="$2" n next
+    mkdir -p "$td"
+    n=$(find "$td" -maxdepth 1 -name '[0-9][0-9][0-9]-*.md' 2>/dev/null | wc -l | tr -d ' ')
+    next=$(printf '%03d' $((n + 1)))
+    cat > "$td/${next}-${author}.md"
+}
+
 cb_bridge_up() {   # $1=id
     local id="$1" chrome home profile fwd url
     chrome="${CLAUDEBOX_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
@@ -1259,6 +1285,7 @@ VERSION
 OTHER
   browser-bridge up|down           opt-in: let claudebot drive your real Chrome via CDP
   framework-bugs [list|clear]      review bugs claudebot filed with cb-report-bug
+  consult list|show|approve|...    supervised claudebot<->framework-Claude threads
   setup-token                      run 'claude setup-token' in a throwaway container
   -v | --version | doctor | auth | mcp    passthrough to the claude CLI
 
@@ -1338,6 +1365,70 @@ HELP
                 fi ;;
             clear) rm -f "$_fwb"/*.md 2>/dev/null; echo "cleared framework bug reports in $_fwb" ;;
             *)     echo "usage: claudebox framework-bugs [list|clear]" >&2; exit 1 ;;
+        esac
+        exit 0
+        ;;
+    consult)
+        # Supervised claudebot<->framework-Claude threads. See docs/design/framework-consult.md.
+        # YOU are the approval gate; framework-Claude drafts (via the framework-consult skill).
+        _ch="$(cb_consult_home)"; mkdir -p "$_ch" 2>/dev/null || true
+        _cid="${3:-}"
+        case "${2:-list}" in
+            list)
+                shopt -s nullglob; _threads=("$_ch"/*/); shopt -u nullglob
+                if [ "${#_threads[@]}" -eq 0 ]; then echo "no consults in $_ch"; else
+                    echo "consults (${#_threads[@]}) in $_ch:"
+                    for _t in "${_threads[@]}"; do
+                        _t="${_t%/}"; _id="$(basename "$_t")"
+                        printf '  %-28s [%s]  %s\n' "$_id" "$(cb_consult_status "$_t")" "$(sed -n 's/^title=//p' "$_t/meta" | head -1)"
+                    done
+                    echo ""; echo "show:  claudebox consult show <id>     approve/revise/reject: claudebox consult <verb> <id>"
+                fi ;;
+            show)
+                [ -n "$_cid" ] || { echo "usage: claudebox consult show <id>" >&2; exit 1; }
+                _t="$_ch/$_cid"; [ -d "$_t" ] || { echo "no such consult: $_cid" >&2; exit 1; }
+                echo "=== consult $_cid ==="; cat "$_t/meta"; echo ""
+                for _m in "$_t"/[0-9][0-9][0-9]-*.md; do [ -f "$_m" ] || continue; echo "── $(basename "$_m") ──"; cat "$_m"; echo ""; done
+                [ -f "$_t/proposed.diff" ] && { echo "── proposed.diff ──"; cat "$_t/proposed.diff"; } ;;
+            approve)
+                [ -n "$_cid" ] || { echo "usage: claudebox consult approve <id>" >&2; exit 1; }
+                _t="$_ch/$_cid"; [ -d "$_t" ] || { echo "no such consult: $_cid" >&2; exit 1; }
+                [ "$(cb_consult_status "$_t")" = "awaiting-approval" ] || echo "note: status is '$(cb_consult_status "$_t")' (expected awaiting-approval)" >&2
+                cb_consult_meta_set "$_t" status awaiting-claudebot
+                printf 'Approved by the human. Framework-Claude: apply the proposed change, commit, and post the reply with the commit hash.\n' | cb_consult_post "$_t" human
+                echo "✅ approved $_cid — framework-Claude will now apply + reply." ;;
+            revise)
+                [ -n "$_cid" ] || { echo "usage: claudebox consult revise <id> [note]" >&2; exit 1; }
+                _t="$_ch/$_cid"; [ -d "$_t" ] || { echo "no such consult: $_cid" >&2; exit 1; }
+                cb_consult_meta_set "$_t" status awaiting-framework
+                _note="${*:4}"; [ -n "$_note" ] || _note="please revise the draft"
+                printf '%s\n' "$_note" | cb_consult_post "$_t" human
+                echo "↩️  bounced $_cid back for revision." ;;
+            reject)
+                [ -n "$_cid" ] || { echo "usage: claudebox consult reject <id> [reason]" >&2; exit 1; }
+                _t="$_ch/$_cid"; [ -d "$_t" ] || { echo "no such consult: $_cid" >&2; exit 1; }
+                cb_consult_meta_set "$_t" status rejected
+                _note="${*:4}"; [ -n "$_note" ] || _note="rejected"
+                printf '%s\n' "$_note" | cb_consult_post "$_t" human
+                echo "🚫 rejected $_cid." ;;
+            post)
+                # low-level append used by framework-Claude (the skill) and you:
+                #   claudebox consult post <id> --author framework --status awaiting-approval [--diff F] < body
+                [ -n "$_cid" ] || { echo "usage: claudebox consult post <id> [--author A] [--status S] [--diff F] < body" >&2; exit 1; }
+                _t="$_ch/$_cid"; mkdir -p "$_t"
+                _author=framework; _status=""; _diff=""
+                shift 3 2>/dev/null || true
+                while [ $# -gt 0 ]; do case "$1" in
+                    --author) _author="${2:-framework}"; shift ;;
+                    --status) _status="${2:-}"; shift ;;
+                    --diff)   _diff="${2:-}"; shift ;;
+                    *) : ;;
+                esac; shift; done
+                cb_consult_post "$_t" "$_author"
+                [ -n "$_diff" ] && [ -f "$_diff" ] && cp "$_diff" "$_t/proposed.diff"
+                [ -n "$_status" ] && cb_consult_meta_set "$_t" status "$_status"
+                echo "posted $_author turn to $_cid${_status:+ (status=$_status)}" ;;
+            *) echo "usage: claudebox consult list|show|approve|revise|reject|post <id>" >&2; exit 1 ;;
         esac
         exit 0
         ;;
@@ -1485,8 +1576,13 @@ done
 _vm_profile="$(cb_project_profile "$CB_PROJECT_ID")"
 _vm_ip="$(cb_vm_address "$_vm_profile" 2>/dev/null || true)"
 [ -n "$_vm_ip" ] && DOCKER_ARGS+=(-e "CLAUDEBOX_VM_IP=$_vm_ip")
+# Stable name (network.hostname) is the rotation-proof escape hatch — ride the same
+# sidecar (its reader loops every KEY=VALUE line). Doesn't rotate, but stays in sync.
+_vm_host="$(cb_project_hostname "$CB_PROJECT_ROOT" 2>/dev/null || true)"
+[ -n "$_vm_host" ] && DOCKER_ARGS+=(-e "CLAUDEBOX_HOSTNAME=$_vm_host")
 for _crole in "" _prog _cron; do
-    printf 'CLAUDEBOX_VM_IP=%s\n' "$_vm_ip" > "$CLAUDE_DIR/.${container_name}${_crole}-vmip"
+    { printf 'CLAUDEBOX_VM_IP=%s\n' "$_vm_ip"
+      printf 'CLAUDEBOX_HOSTNAME=%s\n' "$_vm_host"; } > "$CLAUDE_DIR/.${container_name}${_crole}-vmip"
 done
 
 # Shared framework-bug drop dir — mount it into every container so cb-report-bug can
@@ -1497,6 +1593,24 @@ DOCKER_ARGS+=(-e "CLAUDEBOX_FRAMEWORK_BUGS_DIR=/home/claude/framework-bugs")
 DOCKER_ARGS+=(-e "CLAUDEBOX_PROJECT_ID=$CB_PROJECT_ID")
 _fwb_n=$(find "$_fwbugs" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
 [ "${_fwb_n:-0}" -gt 0 ] && echo "⚠ $_fwb_n framework bug report(s) on file — review: claudebox framework-bugs" >&2
+
+# Shared consult dir — mount it so cb-consult can open/read supervised framework threads.
+_consult="$(cb_consult_home)"; mkdir -p "$_consult" 2>/dev/null || true
+DOCKER_ARGS+=(-v "$_consult:/home/claude/framework-consult")
+DOCKER_ARGS+=(-e "CLAUDEBOX_CONSULT_DIR=/home/claude/framework-consult")
+# Surface pending consults the way checkversion warns — the human is the approval gate.
+_c_appr=0; _c_draft=0
+if [ -d "$_consult" ]; then
+    for _td in "$_consult"/*/; do
+        [ -d "$_td" ] || continue
+        case "$(cb_consult_status "${_td%/}")" in
+            awaiting-approval) _c_appr=$((_c_appr + 1)) ;;
+            awaiting-framework) _c_draft=$((_c_draft + 1)) ;;
+        esac
+    done
+fi
+[ "$_c_appr" -gt 0 ] && echo "🗣  $_c_appr framework consult(s) awaiting YOUR approval — review: claudebox consult list" >&2
+[ "$_c_draft" -gt 0 ] && echo "🗣  $_c_draft framework consult(s) awaiting a framework draft — see: claudebox consult list" >&2
 
 # forward env vars to the container
 [ -n "$ANTHROPIC_API_KEY" ] && DOCKER_ARGS+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")

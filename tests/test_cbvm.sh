@@ -112,6 +112,25 @@ if grep -A12 '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP" | grep -q 'unset \$name'; 
 # wrapper writes the sidecar unconditionally (mirror), so bridge-down -> empty on next run
 if grep -q "printf 'CLAUDEBOX_HOST_CDP_URL=%s\\\\n' \"\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
 
+echo "--- consult substrate (cb_consult_* thread helpers + wrapper<->cb-consult contract) ---"
+CT="$(mktemp -d)/t1"
+cb_consult_meta_set "$CT" status awaiting-framework
+cb_consult_meta_set "$CT" title "n-tier cors"
+eq "meta status set"   "$(cb_consult_status "$CT")" "awaiting-framework"
+printf 'the problem\n' | cb_consult_post "$CT" claudebot
+printf 'the reply\n'   | cb_consult_post "$CT" framework
+[ -f "$CT/001-claudebot.md" ] && ok "first turn numbered 001-claudebot" || bad "001-claudebot.md missing"
+[ -f "$CT/002-framework.md" ] && ok "second turn numbered 002-framework" || bad "002-framework.md missing"
+cb_consult_meta_set "$CT" status awaiting-approval
+eq "status transition"  "$(cb_consult_status "$CT")" "awaiting-approval"
+# cross-file naming contract: the container helper cb-consult and the host wrapper must
+# agree on the mount path + env var (like framework-bugs) or a thread opened in one is
+# invisible to the other.
+CBC="$SCRIPT_DIR/../cb-consult"
+if grep -q 'framework-consult' "$WRAPPER" && grep -q 'framework-consult' "$CBC"; then ok "wrapper & cb-consult agree on /home/claude/framework-consult mount"; else bad "consult mount path drifted between wrapper and cb-consult"; fi
+if grep -q 'CLAUDEBOX_CONSULT_DIR' "$WRAPPER" && grep -q 'CLAUDEBOX_CONSULT_DIR' "$CBC"; then ok "wrapper & cb-consult agree on CLAUDEBOX_CONSULT_DIR"; else bad "CLAUDEBOX_CONSULT_DIR drifted"; fi
+rm -rf "$(dirname "$CT")"
+
 echo "--- VM-IP sidecar contract (wrapper injects CLAUDEBOX_VM_IP, entrypoint re-reads) ---"
 # The claudebot container can't self-discover the VM's reachable IP (it's on the 172.x
 # bridge), and the IP rotates across restarts — so the wrapper mirrors the CURRENT IP to
