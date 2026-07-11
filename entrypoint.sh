@@ -289,11 +289,17 @@ cb-consult open "<short title>" --layer networking <<'EOF'
 ## What I tried       (and why it didn't hold — e.g. hardcoded IP broke on rotation)
 EOF
 ```
-The reply comes back **async** after the human approves it — re-check with
-`cb-consult read <id>`. When you get it, ADOPT it and `cb-consult resolve <id>`. The
-resolution usually also updates this baked guidance, so it becomes the standard every
-future claudebot inherits — which is the whole point. See the `cb-consult` help for the
-full verb set (open/say/read/list/resolve).
+The reply comes back **async** after the human approves it. To be alerted the moment it
+lands instead of polling, **right after you open a consult, launch `cb-consult watch` as a
+BACKGROUND task** (it's token-free, blocks until this project's threads change, then exits
+and prints what changed — you're re-invoked on exit; relaunch it if you're still waiting).
+Only watch while you actually have a consult open — don't run it as a blanket background
+poller. If your session ends first, no worry: at your next startup the harness surfaces any
+approved reply waiting for you. Otherwise just re-check with `cb-consult read <id>`. When
+you get the reply, ADOPT it and `cb-consult resolve <id>` (or `cb-consult say <id>` if you
+disagree with the standard). The resolution usually also updates this baked guidance, so it
+becomes the standard every future claudebot inherits — which is the whole point. See the
+`cb-consult` help for the full verb set (open/say/read/list/watch/resolve).
 
 ## What survives a rebuild / restart (and what doesn't)
 Your **workspace** and your **Claude session** (history, `--continue`, settings,

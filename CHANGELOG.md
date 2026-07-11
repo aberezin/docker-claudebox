@@ -16,6 +16,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.8.1] — 2026-07-11 _(fork)_
+
+### Changed
+- **Consult alerting, claudebot half of Idea A.** Baked container guidance now tells a
+  claudebot to launch `cb-consult watch` as a background task **right after it opens a
+  consult** (targeted — only while it's actually waiting on a reply, not a blanket
+  poller), so it's alerted the moment an approved reply lands instead of polling. If its
+  session ends first, startup surfacing catches the reply next boot. Complements the
+  framework-side `SessionStart` hook added just before. Baked-`CLAUDE.md` change → reaches
+  **new** projects on build; existing projects pick it up when their `CLAUDE.md.template`
+  is regenerated (the task-#10 propagation limitation).
+
+**Needs `make build`** (entrypoint guidance); rebuild auto-recreates containers.
+
 ## [2.8.0] — 2026-07-11 _(fork)_
 
 ### Added
