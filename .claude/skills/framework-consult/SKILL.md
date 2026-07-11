@@ -26,7 +26,11 @@ claudebox consult watch                # block until a thread changes, then exit
 **To stay alerted without babysitting**, run `claudebox consult watch` as a **background
 task** (`run_in_background: true`). It's token-free and blocks until any thread changes,
 then exits and prints what changed — the harness re-invokes you on exit. Handle the
-change (usually: draft an `awaiting-framework` thread), then **relaunch the watcher**.
+change (usually: draft an `awaiting-framework` thread), then **relaunch the watcher** —
+that relaunch is the loop; without it you only catch one change. A **SessionStart hook**
+(`.claude/hooks/consult-session-start.sh`) surfaces pending consults and nudges you to
+start the watcher at the beginning of each session in this repo, so you rarely have to
+remember — but you still own launching and relaunching it.
 
 ## 1. Draft with an Agent-tool sub-agent (the "auto-draft")
 

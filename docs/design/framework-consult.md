@@ -159,7 +159,10 @@ sessions), so there are two alerting layers:
 - **(A) Startup surfacing** — cheap, fires at session boot. A host `claudebox` run prints
   `🗣 N consult(s) awaiting YOUR approval / a framework draft`; the entrypoint injects an
   equivalent note into the **claudebot's** startup context when one of its threads is
-  `awaiting-claudebot` (an approved reply is waiting). So a session *starts* aware.
+  `awaiting-claudebot` (an approved reply is waiting). On the **framework-Claude side**, a
+  `SessionStart` hook (`.claude/hooks/consult-session-start.sh`, wired in
+  `.claude/settings.json`) surfaces pending consults and — if no watcher is running —
+  nudges the session to launch `claudebox consult watch`. So a session *starts* aware.
 - **(B) `watch` — block until change, mid-session.** `claudebox consult watch` (host) and
   `cb-consult watch` (container) are **token-free** loops that block until a relevant
   thread changes state (a new consult / a reply landing / a new turn), print what changed,
