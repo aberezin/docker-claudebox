@@ -358,6 +358,27 @@ if [ -n "${CLAUDEBOX_VERSION:-}" ]; then
 	chown claude:claude "$HARNESS_VER_FILE" 2>/dev/null || true
 fi
 
+# (A) Consult surfacing — if a framework-consult reply is waiting for THIS project
+# (status awaiting-claudebot), tell the claudebot at startup so it doesn't sit unaware of
+# an approved answer. Mirrors the host wrapper surfacing consults to the human. Only
+# threads for this project id, only the actionable state.
+CONSULT_NOTE=""
+_cdir="${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}"
+if [ -d "$_cdir" ] && [ -n "${CLAUDEBOX_PROJECT_ID:-}" ]; then
+	_cn=0; _cids=""
+	for _ctd in "$_cdir"/*/; do
+		[ -d "$_ctd" ] || continue; _ctd="${_ctd%/}"; _cm="$_ctd/meta"
+		[ -f "$_cm" ] || continue
+		[ "$(sed -n 's/^project=//p' "$_cm" | head -1)" = "$CLAUDEBOX_PROJECT_ID" ] || continue
+		[ "$(sed -n 's/^status=//p' "$_cm" | tail -1)" = "awaiting-claudebot" ] || continue
+		_cn=$((_cn + 1)); _cids="${_cids:+$_cids, }$(basename "$_ctd")"
+	done
+	if [ "$_cn" -gt 0 ]; then
+		CONSULT_NOTE="NOTE: ${_cn} framework consult(s) have an APPROVED reply waiting for you (${_cids}). Run \`cb-consult read <id>\`, adopt the resolution, and \`cb-consult resolve <id>\` — or \`cb-consult say <id>\` if you disagree with the framework standard. See the 'Escalating a framework BEST-PRACTICE question' section for how consults work."
+		dbg "consult surfacing: $_cn awaiting-claudebot for $CLAUDEBOX_PROJECT_ID"
+	fi
+fi
+
 # Seed the container-side /claudebox skill: a harness self-report the claudebot can run
 # from INSIDE (the host `claudebox` binary isn't in here). Rewritten every start so it
 # stays current after an image update (it's shipped content, not user-editable).
@@ -638,6 +659,11 @@ if [ -n "$HARNESS_UPDATE_NOTE" ]; then
 	COMBINED_APPEND="${COMBINED_APPEND:+$COMBINED_APPEND
 
 }$HARNESS_UPDATE_NOTE"
+fi
+if [ -n "$CONSULT_NOTE" ]; then
+	COMBINED_APPEND="${COMBINED_APPEND:+$COMBINED_APPEND
+
+}$CONSULT_NOTE"
 fi
 ALWAYS_SKILLS_DIR="/home/claude/.claude/.always-skills"
 if [ -d "$ALWAYS_SKILLS_DIR" ]; then

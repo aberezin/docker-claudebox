@@ -123,6 +123,13 @@ printf 'the reply\n'   | cb_consult_post "$CT" framework
 [ -f "$CT/002-framework.md" ] && ok "second turn numbered 002-framework" || bad "002-framework.md missing"
 cb_consult_meta_set "$CT" status awaiting-approval
 eq "status transition"  "$(cb_consult_status "$CT")" "awaiting-approval"
+# watch (B): cb_consult_sig must change when status/turns change, so `watch` detects it
+_sig1="$(cb_consult_sig "$(dirname "$CT")")"
+printf 'another turn\n' | cb_consult_post "$CT" human
+cb_consult_meta_set "$CT" status awaiting-claudebot
+_sig2="$(cb_consult_sig "$(dirname "$CT")")"
+if [ "$_sig1" != "$_sig2" ]; then ok "cb_consult_sig changes on status/turn change (watch fires)"; else bad "cb_consult_sig did not change (watch would miss it)"; fi
+case "$_sig2" in *"|awaiting-claudebot|"*) ok "sig encodes id|status|nturns" ;; *) bad "sig format unexpected: $_sig2" ;; esac
 # cross-file naming contract: the container helper cb-consult and the host wrapper must
 # agree on the mount path + env var (like framework-bugs) or a thread opened in one is
 # invisible to the other.

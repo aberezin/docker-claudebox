@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.7.0"
+CLAUDEBOX_VERSION="2.8.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -971,6 +971,19 @@ cb_consult_post() {
     cat > "$td/${next}-${author}.md"
 }
 
+# cb_consult_sig HOME [PROJECT] — a stable one-line-per-thread signature (id|status|nturns)
+# of all threads (optionally filtered to a project id). `watch` diffs this to detect change.
+cb_consult_sig() {
+    local ch="$1" filt="${2:-}" td m n
+    [ -d "$ch" ] || return 0
+    for td in "$ch"/*/; do
+        [ -d "$td" ] || continue; td="${td%/}"; m="$td/meta"; [ -f "$m" ] || continue
+        [ -z "$filt" ] || [ "$(sed -n 's/^project=//p' "$m" | head -1)" = "$filt" ] || continue
+        n=$(find "$td" -maxdepth 1 -name '[0-9][0-9][0-9]-*.md' 2>/dev/null | wc -l | tr -d ' ')
+        printf '%s|%s|%s\n' "$(basename "$td")" "$(sed -n 's/^status=//p' "$m" | tail -1)" "$n"
+    done | sort
+}
+
 cb_bridge_up() {   # $1=id
     local id="$1" chrome home profile fwd url
     chrome="${CLAUDEBOX_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
@@ -1285,7 +1298,7 @@ VERSION
 OTHER
   browser-bridge up|down           opt-in: let claudebot drive your real Chrome via CDP
   framework-bugs [list|clear]      review bugs claudebot filed with cb-report-bug
-  consult list|show|approve|...    supervised claudebot<->framework-Claude threads
+  consult list|show|approve|watch  supervised claudebot<->framework-Claude threads (watch=block-until-change)
   setup-token                      run 'claude setup-token' in a throwaway container
   -v | --version | doctor | auth | mcp    passthrough to the claude CLI
 
@@ -1428,7 +1441,26 @@ HELP
                 [ -n "$_diff" ] && [ -f "$_diff" ] && cp "$_diff" "$_t/proposed.diff"
                 [ -n "$_status" ] && cb_consult_meta_set "$_t" status "$_status"
                 echo "posted $_author turn to $_cid${_status:+ (status=$_status)}" ;;
-            *) echo "usage: claudebox consult list|show|approve|revise|reject|post <id>" >&2; exit 1 ;;
+            watch)
+                # Block (token-free) until any consult's state changes, print what changed,
+                # exit. Run as a BACKGROUND task in a live framework-Claude session: the
+                # harness re-invokes the session when it exits; handle the change, relaunch.
+                _iv="${3:-20}"; case "$_iv" in ''|*[!0-9]*) _iv=20 ;; esac
+                _base="$(cb_consult_sig "$_ch")"
+                echo "👁  watching $_ch for consult changes (every ${_iv}s; Ctrl-C to stop)…" >&2
+                while :; do
+                    sleep "$_iv"
+                    _cur="$(cb_consult_sig "$_ch")"
+                    if [ "$_cur" != "$_base" ]; then
+                        echo "🗣  consult state changed:"
+                        comm -13 <(printf '%s\n' "$_base") <(printf '%s\n' "$_cur") | while IFS='|' read -r _id _st _n; do
+                            [ -n "$_id" ] && printf '  %-28s → [%s]\n' "$_id" "$_st"
+                        done
+                        echo "act: claudebox consult show <id>   (awaiting-framework = needs your draft)"
+                        exit 0
+                    fi
+                done ;;
+            *) echo "usage: claudebox consult list|show|approve|revise|reject|post|watch <id>" >&2; exit 1 ;;
         esac
         exit 0
         ;;

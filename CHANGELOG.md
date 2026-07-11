@@ -16,6 +16,25 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.8.0] — 2026-07-11 _(fork)_
+
+### Added
+- **Consult alerting — surfacing + `watch`.** So a claudebot and framework-Claude aren't
+  unaware of incoming replies/state changes:
+  - **(A) Startup surfacing:** the entrypoint now injects a note into the **claudebot's**
+    startup context when one of its consults is `awaiting-claudebot` (an approved reply is
+    waiting) — mirroring the host wrapper already surfacing pending consults to the human.
+  - **(B) `watch`:** new `claudebox consult watch` (host) and `cb-consult watch` (container)
+    — **token-free** loops that block until a relevant thread changes state (new consult /
+    reply landing / new turn), print what changed, and exit. Run as a background task in a
+    live session; the harness re-invokes on exit → handle → relaunch. Pure files + polling
+    (default 20s, `watch [secs]`); no external infra. The `framework-consult` skill uses it.
+- Sequence diagram (Mermaid) + a "Staying alerted" section in
+  [docs/design/framework-consult.md](docs/design/framework-consult.md).
+
+**Needs `make build`** (entrypoint + `cb-consult` changes); the rebuild auto-recreates
+existing containers on next run.
+
 ## [2.7.0] — 2026-07-08 _(fork)_
 
 ### Added

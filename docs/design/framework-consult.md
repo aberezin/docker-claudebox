@@ -105,6 +105,74 @@ drives the loop below.
 "Hybrid" = the drafting is automated (the sub-agent, not you, writes the analysis) but
 **held for your approval** before it returns to the claudebot.
 
+### Sequence
+
+The claudebot and framework-Claude **never talk directly** — every arrow to/from the
+store is a file read/write, and the human is the only actor that advances the gate.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor H as 👤 Human (the gate)
+    participant CB as claudebot<br/>(e.g. gammaray)
+    participant S as Consult store<br/>(shared files)
+    participant FC as Framework-Claude
+    participant SA as Drafting sub-agent
+
+    Note over CB,FC: peers — never talk directly, only through the store + the human
+
+    CB->>S: cb-consult open "N-tier CORS…"
+    Note over S: status = awaiting-framework
+    S-->>H: surfaced on a `claudebox` run:<br/>"N awaiting a framework draft"
+    H->>FC: "work consult <id>"
+    FC->>S: read thread
+    FC->>SA: spawn (thread + repo context)
+    SA-->>FC: reply + proposed artifacts (+ diff)
+    FC->>S: post draft
+    Note over S: status = awaiting-approval  ← the gate
+    S-->>H: "N consult(s) awaiting YOUR approval"
+
+    alt human approves
+        H->>S: claudebox consult approve
+        Note over S: status = awaiting-claudebot
+        FC->>FC: apply change, commit (vX.Y.Z)
+        FC->>S: post apply-reply (with commit hash)
+    else human revises
+        H->>S: claudebox consult revise "note"
+        Note over S: status → awaiting-framework
+        Note over FC: re-draft addressing the note
+    else human rejects
+        H->>S: claudebox consult reject "reason"
+        Note over S: status = rejected (closed)
+    end
+
+    S-->>CB: cb-consult read → reply available
+    CB->>S: adopt → cb-consult resolve
+    Note over S: status = resolved
+```
+
+## Staying alerted (surfacing + watch)
+
+Acting on a consult needs a **live** session (both framework-Claude and a claudebot are
+sessions), so there are two alerting layers:
+
+- **(A) Startup surfacing** — cheap, fires at session boot. A host `claudebox` run prints
+  `🗣 N consult(s) awaiting YOUR approval / a framework draft`; the entrypoint injects an
+  equivalent note into the **claudebot's** startup context when one of its threads is
+  `awaiting-claudebot` (an approved reply is waiting). So a session *starts* aware.
+- **(B) `watch` — block until change, mid-session.** `claudebox consult watch` (host) and
+  `cb-consult watch` (container) are **token-free** loops that block until a relevant
+  thread changes state (a new consult / a reply landing / a new turn), print what changed,
+  and **exit**. Run as a **background task** in a live session: the harness re-invokes the
+  session when the task exits, it handles the change, then relaunches the watcher. Pure
+  files + polling — no external infra; it costs nothing until an actual change. Default
+  poll interval 20s (`watch [secs]`); swap in `inotifywait`/`fswatch` later if you want
+  event-driven.
+
+Neither can wake a session that isn't running — that's inherent. When nobody's watching,
+the party to alert is the **human** (so you open a session); a push hook (Telegram/
+desktop) on a state change is the complementary path, not yet built.
+
 ## When to open a consult (escalation criteria)
 
 Baked into the container `CLAUDE.md` so a claudebot knows the boundary. Open one only when

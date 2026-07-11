@@ -17,10 +17,16 @@ reaches the claudebot until they run `claudebox consult approve`.
 ```bash
 claudebox consult list                 # all threads + status
 claudebox consult show <id>            # full thread + any proposed.diff
+claudebox consult watch                # block until a thread changes, then exit (see below)
 ```
 - `awaiting-framework` → it needs your draft (step 1).
 - `awaiting-claudebot` → the human approved; **apply + reply** (step 3).
 - `awaiting-approval` → waiting on the human; do nothing but tell them.
+
+**To stay alerted without babysitting**, run `claudebox consult watch` as a **background
+task** (`run_in_background: true`). It's token-free and blocks until any thread changes,
+then exits and prints what changed — the harness re-invokes you on exit. Handle the
+change (usually: draft an `awaiting-framework` thread), then **relaunch the watcher**.
 
 ## 1. Draft with an Agent-tool sub-agent (the "auto-draft")
 
