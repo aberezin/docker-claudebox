@@ -11,6 +11,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [environment-variables.md](environment-variables.md) | Every `CLAUDEBOX_*` setting; `CLAUDEBOX_ENV_*` (forward vars), `CLAUDEBOX_MOUNT_*` (extra mounts), secrets, caffeinate. |
 | [customization.md](customization.md) | `~/.claude/bin` scripts, `init.d` hooks, always-active skills, MCP servers, plugins, and **profiles**. |
 | [versioning.md](versioning.md) | Semver, the host↔image contract, release steps, and `claudebox checkversion`. |
+| [documentation.md](documentation.md) | How to document this framework — house style, the `See also` rule, and the Mermaid convention (+ the `;` gotcha). |
 
 ## Modes
 
