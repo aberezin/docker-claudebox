@@ -16,6 +16,29 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.14.0] — 2026-07-12 _(fork)_
+
+### Added
+- **`claudebox host-agent` — proxy the framework's host commands to the Mac** (backlog #15,
+  Approach 2, **phase 1**). Lets a claudebot developing *this harness* inside a container run the
+  framework's `colima`/`limactl` calls against the real Mac Colima, so the full orchestration is
+  under test from a container. How it works:
+  - **`host-agent.py`** — a small Mac daemon (reusing the CDP-bridge gateway pattern) that runs an
+    **allowlisted** `colima`/`limactl` (binary **and** subcommand). **Security: opt-in, off by
+    default; binds only the Colima gateway `192.168.64.1` (never LAN); per-session bearer token;
+    subcommand-allowlisted.** It is a **trusted single-operator tool**, not a general claudebot
+    capability. `claudebox host-agent up|down|status`.
+  - **`cb-host-shim`** baked as `colima` + `limactl` on the container PATH — proxies each call to
+    the agent. The wrapper injects the agent URL+token via a durable `-hostagent` sidecar (empty
+    when the agent is down → entrypoint unsets it).
+  - Proven end-to-end: a bridge-network container ran real `colima list` on the Mac (no
+    `--network host` needed); the allowlist denied a non-`colima`/`limactl` command.
+  - Design + phasing + full security model: [docs/design/backends.md](docs/design/backends.md).
+    Not yet done: the `docker` shim (phase 3) that would make `make build`/`test.sh` fully proxy.
+- `install.sh` installs `host-agent.py` next to the wrapper.
+
+**Needs `make build`** (Dockerfile + entrypoint); rebuild auto-recreates containers.
+
 ## [2.13.0] — 2026-07-12 _(fork)_
 
 ### Added

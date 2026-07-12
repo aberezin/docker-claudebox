@@ -20,6 +20,7 @@ All wrapper/installer config uses the `CLAUDEBOX_*` prefix. Anything you want av
 | `CLAUDEBOX_ALLOW_SUBDIR`   | Set to `1` to bypass the guard that stops you launching claudebot from inside a `.claudebox` metadata dir (which would mount that dir as the workspace). | _(off)_ |
 | `CLAUDEBOX_PRUNE_ON_START` | Set to `1` to have the entrypoint run `docker builder prune -f` (build cache only, best-effort) on every container start — keeps the shared VM disk from creeping up on image-iterating projects. Never removes tagged images. See [design/disk-management.md](design/disk-management.md). | _(off)_ |
 | `CLAUDEBOX_TMPFS_TMP`      | RAM-back the claudebot's `/tmp` so docker disk bloat can't starve the Bash tool (`/tmp/claude-501`). Value is a size (`2g`) or `1`/`on` for 2g. Applies on a fresh `docker run`. Sized in RAM — keep modest vs the VM's memory. | _(off)_ |
+| `CLAUDEBOX_HOST_AGENT_PORT` / `CLAUDEBOX_HOST_AGENT_BIND` | Tune the opt-in host agent (`claudebox host-agent up`, Approach 2 / #15) — the port and bind address it listens on. **BIND stays the Colima gateway; never set it to `0.0.0.0`/a LAN address.** See [design/backends.md](design/backends.md). | `9280` / `192.168.64.1` |
 | `CLAUDEBOX_INFRA_CPU`      | CPUs for the shared `cb-infra` image-store VM (install-time only)                           | `2`                       |
 | `CLAUDEBOX_INFRA_MEMORY`   | Memory (GiB) for `cb-infra` (install-time; bump if a `full` build runs short)              | `4`                       |
 | `CLAUDEBOX_INFRA_DISK`     | Disk (GiB) for `cb-infra` (install-time only)                                               | `40`                      |
@@ -91,6 +92,7 @@ its environment. Read them; don't hardcode their values in project source.
 | `CLAUDEBOX_HOST_CDP_URL`      | Present only while a CDP bridge is up (`claudebox browser-bridge up`) — the URL `cb-browser cdp` drives the human's Chrome through. |
 | `CLAUDEBOX_PROJECT_ID`        | This project's stable id (from `.claudebox/config.yml`).                    |
 | `CLAUDEBOX_CONSULT_DIR`       | Mount path for the shared consult substrate (`cb-consult`). See [design/framework-consult.md](design/framework-consult.md). |
+| `CLAUDEBOX_HOST_AGENT_URL` / `CLAUDEBOX_HOST_AGENT_TOKEN` | Injected only while the opt-in host agent is up (`claudebox host-agent up`) — the address + per-session token the baked `colima`/`limactl` shims use to proxy to the Mac. See [design/backends.md](design/backends.md). |
 | `CLAUDEBOX_FRAMEWORK_BUGS_DIR`| Mount path for the shared framework-bug drop (`cb-report-bug`).             |
 
 ## See also

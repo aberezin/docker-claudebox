@@ -634,6 +634,17 @@ if [ -f "$VMIP_FILE" ]; then
 	done < "$VMIP_FILE"
 fi
 
+# Host agent (Approach 2 / #15) — the opt-in colima/limactl proxy URL+token, re-read every
+# start (empty when the agent is down -> unset). Same durable pattern as the vmip sidecar.
+HOSTAGENT_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-hostagent"
+if [ -f "$HOSTAGENT_FILE" ]; then
+	while IFS='=' read -r name value; do
+		case "$name" in ''|\#*) continue ;; esac
+		if [ -n "$value" ]; then CMD="$CMD && export $name=$(printf '%q' "$value")"
+		else CMD="$CMD && unset $name"; fi
+	done < "$HOSTAGENT_FILE"
+fi
+
 ARGS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-args"
 UPDATE_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-update"
 

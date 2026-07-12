@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.13.0"
+CLAUDEBOX_VERSION="2.14.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -1065,6 +1065,56 @@ cb_bridge_down() {  # $1=id
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Host agent (Approach 2 / task #15, phase 1) — proxy the framework's host-only commands
+# (colima/limactl) from a harness-DEV claudebot back to the Mac. OPT-IN, off by default, and
+# a TRUSTED single-operator tool (remote command exec). Gateway-bound + token-auth +
+# subcommand-allowlisted (see host-agent.py). See docs/design/backends.md.
+# ─────────────────────────────────────────────────────────────────────────────
+CB_HOST_AGENT_PORT="${CLAUDEBOX_HOST_AGENT_PORT:-9280}"
+CB_HOST_AGENT_BIND="${CLAUDEBOX_HOST_AGENT_BIND:-192.168.64.1}"   # Colima gateway only, never LAN
+cb_host_agent_home() { printf '%s/claudebox/host-agent' "$(cb_config_home)"; }
+# resolve host-agent.py: env override → next to the wrapper → the share dir → the repo.
+cb_host_agent_py() {
+    local d; d="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
+    for _p in "${CLAUDEBOX_HOST_AGENT_PY:-}" "$d/host-agent.py" "$d/../share/claudebox/host-agent.py"; do
+        [ -n "$_p" ] && [ -f "$_p" ] && { printf '%s' "$_p"; return 0; }
+    done
+    return 1
+}
+cb_host_agent_up() {
+    local home py tok; home="$(cb_host_agent_home)"; mkdir -p "$home"
+    py="$(cb_host_agent_py)" || { echo "❌ host-agent.py not found (set CLAUDEBOX_HOST_AGENT_PY, or reinstall)" >&2; return 1; }
+    if [ -f "$home/pid" ] && kill -0 "$(cat "$home/pid" 2>/dev/null)" 2>/dev/null; then
+        echo "🛰  host agent already up ($CB_HOST_AGENT_BIND:$CB_HOST_AGENT_PORT)"; return 0
+    fi
+    tok="$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+    printf '%s' "$tok" > "$home/token"; chmod 600 "$home/token"
+    CB_HOST_AGENT_TOKEN="$tok" CB_HOST_AGENT_BIND="$CB_HOST_AGENT_BIND" CB_HOST_AGENT_PORT="$CB_HOST_AGENT_PORT" \
+        nohup python3 "$py" >"$home/log" 2>&1 &
+    echo $! > "$home/pid"
+    sleep 1
+    if kill -0 "$(cat "$home/pid")" 2>/dev/null; then
+        echo "🛰  host agent up on $CB_HOST_AGENT_BIND:$CB_HOST_AGENT_PORT (allowlisted colima/limactl)"
+        echo "   ⚠️  this lets a claudebot run allowlisted colima/limactl ON YOUR MAC — trusted harness dev only."
+        echo "   restart your dev claudebot to pick up the agent; stop:  claudebox host-agent down"
+    else
+        echo "❌ host agent failed to start — see $home/log" >&2; tail -3 "$home/log" >&2; return 1
+    fi
+}
+cb_host_agent_down() {
+    local home; home="$(cb_host_agent_home)"
+    [ -f "$home/pid" ] && { kill "$(cat "$home/pid")" 2>/dev/null; rm -f "$home/pid"; }
+    rm -f "$home/token"
+    echo "🛰  host agent down"
+}
+cb_host_agent_status() {
+    local home; home="$(cb_host_agent_home)"
+    if [ -f "$home/pid" ] && kill -0 "$(cat "$home/pid" 2>/dev/null)" 2>/dev/null; then
+        echo "host agent: UP ($CB_HOST_AGENT_BIND:$CB_HOST_AGENT_PORT, pid $(cat "$home/pid"))"
+    else echo "host agent: down (enable with 'claudebox host-agent up')"; fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Bootstrap — hand off *intent* from host-Claude into a new claudebot project.
 # See docs/design/bootstrap.md. `claudebox bootstrap` scaffolds a project and
 # writes a durable, COMMITTED mission brief (.claudebox/BRIEF.md) so claudebot
@@ -1368,6 +1418,7 @@ VERSION
 
 OTHER
   browser-bridge up|down           opt-in: let claudebot drive your real Chrome via CDP
+  host-agent up|down|status        opt-in (TRUSTED): let a HARNESS-DEV claudebot run allowlisted colima/limactl on the Mac (#15)
   framework-bugs [list|clear]      review bugs claudebot filed with cb-report-bug
   consult list|show|approve|watch  supervised claudebot<->framework-Claude threads (watch=block-until-change)
   setup-token                      run 'claude setup-token' in a throwaway container
@@ -1432,6 +1483,15 @@ HELP
             up)   cb_bridge_up "$_cbid"; exit $? ;;
             down) cb_bridge_down "$_cbid"; exit $? ;;
             *)    echo "usage: claudebox browser-bridge up|down  (opt-in: let claudebot drive your real Chrome via CDP)" >&2; exit 1 ;;
+        esac
+        ;;
+    host-agent)
+        # Approach 2 / #15: proxy colima/limactl from a harness-dev claudebot to the Mac.
+        case "${2:-status}" in
+            up)     cb_host_agent_up; exit $? ;;
+            down)   cb_host_agent_down; exit $? ;;
+            status) cb_host_agent_status; exit $? ;;
+            *)      echo "usage: claudebox host-agent up|down|status  (opt-in: let a HARNESS-DEV claudebot run allowlisted colima/limactl on your Mac — trusted use only; see docs/design/backends.md)" >&2; exit 1 ;;
         esac
         ;;
     framework-bugs)
@@ -1757,6 +1817,20 @@ _vm_host="$(cb_project_hostname "$CB_PROJECT_ROOT" 2>/dev/null || true)"
 for _crole in "" _prog _cron; do
     { printf 'CLAUDEBOX_VM_IP=%s\n' "$_vm_ip"
       printf 'CLAUDEBOX_HOSTNAME=%s\n' "$_vm_host"; } > "$CLAUDE_DIR/.${container_name}${_crole}-vmip"
+done
+
+# Host agent (Approach 2 / #15) — if the OPT-IN agent is up, inject its URL + token so the
+# baked colima/limactl shims can proxy to the Mac. Durable sidecar (empty when the agent is
+# down → entrypoint unsets it), same self-healing pattern as the CDP/VM-IP sidecars.
+_ha_home="$(cb_host_agent_home)"; _ha_url= _ha_tok=
+if [ -f "$_ha_home/pid" ] && kill -0 "$(cat "$_ha_home/pid" 2>/dev/null)" 2>/dev/null && [ -f "$_ha_home/token" ]; then
+    _ha_url="$CB_HOST_AGENT_BIND:$CB_HOST_AGENT_PORT"; _ha_tok="$(cat "$_ha_home/token")"
+    DOCKER_ARGS+=(-e "CLAUDEBOX_HOST_AGENT_URL=$_ha_url" -e "CLAUDEBOX_HOST_AGENT_TOKEN=$_ha_tok")
+fi
+for _crole in "" _prog _cron; do
+    { printf 'CLAUDEBOX_HOST_AGENT_URL=%s\n' "$_ha_url"
+      printf 'CLAUDEBOX_HOST_AGENT_TOKEN=%s\n' "$_ha_tok"; } > "$CLAUDE_DIR/.${container_name}${_crole}-hostagent"
+    chmod 600 "$CLAUDE_DIR/.${container_name}${_crole}-hostagent" 2>/dev/null || true
 done
 
 # Shared framework-bug drop dir — mount it into every container so cb-report-bug can

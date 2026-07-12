@@ -152,6 +152,18 @@ if grep -q 'framework-consult' "$WRAPPER" && grep -q 'framework-consult' "$CBC";
 if grep -q 'CLAUDEBOX_CONSULT_DIR' "$WRAPPER" && grep -q 'CLAUDEBOX_CONSULT_DIR' "$CBC"; then ok "wrapper & cb-consult agree on CLAUDEBOX_CONSULT_DIR"; else bad "CLAUDEBOX_CONSULT_DIR drifted"; fi
 rm -rf "$(dirname "$CT")"
 
+echo "--- host agent (#15 Approach 2, phase 1): security posture + wiring contract ---"
+HAPY="$SCRIPT_DIR/../host-agent.py"; HASH="$SCRIPT_DIR/../cb-host-shim"
+[ -f "$HAPY" ] && ok "host-agent.py present" || bad "host-agent.py missing"
+grep -q 'CB_HOST_AGENT_TOKEN' "$HAPY" && grep -q 'sys.exit(1)' "$HAPY" && ok "agent refuses to start without a token" || bad "agent token-gate missing"
+grep -q '"192.168.64.1"' "$HAPY" && ok "agent binds the Colima gateway (not 0.0.0.0/LAN)" || bad "agent bind not gateway-scoped"
+grep -q 'ALLOW = {' "$HAPY" && grep -q '"colima"' "$HAPY" && grep -q '"limactl"' "$HAPY" && ok "agent allowlists colima/limactl (binary+subcommand)" || bad "agent allowlist missing"
+grep -q 'CLAUDEBOX_HOST_AGENT_URL' "$HASH" && grep -q 'CLAUDEBOX_HOST_AGENT_TOKEN' "$HASH" && ok "shim reads the injected URL+token" || bad "shim env contract missing"
+# wrapper injects the durable -hostagent sidecar; entrypoint re-reads it
+grep -q 'container_name}${_crole}-hostagent' "$WRAPPER" && ok "wrapper writes -hostagent sidecar" || bad "wrapper -hostagent sidecar missing"
+grep -q '${CLAUDE_CONTAINER_NAME}-hostagent' "$ENTRYP" && ok "entrypoint re-reads -hostagent sidecar" || bad "entrypoint -hostagent reader missing"
+if declare -f cb_host_agent_up >/dev/null && declare -f cb_host_agent_down >/dev/null; then ok "cb_host_agent_up/down defined"; else bad "host-agent wrapper functions missing"; fi
+
 echo "--- bootstrap --adopt (existing repos, no nesting) ---"
 _orig_pf="$(declare -f cb_preflight)"; cb_preflight() { return 0; }   # stub VM/tooling preflight
 BT="$(mktemp -d)"

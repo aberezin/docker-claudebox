@@ -117,6 +117,14 @@ else
 fi
 rm -f "$WRAPPER_TMP"
 
+# Install host-agent.py next to the wrapper (the wrapper resolves it there) — the opt-in
+# Mac agent for `claudebox host-agent up` (Approach 2 / #15). Best-effort; skip if absent.
+if [ -f "$SCRIPT_DIR/host-agent.py" ]; then
+	if [ -w "$INSTALL_DIR" ]; then install -m 755 "$SCRIPT_DIR/host-agent.py" "$INSTALL_DIR/host-agent.py"
+	elif command -v sudo >/dev/null 2>&1; then sudo install -m 755 "$SCRIPT_DIR/host-agent.py" "$INSTALL_DIR/host-agent.py"; fi
+	echo "📝 Installed host-agent.py to $INSTALL_DIR (for 'claudebox host-agent')"
+fi
+
 # Install the /claudebox Claude Code skill (human status glance) into the user's global
 # skills dir, so /claudebox works in any project. Skip with CLAUDEBOX_SKIP_SKILL=1.
 if [ -z "${CLAUDEBOX_SKIP_SKILL:-}" ] && [ -d "$SCRIPT_DIR/skills" ]; then

@@ -1,8 +1,9 @@
 # Backends — developing/testing the framework off the Mac (task #15)
 
-**Status:** Design sketch — *not yet implemented*. Captures two approaches, their trade-offs,
-and (critically) the security model of the proxy approach, so a future implementation starts
-from a clear-eyed decision.
+**Status:** Approach 2 **phase 1 shipped** (v2.14.0) — the host agent + `colima`/`limactl`
+shims, proven end-to-end (a bridge-network container drives real `colima list` on the Mac).
+Approach 1 (docker backend) remains a sketch. This doc captures both, their trade-offs, and
+the security model.
 
 ## The goal
 
@@ -121,16 +122,28 @@ arbitrary projects/claudebots.
 - For **safe Linux CI / contributors without a Mac** → **Approach 1 (docker backend)**.
 - They can coexist: the proxy for powerful trusted dev, the docker backend for CI.
 
-## Phasing (proxy, if chosen)
+## Phasing (proxy)
 
-1. **Host agent spike** — a small daemon on the Mac (reuse the CDP bridge's Python-forwarder
-   pattern), gateway-bound + token-auth, that runs an **allowlisted** `colima`/`limactl` and
-   streams the result. `claudebox host-agent up|down` to control it.
-2. **`colima`/`limactl` shims** in the image (proxy to the agent); prove a dev claudebot can run
-   one real command (`colima list`) against the Mac.
-3. Decide on the **`docker` shim** (the thin-client step) — or keep docker local to the VM and
-   only proxy Colima.
-4. `docs/*` + a "develop-in-a-claudebox" runbook.
+1. ✅ **Host agent** (`host-agent.py`) — daemon on the Mac (reusing the CDP bridge's gateway-bound
+   pattern), **token-auth + binary/subcommand allowlisted**, streams an allowlisted `colima`/
+   `limactl`. Control with **`claudebox host-agent up|down|status`** (opt-in, off by default).
+2. ✅ **`colima`/`limactl` shims** (`cb-host-shim`, baked as both) proxy the framework's calls to
+   the agent; the wrapper injects the agent URL+token (durable `-hostagent` sidecar, empty when
+   the agent is down). Proven: a bridge-network container ran real `colima list` on the Mac.
+3. ⬜ **Decide on the `docker` shim** — the thin-client step that lets the in-container wrapper
+   build/run *into* the proxied VMs. Bigger security surface; may prefer "Colima proxied, docker
+   local to the dev VM." (This is what makes end-to-end `make build`/`test.sh` from a dev
+   claudebot fully work — phase 1 only proves the proxy channel.)
+4. ⬜ A "develop-the-harness-in-a-claudebox" runbook + deciding whether much of it needs no proxy
+   at all (unit tests are pure bash; most integration is `docker build`/`run` a local daemon
+   satisfies).
+
+### How to use phase 1
+On the Mac: `claudebox host-agent up` (prints a trust warning). Restart your harness-dev
+claudebot so it picks up the injected agent URL/token. Inside it, `colima list` (and other
+allowlisted `colima`/`limactl` subcommands) now execute on the Mac. Stop with
+`claudebox host-agent down`. It is **off by default** and a **trusted single-operator tool** —
+do not enable it for arbitrary projects.
 
 ## Open questions
 
