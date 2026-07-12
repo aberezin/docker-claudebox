@@ -199,6 +199,25 @@ does it the same way): the full spec — snippets, a worked Next+API+postgres la
 symptom→cause→fix table — is in `docs/design/n-tier-networking.md` on the host. If it's
 still unclear or you think the standard is wrong/incomplete, `cb-consult open` it.
 
+## Disk discipline (avoid the ENOSPC-kills-the-Bash-tool trap)
+Your VM has ONE overlay disk shared by docker (images + BuildKit **build cache**) AND your
+`/tmp` — where the Bash tool writes `/tmp/claude-501/<id>` for every command. If docker
+bloat fills it, the Bash tool can't create its tempdir and **every** command fails with
+`ENOSPC` — including `cb-report-bug` / `cb-df`, which are themselves Bash.
+- **Watch it:** run **`cb-df`** (or `df -h /` + `docker system df`) before/after builds.
+  Prune before `/` hits ~90%.
+- **Prune as you iterate, not once at the end:** `docker builder prune -f` (build cache —
+  the real accumulator) after EACH `docker compose build`; `docker image prune -af`
+  (unused images). Big hammer: `docker system prune -af`.
+- **If Bash is ALREADY dead (ENOSPC on every call), don't try to shell out — you can't.**
+  Your **Write tool still works**: write a Markdown report file directly into the mounted
+  drop dir `/home/claude/framework-bugs/<project-id>-<ts>-<slug>.md` (mirroring what
+  `cb-report-bug` produces), then ask the human to reclaim disk on the Mac
+  (`docker system prune -af` or `claudebox vm gc`). Bash recovers once `/` has room.
+- Image-heavy project? The human can raise `vm.disk` in `.claudebox/config.yml` (sparse —
+  near-zero Mac cost; needs `claudebox down` + restart). Full standard:
+  `docs/design/disk-management.md` on the host.
+
 ## Secrets & credentials
 NEVER put a secret value on a command line — arguments leak into shell history, `ps`,
 process listings, and logs. This is a hard rule for the flows you build here AND for

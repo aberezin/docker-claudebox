@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.8.0"
+CLAUDEBOX_VERSION="2.9.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -612,11 +612,15 @@ cb_vm_gc() {
         echo "   (none)"
     fi
 
-    echo "🖼  pruning dangling (old) docker images in running claudebox VMs…"
+    echo "🖼  pruning dangling images + BuildKit build cache in running claudebox VMs…"
     while IFS= read -r p; do
         [ -n "$p" ] || continue
-        _pr="$(docker --context "colima-$p" image prune -f 2>/dev/null | grep -i 'reclaimed' | sed 's/.*: //')"
-        printf '   - %-14s reclaimed %s\n' "$p" "${_pr:-0B}"
+        # dangling images AND build cache — build cache is the real accumulator on
+        # image-iterating projects, and `image prune` never touches it (see
+        # docs/design/disk-management.md).
+        _pi="$(docker --context "colima-$p" image prune -f 2>/dev/null | grep -i 'reclaimed' | sed 's/.*: //')"
+        _pb="$(docker --context "colima-$p" builder prune -f 2>/dev/null | grep -i 'reclaimed' | sed 's/.*: //')"
+        printf '   - %-14s images %s · build cache %s\n' "$p" "${_pi:-0B}" "${_pb:-0B}"
     done < <(_cb_vm_list_json | cb_parse_vm_lines | awk -F'\t' '$1 ~ /^cb-/ && $2 == "Running" {print $1}')
 
     echo "🧻 fstrim on running claudebox VMs (return freed blocks to macOS)…"

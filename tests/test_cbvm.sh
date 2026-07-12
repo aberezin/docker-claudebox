@@ -112,6 +112,13 @@ if grep -A12 '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP" | grep -q 'unset \$name'; 
 # wrapper writes the sidecar unconditionally (mirror), so bridge-down -> empty on next run
 if grep -q "printf 'CLAUDEBOX_HOST_CDP_URL=%s\\\\n' \"\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
 
+echo "--- cb_vm_gc prunes build cache (the real accumulator), not just dangling images ---"
+# Regression for the disk-management consult: `vm gc` used to run only `image prune`
+# (dangling images) + fstrim, never `builder prune` (build cache), which is what actually
+# fills an image-iterating project's VM. Assert both prunes are present.
+if grep -q 'builder prune -f' "$WRAPPER"; then ok "cb_vm_gc prunes BuildKit build cache"; else bad "cb_vm_gc no longer prunes build cache"; fi
+if grep -q 'image prune -f' "$WRAPPER"; then ok "cb_vm_gc still prunes dangling images"; else bad "cb_vm_gc no longer prunes dangling images"; fi
+
 echo "--- consult substrate (cb_consult_* thread helpers + wrapper<->cb-consult contract) ---"
 CT="$(mktemp -d)/t1"
 cb_consult_meta_set "$CT" status awaiting-framework

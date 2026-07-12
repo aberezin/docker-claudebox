@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# summary: at-a-glance VM disk usage — df -h / + docker system df + biggest images
+# cb-df — in-VM disk snapshot for a claudebot. Your project's Colima VM has ONE overlay
+# disk shared by docker (images + build cache) AND your /tmp (where the Bash tool writes
+# /tmp/claude-501). When it fills, the Bash tool dies with ENOSPC and every command fails.
+# Run this to see it coming. Reclaim with: docker builder prune -f (cache), docker image
+# prune -af (unused images). See docs/design/disk-management.md on the host.
+set -uo pipefail
+
+hr() { printf '%s\n' "────────────────────────────────────────────────────────"; }
+
+echo "cb-df — VM disk (the shared overlay hosts docker AND your /tmp)"
+hr
+echo "overlay filesystem (watch Use% — prune before it hits ~90%):"
+df -h / 2>/dev/null | sed 's/^/  /'
+hr
+echo "docker disk usage (Build Cache is the usual hidden hog):"
+if docker system df 2>/dev/null | sed 's/^/  /'; then :; else
+    echo "  (docker not reachable)"; fi
+hr
+echo "biggest images:"
+docker images --format '{{.Size}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null \
+    | sort -h -r | head -8 | sed 's/^/  /' || echo "  (none / docker unavailable)"
+hr
+# nudge if the overlay is getting tight
+use="$(df -P / 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}')"
+case "$use" in
+    ''|*[!0-9]*) : ;;
+    *) if [ "$use" -ge 85 ]; then
+           echo "⚠️  / is ${use}% full — reclaim now: docker builder prune -f ; docker image prune -af"
+           echo "    host-side, the human can run: claudebox vm gc"
+       else
+           echo "reclaim: docker builder prune -f (cache) · docker image prune -af (unused images)"
+       fi ;;
+esac

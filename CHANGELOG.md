@@ -16,6 +16,30 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.9.0] — 2026-07-12 _(fork)_
+
+### Added
+- **Docker disk-management standard** (produced via the consult channel — the disk issue a
+  claudebot hit + escalated). A project's Colima VM has ONE overlay disk shared by docker
+  (images + BuildKit build cache) AND the claudebot's `/tmp`; when docker bloat fills it, the
+  Claude Code Bash tool dies with `ENOSPC` and every command fails — including the report
+  tools. New:
+  - **`docs/design/disk-management.md`** — the standard: one-disk-two-tenants model, prune
+    discipline, budget rule, symptom→cause→fix table, and the **Write-tool escape** (when Bash
+    is dead, the claudebot writes a report file directly into the mounted `framework-bugs`/
+    `framework-consult` dir — no shell needed).
+  - **`cb-df`** — new baked helper: `df -h /` + `docker system df` + biggest images, with a
+    ≥85%-full warning. cb-* convention, cb-help-discoverable.
+  - **Baked "Disk discipline" guidance** in the container `CLAUDE.md` (prune cadence, `cb-df`,
+    the ENOSPC→Write-tool escape).
+
+### Fixed
+- **`claudebox vm gc` now prunes BuildKit build cache**, not just dangling images. Build cache
+  is the real accumulator on image-iterating projects, and `image prune` never touches it — so
+  `vm gc` was leaving the biggest reclaimable chunk on the disk.
+
+**Needs `make build`** (entrypoint + new `cb-df` helper); rebuild auto-recreates containers.
+
 ## [2.8.1] — 2026-07-11 _(fork)_
 
 ### Changed
