@@ -1,0 +1,148 @@
+# Backends — developing/testing the framework off the Mac (task #15)
+
+**Status:** Design sketch — *not yet implemented*. Captures two approaches, their trade-offs,
+and (critically) the security model of the proxy approach, so a future implementation starts
+from a clear-eyed decision.
+
+## The goal
+
+Develop, build, and test **this harness** somewhere other than directly on Alan's Mac —
+specifically **inside a claudebox** (dogfooding — a claudebot editing `wrapper.sh`/
+`entrypoint.sh` and running the suite) and/or in **Linux CI** (the repo currently has none).
+
+## Why it's hard — the Colima coupling
+
+The framework is deeply coupled to a **macOS host running Colima** (a Lima-based VM manager
+that only exists on macOS):
+
+- `wrapper.sh` has **~56 `colima`/`limactl` call sites** — VM lifecycle (`colima start/stop/
+  delete`), per-project docker contexts (`colima-cb-<id>`), reachable IPs (`--network-address`,
+  `col0`), image reseed between the `cb-infra` store VM and project VMs, lima disk GC.
+- `make build` does `colima start cb-infra` + `docker --context colima-cb-infra build`.
+- `tests/common.sh` spins a throwaway `colima` profile and builds/runs in its context.
+
+You cannot run the Colima path inside a Linux container — there is no Colima there.
+
+## The insight
+
+Underneath, the real work is **plain Docker** (`docker build` / `docker run`). Colima only
+provides the *substrate*: per-project VM isolation, the image store, reachable IPs, disk
+management. And **inside a claudebox you already have a Docker daemon** (the mounted socket /
+DooD). So the question is only *how the framework reaches an orchestration substrate when it
+isn't on the Mac* — and there are two very different answers.
+
+## Approach 1 — a `docker` backend (`CLAUDEBOX_BACKEND`)
+
+Introduce `CLAUDEBOX_BACKEND = colima | docker` and factor the backend-specific ops behind
+dispatch helpers:
+
+| Op | `colima` (default, macOS/prod) | `docker` (CI / in-container) |
+|---|---|---|
+| context | `colima-cb-<id>` | default / ambient daemon |
+| ensure-up | `colima start <profile>` | no-op (daemon already there) |
+| image | build into `cb-infra`, reseed to project VMs | just `claudebox:latest` locally, no reseed |
+| address | reachable `col0` IP (rotating) | `localhost` (published ports) |
+| gc / usage | lima disks + `fstrim` | `docker system prune` / `df` |
+
+The **container layer (entrypoint + image) is unchanged** — it runs in a container either way.
+
+- **Delivers:** the suite (and `make build`) runs on plain Docker → Linux CI and in-container dev.
+- **Cost:** a second orchestration path, and a **weaker isolation model** — one shared daemon
+  instead of a VM per project (port collisions, no shared-nothing boundary). That's a downgrade
+  of the fork's whole premise, so the `docker` backend is a **dev/CI** backend, not a production
+  substitute.
+- **Tests:** the container/docker layer + wrapper *logic* — **not** the real Colima orchestration.
+
+## Approach 2 — proxy host commands to the Mac (keep one code path)
+
+Instead of a second backend, keep the **single Colima code path** and, when it runs inside a
+container, **proxy the host-only commands out to the Mac**, where the real Colima runs.
+
+**Realization — PATH shims + a host agent (no framework changes):**
+
+- Bake shim binaries named **`colima`** and **`limactl`** early on the container's `PATH`. Each
+  shim forwards its `argv` to a **host agent** on the Mac, which runs the real command and
+  streams back stdout/stderr/exit. On the Mac there are no shims → `colima` is the real binary →
+  **passthrough**. `wrapper.sh` is untouched (it just calls `colima`).
+- The agent is reachable over the **Colima gateway `192.168.64.1`** — the exact pattern the
+  [CDP bridge](browser-testing.md) already uses (host-side helper, VM-reachable, not LAN-exposed).
+- It composes with an existing invariant: the workspace is mounted at the **same path** on Mac
+  and container, so a proxied command that touches the workspace sees the same files.
+
+- **Delivers (more than Approach 1):** a dev claudebot drives the **real Colima** — real
+  per-project VMs, reachable IPs, `vm gc`, reseed — so the **full orchestration path** is under
+  test end-to-end from inside a container. No reimplementation, no isolation downgrade.
+
+### The wrinkle: the surface is Colima **and** Docker
+
+`wrapper.sh` doesn't only call `colima`; it calls **`docker --context colima-cb-<id>`** to
+build/run *into* those VMs. From the container, those contexts live on the Mac — so a
+context-targeted `docker` has to be proxied too. In practice that means also shimming `docker`,
+which makes the container a fairly **thin client** for the Mac's Colima + Docker. (A first cut
+can defer the `docker` shim and prove the `colima`-only path first.)
+
+### Security model (this is the real cost)
+
+A shim that proxies commands to the Mac **is remote host command execution from a container.**
+Proxying `docker` is nearly *"the container can run anything on the Mac"* (`docker run -v
+/:/mac --privileged …` ⇒ full host access); even `colima`/`limactl` can delete VMs and mount
+host paths. So the agent MUST be:
+
+- **Opt-in, off by default** — enabled only for the deliberate "develop the harness in a dev
+  claudebox" use case, never a general claudebot capability.
+- **Bound to `192.168.64.1` only** — the Colima gateway the project VMs reach; **never**
+  `0.0.0.0`/LAN. Torn down when not in use (like the CDP bridge).
+- **Token-authenticated per session** — a secret the wrapper injects, so a random VM neighbour
+  can't drive it.
+- **Command-allowlisted** where feasible — trivial for `colima`/`limactl` (fixed subcommands);
+  genuinely hard for `docker` (unbounded `run` flags), which is why the `docker` shim is the
+  sharpest edge.
+
+**Realistic framing:** this is a **trusted, single-operator tool** — appropriate for *you*
+driving your own harness dev from your own dev claudebox, not something to ship enabled for
+arbitrary projects/claudebots.
+
+## The two are complementary, not rivals
+
+| | **Approach 2 — proxy-to-host** | **Approach 1 — docker backend** |
+|---|---|---|
+| Tests | the **full** framework incl. real Colima | container/docker layer + wrapper logic |
+| Isolation | real per-project VMs (unchanged) | shared daemon (weaker) |
+| Reimplements Colima? | no — drives the real one | partially (docker equivalents) |
+| Security | **high** (remote host exec) → opt-in, trusted-only | low (self-contained) |
+| Best for | Alan driving the real thing from a dev claudebox | Linux CI / other contributors |
+
+## Recommendation
+
+- For **"Alan develops the harness end-to-end inside a claudebox, against real Colima"** →
+  **Approach 2 (proxy)**, built as a tight opt-in agent (gateway-bound, token-auth, reusing the
+  CDP-bridge machinery), accepted as a trusted capability. Start **colima-only** (defer the
+  `docker` shim) to keep the first cut's blast radius small.
+- For **safe Linux CI / contributors without a Mac** → **Approach 1 (docker backend)**.
+- They can coexist: the proxy for powerful trusted dev, the docker backend for CI.
+
+## Phasing (proxy, if chosen)
+
+1. **Host agent spike** — a small daemon on the Mac (reuse the CDP bridge's Python-forwarder
+   pattern), gateway-bound + token-auth, that runs an **allowlisted** `colima`/`limactl` and
+   streams the result. `claudebox host-agent up|down` to control it.
+2. **`colima`/`limactl` shims** in the image (proxy to the agent); prove a dev claudebot can run
+   one real command (`colima list`) against the Mac.
+3. Decide on the **`docker` shim** (the thin-client step) — or keep docker local to the VM and
+   only proxy Colima.
+4. `docs/*` + a "develop-in-a-claudebox" runbook.
+
+## Open questions
+
+- Can most harness dev be done with **no proxy at all** — unit tests (`test_cbvm.sh`, pure bash)
+  run anywhere, and much of the integration suite is `docker build`/`run` that a local daemon
+  satisfies? If so, the proxy is only needed to exercise Colima *orchestration* specifically,
+  which narrows its scope (and its risk) considerably.
+- Is the `docker` shim worth its security cost, or is "Colima proxied, docker local" enough?
+
+## See also
+
+- [per-project-vm.md](per-project-vm.md) — the Colima model both approaches work around.
+- [browser-testing.md](browser-testing.md) — the CDP bridge's host-agent pattern the proxy reuses (gateway-bound, token-auth ethos).
+- [../../CLAUDE.md](../../CLAUDE.md) — the DooD orchestration vision (Container 1 spinning up Container 2/3).
+- [versioning.md](versioning.md) — where a `CLAUDEBOX_BACKEND` contract change would land.
