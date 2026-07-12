@@ -16,6 +16,19 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.9.1] — 2026-07-12 _(fork)_
+
+### Fixed
+- **`claudebox vm gc` data-loss bug — it deleted STOPPED VMs' disks.** The orphan detection
+  keyed on `limactl disk ls`'s `IN-USE-BY` column (`awk NF<5`), which is blank for any VM
+  that isn't *running* — so gc treated every stopped VM's disk as junk and deleted it
+  (observed: it removed the `cb-9f96a052` project VM's disk, and would have deleted the
+  `cb-infra` **image store** the moment it was stopped). Fixed to cross-reference disk names
+  against the known colima **profiles** (which include Stopped ones); a disk is orphaned only
+  if no profile owns it. `claudebox vm usage` had the same misclassification — also fixed, and
+  it now measures stopped VMs' disks by name. Host-only (wrapper) — **no image rebuild needed**;
+  reinstall the wrapper (`install.sh`) to pick it up.
+
 ## [2.9.0] — 2026-07-12 _(fork)_
 
 ### Added

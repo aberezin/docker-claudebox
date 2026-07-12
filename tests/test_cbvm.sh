@@ -112,6 +112,13 @@ if grep -A12 '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP" | grep -q 'unset \$name'; 
 # wrapper writes the sidecar unconditionally (mirror), so bridge-down -> empty on next run
 if grep -q "printf 'CLAUDEBOX_HOST_CDP_URL=%s\\\\n' \"\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
 
+echo "--- cb_vm_gc orphan detection must be profile-based, NOT the dangerous IN-USE-BY heuristic ---"
+# Regression for a data-loss bug: the orphan test used `limactl disk ls | awk NF<5`, but
+# IN-USE-BY is blank for every STOPPED VM, so gc deleted valid stopped VMs' disks (incl. the
+# cb-infra image store). The fix cross-references disk names against known colima profiles.
+if grep -q 'NR>1 && NF<5' "$WRAPPER"; then bad "cb_vm_gc still keys orphan detection on NF<5 (deletes stopped VMs' disks!)"; else ok "cb_vm_gc no longer uses the NF<5 orphan heuristic"; fi
+if grep -q 'no owning colima profile' "$WRAPPER"; then ok "cb_vm_gc orphan detection is profile-based"; else bad "cb_vm_gc orphan detection is not profile-based"; fi
+
 echo "--- cb_vm_gc prunes build cache (the real accumulator), not just dangling images ---"
 # Regression for the disk-management consult: `vm gc` used to run only `image prune`
 # (dangling images) + fstrim, never `builder prune` (build cache), which is what actually

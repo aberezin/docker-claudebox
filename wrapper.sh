@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.9.0"
+CLAUDEBOX_VERSION="2.9.1"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -557,13 +557,18 @@ cb_vm_usage() {
     lh="$(cb_lima_home)" || { echo "colima LIMA_HOME not found (is colima installed?)" >&2; return 1; }
     command -v limactl >/dev/null 2>&1 || { echo "limactl not found — cannot read disk usage" >&2; return 1; }
     statuses="$(_cb_vm_list_json | cb_parse_vm_lines)"
+    # A disk is orphaned ONLY if no colima profile owns it — NOT merely if it's not in use
+    # by a *running* VM (limactl's IN-USE-BY is blank for stopped VMs, so keying on it would
+    # misflag every stopped VM's disk, incl. cb-infra, as junk to delete). Cross-reference the
+    # disk name against the known colima profiles (which include Stopped ones).
+    local known; known="$(printf '%s\n' "$statuses" | awk -F'\t' 'NF{print $1}')"
     while IFS="$(printf '\t')" read -r name max inuse; do
         [ -n "$name" ] || continue
         profile="${name#colima-}"; [ "$name" = colima ] && profile="default"
-        dk="$(cb_du_k "$lh/_disks/$name")"; ik=0
-        [ -n "$inuse" ] && ik="$(cb_du_k "$lh/$inuse")"
+        # measure disk + instance dir by NAME (not IN-USE-BY) so stopped VMs still count
+        dk="$(cb_du_k "$lh/_disks/$name")"; ik="$(cb_du_k "$lh/$name")"
         act=$((dk + ik))
-        if [ -z "$inuse" ]; then
+        if ! printf '%s\n' "$known" | grep -qxF "$profile"; then
             orph="$orph$name\t$(cb_h $((act * 1024)))\t$max\n"; orph_k=$((orph_k + act))
         else
             status="$(printf '%s\n' "$statuses" | awk -F'\t' -v p="$profile" '$1==p{print $2}')"
@@ -600,8 +605,18 @@ cb_vm_gc() {
     command -v limactl >/dev/null 2>&1 || { echo "limactl not found — cannot gc" >&2; return 1; }
     before="$(cb_du_k "$lh")"
 
-    echo "🧹 pruning orphaned lima disks (no owning VM)…"
-    orphans="$(LIMA_HOME="$lh" limactl disk ls 2>/dev/null | awk 'NR>1 && NF<5 {print $1}')"
+    echo "🧹 pruning orphaned lima disks (no owning colima profile)…"
+    # SAFETY: a disk is orphaned only if NO colima profile owns it. Do NOT key on limactl's
+    # IN-USE-BY column (NF<5) — that is blank for every STOPPED VM, so it would delete a valid
+    # stopped VM's disk (e.g. the cb-infra image store, or any idle project VM). Cross-reference
+    # disk names against the known colima profiles (which include Stopped ones).
+    local known; known="$(_cb_vm_list_json | cb_parse_vm_lines | awk -F'\t' 'NF{print $1}')"
+    orphans=""
+    while IFS= read -r _dn; do
+        [ -n "$_dn" ] || continue
+        local _dp; _dp="${_dn#colima-}"; [ "$_dn" = colima ] && _dp="default"
+        printf '%s\n' "$known" | grep -qxF "$_dp" || orphans="${orphans:+$orphans }$_dn"
+    done < <(LIMA_HOME="$lh" limactl disk ls 2>/dev/null | awk 'NR>1{print $1}')
     if [ -n "$orphans" ]; then
         printf '   - %s\n' $orphans
         # shellcheck disable=SC2086
