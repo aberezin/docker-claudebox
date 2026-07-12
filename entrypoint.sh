@@ -24,6 +24,17 @@ if [ -S /var/run/docker.sock ]; then
 fi
 dbg "docker socket done"
 
+# Opt-in: prune docker BUILD CACHE on every start to keep the shared VM disk from creeping up
+# on image-iterating projects (build cache is the real accumulator; see disk-management.md).
+# Cache-only + best-effort, so it never deletes tagged images or blocks startup. Default off.
+case "${CLAUDEBOX_PRUNE_ON_START:-${CLAUDE_PRUNE_ON_START:-}}" in
+	1|true|yes|on)
+		if [ -S /var/run/docker.sock ]; then
+			dbg "prune-on-start: docker builder prune -f"
+			docker builder prune -f >/dev/null 2>&1 || true
+		fi ;;
+esac
+
 # match claude user's UID/GID to the host directory owner (skip if root)
 if [ -n "$CLAUDE_WORKSPACE" ] && [ -d "$CLAUDE_WORKSPACE" ]; then
 	HOST_UID=$(stat -c '%u' "$CLAUDE_WORKSPACE")
@@ -83,79 +94,18 @@ CLAUDEMD_HEADER
 		if [ "${CLAUDE_IMAGE_VARIANT:-full}" = "full" ]; then
 			cat <<'CLAUDEMD_FULL'
 
-## Languages & Runtimes
-- **Go 1.26.1** - /usr/local/go/bin/go
-- **Python 3.12.11** (via pyenv) - default python
-- **Node.js LTS** - with npm
+## What's baked (full image)
+- **Languages:** Go 1.26.1 · Python 3.12.11 (pyenv) · Node.js LTS (npm/yarn/pnpm).
+- **Language servers** (for the `*-lsp` plugins): `gopls`, `typescript-language-server`, `pyright`.
+- **Linters/formatters:** golangci-lint, gofumpt · black, isort, flake8, mypy · eslint, prettier · shellcheck, shfmt · clang-format.
+- **Build/DevOps:** gcc/g++/make/cmake, gdb, valgrind · docker + docker-compose · terraform, kubectl, helm · gh.
+- **DB clients:** psql, mysql, sqlite3, redis-cli.  **Search/shell:** ripgrep (`rg`), fd (`fdfind`), jq, bat, tree, tmux, httpie, curl/wget.
 
-## Go Tools
-- golangci-lint - linter aggregator
-- gopls - language server
-- dlv - delve debugger
-- staticcheck - static analysis
-- gomodifytags - struct tag modifier
-- impl - interface implementation generator
-- gotests - test generator
-- gofumpt - stricter gofmt
-
-## Python Tools
-- flake8 - linter
-- black - formatter
-- isort - import sorter
-- autoflake - remove unused imports
-- pyright - type checker
-- mypy - type checker
-- vulture - dead code finder
-- pytest, pytest-cov - testing
-- pipenv, poetry - dependency management
-- pyenv - python version management
-
-## Node.js Tools
-- eslint, prettier - linting/formatting
-- typescript, ts-node - TypeScript
-- yarn, pnpm - package managers
-- nodemon, pm2 - process management
-- create-react-app, @vue/cli, @angular/cli - framework CLIs
-- express-generator - Express scaffolding
-- newman - Postman CLI
-- http-server, serve - static servers
-- lighthouse - performance auditing
-- @storybook/cli - component development
-
-## Infrastructure & DevOps
-- terraform - infrastructure as code
-- kubectl - Kubernetes CLI
-- helm - Kubernetes package manager
-- docker, docker-compose - containerization
-- gh - GitHub CLI
-
-## Databases & Data
-- sqlite3 - SQLite CLI
-- postgresql-client (psql) - PostgreSQL CLI
-- mysql-client - MySQL CLI
-- redis-tools (redis-cli) - Redis CLI
-
-## Shell & System Tools
-- git - version control
-- curl, wget, httpie - HTTP clients
-- jq - JSON processor
-- tree - directory visualization
-- fd-find (fdfind) - fast file finder
-- ripgrep (rg) - fast grep
-- bat - cat with syntax highlighting
-- exa - modern ls
-- silversearcher-ag (ag) - code search
-- shellcheck - shell script linter
-- shfmt - shell formatter
-- tmux - terminal multiplexer
-- htop - process viewer
-
-## C/C++ Tools
-- gcc, g++, make, cmake - compilation
-- clang-format - code formatter
-- valgrind - memory debugging
-- gdb - debugger
-- strace, ltrace - tracing
+You have passwordless sudo — install anything else with `apt-get`/`pip`/`npm`/`go install`. But
+for a tool you keep needing, `cb-report-bug` it so it gets baked in (or add it via a profile /
+`~/.claude/init.d`), rather than reinstalling every session. Discover what's present with
+`which <tool>` / `apt list --installed` / `pip list`; heavy/niche language servers install per
+**profile** (`.claudebox/config.yml` `profiles: [...]` — list them with `claudebox profiles`).
 CLAUDEMD_FULL
 		else
 			cat <<'CLAUDEMD_MINIMAL'
@@ -429,6 +379,19 @@ if [ -d "$_cdir" ] && [ -n "${CLAUDEBOX_PROJECT_ID:-}" ]; then
 	fi
 fi
 
+# (Disk) startup MOTD — if the VM's shared overlay is already low at boot, warn the claudebot
+# up front (docker images/build cache and the Bash tool's /tmp share ONE disk; a full disk =
+# ENOSPC on every Bash call). See docs/design/disk-management.md.
+DISK_NOTE=""
+_duse="$(df -P / 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}')"
+case "$_duse" in
+	''|*[!0-9]*) : ;;
+	*) if [ "$_duse" -ge 85 ]; then
+		DISK_NOTE="NOTE: this VM's disk is ${_duse}% full at startup — docker (images + build cache) and your /tmp share ONE overlay, so if it fills the Bash tool dies with ENOSPC on every command. Check with \`cb-df\`; reclaim with \`docker builder prune -f\` then \`docker image prune -af\`. If Bash is already failing, use your Write tool to drop a report into /home/claude/framework-bugs/ and ask the human to \`docker system prune -af\` / \`claudebox vm gc\` on the Mac. (See the Disk discipline section.)"
+		dbg "disk MOTD: / is ${_duse}% full at boot"
+	fi ;;
+esac
+
 # Seed the container-side /claudebox skill: a harness self-report the claudebot can run
 # from INSIDE (the host `claudebox` binary isn't in here). Rewritten every start so it
 # stays current after an image update (it's shipped content, not user-editable).
@@ -688,6 +651,11 @@ if [ -n "$CONSULT_NOTE" ]; then
 	COMBINED_APPEND="${COMBINED_APPEND:+$COMBINED_APPEND
 
 }$CONSULT_NOTE"
+fi
+if [ -n "$DISK_NOTE" ]; then
+	COMBINED_APPEND="${COMBINED_APPEND:+$COMBINED_APPEND
+
+}$DISK_NOTE"
 fi
 ALWAYS_SKILLS_DIR="/home/claude/.claude/.always-skills"
 if [ -d "$ALWAYS_SKILLS_DIR" ]; then

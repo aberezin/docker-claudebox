@@ -16,6 +16,29 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.11.0] — 2026-07-12 _(fork)_
+
+### Added — disk-management follow-ups (deferred from the disk consult)
+- **Startup disk MOTD** — when the VM's `/` is ≥85% full at container boot, the entrypoint
+  injects a disk warning into the claudebot's context, so a claudebot inheriting a near-full
+  VM is told up front (with the prune commands + the Write-tool report escape).
+- **`CLAUDEBOX_PRUNE_ON_START=1`** — opt-in: the entrypoint runs `docker builder prune -f`
+  (build cache only, best-effort) on every start. Never removes tagged images; default off.
+- **`CLAUDEBOX_TMPFS_TMP=<size>`** — opt-in: RAM-back the claudebot's `/tmp` (`--tmpfs`) so
+  docker disk bloat can't starve the Bash tool at all. The hardest isolation; for chronically
+  disk-tight projects.
+- **Default `vm.disk` 60 → 100 GiB** for new projects (sparse, so near-zero Mac cost).
+
+### Changed
+- **Trimmed the baked framework guidance** ~284 → ~223 lines: the exhaustive per-language tool
+  inventory is condensed to a short "what's baked" summary + "discover with `which`/`cb-help`/
+  profiles", improving adherence (closer to the ~200-line guideline). Directive guidance
+  (networking, disk, secrets, consult, etc.) is unchanged.
+
+Docs: [disk-management.md](docs/design/disk-management.md), [environment-variables.md](docs/environment-variables.md).
+
+**Needs `make build`** (entrypoint change); rebuild auto-recreates containers.
+
 ## [2.10.0] — 2026-07-12 _(fork)_
 
 ### Changed

@@ -175,13 +175,30 @@ but the in-tool message improvement belongs upstream.
 
 ## What claudebox bakes in
 
-- **Baked container guidance** — a "Disk discipline" section in the auto-generated
-  container `CLAUDE.md` (`entrypoint.sh` → `CLAUDEMD_NOTES`): watch `df -h /`, prune
-  cadence, and the Write-tool report escape — so every claudebot self-diagnoses.
+- **Baked container guidance** — a "Disk discipline" section in the framework guidance
+  (`~/.claude/CLAUDE.md`): watch `df -h /`, prune cadence, and the Write-tool report
+  escape — so every claudebot self-diagnoses.
 - **`cb-df`** — the in-VM disk snapshot helper (see [In-VM disk visibility](#in-vm-disk-visibility)),
   following the [`cb-*` convention](convenience-scripts.md).
 - **Prune-aware `claudebox vm gc`** — the host reclaim command also prunes build cache
   per VM (not only dangling images), because build cache is the real accumulator.
+- **Startup disk MOTD** — when `/` is ≥85% full at container boot, the entrypoint injects a
+  disk warning into the claudebot's context (via `--append-system-prompt`), so a claudebot
+  inheriting a near-full VM is told up front.
+- **Larger default `vm.disk`** — new projects default to **100 GiB** (was 60). The disk is
+  sparse, so the larger cap costs no Mac disk until used.
+
+### Opt-in hardening
+
+- **`CLAUDEBOX_PRUNE_ON_START=1`** — the entrypoint runs `docker builder prune -f` (cache
+  only, best-effort) on every start, so build cache never creeps up on image-iterating
+  projects. Cache-only, so it never removes tagged images; off by default.
+- **`CLAUDEBOX_TMPFS_TMP=<size>`** (e.g. `2g`, or `1`/`on` for 2g) — RAM-backs the
+  claudebot's `/tmp` so docker disk bloat **cannot** starve the Bash tool at all (its
+  `/tmp/claude-501` scratch is then on RAM, not the shared overlay). This is the hardest
+  isolation; use it for chronically disk-tight projects. `--tmpfs` applies to a fresh
+  `docker run`, so it takes effect when the container is (re)created. Sized in RAM, so keep
+  it modest relative to the VM's memory.
 
 If any of this bites you or is missing, that's framework feedback: open a
 [consult](framework-consult.md) (best-practice question) or `cb-report-bug` (defect) —

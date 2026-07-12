@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.10.0"
+CLAUDEBOX_VERSION="2.11.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -37,7 +37,7 @@ cb_baked_default() {
     case "$1" in
         vm.cpu|vm.default_cpu)       printf '4' ;;
         vm.memory|vm.default_memory) printf '8GiB' ;;
-        vm.disk|vm.default_disk)     printf '60GiB' ;;
+        vm.disk|vm.default_disk)     printf '100GiB' ;;
         vm.autostop)                 printf 'false' ;;
         vm.warn_max)                 printf '3' ;;
         vm.hard_max)                 printf '5' ;;
@@ -185,7 +185,7 @@ id: auto                  # stable project identity; generated once, never chang
 vm:
   cpu: 4
   memory: 8GiB
-  disk: 60GiB
+  disk: 100GiB
   autostop: false         # stop the VM when the harness container exits
 network:
   hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'claudebox net'); blank = raw IP
@@ -1649,6 +1649,16 @@ DOCKER_ARGS+=(-e "CLAUDEBOX_FRAMEWORK_BUGS_DIR=/home/claude/framework-bugs")
 DOCKER_ARGS+=(-e "CLAUDEBOX_PROJECT_ID=$CB_PROJECT_ID")
 _fwb_n=$(find "$_fwbugs" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
 [ "${_fwb_n:-0}" -gt 0 ] && echo "⚠ $_fwb_n framework bug report(s) on file — review: claudebox framework-bugs" >&2
+
+# Opt-in: RAM-back the claudebot's /tmp so docker disk bloat can't starve the Bash tool
+# (it writes /tmp/claude-501 per command; when the shared VM overlay fills, mkdir there fails
+# with ENOSPC and every command dies). CLAUDEBOX_TMPFS_TMP=<size like 2g>, or 1/on for 2g.
+# --tmpfs only applies to a fresh `docker run` (not `docker start`). See docs/design/disk-management.md.
+case "${CLAUDEBOX_TMPFS_TMP:-${CLAUDE_TMPFS_TMP:-}}" in
+    ''|0|false|no|off) : ;;
+    1|true|yes|on)     DOCKER_ARGS+=(--tmpfs "/tmp:size=2g,exec,mode=1777") ;;
+    *)                 DOCKER_ARGS+=(--tmpfs "/tmp:size=${CLAUDEBOX_TMPFS_TMP:-${CLAUDE_TMPFS_TMP}},exec,mode=1777") ;;
+esac
 
 # Shared consult dir — mount it so cb-consult can open/read supervised framework threads.
 _consult="$(cb_consult_home)"; mkdir -p "$_consult" 2>/dev/null || true

@@ -152,6 +152,14 @@ if grep -q 'framework-consult' "$WRAPPER" && grep -q 'framework-consult' "$CBC";
 if grep -q 'CLAUDEBOX_CONSULT_DIR' "$WRAPPER" && grep -q 'CLAUDEBOX_CONSULT_DIR' "$CBC"; then ok "wrapper & cb-consult agree on CLAUDEBOX_CONSULT_DIR"; else bad "CLAUDEBOX_CONSULT_DIR drifted"; fi
 rm -rf "$(dirname "$CT")"
 
+echo "--- disk nice-to-haves (2.11.0): vm.disk default, prune-on-start, tmpfs, disk MOTD ---"
+eq "vm.disk default is 100GiB" "$(cb_machine_get vm.default_disk)" "100GiB"
+if grep -q 'CLAUDEBOX_PRUNE_ON_START' "$ENTRYP"; then ok "entrypoint honors CLAUDEBOX_PRUNE_ON_START"; else bad "prune-on-start missing"; fi
+if grep -q 'CLAUDEBOX_TMPFS_TMP' "$WRAPPER" && grep -q 'tmpfs "/tmp' "$WRAPPER"; then ok "wrapper supports CLAUDEBOX_TMPFS_TMP (--tmpfs /tmp)"; else bad "tmpfs /tmp opt-in missing"; fi
+if grep -q 'DISK_NOTE=' "$ENTRYP" && grep -q '85' "$ENTRYP"; then ok "entrypoint has the startup disk MOTD (>=85%)"; else bad "disk MOTD missing"; fi
+# guidance trim: the exhaustive per-language tool lists are gone
+if grep -q '^## Go Tools' "$ENTRYP"; then bad "guidance still carries the exhaustive tool inventory"; else ok "guidance tool inventory trimmed"; fi
+
 echo "--- framework guidance goes to user memory (~/.claude/CLAUDE.md), not a once-copied workspace file ---"
 # Regression for the existing-repo guidance gap (task #10): the entrypoint must write guidance
 # to the user-memory file EVERY start, and must NOT copy a template into the workspace ./CLAUDE.md.

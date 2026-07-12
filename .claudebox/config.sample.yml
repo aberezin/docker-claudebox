@@ -4,7 +4,7 @@ id: auto                  # stable project identity; generated once, never chang
 vm:
   cpu: 4
   memory: 8GiB
-  disk: 60GiB
+  disk: 100GiB
   autostop: false         # stop the VM when the harness container exits
 network:
   hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'claudebox net'); blank = raw IP
