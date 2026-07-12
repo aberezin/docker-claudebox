@@ -155,9 +155,10 @@ rm -rf "$(dirname "$CT")"
 echo "--- bootstrap --adopt (existing repos, no nesting) ---"
 _orig_pf="$(declare -f cb_preflight)"; cb_preflight() { return 0; }   # stub VM/tooling preflight
 BT="$(mktemp -d)"
-# adopt framing in the brief
-cb_write_brief "$BT/g" "x" ""  ; grep -q 'ADOPTS an existing' "$BT/g/.claudebox/BRIEF.md" && bad "greenfield brief has adopt note" || ok "greenfield brief: no adopt note"
-cb_write_brief "$BT/a" "x" 1   ; grep -q 'ADOPTS an existing' "$BT/a/.claudebox/BRIEF.md" && ok "adopt brief carries the adopt note" || bad "adopt note missing"
+# brief framing by flavor (greenfield / adopt / workspace)
+cb_write_brief "$BT/g" "x" ""        ; grep -q 'ADOPTS an existing\|MULTI-REPO' "$BT/g/.claudebox/BRIEF.md" && bad "greenfield brief has a flavor note" || ok "greenfield brief: no flavor note"
+cb_write_brief "$BT/a" "x" adopt     ; grep -q 'ADOPTS an existing' "$BT/a/.claudebox/BRIEF.md" && ok "adopt brief carries the adopt note" || bad "adopt note missing"
+cb_write_brief "$BT/w" "x" workspace ; grep -q 'MULTI-REPO workspace' "$BT/w/.claudebox/BRIEF.md" && ok "workspace brief carries the multi-repo note" || bad "workspace note missing"
 # cb_bootstrap on an existing repo must NOT add README/workloads (greenfield scaffolding)
 mkdir -p "$BT/r"; ( cd "$BT/r" && git init -q && : > f && git add -A && git -c user.email=t@t -c user.name=t commit -qm i ) >/dev/null 2>&1
 ( cd "$BT/r" && cb_bootstrap "$BT/r" "x" brief "" ) >/dev/null 2>&1
@@ -168,6 +169,10 @@ grep -q 'ADOPTS an existing' "$BT/r/.claudebox/BRIEF.md" 2>/dev/null && ok "auto
 mkdir "$BT/ne"; : > "$BT/ne/x"
 _ca_out="$( cd "$BT/ne" && cb_clone_adopt /tmp/nope 2>&1 || true )"
 case "$_ca_out" in *"not empty"*) ok "cb_clone_adopt refuses a non-empty dir" ;; *) bad "cb_clone_adopt did not refuse non-empty" ;; esac
+# workspace flavor (#13): orchestration parent = git init + README, but NO workloads/
+mkdir -p "$BT/ws"; ( cd "$BT/ws" && cb_bootstrap "$BT/ws" "x" full "" workspace ) >/dev/null 2>&1
+{ [ -f "$BT/ws/README.md" ] && [ ! -d "$BT/ws/workloads" ] && [ -e "$BT/ws/.git" ]; } && ok "workspace: git init + README, no workloads/" || bad "workspace scaffolding wrong"
+grep -q 'MULTI-REPO workspace' "$BT/ws/.claudebox/BRIEF.md" 2>/dev/null && ok "workspace BRIEF is multi-repo framed" || bad "workspace BRIEF not multi-repo framed"
 rm -rf "$BT"; eval "$_orig_pf"   # restore the real cb_preflight
 
 echo "--- disk nice-to-haves (2.11.0): vm.disk default, prune-on-start, tmpfs, disk MOTD ---"

@@ -16,6 +16,23 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.13.0] — 2026-07-12 _(fork)_
+
+### Added
+- **`claudebox bootstrap --workspace` — first-class multi-repo projects** (backlog #13). One
+  project / one VM / N repos as siblings. `--workspace` (alias `--multi-repo`) makes the
+  current dir an **orchestration parent** (git init + README, but **no** `workloads/`), writes
+  a multi-repo-framed BRIEF, and seeds a `.gitignore` excluding the sibling repo dirs +
+  machine-local `config.yml`/`secrets.env` — so the parent never tracks the app repos as
+  gitlinks (the footgun). Repeatable **`--repo <url>`** (URL or `gh owner/repo`, implies
+  `--workspace`) clones each as a gitignored sibling using the host's git/`gh` auth.
+  `--workspace` and `--adopt` are mutually exclusive. Docs:
+  [multi-repo-projects.md](docs/design/multi-repo-projects.md).
+- Internally, the bootstrap "flavor" (`adopt` | `workspace` | greenfield) now drives
+  scaffolding + BRIEF framing uniformly.
+
+Host-only (wrapper) — **no image rebuild needed**; reinstall the wrapper to pick it up.
+
 ## [2.12.0] — 2026-07-12 _(fork)_
 
 ### Added

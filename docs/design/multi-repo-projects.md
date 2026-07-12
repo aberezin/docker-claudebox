@@ -75,31 +75,30 @@ in the top-level `CLAUDE.md`. The claudebot:
 
 The per-project VM gives the whole multi-repo system one clean, disposable sandbox.
 
-## Setting one up
+## Setting one up — `bootstrap --workspace`
 
-Until first-class tooling lands (see below), the manual flow:
+First-class tooling: **`--workspace`** makes the current dir a multi-repo orchestration
+parent, and repeatable **`--repo <url>`** clones each as a gitignored sibling (so the
+parent never tracks them as gitlinks):
 
 ```bash
 mkdir -p ~/Development/myproject && cd ~/Development/myproject
-claudebox bootstrap "myproject spans repos: frontend, backend, infra — <goal>"
-# make the parent an orchestration repo that ignores the app checkouts (or skip git here):
-printf '/frontend/\n/backend/\n/infra/\n' >> .gitignore
-git clone <frontend-url> frontend
-git clone <backend-url>  backend
-git clone <infra-url>    infra
-claudebox            # one VM; the claudebot sees all three repos
+claudebox bootstrap --workspace \
+  --repo <frontend-url> --repo <backend-url> --repo <infra-url> \
+  "myproject spans frontend + backend + infra — <goal>"
+# → git init parent (orchestration, NO workloads/), README, multi-repo BRIEF,
+#   .gitignore excluding /frontend/ /backend/ /infra/ + machine-local config/secrets,
+#   and the three siblings cloned. Then it boots one VM; the claudebot sees all three.
 ```
 
-State each repo's role and the wiring in `.claudebox/BRIEF.md` so any later session
-picks up the topology.
+`--workspace` alone sets up the parent without cloning (add repos yourself — they're
+auto-gitignored as `--repo` adds them). Each `--repo <url>` takes a URL or `gh owner/repo`
+and uses the host's git/`gh` auth (add `--gh-token` for private repos). State each repo's
+role + wiring in `.claudebox/BRIEF.md` (the generated multi-repo section prompts for it) so
+any later session picks up the topology.
 
-## Not yet: first-class multi-repo bootstrap (task #13)
-
-`claudebox bootstrap` scaffolds a single project and `git init`s the parent, which for
-multi-repo is the *start* of the gitlink footgun unless you gitignore the sub-repos. A
-`bootstrap --workspace` (or `--multi-repo`) mode should: set the parent up as an
-orchestration repo (or leave it plain), seed a `.gitignore` that excludes the sibling
-app-repo dirs, and record the repo topology in the BRIEF.
+> `--workspace` and `--adopt` are mutually exclusive: `--adopt` is *one existing repo IS the
+> workspace*; `--workspace` is *a parent holding N sibling repos*. See [bootstrap.md](bootstrap.md).
 
 ## See also
 

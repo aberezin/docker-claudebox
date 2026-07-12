@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.12.0"
+CLAUDEBOX_VERSION="2.13.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -1108,13 +1108,15 @@ cb_preflight() {
     return 0
 }
 
-# cb_write_brief ROOT INTENT [ADOPT] — (re)write the standard mission brief.
+# cb_write_brief ROOT INTENT [FLAVOR] — (re)write the standard mission brief.
+#   FLAVOR = adopt (existing repo) | workspace (multi-repo) | "" (greenfield).
 cb_write_brief() {
-    local root="$1" intent="$2" adopt="${3:-}" brief name when adopt_note=""
+    local root="$1" intent="$2" flavor="${3:-}" brief name when extra_note=""
     brief="$(cb_brief_path "$root")"; name="$(basename "$root")"
     when="$(date +%Y-%m-%d 2>/dev/null || echo 'unknown date')"
     [ -n "$intent" ] || intent="_TODO: state why this project exists — the goal Alan/host-Claude set. Replace this line._"
-    [ -n "$adopt" ] && adopt_note="
+    case "$flavor" in
+      adopt) extra_note="
 ## The codebase (adopted)
 
 This project ADOPTS an existing repository — its code is already checked out at the
@@ -1123,7 +1125,20 @@ into a subdirectory (that creates a nested-repo tangle). If git/\`gh\` operation
 repo fail (e.g. \`git pull\`/\`push\` auth), the host should seed a token via
 \`claudebox bootstrap --gh-token\`, and prefer \`gh\`-authenticated remotes over an embedded-email
 \`origin\`.
-"
+" ;;
+      workspace) extra_note="
+## Repositories (multi-repo workspace)
+
+This project is a MULTI-REPO workspace: each sibling directory is its OWN git repo (own
+\`.git\`, own remote). This parent is an **orchestration layer** — its \`.gitignore\` excludes the
+sibling repo dirs so git never tracks them as gitlinks. Build a **self-contained image per
+service** (\`COPY\` the code in — don't bind-mount), run them on the shared **\`cb-net\`** network
+(address each other by container name, e.g. \`http://backend:8080\`), and publish ports the human
+reaches at the VM IP (\`claudebox ip\`). Record each repo's role + wiring below:
+
+- _<dir>/_ — _role · port · how it's reached_
+" ;;
+    esac
     mkdir -p "$(dirname "$brief")"
     cat > "$brief" <<BRIEFEOF
 # Project brief — $name
@@ -1136,7 +1151,7 @@ repo fail (e.g. \`git pull\`/\`push\` auth), the host should seed a token via
 ## Why this project exists
 
 $intent
-$adopt_note
+$extra_note
 ## Goals / deliverables
 
 - _TODO_
@@ -1198,31 +1213,42 @@ cb_clone_adopt() {
         echo "❌ clone failed: $ref (private? run 'gh auth login' / check the URL)" >&2; return 1; }
 }
 
-# cb_bootstrap ROOT INTENT MODE FORCE [ADOPT] — scaffold a project + write the brief.
-#   MODE = full | brief   FORCE = 1 to overwrite an existing brief   ADOPT = 1 for an existing repo.
-# Does NOT boot claudebot or write a workspace CLAUDE.md (the entrypoint bakes that
-# on first boot). ADOPT (or an existing .git) skips greenfield scaffolding so an adopted
-# repo isn't polluted with README/workloads/git-init. Returns non-zero on refusal.
+# cb_bootstrap ROOT INTENT MODE FORCE [FLAVOR] — scaffold a project + write the brief.
+#   MODE = full | brief   FORCE = 1 to overwrite an existing brief
+#   FLAVOR = adopt (existing repo — skip greenfield scaffolding) | workspace (multi-repo
+#            orchestration parent — git init + README but NO workloads/) | "" (greenfield).
+# Does NOT boot claudebot or write a workspace CLAUDE.md (the entrypoint bakes that on first
+# boot). An existing .git auto-implies `adopt` so we never pollute an existing repo.
 cb_bootstrap() {
-    local root="$1" intent="$2" mode="${3:-full}" force="${4:-}" adopt="${5:-}" brief
+    local root="$1" intent="$2" mode="${3:-full}" force="${4:-}" flavor="${5:-}" brief
     cb_preflight "$mode" || return 1
     brief="$(cb_brief_path "$root")"
     if [ -f "$brief" ] && [ -z "$force" ]; then
         echo "❌ $brief already exists — use --force to overwrite" >&2; return 1
     fi
-    # an existing git repo means we're ADOPTING it, not greenfielding
-    [ -z "$adopt" ] && [ -e "$root/.git" ] && adopt=1
+    # an existing git repo means we're ADOPTING it, not greenfielding (unless workspace)
+    [ -z "$flavor" ] && [ -e "$root/.git" ] && flavor=adopt
     mkdir -p "$root/.claudebox"
-    if [ "$mode" = "full" ] && [ -z "$adopt" ]; then
-        # greenfield scaffolding — deliberately skipped when adopting an existing repo
-        git -C "$root" init -q 2>/dev/null && echo "  ✓ git init"
-        [ -f "$root/README.md" ] || { cb_write_readme "$root"; echo "  ✓ README.md"; }
-        mkdir -p "$root/workloads"
-        [ -e "$root/workloads/.gitkeep" ] || : > "$root/workloads/.gitkeep"
+    if [ "$mode" = "full" ]; then
+        case "$flavor" in
+            adopt) : ;;   # existing repo — deliberately no greenfield scaffolding
+            workspace)
+                [ -e "$root/.git" ] || { git -C "$root" init -q 2>/dev/null && echo "  ✓ git init (orchestration parent)"; }
+                [ -f "$root/README.md" ] || { cb_write_readme "$root"; echo "  ✓ README.md"; } ;;
+            *)  # greenfield
+                git -C "$root" init -q 2>/dev/null && echo "  ✓ git init"
+                [ -f "$root/README.md" ] || { cb_write_readme "$root"; echo "  ✓ README.md"; }
+                mkdir -p "$root/workloads"
+                [ -e "$root/workloads/.gitkeep" ] || : > "$root/workloads/.gitkeep" ;;
+        esac
     fi
-    cb_write_brief "$root" "$intent" "$adopt";     echo "  ✓ .claudebox/BRIEF.md (committed)"
+    cb_write_brief "$root" "$intent" "$flavor";    echo "  ✓ .claudebox/BRIEF.md (committed)"
     cb_init_project_config "$root" >/dev/null;     echo "  ✓ .claudebox/config.yml (gitignored)"
-    [ -n "$adopt" ] && echo "🚀 adopted: $(basename "$root")" || echo "🚀 bootstrapped: $(basename "$root")"
+    case "$flavor" in
+        adopt)     echo "🚀 adopted: $(basename "$root")" ;;
+        workspace) echo "🚀 multi-repo workspace: $(basename "$root")" ;;
+        *)         echo "🚀 bootstrapped: $(basename "$root")" ;;
+    esac
 }
 
 # load functions only (for tests) without running the wrapper body
@@ -1531,7 +1557,7 @@ HELP
     bootstrap)
         # scaffold a new claudebot project in $PWD + write the mission brief.
         shift
-        _bs_mode=full _bs_force= _bs_start=1 _bs_intent= _bs_file= _bs_secfile= _bs_ghtoken= _bs_adopt= _bs_adopt_url=
+        _bs_mode=full _bs_force= _bs_start=1 _bs_intent= _bs_file= _bs_secfile= _bs_ghtoken= _bs_adopt= _bs_adopt_url= _bs_workspace= ; _bs_repos=()
         while [ $# -gt 0 ]; do
             case "$1" in
                 --brief-only) _bs_mode=brief; _bs_start= ;;
@@ -1548,6 +1574,8 @@ HELP
                                   *://*|git@*|*.git|*/*) _bs_adopt_url="$2"; shift ;;
                                   *) : ;;
                               esac ;;
+                --workspace|--multi-repo) _bs_workspace=1 ;;   # multi-repo orchestration parent
+                --repo)       _bs_workspace=1; [ -n "${2:-}" ] && { _bs_repos+=("$2"); shift; } ;;  # clone a sibling repo
                 -h|--help)
                     echo "usage: claudebox bootstrap [--adopt [<url>]] [--brief-only] [--no-start] [--force]"
                     echo "                           [--brief-file F] [--secrets-file F] [--gh-token] [\"intent…\"]"
@@ -1558,6 +1586,11 @@ HELP
                     echo "    --adopt           adopt the git repo already in this dir (skips greenfield scaffolding)"
                     echo "    --adopt <url>     clone <url> (URL or gh owner/repo) INTO this empty dir first, then adopt"
                     echo "                      — the repo becomes the workspace root; run it in a fresh empty dir."
+                    echo ""
+                    echo "  multi-repo (one project/VM, N repos as siblings):"
+                    echo "    --workspace       make this dir an orchestration parent (git init, NO workloads/)"
+                    echo "    --repo <url>       clone <url> as a gitignored sibling (repeatable; implies --workspace)"
+                    echo "                      — parent gitignores the siblings so it never tracks them as gitlinks."
                     echo ""
                     echo "  secrets (never typed on the command line — file-based only):"
                     echo "    --secrets-file F  merge KEY=VALUE lines from F into .claudebox/secrets.env"
@@ -1576,6 +1609,12 @@ HELP
         elif [ -z "$_bs_intent" ] && [ ! -t 0 ]; then
             _bs_intent="$(cat)"   # piped/heredoc intent (host-Claude path)
         fi
+        # flavor: adopt (one existing repo IS the workspace) XOR workspace (a parent holding
+        # N sibling repos). Mutually exclusive.
+        if [ -n "$_bs_adopt" ] && [ -n "$_bs_workspace" ]; then
+            echo "❌ bootstrap: --adopt and --workspace are mutually exclusive." >&2; exit 1
+        fi
+        _bs_flavor=; [ -n "$_bs_adopt" ] && _bs_flavor=adopt; [ -n "$_bs_workspace" ] && _bs_flavor=workspace
         # --adopt: clone-then-adopt, or adopt the repo already in $PWD.
         if [ -n "$_bs_adopt_url" ]; then
             cb_clone_adopt "$_bs_adopt_url" || exit 1
@@ -1583,13 +1622,37 @@ HELP
         elif [ -n "$_bs_adopt" ] && [ ! -e "$PWD/.git" ]; then
             echo "❌ bootstrap --adopt: no git repo in $PWD to adopt. Use --adopt <url> to clone one here, or run plain 'bootstrap' for a greenfield project." >&2; exit 1
         fi
-        cb_bootstrap "$PWD" "$_bs_intent" "$_bs_mode" "$_bs_force" "$_bs_adopt" || exit $?
-        # Adopting + no GH_TOKEN staged? nudge (private repos need it for git/gh, and to dodge
-        # the embedded-email `origin` pull/push gotcha). Non-fatal.
-        if { [ -n "$_bs_adopt" ] || [ -n "$_bs_adopt_url" ]; } && [ -z "$_bs_ghtoken" ] \
+        cb_bootstrap "$PWD" "$_bs_intent" "$_bs_mode" "$_bs_force" "$_bs_flavor" || exit $?
+        # --workspace: gitignore the machine-local files, then clone each --repo as a
+        # GITIGNORED sibling so the parent orchestration repo never tracks it as a gitlink.
+        if [ -n "$_bs_workspace" ]; then
+            for _ig in '/.claudebox/config.yml' '/.claudebox/secrets.env'; do
+                grep -qxF "$_ig" "$PWD/.gitignore" 2>/dev/null || echo "$_ig" >> "$PWD/.gitignore"
+            done
+            if [ "${#_bs_repos[@]}" -gt 0 ]; then
+                for _url in "${_bs_repos[@]}"; do
+                    _name="$(basename "$_url" .git)"
+                    if [ -e "$PWD/$_name" ]; then
+                        echo "  ⚠ $_name/ already exists — skipping clone" >&2
+                    else
+                        echo "  ⬇ cloning $_url → $_name/ …"
+                        if command -v gh >/dev/null 2>&1 && gh repo clone "$_url" "$_name" >/dev/null 2>&1; then :
+                        elif git clone -q "$_url" "$_name" 2>/dev/null; then :
+                        else echo "  ❌ clone failed: $_url (private? check 'gh auth login' / the URL)" >&2; fi
+                    fi
+                    grep -qxF "/$_name/" "$PWD/.gitignore" 2>/dev/null || echo "/$_name/" >> "$PWD/.gitignore"
+                done
+                echo "  ✓ ${#_bs_repos[@]} sibling repo(s) cloned + gitignored (parent won't track them as gitlinks)"
+            else
+                echo "  ℹ multi-repo parent ready — clone your repos as siblings (they're auto-gitignored as you add them), or use --repo <url>"
+            fi
+        fi
+        # Adopting/workspace + no GH_TOKEN staged? nudge for private repos (git/gh auth + the
+        # embedded-email `origin` gotcha). Non-fatal.
+        if { [ -n "$_bs_adopt" ] || [ -n "$_bs_adopt_url" ] || [ -n "$_bs_workspace" ]; } && [ -z "$_bs_ghtoken" ] \
            && ! grep -q '^GH_TOKEN=' "$(cb_secrets_path "$PWD")" 2>/dev/null; then
-            echo "  ℹ private repo? seed GitHub auth so git push/pull works inside claudebot:" >&2
-            echo "     claudebox bootstrap --adopt --gh-token --force   (or add GH_TOKEN to .claudebox/secrets.env)" >&2
+            echo "  ℹ private repo(s)? seed GitHub auth so git push/pull works inside claudebot:" >&2
+            echo "     add --gh-token, or put GH_TOKEN in .claudebox/secrets.env" >&2
         fi
         # secrets: file-based only, so nothing sensitive is echoed or shell-history'd.
         if [ -n "$_bs_secfile" ]; then
