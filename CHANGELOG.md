@@ -16,6 +16,27 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.12.0] — 2026-07-12 _(fork)_
+
+### Added
+- **`claudebox bootstrap --adopt` — adopt an EXISTING repo without the nested-repo tangle**
+  (backlog #12). Plain `bootstrap` scaffolds a greenfield project (git init, README,
+  `workloads/`); doing that to an existing repo is wrong, and cloning a repo *inside* the
+  workspace produces the nesting mess gammaray hit. Now:
+  - `bootstrap --adopt` adopts the repo already in `$PWD` — and bootstrap **auto-detects**
+    this (an existing `.git` ⇒ adopt), **skipping** greenfield scaffolding so it never
+    pollutes the repo, and framing the BRIEF as "this repo IS your workspace, extend it in
+    place, don't re-clone it."
+  - `bootstrap --adopt <url>` clones `<url>` (URL or `gh owner/repo`) **into the current
+    empty dir first** (repo becomes the workspace root), then adopts. Refuses a non-empty
+    dir. Uses the host's git/`gh` auth.
+  - Adopting nudges you to seed `--gh-token` for private repos (git push/pull + the
+    embedded-email `origin` gotcha).
+  - Docs: [bootstrap.md](docs/design/bootstrap.md) (also refreshed the stale first-run
+    surfacing section to the user-memory mechanism).
+
+Host-only (wrapper) — **no image rebuild needed**; reinstall the wrapper to pick it up.
+
 ## [2.11.0] — 2026-07-12 _(fork)_
 
 ### Added — disk-management follow-ups (deferred from the disk consult)

@@ -152,6 +152,24 @@ if grep -q 'framework-consult' "$WRAPPER" && grep -q 'framework-consult' "$CBC";
 if grep -q 'CLAUDEBOX_CONSULT_DIR' "$WRAPPER" && grep -q 'CLAUDEBOX_CONSULT_DIR' "$CBC"; then ok "wrapper & cb-consult agree on CLAUDEBOX_CONSULT_DIR"; else bad "CLAUDEBOX_CONSULT_DIR drifted"; fi
 rm -rf "$(dirname "$CT")"
 
+echo "--- bootstrap --adopt (existing repos, no nesting) ---"
+_orig_pf="$(declare -f cb_preflight)"; cb_preflight() { return 0; }   # stub VM/tooling preflight
+BT="$(mktemp -d)"
+# adopt framing in the brief
+cb_write_brief "$BT/g" "x" ""  ; grep -q 'ADOPTS an existing' "$BT/g/.claudebox/BRIEF.md" && bad "greenfield brief has adopt note" || ok "greenfield brief: no adopt note"
+cb_write_brief "$BT/a" "x" 1   ; grep -q 'ADOPTS an existing' "$BT/a/.claudebox/BRIEF.md" && ok "adopt brief carries the adopt note" || bad "adopt note missing"
+# cb_bootstrap on an existing repo must NOT add README/workloads (greenfield scaffolding)
+mkdir -p "$BT/r"; ( cd "$BT/r" && git init -q && : > f && git add -A && git -c user.email=t@t -c user.name=t commit -qm i ) >/dev/null 2>&1
+( cd "$BT/r" && cb_bootstrap "$BT/r" "x" brief "" ) >/dev/null 2>&1
+{ [ ! -f "$BT/r/README.md" ] && [ ! -d "$BT/r/workloads" ]; } && ok "cb_bootstrap skips greenfield scaffolding on an existing repo" || bad "cb_bootstrap polluted an existing repo"
+grep -q 'ADOPTS an existing' "$BT/r/.claudebox/BRIEF.md" 2>/dev/null && ok "auto-detected adopt (existing .git)" || bad "did not auto-detect adopt"
+# cb_clone_adopt refuses a non-empty dir (no clobber / nesting). Capture output (it returns
+# non-zero on refusal, which under `set -o pipefail` would trip a piped grep).
+mkdir "$BT/ne"; : > "$BT/ne/x"
+_ca_out="$( cd "$BT/ne" && cb_clone_adopt /tmp/nope 2>&1 || true )"
+case "$_ca_out" in *"not empty"*) ok "cb_clone_adopt refuses a non-empty dir" ;; *) bad "cb_clone_adopt did not refuse non-empty" ;; esac
+rm -rf "$BT"; eval "$_orig_pf"   # restore the real cb_preflight
+
 echo "--- disk nice-to-haves (2.11.0): vm.disk default, prune-on-start, tmpfs, disk MOTD ---"
 eq "vm.disk default is 100GiB" "$(cb_machine_get vm.default_disk)" "100GiB"
 if grep -q 'CLAUDEBOX_PRUNE_ON_START' "$ENTRYP"; then ok "entrypoint honors CLAUDEBOX_PRUNE_ON_START"; else bad "prune-on-start missing"; fi

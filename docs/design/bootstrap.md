@@ -100,16 +100,34 @@ It wraps whatever intent it's given in the standard BRIEF.md template, ensures
 `.claudebox/` exists, and initializes project config. It is **idempotent-safe**: it
 won't clobber an existing brief without `--force`.
 
+### 2b. `--adopt` — an existing repo, without the nesting tangle
+
+Plain `bootstrap` scaffolds a *greenfield* project (git init, README, `workloads/`).
+For an **existing repo** that would be wrong — you'd get a nested-repo tangle if the
+claudebot cloned it *inside* the workspace. So:
+
+- **`claudebox bootstrap --adopt`** — adopt the git repo already in this dir. Bootstrap
+  auto-detects this too (an existing `.git` ⇒ adopt): it **skips** the greenfield
+  scaffolding (no README/`workloads/`/`git init`) so it never pollutes your repo, writes
+  the `.claudebox/` files, and frames the BRIEF as *"this repo IS your workspace — extend
+  it in place, don't re-clone it."*
+- **`claudebox bootstrap --adopt <url>`** — clone `<url>` (a URL or `gh owner/repo`) **into
+  the current empty dir first**, so the repo becomes the workspace *root*, then adopt.
+  Refuses a non-empty dir (run it in a fresh `mkdir`ed dir). Uses the host's git/`gh` auth.
+- Adopting nudges you to seed **`--gh-token`** for a private repo (so `git push`/`pull`
+  work inside claudebot, and to dodge the embedded-email `origin` gotcha).
+
 ### 3. First-run surfacing — claudebot can't miss it
 
-The entrypoint already (a) copies a `CLAUDE.md` template into the workspace on
-first run and (b) appends `system-hint.txt` to every `claude` invocation. Bootstrap
-hooks both:
+Framework guidance (incl. *"read `.claudebox/BRIEF.md` first"*) reaches the claudebot two
+ways, both handled by the entrypoint:
 
-- **Always:** the system hint gains a line — *"If `.claudebox/BRIEF.md` exists,
-  read it first; it states why this project was created and what to build."*
-- **First run:** if a brief exists, the entrypoint prepends a short mission banner
-  to the workspace `CLAUDE.md` pointing at it, so it's unmissable in context.
+- **Framework user memory** — the guidance is written to `~/.claude/CLAUDE.md` (user
+  memory) on every start; when a `BRIEF.md` exists, a **mission banner** pointing at it is
+  emitted into that file (see [framework-guidance.md](framework-guidance.md)). Loaded
+  additively with the project's own `./CLAUDE.md`, so it reaches existing-repo projects too.
+- **System hint** — `system-hint.txt`, appended to every `claude` invocation, also carries
+  the "read your BRIEF.md first" line.
 
 ### 4. Secrets — `.claudebox/secrets.env` (credentials the project needs)
 
