@@ -16,6 +16,31 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.10.0] — 2026-07-12 _(fork)_
+
+### Changed
+- **Framework guidance now reaches EVERY claudebot — via `~/.claude/CLAUDE.md` (user memory),
+  rewritten every start.** Previously the guidance was copied into the workspace `./CLAUDE.md`
+  once, and only if the project didn't already have one — so **existing-repo projects got
+  nothing**, and the copy never refreshed on harness updates (the task #10 gap). Now the
+  entrypoint writes the guidance to the container's user-memory file on every boot. Claude Code
+  loads `~/.claude/CLAUDE.md` additively with (and below) the project's own `./CLAUDE.md`, in
+  every mode incl. `-p` / `--dangerously-skip-permissions`, so:
+  - existing-repo projects (with their own `./CLAUDE.md`) now get the guidance too, untouched;
+  - the guidance is always current (a reseed carries the latest);
+  - the project's `./CLAUDE.md` is never written to or mixed with framework text.
+- **Greenfield projects no longer get a seeded workspace `./CLAUDE.md`** — the guidance lives in
+  user memory; the project creates its own `CLAUDE.md` (via `/init` or as it develops) when it
+  has project-specific conventions.
+- The bootstrap **mission banner** (`.claudebox/BRIEF.md`) is now surfaced *in the user-memory
+  file* (conditional on the brief existing), not prepended to the workspace `CLAUDE.md`.
+- Design + precedence/migration notes: [docs/design/framework-guidance.md](docs/design/framework-guidance.md).
+  Follow-up: the generated file is ~280 lines — trimming toward directive essentials (letting
+  `cb-help`/discovery cover the tool inventory) is worthwhile.
+
+**Needs `make build`** (entrypoint change); the rebuild auto-recreates containers, and existing
+projects pick up the guidance on their next reseed — no per-project migration needed.
+
 ## [2.9.2] — 2026-07-12 _(fork)_
 
 ### Fixed

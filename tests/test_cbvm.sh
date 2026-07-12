@@ -152,6 +152,14 @@ if grep -q 'framework-consult' "$WRAPPER" && grep -q 'framework-consult' "$CBC";
 if grep -q 'CLAUDEBOX_CONSULT_DIR' "$WRAPPER" && grep -q 'CLAUDEBOX_CONSULT_DIR' "$CBC"; then ok "wrapper & cb-consult agree on CLAUDEBOX_CONSULT_DIR"; else bad "CLAUDEBOX_CONSULT_DIR drifted"; fi
 rm -rf "$(dirname "$CT")"
 
+echo "--- framework guidance goes to user memory (~/.claude/CLAUDE.md), not a once-copied workspace file ---"
+# Regression for the existing-repo guidance gap (task #10): the entrypoint must write guidance
+# to the user-memory file EVERY start, and must NOT copy a template into the workspace ./CLAUDE.md.
+if grep -q 'CLAUDE_MD_USER="/home/claude/.claude/CLAUDE.md"' "$ENTRYP"; then ok "entrypoint targets ~/.claude/CLAUDE.md (user memory)"; else bad "entrypoint no longer writes user-memory CLAUDE.md"; fi
+if grep -q '} > "\$CLAUDE_MD_USER"' "$ENTRYP"; then ok "guidance block redirects to user memory"; else bad "guidance block does not write CLAUDE_MD_USER"; fi
+if grep -q 'CLAUDE_MD_TEMPLATE' "$ENTRYP"; then bad "stale CLAUDE_MD_TEMPLATE still referenced"; else ok "no stale CLAUDE_MD_TEMPLATE refs"; fi
+if grep -q 'cp .*CLAUDE_MD.*WORKSPACE_DIR/CLAUDE.md' "$ENTRYP"; then bad "entrypoint still copies a template into the workspace CLAUDE.md"; else ok "entrypoint does not seed a workspace ./CLAUDE.md"; fi
+
 echo "--- consult watch actionability: fire on new awaiting-framework, NOT on framework's own posts ---"
 # Regression for the self-trigger papercut: `consult watch` used to wake on ANY thread change,
 # so framework-Claude posting a draft/approval re-triggered its own watcher. The watch now

@@ -35,6 +35,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [browser-testing.md](design/browser-testing.md) | `cb-browser` (headless/noVNC) and the opt-in CDP bridge to your real Chrome. |
 | [n-tier-networking.md](design/n-tier-networking.md) | The standard for addressing/binding/CORS in multi-tier apps (service-name vs rotating VM IP). |
 | [disk-management.md](design/disk-management.md) | The standard for docker-disk under the per-project VM — prune discipline, `cb-df`, the ENOSPC/Write-tool escape. |
+| [framework-guidance.md](design/framework-guidance.md) | How framework guidance reaches every claudebot — `~/.claude/CLAUDE.md` (user memory), rewritten each start. |
 | [framework-consult.md](design/framework-consult.md) | Supervised claudebot ↔ framework-Claude threads that turn recurring problems into baked standards. |
 | [framework-bug-reporting.md](design/framework-bug-reporting.md) | `cb-report-bug` — claudebot flags harness bugs to the host. |
 

@@ -53,12 +53,23 @@ WORKSPACE_DIR="${CLAUDE_WORKSPACE:-/workspace}"
 
 dbg "WORKSPACE_DIR=$WORKSPACE_DIR"
 
-# generate CLAUDE.md template (baked per image variant, reusable across workspaces)
-CLAUDE_MD_TEMPLATE="/home/claude/.claude/CLAUDE.md.template"
-if [ ! -f "$CLAUDE_MD_TEMPLATE" ]; then
-	dbg "generating CLAUDE.md template (variant: ${CLAUDE_IMAGE_VARIANT:-full})"
-	{
+# Framework guidance -> USER MEMORY (~/.claude/CLAUDE.md), rewritten EVERY container start
+# from the baked image. Claude Code loads ~/.claude/CLAUDE.md as user memory ADDITIVELY with
+# (and at lower precedence than) the project's own ./CLAUDE.md — so this reaches every
+# claudebot, INCLUDING existing-repo projects that already have their own CLAUDE.md, and it
+# always reflects the current harness (fixes the old once-per-project staleness). We never
+# touch the project's ./CLAUDE.md. See docs/design/framework-guidance.md.
+CLAUDE_MD_USER="/home/claude/.claude/CLAUDE.md"
+dbg "writing framework guidance to user memory (variant: ${CLAUDE_IMAGE_VARIANT:-full})"
+{
 		cat <<'CLAUDEMD_HEADER'
+# claudebox — framework guidance (auto-generated; do not edit)
+
+> This is claudebox **framework** guidance, loaded as *user memory* and **rewritten on every
+> container start** — edits here are lost next boot. It describes the container/environment you
+> run in. Your project's own `./CLAUDE.md` (if it has one) is loaded alongside this and is
+> authoritative for project-specific conventions — put project notes there, not here.
+
 # Available Tools in This Container
 
 You are running in a Docker container with full sudo access. Here's what you have:
@@ -346,13 +357,27 @@ outside the workspace and `~/.claude`. After a rebuild/recreate they're gone.
 - ~/.claude/init.d/*.sh scripts run once on first container create (not on subsequent starts)
 - Extra host directories may be mounted via CLAUDEBOX_MOUNT_* env vars — check what's available if you need files outside the workspace
 
-## IMPORTANT
-If you need to overwrite or restructure this CLAUDE.md file for your project, FIRST save the container environment notes above to your memory or to a separate file (e.g. ~/.claude/CONTAINER.md) so you don't lose the container-specific information. These notes are auto-generated only on first run and won't be recreated if the file already exists.
+## Remember
+This file is FRAMEWORK guidance (user memory), not your project's CLAUDE.md — it is rewritten
+on every container start, so don't edit it to store anything (it won't survive). If your project
+needs its own conventions, put them in the project's own `./CLAUDE.md`, which is loaded alongside
+this file and takes precedence for project-specific instructions.
 CLAUDEMD_NOTES
-	} > "$CLAUDE_MD_TEMPLATE"
-	chown claude:claude "$CLAUDE_MD_TEMPLATE"
-	dbg "CLAUDE.md template created"
-fi
+
+	# Bootstrapped project? Surface its mission brief here (this file is always loaded) — only
+	# when .claudebox/BRIEF.md exists. (Formerly prepended to the workspace CLAUDE.md.)
+	if [ -f "$WORKSPACE_DIR/.claudebox/BRIEF.md" ]; then
+		cat <<'CLAUDEMD_BRIEF'
+
+## 🎯 Your mission — read `.claudebox/BRIEF.md` FIRST
+This project was bootstrapped with a mission brief at `.claudebox/BRIEF.md`. It states WHY this
+project exists and what to build. Read it before anything else, follow it as the project spec,
+and keep its "Progress / handoff log" section updated as you work.
+CLAUDEMD_BRIEF
+	fi
+} > "$CLAUDE_MD_USER"
+chown claude:claude "$CLAUDE_MD_USER"
+dbg "framework guidance written to $CLAUDE_MD_USER"
 
 # generate system hint (appended to every claude invocation via --append-system-prompt)
 SYSTEM_HINT_FILE="/home/claude/.claude/system-hint.txt"
@@ -435,37 +460,11 @@ CBSKILL
 chown -R claude:claude "$CB_SKILL_DIR" 2>/dev/null || true
 dbg "seeded container /claudebox skill"
 
-# copy template to workspace if CLAUDE.md doesn't exist there
-if [ ! -f "$WORKSPACE_DIR/CLAUDE.md" ]; then
-	cp "$CLAUDE_MD_TEMPLATE" "$WORKSPACE_DIR/CLAUDE.md"
-	chown claude:claude "$WORKSPACE_DIR/CLAUDE.md"
-	dbg "CLAUDE.md copied to $WORKSPACE_DIR"
-fi
-
-# If this project was bootstrapped (docs/design/bootstrap.md), surface its mission
-# brief unmissably: prepend a one-block banner to the workspace CLAUDE.md pointing at
-# .claudebox/BRIEF.md. Guarded by a marker so it's done exactly once (idempotent
-# across restarts). We do NOT inline the brief — claudebot reads the live file.
-BRIEF_FILE="$WORKSPACE_DIR/.claudebox/BRIEF.md"
-if [ -f "$BRIEF_FILE" ] && [ -f "$WORKSPACE_DIR/CLAUDE.md" ] \
-   && ! grep -q "claudebox:mission-banner" "$WORKSPACE_DIR/CLAUDE.md" 2>/dev/null; then
-	BANNER_TMP="$(mktemp)"
-	{
-		echo "<!-- claudebox:mission-banner -->"
-		echo "## 🎯 Your mission — read \`.claudebox/BRIEF.md\` FIRST"
-		echo ""
-		echo "This project was bootstrapped with a mission brief at \`.claudebox/BRIEF.md\`."
-		echo "It states WHY this project exists and what to build. Read it before anything"
-		echo "else, follow it as project spec, and keep its \"Progress / handoff log\""
-		echo "section updated as you work."
-		echo ""
-		echo "---"
-		echo ""
-		cat "$WORKSPACE_DIR/CLAUDE.md"
-	} > "$BANNER_TMP" && mv "$BANNER_TMP" "$WORKSPACE_DIR/CLAUDE.md"
-	chown claude:claude "$WORKSPACE_DIR/CLAUDE.md"
-	dbg "mission banner prepended (BRIEF.md present)"
-fi
+# NOTE: we deliberately do NOT create a workspace ./CLAUDE.md. Framework guidance lives in
+# ~/.claude/CLAUDE.md (user memory, written above); the project's own ./CLAUDE.md — if any —
+# is left entirely to the project. A greenfield project starts with none and creates its own
+# (via /init or as it develops). The bootstrap mission brief is surfaced in the user-memory
+# file above (conditional on .claudebox/BRIEF.md). See docs/design/framework-guidance.md.
 
 # ensure .claude.json has required native install properties
 # this helps users who mount their existing .claude directory
