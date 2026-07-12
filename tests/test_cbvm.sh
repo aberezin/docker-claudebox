@@ -152,6 +152,25 @@ if grep -q 'framework-consult' "$WRAPPER" && grep -q 'framework-consult' "$CBC";
 if grep -q 'CLAUDEBOX_CONSULT_DIR' "$WRAPPER" && grep -q 'CLAUDEBOX_CONSULT_DIR' "$CBC"; then ok "wrapper & cb-consult agree on CLAUDEBOX_CONSULT_DIR"; else bad "CLAUDEBOX_CONSULT_DIR drifted"; fi
 rm -rf "$(dirname "$CT")"
 
+echo "--- consult watch actionability: fire on new awaiting-framework, NOT on framework's own posts ---"
+# Regression for the self-trigger papercut: `consult watch` used to wake on ANY thread change,
+# so framework-Claude posting a draft/approval re-triggered its own watcher. The watch now
+# tracks only threads ENTERING awaiting-framework (additions), so its own awaiting-approval/
+# awaiting-claudebot posts are silent.
+WT="$(mktemp -d)"
+mkdir -p "$WT/t1"; printf 'id=t1\nproject=p\ntitle=x\nstatus=awaiting-approval\n' > "$WT/t1/meta"; echo a > "$WT/t1/001-claudebot.md"
+_wact() { cb_consult_sig "$WT" | awk -F'|' '$2=="awaiting-framework"{print $1"|"$3}' | sort; }
+_wbase="$(_wact)"
+# framework posts a draft -> awaiting-claudebot (its own change): must NOT be a new actionable item
+printf 'status=awaiting-claudebot\n' > "$WT/t1/meta"; echo b > "$WT/t1/002-framework.md"
+_wnew="$(comm -13 <(printf '%s\n' "$_wbase") <(_wact))"
+[ -z "$_wnew" ] && ok "framework's own post does not wake the watcher" || bad "self-trigger: '$_wnew'"
+# a new claudebot consult -> awaiting-framework: MUST fire
+mkdir -p "$WT/t2"; printf 'id=t2\nproject=p\ntitle=y\nstatus=awaiting-framework\n' > "$WT/t2/meta"; echo q > "$WT/t2/001-claudebot.md"
+_wnew="$(comm -13 <(printf '%s\n' "$_wbase") <(_wact))"
+case "$_wnew" in *t2*) ok "new awaiting-framework consult wakes the watcher" ;; *) bad "missed new consult: '$_wnew'" ;; esac
+rm -rf "$WT"
+
 echo "--- VM-IP sidecar contract (wrapper injects CLAUDEBOX_VM_IP, entrypoint re-reads) ---"
 # The claudebot container can't self-discover the VM's reachable IP (it's on the 172.x
 # bridge), and the IP rotates across restarts — so the wrapper mirrors the CURRENT IP to

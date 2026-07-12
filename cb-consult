@@ -123,23 +123,26 @@ case "$cmd" in
     printf '%s\n' "$note" | _post "$td" claudebot; _meta_set "$td" status resolved
     echo "cb-consult: marked $id resolved." ;;
   watch)
-    # Block (token-free) until one of THIS project's consults changes — a framework reply
-    # lands (status awaiting-claudebot) or a turn is added — then print it and exit. Run as
-    # a BACKGROUND task in a long-lived session; you get re-invoked on exit, then relaunch.
+    # Block (token-free) until one of THIS project's consults has an APPROVED reply waiting
+    # (status awaiting-claudebot), print it, exit. Run as a BACKGROUND task after you open a
+    # consult; you're re-invoked on exit, then relaunch. Only wakes on a reply LANDING — not
+    # on your own open/say/resolve (those you already know about), so it doesn't self-trigger.
     iv="${1:-20}"; case "$iv" in ''|*[!0-9]*) iv=20 ;; esac
-    base="$(_sig)"
-    echo "👁  cb-consult: watching this project's consults (every ${iv}s)…" >&2
+    _act() { _sig | awk -F'|' '$2=="awaiting-claudebot"{print $1"|"$3}' | sort; }
+    base="$(_act)"
+    echo "👁  cb-consult: watching for approved replies to this project's consults (every ${iv}s)…" >&2
     while :; do
         sleep "$iv"
-        cur="$(_sig)"
-        if [ "$cur" != "$base" ]; then
-            echo "🗣  consult update:"
-            comm -13 <(printf '%s\n' "$base") <(printf '%s\n' "$cur") | while IFS='|' read -r cid cst cn; do
-                [ -n "$cid" ] && printf '  %-28s → [%s]\n' "$cid" "$cst"
+        cur="$(_act)"
+        new="$(comm -13 <(printf '%s\n' "$base") <(printf '%s\n' "$cur"))"
+        if [ -n "$new" ]; then
+            echo "🗣  approved reply ready:"
+            printf '%s\n' "$new" | while IFS='|' read -r cid cn; do
+                [ -n "$cid" ] && printf '  %-28s  (cb-consult read %s)\n' "$cid" "$cid"
             done
-            echo "read it: cb-consult read <id>   (awaiting-claudebot = an approved reply is ready)"
             exit 0
         fi
+        base="$cur"   # absorb removals / your own resolve silently
     done ;;
   ""|-h|--help) usage 0 ;;
   *) echo "cb-consult: unknown command '$cmd'" >&2; usage ;;

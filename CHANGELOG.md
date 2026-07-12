@@ -16,6 +16,18 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.9.2] — 2026-07-12 _(fork)_
+
+### Fixed
+- **Consult `watch` no longer self-triggers.** Both watchers used to wake on *any* thread
+  change, so framework-Claude posting a draft/approval immediately re-triggered its own
+  watcher (and a claudebot's own `open`/`say`/`resolve` re-triggered its). Each watcher now
+  wakes only on transitions **it** can act on: `claudebox consult watch` (host) on a thread
+  *entering* `awaiting-framework` (a new consult, or a claudebot `say`/`revise`);
+  `cb-consult watch` (container) on a reply *landing* (`awaiting-claudebot`). Implemented by
+  tracking only the actionable subset and firing on additions. Host side (`wrapper.sh`) is
+  live on reinstall; the container side (`cb-consult`) ships on the next `make build`.
+
 ## [2.9.1] — 2026-07-12 _(fork)_
 
 ### Fixed

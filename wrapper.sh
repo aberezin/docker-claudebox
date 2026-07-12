@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.9.1"
+CLAUDEBOX_VERSION="2.9.2"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -1461,23 +1461,28 @@ HELP
                 [ -n "$_status" ] && cb_consult_meta_set "$_t" status "$_status"
                 echo "posted $_author turn to $_cid${_status:+ (status=$_status)}" ;;
             watch)
-                # Block (token-free) until any consult's state changes, print what changed,
-                # exit. Run as a BACKGROUND task in a live framework-Claude session: the
-                # harness re-invokes the session when it exits; handle the change, relaunch.
+                # Block (token-free) until a consult needs FRAMEWORK action, print it, exit.
+                # Run as a BACKGROUND task in a live framework-Claude session: the harness
+                # re-invokes the session on exit; handle it, relaunch. Only wakes on a thread
+                # ENTERING awaiting-framework (a new consult, or a claudebot say/revise) or
+                # gaining a turn while there — NOT on the awaiting-approval/awaiting-claudebot
+                # states framework-Claude sets itself (else posting a draft self-triggers it).
                 _iv="${3:-20}"; case "$_iv" in ''|*[!0-9]*) _iv=20 ;; esac
-                _base="$(cb_consult_sig "$_ch")"
-                echo "👁  watching $_ch for consult changes (every ${_iv}s; Ctrl-C to stop)…" >&2
+                _act() { cb_consult_sig "$_ch" | awk -F'|' '$2=="awaiting-framework"{print $1"|"$3}' | sort; }
+                _base="$(_act)"
+                echo "👁  watching $_ch for consults needing a framework draft (every ${_iv}s; Ctrl-C to stop)…" >&2
                 while :; do
                     sleep "$_iv"
-                    _cur="$(cb_consult_sig "$_ch")"
-                    if [ "$_cur" != "$_base" ]; then
-                        echo "🗣  consult state changed:"
-                        comm -13 <(printf '%s\n' "$_base") <(printf '%s\n' "$_cur") | while IFS='|' read -r _id _st _n; do
-                            [ -n "$_id" ] && printf '  %-28s → [%s]\n' "$_id" "$_st"
+                    _cur="$(_act)"
+                    _new="$(comm -13 <(printf '%s\n' "$_base") <(printf '%s\n' "$_cur"))"
+                    if [ -n "$_new" ]; then
+                        echo "🗣  consult(s) awaiting a framework draft:"
+                        printf '%s\n' "$_new" | while IFS='|' read -r _id _n; do
+                            [ -n "$_id" ] && printf '  %-28s  (claudebox consult show %s)\n' "$_id" "$_id"
                         done
-                        echo "act: claudebox consult show <id>   (awaiting-framework = needs your draft)"
                         exit 0
                     fi
+                    _base="$_cur"   # absorb removals / framework's own posts silently
                 done ;;
             *) echo "usage: claudebox consult list|show|approve|revise|reject|post|watch <id>" >&2; exit 1 ;;
         esac
