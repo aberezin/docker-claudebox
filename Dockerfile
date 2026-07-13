@@ -2,13 +2,12 @@ FROM ubuntu:24.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Fork semver — stamped from the VERSION file at build time (Makefile/install.sh pass
-# --build-arg). Both a LABEL (read by `claudebox checkversion` via image inspect) and
-# an ENV (visible to the running container). Bump VERSION + wrapper.sh on IPC-contract
-# changes so host/container drift is detectable.
-ARG CLAUDEBOX_VERSION=0.0.0
-ENV CLAUDEBOX_VERSION=$CLAUDEBOX_VERSION
-LABEL org.claudebox.version=$CLAUDEBOX_VERSION
+# NOTE ON LAYER CACHING: the volatile bits — the fork version stamp and the harness
+# scripts/CHANGELOG — deliberately do NOT live in `base`. Because `full` is `FROM base`,
+# anything that changes here would bust full's entire (expensive) Go/npm/pyenv toolchain
+# on every release or script edit. Instead they're assembled in the cheap `harness` stage
+# below and COPY --from'd in at the very END of each variant, after the toolchain. Keep
+# `base` limited to slow-changing, cacheable installs.
 
 # faster apt mirror — Cloudflare
 RUN sed -i 's|http://archive.ubuntu.com|http://cloudflaremirrors.com|g; s|http://security.ubuntu.com|http://cloudflaremirrors.com|g' /etc/apt/sources.list.d/ubuntu.sources || true
@@ -79,34 +78,46 @@ RUN mkdir -p /claude && \
 # workspace
 WORKDIR /workspace
 
-# entrypoint + api server
-COPY entrypoint.sh /home/claude/entrypoint.sh
-COPY api_server.py /home/claude/api_server.py
-COPY telegram_bot.py /home/claude/telegram_bot.py
-COPY telegram_utils.py /home/claude/telegram_utils.py
-COPY cron.py /home/claude/cron.py
-COPY jsonpipe.py /home/claude/jsonpipe.py
-COPY cb-browser /usr/local/bin/cb-browser
-COPY cb-report-bug /usr/local/bin/cb-report-bug
-COPY cb-consult /usr/local/bin/cb-consult
-COPY cb-df /usr/local/bin/cb-df
-COPY cb-host-shim /usr/local/bin/colima
-COPY cb-help /usr/local/bin/cb-help
+# ── harness ──────────────────────────────────────────────────────────────────────
+# The VOLATILE layer: entrypoint + Python daemons + cb-* helpers + profiles + CHANGELOG.
+# These change on nearly every commit, so they're staged HERE (a cheap ubuntu stage, no
+# apt) and COPY --from'd into each variant at the very end — AFTER the expensive toolchain
+# — so editing a script or cutting a release never invalidates the Go/npm/pyenv layers.
+# The staging layout mirrors the install destinations:
+#   /h/home     → /home/claude          (entrypoint, daemons, CHANGELOG)
+#   /h/bin      → /usr/local/bin         (cb-* helpers + the host-agent shim colima/limactl)
+#   /h/profiles → /usr/local/lib/claudebox/profiles
+FROM ubuntu:24.04 AS harness
+RUN mkdir -p /h/home /h/bin /h/profiles
+COPY entrypoint.sh api_server.py telegram_bot.py telegram_utils.py cron.py jsonpipe.py /h/home/
+# Bake the harness changelog OUTSIDE the mount (/home/claude/.claude is shadowed) so
+# claudebot can read it; the entrypoint points claudebot here and flags version bumps.
+COPY CHANGELOG.md /h/home/
+COPY cb-browser cb-report-bug cb-consult cb-df cb-help /h/bin/
+COPY cb-host-shim /h/bin/colima
 # Profile installers: named tool bundles a project opts into (.claudebox config
 # `profiles:`); the entrypoint runs the matching one on first enable. See
 # docs/design/profiles.md.
-COPY profiles /usr/local/lib/claudebox/profiles
-# Bake the harness changelog OUTSIDE the mount (/home/claude/.claude is shadowed) so
-# claudebot can read it; the entrypoint points claudebot here and flags version bumps.
-COPY CHANGELOG.md /home/claude/CHANGELOG.md
-RUN chmod +x /home/claude/entrypoint.sh /usr/local/bin/cb-browser /usr/local/bin/cb-report-bug /usr/local/bin/cb-consult /usr/local/bin/cb-df /usr/local/bin/colima /usr/local/bin/cb-help /usr/local/lib/claudebox/profiles/*.sh \
-    && ln -sf colima /usr/local/bin/limactl   # host-agent shim proxies both (Approach 2 / #15)
+COPY profiles/ /h/profiles/
+RUN chmod +x /h/home/entrypoint.sh /h/bin/* /h/profiles/*.sh \
+    && ln -sf colima /h/bin/limactl   # host-agent shim proxies both (Approach 2 / #15)
 
-ENTRYPOINT ["/home/claude/entrypoint.sh"]
+# ── harness install (shared tail) ────────────────────────────────────────────────
+# Applied identically at the end of BOTH variants (minimal + full). Dockerfile has no
+# macros, so if you change what/where the harness installs, change it in the harness
+# stage above AND both `COPY --from=harness` blocks below. The version stamp goes LAST so
+# a VERSION bump only rebuilds these trivial final layers, never the toolchain.
 
 # ── minimal ────────────────────────────────────────────────────────────────────
 FROM base AS minimal
 ENV CLAUDEBOX_IMAGE_VARIANT=minimal
+COPY --from=harness /h/home/ /home/claude/
+COPY --from=harness /h/bin/ /usr/local/bin/
+COPY --from=harness /h/profiles/ /usr/local/lib/claudebox/profiles/
+ARG CLAUDEBOX_VERSION=0.0.0
+ENV CLAUDEBOX_VERSION=$CLAUDEBOX_VERSION
+LABEL org.claudebox.version=$CLAUDEBOX_VERSION
+ENTRYPOINT ["/home/claude/entrypoint.sh"]
 
 # ── full ───────────────────────────────────────────────────────────────────────
 FROM base AS full
@@ -220,3 +231,12 @@ RUN pip install --no-cache-dir requests beautifulsoup4 lxml pyyaml toml
 
 # python package managers
 RUN pip install --no-cache-dir pipenv poetry
+
+# harness install (shared tail — keep in sync with the minimal variant above)
+COPY --from=harness /h/home/ /home/claude/
+COPY --from=harness /h/bin/ /usr/local/bin/
+COPY --from=harness /h/profiles/ /usr/local/lib/claudebox/profiles/
+ARG CLAUDEBOX_VERSION=0.0.0
+ENV CLAUDEBOX_VERSION=$CLAUDEBOX_VERSION
+LABEL org.claudebox.version=$CLAUDEBOX_VERSION
+ENTRYPOINT ["/home/claude/entrypoint.sh"]

@@ -16,6 +16,21 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.15.2] — 2026-07-12 _(fork)_
+
+### Changed
+- **Dockerfile layer caching — releases and script edits no longer rebuild the toolchain.**
+  `full` is `FROM base`, so the two frequently-changing things that lived in `base` — the
+  `CLAUDEBOX_VERSION` ARG/ENV/LABEL (near the top, bumped every release) and the harness
+  `COPY`s + `CHANGELOG.md` (at the end of base, change nearly every commit) — invalidated
+  full's entire Go/npm/pyenv/pip toolchain on every build, making a version bump or a one-line
+  script edit a ~10–20 min rebuild. Moved both into a cheap `harness` staging stage that each
+  variant `COPY --from`'s in — with the version stamp — at the very END, after the toolchain.
+  Now a release rebuilds only the tail ENV/LABEL and a script/CHANGELOG edit only the three
+  final `COPY --from=harness` layers; the toolchain stays cached (verified on cb-infra: 0 npm
+  reruns). **Build-time only** — the resulting image is behaviorally identical, so existing
+  users need **no rebuild**. One-time cost: the next `make build` re-establishes `base`'s layers.
+
 ## [2.15.1] — 2026-07-13 _(fork)_
 
 ### Fixed
