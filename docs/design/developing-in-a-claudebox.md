@@ -55,6 +55,29 @@ CLAUDEBOX_BACKEND=docker bash test.sh          # needs tests/.env (see Auth); hi
 CLAUDEBOX_BACKEND=docker bash test.sh test_wrapper   # a single test, to iterate cheaply
 ```
 
+## Where builds land — your own VM, not `cb-infra`
+
+On the Mac, `make build` builds into the shared **`cb-infra`** image store (colima backend), and
+every project VM reseeds the image from it. **A framework-dev claudebot cannot reach `cb-infra`** —
+it's a separate Colima VM, and the fork is shared-nothing per VM:
+
+- your `docker` is the **mounted socket = your *own* VM's daemon**, not cb-infra's;
+- cb-infra's daemon is only reachable via `docker --context colima-cb-infra` — a **Mac-local socket**
+  the container doesn't have — and cb-infra has **no reachable IP** (it's just an image store).
+
+That's by design, and it's fine:
+
+- **In here, `make build` auto-uses the docker backend and builds into your own VM's daemon** — so you
+  build + test your changes **locally**, no cb-infra and no colima. That's the whole point of the
+  docker backend (#15).
+- **The canonical "build into cb-infra so every project reseeds the new image" is a MAC step** — Alan
+  (or a Mac `make build`) does it once your change is validated. *You validate here; the propagating
+  release build happens on the Mac.*
+- `checkversion` may show your wrapper ahead of the image for repo-only changes — expected, **not** a
+  reason to rebuild (see Version skew below).
+- *Escape hatch, rarely needed:* with the opt-in host-agent up, `colima ssh -p cb-infra -- …` can run a
+  command inside cb-infra — but that's a trusted-Mac operation, not the normal dev flow.
+
 ## The trap: testing an `entrypoint.sh` / image change
 
 The claudebot runs a **baked** entrypoint from its image. Editing `entrypoint.sh` in the repo
