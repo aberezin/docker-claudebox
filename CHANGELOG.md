@@ -16,6 +16,22 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.15.0] — 2026-07-12 _(fork)_
+
+### Added
+- **Backend-aware build + test (`CLAUDEBOX_BACKEND`)** — task #15 Approach 2 **phase 3**, resolved
+  as "docker LOCAL, not proxied." A `docker` shim proxying to the Mac was rejected (near-full host
+  compromise — `docker run -v /:/mac` on the Mac — for little gain). Instead `make build` and
+  `tests/common.sh` now branch on `CLAUDEBOX_BACKEND` (`colima` | `docker`, auto-`docker` when
+  `/.dockerenv` exists): in `docker` mode they build the image and run the integration tests on the
+  **ambient daemon** (the dev claudebot's own VM), with no colima and no host proxy. So a claudebot
+  developing this harness inside a container can `make build` + `bash test.sh` end-to-end. The
+  phase-1 `host-agent` remains only for the narrow slice that needs *real* Colima (e.g. exercising
+  `claudebox vm gc` against live VMs). Override: `make build CLAUDEBOX_BACKEND=docker`,
+  `CLAUDEBOX_BACKEND=docker bash test.sh`. Design: [docs/design/backends.md](docs/design/backends.md).
+
+Repo-only (Makefile / test harness) — **no image rebuild needed**.
+
 ## [2.14.0] — 2026-07-12 _(fork)_
 
 ### Added

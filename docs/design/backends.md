@@ -1,9 +1,11 @@
 # Backends — developing/testing the framework off the Mac (task #15)
 
-**Status:** Approach 2 **phase 1 shipped** (v2.14.0) — the host agent + `colima`/`limactl`
-shims, proven end-to-end (a bridge-network container drives real `colima list` on the Mac).
-Approach 1 (docker backend) remains a sketch. This doc captures both, their trade-offs, and
-the security model.
+**Status:** Approach 2 **phases 1 + 3 shipped**. Phase 1 (v2.14.0): the host agent + `colima`/
+`limactl` shims, proven end-to-end (a bridge-network container drives real `colima list` on the
+Mac). Phase 3 (v2.15.0): the "docker" decision — resolved as **docker LOCAL, not proxied** —
+`make build` + the integration tests are backend-aware and run on the dev claudebot's own
+daemon, so the harness builds+tests inside a container with no host-exec surface. This doc
+captures both approaches, their trade-offs, and the security model.
 
 ## The goal
 
@@ -130,13 +132,31 @@ arbitrary projects/claudebots.
 2. ✅ **`colima`/`limactl` shims** (`cb-host-shim`, baked as both) proxy the framework's calls to
    the agent; the wrapper injects the agent URL+token (durable `-hostagent` sidecar, empty when
    the agent is down). Proven: a bridge-network container ran real `colima list` on the Mac.
-3. ⬜ **Decide on the `docker` shim** — the thin-client step that lets the in-container wrapper
-   build/run *into* the proxied VMs. Bigger security surface; may prefer "Colima proxied, docker
-   local to the dev VM." (This is what makes end-to-end `make build`/`test.sh` from a dev
-   claudebot fully work — phase 1 only proves the proxy channel.)
-4. ⬜ A "develop-the-harness-in-a-claudebox" runbook + deciding whether much of it needs no proxy
-   at all (unit tests are pure bash; most integration is `docker build`/`run` a local daemon
-   satisfies).
+3. ✅ **The `docker` decision — resolved as "docker LOCAL, not proxied" (v2.15.0).** A `docker`
+   shim proxying to the Mac was rejected: it's near-full host compromise (`docker --context
+   colima-cb-X run -v /:/mac …` on the Mac) for little gain. Instead `make build` and
+   `tests/common.sh` are **backend-aware** (`CLAUDEBOX_BACKEND`, auto `docker` inside a
+   container): in `docker` mode they build the image and run the integration tests on the dev
+   claudebot's **own** VM daemon — no colima, no host proxy. So a dev claudebot can `make build`
+   + `bash test.sh` end-to-end. The phase-1 host-agent stays for the narrow slice that genuinely
+   needs *real* Colima (e.g. exercising `claudebox vm gc` against live VMs).
+4. ⬜ A "develop-the-harness-in-a-claudebox" runbook. And note (confirmed): much of it needs **no
+   proxy at all** — unit tests (`test_cbvm.sh`, `test_bootstrap.sh`) are pure bash and run
+   anywhere; the integration suite is `docker build`/`run` that the local daemon satisfies. The
+   host-agent is only for the Colima-*orchestration* tests.
+
+### The docker backend for build/test (phase 3)
+
+`CLAUDEBOX_BACKEND = colima | docker` (auto: `docker` when `/.dockerenv` exists) selects where
+`make build` and the integration tests run:
+
+| | `colima` (Mac/prod) | `docker` (CI / in-container) |
+|---|---|---|
+| `make build` | `colima start cb-infra` + `docker --context colima-cb-infra build` | `docker build` on the ambient daemon |
+| `tests/common.sh` | throwaway `colima` test VM + build/run in its context | build/run on the ambient daemon (no VM) |
+
+This is **not** the docker *shim* (no host proxy) — it's the same-machine ambient daemon the dev
+claudebot already has. Overridable: `make build CLAUDEBOX_BACKEND=docker`, `CLAUDEBOX_BACKEND=docker bash test.sh`.
 
 ### How to use phase 1
 On the Mac: `claudebox host-agent up` (prints a trust warning). Restart your harness-dev

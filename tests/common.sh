@@ -14,7 +14,11 @@ ALL_TESTS=()
 # project's .claudebox/config.yml) is pointed at it via a fixed-id test workspace.
 CBX_TEST_ID="cbxtest"
 CBX_TEST_PROFILE="cb-${CBX_TEST_ID}"
-CBX_TEST_CTX="colima-${CBX_TEST_PROFILE}"
+# Backend: colima (build/run in a throwaway VM) or docker (CI / in-container harness dev — use
+# the AMBIENT daemon, no colima). Auto-selects docker inside a container. docker mode leaves
+# CBX_TEST_CTX empty so `docker` targets the local daemon. See docs/design/backends.md (#15).
+CBX_BACKEND="${CLAUDEBOX_BACKEND:-$([ -f /.dockerenv ] && echo docker || echo colima)}"
+if [ "$CBX_BACKEND" = docker ]; then CBX_TEST_CTX=""; DCTX=(); else CBX_TEST_CTX="colima-${CBX_TEST_PROFILE}"; DCTX=(--context "$CBX_TEST_CTX"); fi
 # workspace lives OUTSIDE the repo git tree (under $HOME so colima auto-mounts it),
 # so the wrapper resolves the project root to it (not the repo) and pollutes nothing.
 CBX_TEST_WS="$HOME/.cache/claudebox-test-ws"
@@ -173,18 +177,24 @@ start_container() {
 # ── setup / cleanup ─────────────────────────────────────────────────────────
 
 setup() {
-    echo "creating throwaway test VM ($CBX_TEST_PROFILE)..."
-    # a plain VM (no --network-address — tests don't need reachable IPs, and it
-    # keeps the profile light and socket_vmnet out of the picture)
-    colima start -p "$CBX_TEST_PROFILE" --cpu 4 --memory 4 --disk 30 >/dev/null 2>&1
+    if [ "$CBX_BACKEND" = docker ]; then
+        echo "docker backend: building the test image on the ambient daemon (no test VM)..."
+        docker build --target minimal -t "$IMAGE" "$WORKDIR" >/dev/null 2>&1
+        # bare `docker` already targets the local daemon — no context switch needed.
+    else
+        echo "creating throwaway test VM ($CBX_TEST_PROFILE)..."
+        # a plain VM (no --network-address — tests don't need reachable IPs, and it
+        # keeps the profile light and socket_vmnet out of the picture)
+        colima start -p "$CBX_TEST_PROFILE" --cpu 4 --memory 4 --disk 30 >/dev/null 2>&1
 
-    echo "building claudebox test image ($IMAGE) into $CBX_TEST_PROFILE..."
-    docker --context "$CBX_TEST_CTX" build --target minimal -t "$IMAGE" "$WORKDIR" >/dev/null 2>&1
+        echo "building claudebox test image ($IMAGE) into $CBX_TEST_PROFILE..."
+        docker "${DCTX[@]}" build --target minimal -t "$IMAGE" "$WORKDIR" >/dev/null 2>&1
 
-    # run the whole suite against the test VM: bare `docker ...` in tests, and the
-    # wrapper's explicit `docker --context $CBX_TEST_CTX`, both resolve to it.
-    CBX_PREV_CTX="$(docker context show 2>/dev/null)"
-    docker context use "$CBX_TEST_CTX" >/dev/null 2>&1
+        # run the whole suite against the test VM: bare `docker ...` in tests, and the
+        # wrapper's explicit `docker --context $CBX_TEST_CTX`, both resolve to it.
+        CBX_PREV_CTX="$(docker context show 2>/dev/null)"
+        docker context use "$CBX_TEST_CTX" >/dev/null 2>&1
+    fi
 
     # fixed-id workspace so the wrapper resolves to $CBX_TEST_PROFILE (already up,
     # so cb_ensure_vm reuses it and never adds --network-address).
@@ -205,10 +215,15 @@ cleanup() {
     for c in "${EXTRA_CONTAINERS[@]+"${EXTRA_CONTAINERS[@]}"}"; do
         docker rm -f "$c" >/dev/null 2>&1 || true
     done
-    # restore the human's docker context, then nuke the throwaway VM (removes its
-    # containers + the test image with it) and the test workspace.
-    [ -n "$CBX_PREV_CTX" ] && docker context use "$CBX_PREV_CTX" >/dev/null 2>&1
-    colima delete -f -p "$CBX_TEST_PROFILE" >/dev/null 2>&1 || true
+    if [ "$CBX_BACKEND" = docker ]; then
+        # docker backend: remove the test image from the ambient daemon (no VM to nuke).
+        docker rmi "$IMAGE" >/dev/null 2>&1 || true
+    else
+        # restore the human's docker context, then nuke the throwaway VM (removes its
+        # containers + the test image with it).
+        [ -n "$CBX_PREV_CTX" ] && docker context use "$CBX_PREV_CTX" >/dev/null 2>&1
+        colima delete -f -p "$CBX_TEST_PROFILE" >/dev/null 2>&1 || true
+    fi
     rm -rf "$CBX_TEST_WS"
 }
 

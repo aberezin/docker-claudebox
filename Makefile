@@ -17,7 +17,18 @@ CB_INFRA_CTX      := colima-$(CB_INFRA_PROFILE)
 CB_INFRA_CPU      ?= 2
 CB_INFRA_MEMORY   ?= 4
 CB_INFRA_DISK     ?= 40
-DOCKER_INFRA      := docker --context $(CB_INFRA_CTX)
+# Backend: colima (macOS/prod — build into cb-infra) or docker (CI / in-container harness dev —
+# build on the AMBIENT daemon, no colima). Auto-selects `docker` inside a container. This does NOT
+# proxy docker to the Mac; it uses the local VM's daemon. The opt-in `claudebox host-agent` proxies
+# colima only where real VMs are genuinely needed. See docs/design/backends.md (task #15).
+CLAUDEBOX_BACKEND ?= $(shell [ -f /.dockerenv ] && echo docker || echo colima)
+ifeq ($(CLAUDEBOX_BACKEND),docker)
+  DOCKER_INFRA := docker
+  INFRA_DEP    :=
+else
+  DOCKER_INFRA := docker --context $(CB_INFRA_CTX)
+  INFRA_DEP    := infra-up
+endif
 
 .PHONY: build build-minimal build-all infra-up test clean help
 
@@ -30,13 +41,13 @@ infra-up:
 		colima start -p $(CB_INFRA_PROFILE) --cpu $(CB_INFRA_CPU) --memory $(CB_INFRA_MEMORY) --disk $(CB_INFRA_DISK)
 
 # Build the full image into cb-infra
-build: infra-up
+build: $(INFRA_DEP)
 	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target full -t $(IMAGE_NAME):$(TAG) .
 	@# the previous claudebox:latest is now a dangling <none> image — reclaim it
 	$(DOCKER_INFRA) image prune -f
 
 # Build the minimal image into cb-infra
-build-minimal: infra-up
+build-minimal: $(INFRA_DEP)
 	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
 	$(DOCKER_INFRA) image prune -f
 

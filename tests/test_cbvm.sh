@@ -163,6 +163,10 @@ grep -q 'CLAUDEBOX_HOST_AGENT_URL' "$HASH" && grep -q 'CLAUDEBOX_HOST_AGENT_TOKE
 grep -q 'container_name}${_crole}-hostagent' "$WRAPPER" && ok "wrapper writes -hostagent sidecar" || bad "wrapper -hostagent sidecar missing"
 grep -q '${CLAUDE_CONTAINER_NAME}-hostagent' "$ENTRYP" && ok "entrypoint re-reads -hostagent sidecar" || bad "entrypoint -hostagent reader missing"
 if declare -f cb_host_agent_up >/dev/null && declare -f cb_host_agent_down >/dev/null; then ok "cb_host_agent_up/down defined"; else bad "host-agent wrapper functions missing"; fi
+# phase 3: Makefile + tests are backend-aware (docker backend builds/tests locally, no colima)
+MK="$SCRIPT_DIR/../Makefile"; CMN="$SCRIPT_DIR/common.sh"
+grep -q 'CLAUDEBOX_BACKEND' "$MK" && grep -q 'ifeq ($(CLAUDEBOX_BACKEND),docker)' "$MK" && ok "Makefile is backend-aware (colima|docker)" || bad "Makefile backend branch missing"
+grep -q 'CBX_BACKEND' "$CMN" && grep -q '/.dockerenv' "$CMN" && ok "test harness auto-selects docker backend in a container" || bad "common.sh backend detection missing"
 
 echo "--- bootstrap --adopt (existing repos, no nesting) ---"
 _orig_pf="$(declare -f cb_preflight)"; cb_preflight() { return 0; }   # stub VM/tooling preflight
