@@ -190,9 +190,11 @@ but the in-tool message improvement belongs upstream.
 
 ### Opt-in hardening
 
-- **`CLAUDEBOX_PRUNE_ON_START=1`** — the entrypoint runs `docker builder prune -f` (cache
-  only, best-effort) on every start, so build cache never creeps up on image-iterating
-  projects. Cache-only, so it never removes tagged images; off by default.
+- **`CLAUDEBOX_PRUNE_ON_START=1`** — the entrypoint runs `docker builder prune -f` (build
+  cache) AND `docker image prune -f` (dangling, untagged, unreferenced images) on every
+  start, so both classes of accumulation are cleared on image-iterating projects. Best-effort
+  and safe: `image prune -f` only touches untagged images with no container reference — never
+  a tagged image, never a running container's image. Off by default.
 - **`CLAUDEBOX_TMPFS_TMP=<size>`** (e.g. `2g`, or `1`/`on` for 2g) — RAM-backs the
   claudebot's `/tmp` so docker disk bloat **cannot** starve the Bash tool at all (its
   `/tmp/claude-501` scratch is then on RAM, not the shared overlay). This is the hardest

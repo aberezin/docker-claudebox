@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.15.2"
+CLAUDEBOX_VERSION="2.15.3"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -1457,7 +1457,7 @@ USEFUL ENV
   CLAUDEBOX_CAFFEINATE=1           keep the Mac awake during a foreground session (macOS)
   CLAUDEBOX_MINIMAL=1              use the minimal image variant
   CLAUDEBOX_ENV_FOO=bar           forward FOO=bar into the container
-  CLAUDEBOX_PRUNE_ON_START=1      docker builder prune (cache) on each start — keep VM disk lean
+  CLAUDEBOX_PRUNE_ON_START=1      docker builder prune (cache) + image prune (dangling) on each start
   CLAUDEBOX_TMPFS_TMP=2g          RAM-back /tmp so docker bloat can't ENOSPC-kill the Bash tool
   DEBUG / CLAUDEBOX_ENV_DEBUG      verbose wrapper logging
   See docs/environment-variables.md for the full list; docs/versioning.md for releases.

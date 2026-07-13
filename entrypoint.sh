@@ -24,14 +24,18 @@ if [ -S /var/run/docker.sock ]; then
 fi
 dbg "docker socket done"
 
-# Opt-in: prune docker BUILD CACHE on every start to keep the shared VM disk from creeping up
-# on image-iterating projects (build cache is the real accumulator; see disk-management.md).
-# Cache-only + best-effort, so it never deletes tagged images or blocks startup. Default off.
+# Opt-in: prune docker build cache AND dangling (untagged, unreferenced) images on every start,
+# to keep the shared VM disk from creeping up on image-iterating projects (build cache is the real
+# accumulator; dangling images pile up when a rebuild retags an existing tag and orphans the old
+# one — common on harness-dev projects that `make build` often; see disk-management.md). Safe +
+# best-effort: `image prune -f` only touches untagged unreferenced images (never a tagged image
+# and never a running container's image), and both never block startup. Default off.
 case "${CLAUDEBOX_PRUNE_ON_START:-${CLAUDE_PRUNE_ON_START:-}}" in
 	1|true|yes|on)
 		if [ -S /var/run/docker.sock ]; then
-			dbg "prune-on-start: docker builder prune -f"
+			dbg "prune-on-start: docker builder prune -f + docker image prune -f"
 			docker builder prune -f >/dev/null 2>&1 || true
+			docker image prune -f   >/dev/null 2>&1 || true
 		fi ;;
 esac
 

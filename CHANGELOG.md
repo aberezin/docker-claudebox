@@ -16,6 +16,19 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.15.3] — 2026-07-13 _(fork)_
+
+### Changed
+- **`CLAUDEBOX_PRUNE_ON_START` now also prunes dangling images**, not just build cache. The
+  opt-in prune ran `docker builder prune -f` only, so an untagged image orphaned when a
+  rebuild retagged `claudebox:latest` (routine on harness-dev projects that `make build`
+  often) would linger — one such image on the dev VM was ~1.7 GB of unique layers, invisible
+  to `docker images` and only visible via `docker system df`'s "reclaimable". Now the same
+  opt-in also runs `docker image prune -f` alongside. Best-effort and safe — `image prune -f`
+  only touches untagged unreferenced images (never a tagged image, never a running
+  container's image). Env-var + doc updated. `vm gc` (Mac-side) has always covered this;
+  this closes the same gap on the container side. **Needs `make build`** (entrypoint change).
+
 ## [2.15.2] — 2026-07-12 _(fork)_
 
 ### Changed
