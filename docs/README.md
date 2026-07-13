@@ -37,7 +37,8 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [disk-management.md](design/disk-management.md) | The standard for docker-disk under the per-project VM — prune discipline, `cb-df`, the ENOSPC/Write-tool escape. |
 | [framework-guidance.md](design/framework-guidance.md) | How framework guidance reaches every claudebot — `~/.claude/CLAUDE.md` (user memory), rewritten each start. |
 | [framework-consult.md](design/framework-consult.md) | Supervised claudebot ↔ framework-Claude threads that turn recurring problems into baked standards. |
-| [backends.md](design/backends.md) | Design sketch (#15): developing/testing the harness off the Mac — a docker backend vs proxying Colima to the host. |
+| [backends.md](design/backends.md) | Developing/testing the harness off the Mac (#15) — the docker backend + the host-agent proxy, and the security model. |
+| [developing-in-a-claudebox.md](design/developing-in-a-claudebox.md) | Runbook: the dev loop for editing/building/testing the harness *inside* a claudebox (dogfooding). |
 | [framework-bug-reporting.md](design/framework-bug-reporting.md) | `cb-report-bug` — claudebot flags harness bugs to the host. |
 
 ## See also
