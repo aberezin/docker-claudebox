@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.15.0"
+CLAUDEBOX_VERSION="2.15.1"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -477,6 +477,12 @@ cb_ensure_vm() {
             "${mount_args[@]}" || return 1
     fi
     cb_ensure_image "$ctx" || return 1
+    # Refresh the VM-IP env now that the VM is guaranteed up — must happen HERE, not
+    # earlier in the wrapper: on a first-run cold boot the plain lookup used to race
+    # `colima start --network-address` (col0 reachability lags by seconds), leaving
+    # CLAUDEBOX_VM_IP unset in the fresh container until the next invocation. See
+    # cb_inject_vm_env / cb_wait_reachable.
+    cb_inject_vm_env "$id" "$root"
 }
 
 cb_vm_down() {
@@ -831,6 +837,29 @@ cb_wait_reachable() {   # $1=profile  $2=max_seconds (default 20)
 
 # project network.hostname from config (empty/blank if unset)
 cb_project_hostname() { _cb_yaml_get "$(cb_project_config_path "$1")" network.hostname; }
+
+# cb_inject_vm_env ID ROOT — populate the VM-IP env for the claudebot container.
+# MUST be called AFTER cb_ensure_vm (needs the VM up). Writes a per-role sidecar
+# ~/.claude/.<container>{,_prog,_cron}-vmip that entrypoint.sh re-reads on every
+# `docker start` (rotation-proof self-heal) and appends -e CLAUDEBOX_VM_IP /
+# CLAUDEBOX_HOSTNAME to DOCKER_ARGS so a fresh `docker run` sees them too.
+# Uses cb_wait_reachable (not the raw cb_vm_address) because col0 reachability
+# lags `colima start --network-address` by a couple of seconds — a plain lookup
+# racing a fresh boot returns empty, which was the pre-fix first-run bug. Reads
+# DOCKER_ARGS, container_name, CLAUDE_DIR from caller scope.
+cb_inject_vm_env() {
+    local id="$1" root="$2" profile ip host _crole
+    profile="$(cb_project_profile "$id")"
+    ip="$(cb_wait_reachable "$profile" 2>/dev/null || true)"
+    host="$(cb_project_hostname "$root" 2>/dev/null || true)"
+    [ -n "$ip" ]   && DOCKER_ARGS+=(-e "CLAUDEBOX_VM_IP=$ip")
+    [ -n "$host" ] && DOCKER_ARGS+=(-e "CLAUDEBOX_HOSTNAME=$host")
+    for _crole in "" _prog _cron; do
+        { printf 'CLAUDEBOX_VM_IP=%s\n' "$ip"
+          printf 'CLAUDEBOX_HOSTNAME=%s\n' "$host"; } \
+            > "$CLAUDE_DIR/.${container_name}${_crole}-vmip"
+    done
+}
 
 # read the `profiles:` list from .claudebox/config.yml -> space-separated names. Supports
 # flow style (`profiles: [typescript, go]`) and block style (`profiles:` then `- name`).
@@ -1803,21 +1832,13 @@ done
 # Reachable VM IP -> claudebot as CLAUDEBOX_VM_IP. The claudebot container sits on the
 # VM's docker bridge (172.x), so it CANNOT self-discover the VM's reachable col0 IP
 # (192.168.64.x) — the only address the human's Mac (and its Chrome, for CDP) can hit a
-# published workload at. We inject it here. Crucially the IP ROTATES across VM restarts,
-# so we mirror the CURRENT value to a per-role sidecar the entrypoint re-reads every
-# start (a stale baked -e can't linger) — the same durable/self-healing pattern as the
-# CDP url above. Empty (IP not up yet) -> entrypoint unsets it; next run fills it in.
-_vm_profile="$(cb_project_profile "$CB_PROJECT_ID")"
-_vm_ip="$(cb_vm_address "$_vm_profile" 2>/dev/null || true)"
-[ -n "$_vm_ip" ] && DOCKER_ARGS+=(-e "CLAUDEBOX_VM_IP=$_vm_ip")
-# Stable name (network.hostname) is the rotation-proof escape hatch — ride the same
-# sidecar (its reader loops every KEY=VALUE line). Doesn't rotate, but stays in sync.
-_vm_host="$(cb_project_hostname "$CB_PROJECT_ROOT" 2>/dev/null || true)"
-[ -n "$_vm_host" ] && DOCKER_ARGS+=(-e "CLAUDEBOX_HOSTNAME=$_vm_host")
-for _crole in "" _prog _cron; do
-    { printf 'CLAUDEBOX_VM_IP=%s\n' "$_vm_ip"
-      printf 'CLAUDEBOX_HOSTNAME=%s\n' "$_vm_host"; } > "$CLAUDE_DIR/.${container_name}${_crole}-vmip"
-done
+# published workload at. Done via cb_inject_vm_env called AFTER cb_ensure_vm at each
+# mode's dispatch site (see below): if injected here we'd race a first-boot VM (not up
+# yet -> lookup empty -> env never set) — the pre-fix first-run bug. cb_inject_vm_env
+# uses cb_wait_reachable so col0's few-second lag past `colima start` is handled, and
+# writes a per-role sidecar entrypoint re-reads on every `docker start` so IP rotation
+# self-heals. HOSTNAME (network.hostname from config.yml) rides the same sidecar as the
+# rotation-proof escape hatch.
 
 # Host agent (Approach 2 / #15) — if the OPT-IN agent is up, inject its URL + token so the
 # baked colima/limactl shims can proxy to the Mac. Durable sidecar (empty when the agent is

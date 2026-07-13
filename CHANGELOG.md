@@ -16,6 +16,19 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.15.1] — 2026-07-13 _(fork)_
+
+### Fixed
+- **`CLAUDEBOX_VM_IP` was empty on first-run cold boot.** The wrapper's IP-injection block
+  ran BEFORE `cb_ensure_vm`, so on a brand-new VM the lookup raced `colima start
+  --network-address` (col0 reachability lags by a couple of seconds) — the env never got
+  set, the sidecar was written empty, and the fresh container came up without the address
+  its browser tier / CORS logic needs. Only self-healed on the NEXT `claudebox` run once
+  the VM was already up. Fixed by moving the injection into `cb_ensure_vm` itself (new
+  `cb_inject_vm_env` helper) and switching to `cb_wait_reachable` so col0's boot lag is
+  handled. Host-only — no image rebuild, no IPC contract change (sidecar name/format and
+  env-var names unchanged).
+
 ## [2.15.0] — 2026-07-12 _(fork)_
 
 ### Added
