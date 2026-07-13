@@ -1454,12 +1454,13 @@ OTHER
   -v | --version | doctor | auth | mcp    passthrough to the claude CLI
 
 USEFUL ENV
-  CLAUDEBOX_CAFFEINATE=1           keep the Mac awake during a foreground session (macOS)
-  CLAUDEBOX_MINIMAL=1              use the minimal image variant
+  CLAUDEBOX_CAFFEINATE=1          keep the Mac awake during a foreground session (macOS)
+  CLAUDEBOX_MINIMAL=1             use the minimal image variant
+  CLAUDEBOX_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
   CLAUDEBOX_ENV_FOO=bar           forward FOO=bar into the container
   CLAUDEBOX_PRUNE_ON_START=1      docker builder prune (cache) + image prune (dangling) on each start
   CLAUDEBOX_TMPFS_TMP=2g          RAM-back /tmp so docker bloat can't ENOSPC-kill the Bash tool
-  DEBUG / CLAUDEBOX_ENV_DEBUG      verbose wrapper logging
+  DEBUG / CLAUDEBOX_ENV_DEBUG     verbose wrapper logging
   See docs/environment-variables.md for the full list; docs/versioning.md for releases.
 HELP
         exit 0
