@@ -16,6 +16,23 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.15.4] — 2026-07-15 _(fork)_
+
+### Added
+- **Guard against silently spinning up a fresh project in some random dir.** Running
+  `claudebox` in a dir without `.claudebox/config.yml` used to silently create the
+  config (and, on the next step, a per-project Colima VM that reserves CPU/RAM/disk
+  and takes ~30-60s to boot) — trivially triggered by a mistyped `cd`, a wrong
+  terminal, or a scratch dir. Now the wrapper detects it and prompts
+  (`Create a new claudebox project at this path? [y/N]`), suggesting
+  `claudebox bootstrap "<intent>"` as the proper way to start a new project. In
+  non-interactive mode it aborts (safer for CI/scripts). Override with
+  **`CLAUDEBOX_ALLOW_NEW=1`**. Follows the 2.5.1 subdir-guard pattern; skipped for the
+  same allowlist of throwaway/utility commands (`setup-token`, `-v`, `--version`,
+  `doctor`, `auth`, `mcp`, `stop`, `clear-session`). `bootstrap` self-heals via its
+  re-exec (creates `.claudebox/` first, then re-enters). Host-only — **no image
+  rebuild needed**; reinstall the wrapper to pick it up.
+
 ## [2.15.3] — 2026-07-13 _(fork)_
 
 ### Changed

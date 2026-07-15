@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.15.3"
+CLAUDEBOX_VERSION="2.15.4"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -130,6 +130,35 @@ cb_guard_workspace() {
         echo "   aborted — cd to the project root and re-run." >&2; return 1
     fi
     echo "   aborting (non-interactive) — set CLAUDEBOX_ALLOW_SUBDIR=1 to override." >&2
+    return 1
+}
+
+# Guard accidental "spawn a fresh project in some random dir". Silent creation of
+# .claudebox/config.yml (+ a per-project Colima VM, ~30-60s to boot, resources reserved)
+# is easy to trigger by mistake — cd'ing into a scratch dir, wrong-terminal `claudebox`,
+# etc. Prompt if interactive; else abort (override: CLAUDEBOX_ALLOW_NEW=1). Skipped by
+# the utility-command allowlist below (setup-token/mcp/stop/... don't create anything)
+# and by `bootstrap` (it creates the config itself, then re-execs). $1 = project root.
+cb_guard_new_project() {
+    local root="$1" ans cfg
+    cfg="$(cb_project_config_path "$root")"
+    [ ! -f "$cfg" ] || return 0
+    {
+        echo "⚠️  No claudebox project here — no .claudebox/config.yml at:"
+        echo "      $root"
+        echo "   Starting claudebox will create a new project (its own Colima VM,"
+        echo "   ~30-60s to boot, reserves CPU/RAM/disk). For a proper new project"
+        echo "   with a mission brief, prefer:  claudebox bootstrap \"<intent>\""
+    } >&2
+    case "${CLAUDEBOX_ALLOW_NEW:-}" in 1|true|yes|on) echo "   (CLAUDEBOX_ALLOW_NEW set — proceeding)" >&2; return 0 ;; esac
+    if [ -t 0 ]; then
+        printf "   Create a new claudebox project at this path? [y/N] " >&2
+        read -r ans
+        case "$ans" in y|Y|yes|YES) return 0 ;; esac
+        echo "   aborted — cd to an existing project, or use 'claudebox bootstrap'." >&2
+        return 1
+    fi
+    echo "   aborting (non-interactive) — use 'claudebox bootstrap', or set CLAUDEBOX_ALLOW_NEW=1 to override." >&2
     return 1
 }
 
@@ -1457,6 +1486,7 @@ USEFUL ENV
   CLAUDEBOX_CAFFEINATE=1          keep the Mac awake during a foreground session (macOS)
   CLAUDEBOX_MINIMAL=1             use the minimal image variant
   CLAUDEBOX_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
+  CLAUDEBOX_ALLOW_NEW=1           skip the "create a new project here?" prompt (or the non-interactive abort)
   CLAUDEBOX_ENV_FOO=bar           forward FOO=bar into the container
   CLAUDEBOX_PRUNE_ON_START=1      docker builder prune (cache) + image prune (dangling) on each start
   CLAUDEBOX_TMPFS_TMP=2g          RAM-back /tmp so docker bloat can't ENOSPC-kill the Bash tool
@@ -1774,12 +1804,18 @@ HELP
         ;;
 esac
 
-# Guard accidental "run from inside .claudebox" (see cb_guard_workspace). Skip for
-# management/throwaway commands that legitimately run from anywhere; catch the run paths
-# (interactive / programmatic / daemon) before any VM work.
+# Guards that catch the run paths (interactive / programmatic / daemon) before any VM
+# work. Skipped for management/throwaway commands that legitimately run from anywhere.
+#   cb_guard_workspace   — refuse to mount .claudebox itself as the workspace (2.5.1)
+#   cb_guard_new_project — refuse to silently spin up a fresh VM in some random dir
+# `bootstrap` is handled above and re-execs into the wrapper AFTER writing .claudebox/,
+# so it never trips the new-project guard.
 case "${1:-}" in
     setup-token|-v|--version|doctor|auth|mcp|stop|clear-session) : ;;
-    *) cb_guard_workspace "$CB_PROJECT_ROOT" || exit 1 ;;
+    *)
+        cb_guard_workspace   "$CB_PROJECT_ROOT" || exit 1
+        cb_guard_new_project "$CB_PROJECT_ROOT" || exit 1
+        ;;
 esac
 
 # ── project identity → colima context (Phase 4) ──────────────────────────────
