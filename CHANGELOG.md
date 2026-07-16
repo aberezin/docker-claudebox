@@ -16,6 +16,24 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.20.1] — 2026-07-16 _(fork)_
+
+### Fixed
+- **cb-infra BuildKit cache no longer grows unbounded across rebuilds.** The Makefile's
+  `build` and `build-minimal` targets already ran `docker image prune -f` after each
+  build to reclaim the previous `claudebox:latest` (now dangling after retag), but they
+  did **not** prune BuildKit cache — so cache from every intermediate stage
+  (`apt-get`/`npm i`/`pyenv install`/etc.) accumulated forever. Concrete: after four
+  days of harness iteration (2.15.4 → 2.20.0, seven versions + interim experiments),
+  Alan's cb-infra had **41 GB** of stale build cache, which only came out via a
+  nuclear `docker builder prune -af` (which also wiped the useful cache and forced a
+  ~10-20-min next-build cold-start). Fix: Makefile now also runs `docker builder prune
+  -f` (non-`-a`, dangling cache only, so recently-used layers survive) after each
+  build. Same shape as the existing `image prune -f`, and mirrors what 2.15.3 did for
+  project VMs via `CLAUDEBOX_PRUNE_ON_START`. Repo-only (Makefile) — **no image
+  rebuild needed**, no wrapper reinstall; the next `make build` picks up the new
+  behavior.
+
 ## [2.20.0] — 2026-07-16 _(fork)_
 
 ### Added

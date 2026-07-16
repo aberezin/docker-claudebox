@@ -45,11 +45,16 @@ build: $(INFRA_DEP)
 	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target full -t $(IMAGE_NAME):$(TAG) .
 	@# the previous claudebox:latest is now a dangling <none> image — reclaim it
 	$(DOCKER_INFRA) image prune -f
+	@# also prune UNREFERENCED BuildKit cache (non-`-a`, so recently-used layers survive).
+	@# Without this, cb-infra's BuildKit cache grows unbounded over many rebuilds — Alan
+	@# hit a 41 GB accumulation over four days of iteration before a nuclear prune.
+	$(DOCKER_INFRA) builder prune -f
 
 # Build the minimal image into cb-infra
 build-minimal: $(INFRA_DEP)
 	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
 	$(DOCKER_INFRA) image prune -f
+	$(DOCKER_INFRA) builder prune -f
 
 # Build both
 build-all: build build-minimal

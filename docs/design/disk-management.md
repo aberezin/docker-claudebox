@@ -175,6 +175,27 @@ but the in-tool message improvement belongs upstream.
 
 ## What claudebox bakes in
 
+### Cleanup mechanisms at a glance
+
+Cleanup is spread across three layers because the disk problem shows up in three places
+(build daemon that produces images, run daemon that stores them, container's `/tmp`):
+
+| Mechanism | Runs where | What it prunes | Trigger |
+|---|---|---|---|
+| Makefile `build` / `build-minimal` (2.20.1) | **cb-infra** daemon | dangling images + **BuildKit cache** (non-`-a`, unreferenced only) | every `make build` (or `claudebox harness sync`) |
+| `CLAUDEBOX_PRUNE_ON_START=1` (2.11.0, 2.15.3) | **project VMs** | BuildKit cache + dangling images | every container start (opt-in) |
+| `claudebox vm gc` (2.9.0) | all running `cb-*` VMs (incl. cb-infra) | orphaned lima disks + dangling images + **BuildKit cache** + `fstrim` | manual, on the Mac |
+
+None of these is redundant — the Makefile keeps cb-infra tidy where builds happen,
+`PRUNE_ON_START` keeps a project VM tidy where runs happen, and `vm gc` is the manual
+reclaim (also fstrims so freed guest blocks return to macOS — the only path that shrinks
+the sparse host raw disks). The nuclear escape hatch is always
+`docker --context colima-cb-<id> builder prune -af` (build cache) +
+`docker --context colima-cb-<id> system prune -af` (everything else) — reserved for when
+BuildKit's snapshotter has corrupted itself (rare but real).
+
+### Individual mechanisms
+
 - **Baked container guidance** — a "Disk discipline" section in the framework guidance
   (`~/.claude/CLAUDE.md`): watch `df -h /`, prune cadence, and the Write-tool report
   escape — so every claudebot self-diagnoses.
@@ -182,6 +203,12 @@ but the in-tool message improvement belongs upstream.
   following the [`cb-*` convention](convenience-scripts.md).
 - **Prune-aware `claudebox vm gc`** — the host reclaim command also prunes build cache
   per VM (not only dangling images), because build cache is the real accumulator.
+- **Post-build cache prune on cb-infra** — the Makefile's `build` / `build-minimal`
+  targets run `docker builder prune -f` (dangling BuildKit cache, non-`-a` so recently-
+  used layers survive) after each build. Without this, cb-infra's BuildKit cache grew
+  unbounded across rebuilds — a real 41 GB accumulation over four days of harness
+  iteration triggered the addition in 2.20.1. Since `claudebox harness sync` invokes
+  `make build` under the hood, both paths get the same treatment.
 - **Startup disk MOTD** — when `/` is ≥85% full at container boot, the entrypoint injects a
   disk warning into the claudebot's context (via `--append-system-prompt`), so a claudebot
   inheriting a near-full VM is told up front.
