@@ -64,6 +64,10 @@ workaround is exactly how DX bugs stay invisible.
 5. **Always-on guidance.** The baked `CLAUDE.md` notes and the always-appended
    system hint tell claudebot to use `cb-report-bug` for framework bugs (not project
    bugs) instead of working around them silently.
+   The baked guidance's **framework-vs-project check** (does the rule name any
+   project-owned code/schema/service? if no, it's framework) is what routes an agent
+   to this channel in the first place — without it, framework friction gets written
+   into project `CLAUDE.md` files and never reaches the drop dir at all.
 
 ## Not in scope (yet)
 

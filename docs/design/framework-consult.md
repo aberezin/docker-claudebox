@@ -193,6 +193,11 @@ Baked into the container `CLAUDE.md` so a claudebot knows the boundary. Open one
   project-specific.
 - It is **not already covered** by the baked guidance / docs.
 
+The baked guidance now leads with an explicit **framework-vs-project check** (does the
+rule name any project-owned code/schema/service? if no, it's framework) so the claudebot
+makes the routing decision *at the moment of writing a rule down*, not after the rule
+has already leaked into a project's `CLAUDE.md`.
+
 Otherwise: solve it locally (your app's own work), or — if it's a concrete defect rather
 than a "what's the right pattern" question — file it with `cb-report-bug`. A consult may
 cite a bug report. Consults are the *bidirectional, best-practice-seeking* sibling of the

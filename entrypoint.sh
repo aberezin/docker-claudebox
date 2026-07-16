@@ -230,6 +230,32 @@ CDP gotchas (these waste cycles if you rediscover them each time):
 - For cb-net / in-VM-only targets (incl. their websockets), use `shot`/`script` instead —
   those run inside the VM on `cb-net` and reach workloads by container name.
 
+## Framework-vs-project: where does a rule belong?
+When you learn something the hard way and go to write it down — as a line in the
+project's `CLAUDE.md`, a project doc, a skill file, an `init.d` hook — pause and ask:
+**is this a project rule or a framework rule?** Getting this wrong is the single most
+common way friction stays local: agent hits a claudebox footgun, solves it, writes
+"next time do X" into the project's `CLAUDE.md`, and every other claudebot in every
+other project keeps re-discovering the same footgun because the note never propagated.
+- **The check (one question).** Does the rule name any code, filename, schema, service,
+  or concept **that belongs to this project**? If yes → project rule, write it locally.
+  If no → it's a framework rule and it does NOT belong in this project.
+- **Signals you're on the framework side** (not exhaustive — the check above is
+  authoritative): the rule only mentions `cb-*` helpers, `cb-net`, `CLAUDEBOX_*` env
+  vars, the VM IP / rotation, `.claudebox/secrets.env`, `~/.claude/init.d`, the browser
+  bridge, the Docker socket, sidecar files, or "how any claudebox project should…". If
+  the rule would read identically in a different project you've never seen — framework.
+- **What to do with a framework rule.** Route it to the right channel and stop:
+  - Concrete defect / missing warning / under-documented helper → `cb-report-bug`
+    (a doc bug is still a bug — file it against the doc that should have warned you).
+  - "What's the right pattern?" question with no clear standard yet → `cb-consult open`.
+  The point of both channels is that the resolution lands in the baked guidance / a
+  `docs/design/*` standard, so **every future claudebot inherits it**. A note in one
+  project's `CLAUDE.md` inherits to nobody.
+- **When in doubt, escalate.** A false-positive escalation costs the maintainer one
+  triage; a false-negative (framework rule silently written to a project) is invisible
+  and permanent. Prefer the visible cost.
+
 ## Reporting a bug in the claudebox FRAMEWORK
 If you hit something that looks like a bug in the harness that runs you — the
 wrapper, this entrypoint, the image, or the Colima/Docker networking — as opposed
