@@ -16,6 +16,27 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.20.0] — 2026-07-16 _(fork)_
+
+### Added
+- **`claudebox harness <verb>`** — a namespace for framework-dev-only commands, gated by
+  the framework-dev fingerprint (workspace's `wrapper.sh` at root contains
+  `CLAUDEBOX_VERSION=`). Listed in `--help` with a "framework-dev:" tag (same pattern as
+  `host-agent`'s TRUSTED tag) so non-dev users see it, register it as not-for-them, and
+  skip past. Running a `harness` verb from a non-harness workspace (e.g. from gammaray)
+  errors clearly with "$root is not a claudebox harness fork" rather than doing something
+  surprising. First verb:
+  - **`claudebox harness sync`** — rebuild cb-infra's `claudebox:latest` from the current
+    wrapper checkout (thin wrapper around `make build`). Correction side of the 2.19.0
+    drift warning: once the wrapper tells you cb-infra is behind, this is the one command
+    to bring it forward. In-container guard: refuses to run from inside a container
+    (docker backend would build on the container's own VM, NOT cb-infra) and prints the
+    exact Mac command to run instead.
+- Refactor: extracted `cb_is_framework_dev` helper (was inlined in 2.19.0's
+  `cb_check_infra_drift`); now shared by the drift check + the new `harness` gate.
+
+Host-only (wrapper.sh) — **no image rebuild needed**; reinstall the wrapper to pick it up.
+
 ## [2.19.0] — 2026-07-16 _(fork)_
 
 ### Added

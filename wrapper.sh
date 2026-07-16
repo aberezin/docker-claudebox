@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.19.0"
+CLAUDEBOX_VERSION="2.20.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -162,6 +162,13 @@ cb_guard_new_project() {
     return 1
 }
 
+# true if $1 is a claudebox harness fork workspace (fingerprint: wrapper.sh at root with
+# CLAUDEBOX_VERSION= line). Used to gate framework-dev behaviors: skip the drift warning,
+# gate `claudebox harness <verb>` commands, mirror the entrypoint's fw-dev surfacing.
+cb_is_framework_dev() {
+    [ -f "$1/wrapper.sh" ] && grep -q '^CLAUDEBOX_VERSION=' "$1/wrapper.sh" 2>/dev/null
+}
+
 # Warn (never block) when the shared cb-infra image is BEHIND the wrapper's version. On
 # a normal `claudebox` invocation, an out-of-date cb-infra silently ships a stale image
 # to any project VM that reseeds from it — the drift is invisible until a fresh project
@@ -173,10 +180,7 @@ cb_guard_new_project() {
 cb_check_infra_drift() {
     local root="$1" civ cver
     case "${CLAUDEBOX_NO_DRIFT_WARN:-}" in 1|true|yes|on) return 0 ;; esac
-    # framework-dev fingerprint: workspace has wrapper.sh w/ CLAUDEBOX_VERSION= at root
-    if [ -f "$root/wrapper.sh" ] && grep -q '^CLAUDEBOX_VERSION=' "$root/wrapper.sh" 2>/dev/null; then
-        return 0
-    fi
+    cb_is_framework_dev "$root" && return 0
     civ="$(cb_image_status "$(cb_infra_context)" 2>/dev/null)"
     cver="$(cb_real_ver "$civ")"
     [ -z "$cver" ] && return 0                                   # cb-infra down / unstamped — silent
@@ -192,6 +196,36 @@ cb_check_infra_drift() {
         lt) echo "⚠  cb-infra image ($cver) is AHEAD of wrapper ($CLAUDEBOX_VERSION) — update the wrapper:  ./install.sh" >&2 ;;
     esac
     return 0
+}
+
+# ── claudebox harness <verb> ─ framework-dev-only commands ───────────────────
+# The `harness` namespace groups verbs meaningful only when developing the claudebox
+# harness itself (this fork). They're gated by cb_is_framework_dev (fingerprint on
+# $CB_PROJECT_ROOT) so running them in gammaray etc. errors clearly instead of doing
+# something surprising. Marked "framework-dev:" in --help so non-dev users see the tag
+# and skip past it (same pattern as host-agent's TRUSTED tag).
+
+# cb_harness_sync — rebuild cb-infra's claudebox:latest from the current wrapper
+# checkout. Thin wrapper around `make build`. On the Mac (colima backend) this is what
+# `make build` already does; the value of a wrapper verb is (a) discoverability from
+# `claudebox --help` and (b) an explicit in-container guard — running it from inside a
+# framework-dev claudebot would build on the CONTAINER's own VM daemon (docker backend),
+# NOT cb-infra, so we refuse and print the exact Mac command to run instead.
+cb_harness_sync() {
+    local root="$CB_PROJECT_ROOT"
+    if ! cb_is_framework_dev "$root"; then
+        echo "❌ claudebox harness sync: $root is not a claudebox harness fork (no wrapper.sh with CLAUDEBOX_VERSION= at its root)." >&2
+        echo "   This command rebuilds the cb-infra image from a harness checkout; it's meaningful only when developing the harness itself." >&2
+        return 1
+    fi
+    if [ -f /.dockerenv ]; then
+        echo "❌ claudebox harness sync: must run on the Mac (colima backend) to update cb-infra." >&2
+        echo "   From inside a container the docker backend would build on this VM's own daemon, not cb-infra." >&2
+        echo "   On your Mac:  cd $(printf '%q' "$root") && claudebox harness sync   (equivalent: make build)" >&2
+        return 1
+    fi
+    echo "🔨 claudebox harness sync: rebuilding cb-infra image from $root (this is 'make build' on the colima backend)…"
+    ( cd "$root" && make build )
 }
 
 cb_project_config_path() { printf '%s/.claudebox/config.yml' "$1"; }
@@ -1521,6 +1555,7 @@ VERSION
 OTHER
   browser-bridge up|down           opt-in: let claudebot drive your real Chrome via CDP
   host-agent up|down|status        opt-in (TRUSTED): let a HARNESS-DEV claudebot run allowlisted colima/limactl on the Mac (#15)
+  harness <verb>                   framework-dev: harness-dev-only ops. Verbs: sync (rebuild cb-infra from this checkout)
   framework-bugs [list|clear]      review bugs claudebot filed with cb-report-bug
   consult list|show|approve|watch  supervised claudebot<->framework-Claude threads (watch=block-until-change)
   setup-token                      run 'claude setup-token' in a throwaway container
@@ -1598,6 +1633,15 @@ HELP
             down)   cb_host_agent_down; exit $? ;;
             status) cb_host_agent_status; exit $? ;;
             *)      echo "usage: claudebox host-agent up|down|status  (opt-in: let a HARNESS-DEV claudebot run allowlisted colima/limactl on your Mac — trusted use only; see docs/design/backends.md)" >&2; exit 1 ;;
+        esac
+        ;;
+    harness)
+        # framework-dev-only ops (gated by cb_is_framework_dev). Namespace so more
+        # dev-only verbs can accrete without cluttering the top-level command list.
+        case "${2:-}" in
+            sync) cb_harness_sync; exit $? ;;
+            "")   echo "usage: claudebox harness <verb>  (framework-dev only; verbs: sync)" >&2; exit 1 ;;
+            *)    echo "claudebox harness: unknown verb '$2'  (verbs: sync)" >&2; exit 1 ;;
         esac
         ;;
     framework-bugs)
