@@ -16,6 +16,32 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.19.0] — 2026-07-16 _(fork)_
+
+### Added
+- **`claudebox` warns on every invocation when `cb-infra` image is behind the wrapper.**
+  A latent gap the framework-dev-inside-a-claudebox workflow exposed: since 2.15.0's
+  `CLAUDEBOX_BACKEND=docker` auto-detect, `make build` from inside a framework-dev
+  claudebot builds on the project's own VM daemon — **not** on `cb-infra`. So while the
+  wrapper's `CLAUDEBOX_VERSION` marches forward with each release, `cb-infra` keeps
+  whatever version was there when it was last built from the Mac. Fresh project VMs
+  reseed from `cb-infra` → they silently inherit the stale image. `claudebox
+  checkversion` catches this if run explicitly, but drift accumulates invisibly
+  otherwise. Concrete: six releases 2.15.4 → 2.18.0 shipped in one session with
+  `cb-infra` untouched; other projects would have gotten the old image on next reseed.
+  Now `claudebox` runs a fast cb-infra image inspect (silent if cb-infra is down or the
+  image is unstamped) and prints a one-line severity-classified warning on drift:
+  - 🔴 MAJOR — rebuild REQUIRED (breaking IPC-contract change)
+  - 🟠 MINOR — SHOULD rebuild (additive contract change / new features)
+  - 🟡 PATCH — rebuild optional (fixes/docs only)
+  Auto-skipped for the framework-dev workspace itself (fingerprint: `wrapper.sh` at
+  root containing `CLAUDEBOX_VERSION=` — the person iterating there IS the one causing
+  drift). Silenceable via **`CLAUDEBOX_NO_DRIFT_WARN=1`** for scripted / CI contexts.
+  Never blocks — always a warning; fires on the same allowlist as the workspace + new-
+  project guards (skipped for `setup-token`, `-v`, `--version`, `doctor`, `auth`,
+  `mcp`, `stop`, `clear-session`). Host-only (wrapper) — **no image rebuild needed**;
+  reinstall the wrapper to pick it up.
+
 ## [2.18.0] — 2026-07-16 _(fork)_
 
 ### Added

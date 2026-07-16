@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.18.0"
+CLAUDEBOX_VERSION="2.19.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -160,6 +160,38 @@ cb_guard_new_project() {
     fi
     echo "   aborting (non-interactive) — use 'claudebox bootstrap', or set CLAUDEBOX_ALLOW_NEW=1 to override." >&2
     return 1
+}
+
+# Warn (never block) when the shared cb-infra image is BEHIND the wrapper's version. On
+# a normal `claudebox` invocation, an out-of-date cb-infra silently ships a stale image
+# to any project VM that reseeds from it — the drift is invisible until a fresh project
+# pulls the old bits. `checkversion` catches this if run explicitly, but this surfaces it
+# on every boot path so drift doesn't accumulate. Auto-skipped for the framework-dev
+# workspace (the person iterating there IS the one causing drift and doesn't need to be
+# told). Also skippable via CLAUDEBOX_NO_DRIFT_WARN=1 for scripted/CI contexts. Fast:
+# cb_image_status returns "unavailable" without booting cb-infra if it's down.
+cb_check_infra_drift() {
+    local root="$1" civ cver
+    case "${CLAUDEBOX_NO_DRIFT_WARN:-}" in 1|true|yes|on) return 0 ;; esac
+    # framework-dev fingerprint: workspace has wrapper.sh w/ CLAUDEBOX_VERSION= at root
+    if [ -f "$root/wrapper.sh" ] && grep -q '^CLAUDEBOX_VERSION=' "$root/wrapper.sh" 2>/dev/null; then
+        return 0
+    fi
+    civ="$(cb_image_status "$(cb_infra_context)" 2>/dev/null)"
+    cver="$(cb_real_ver "$civ")"
+    [ -z "$cver" ] && return 0                                   # cb-infra down / unstamped — silent
+    [ "$cver" = "$CLAUDEBOX_VERSION" ] && return 0                # in sync — silent
+    case "$(cb_semver_cmp "$CLAUDEBOX_VERSION" "$cver")" in
+        gt)
+            case "$(cb_semver_severity "$CLAUDEBOX_VERSION" "$cver")" in
+                major) echo "🔴 cb-infra image ($cver) is MAJOR behind wrapper ($CLAUDEBOX_VERSION) — rebuild REQUIRED on the Mac:  make build" >&2 ;;
+                minor) echo "🟠 cb-infra image ($cver) is MINOR behind wrapper ($CLAUDEBOX_VERSION) — SHOULD rebuild on the Mac:  make build" >&2 ;;
+                patch) echo "🟡 cb-infra image ($cver) is PATCH behind wrapper ($CLAUDEBOX_VERSION) — rebuild optional:  make build" >&2 ;;
+            esac
+            echo "   (fresh project VMs will reseed from this cb-infra; set CLAUDEBOX_NO_DRIFT_WARN=1 to silence)" >&2 ;;
+        lt) echo "⚠  cb-infra image ($cver) is AHEAD of wrapper ($CLAUDEBOX_VERSION) — update the wrapper:  ./install.sh" >&2 ;;
+    esac
+    return 0
 }
 
 cb_project_config_path() { printf '%s/.claudebox/config.yml' "$1"; }
@@ -1500,6 +1532,7 @@ USEFUL ENV
   CLAUDEBOX_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
   CLAUDEBOX_ALLOW_NEW=1           skip the "create a new project here?" prompt (or the non-interactive abort)
   CLAUDEBOX_FRAMEWORK_DEV=1       force framework-dev startup surfacing (auto-detected when the workspace is a claudebox harness fork)
+  CLAUDEBOX_NO_DRIFT_WARN=1       silence the "cb-infra image is behind wrapper" warning on each claudebox invocation
   CLAUDEBOX_ENV_FOO=bar           forward FOO=bar into the container
   CLAUDEBOX_PRUNE_ON_START=1      docker builder prune (cache) + image prune (dangling) on each start
   CLAUDEBOX_TMPFS_TMP=2g          RAM-back /tmp so docker bloat can't ENOSPC-kill the Bash tool
@@ -1821,6 +1854,7 @@ esac
 # work. Skipped for management/throwaway commands that legitimately run from anywhere.
 #   cb_guard_workspace   — refuse to mount .claudebox itself as the workspace (2.5.1)
 #   cb_guard_new_project — refuse to silently spin up a fresh VM in some random dir
+#   cb_check_infra_drift — warn (never block) if cb-infra image is behind the wrapper
 # `bootstrap` is handled above and re-execs into the wrapper AFTER writing .claudebox/,
 # so it never trips the new-project guard.
 case "${1:-}" in
@@ -1828,6 +1862,7 @@ case "${1:-}" in
     *)
         cb_guard_workspace   "$CB_PROJECT_ROOT" || exit 1
         cb_guard_new_project "$CB_PROJECT_ROOT" || exit 1
+        cb_check_infra_drift "$CB_PROJECT_ROOT"
         ;;
 esac
 
