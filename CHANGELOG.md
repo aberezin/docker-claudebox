@@ -16,6 +16,38 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.16.0] — 2026-07-16 _(fork)_
+
+### Added — framework-Claude in-container review surface
+- **Startup surfacing for framework-dev claudebots.** A claudebot developing the harness
+  itself from *inside* a container had no visibility onto framework-bug reports or consults
+  that OTHER projects had filed and were awaiting a framework draft — the review flow was
+  designed assuming framework-Claude worked on the Mac via `claudebox consult list` /
+  `claudebox framework-bugs list`, but those are host wrapper commands and not reachable
+  from inside a container. Concrete miss: a session working on this repo had no idea
+  gammaray had filed 2 consults + 1 bug earlier the same day. Now the entrypoint detects
+  when the workspace **is** a claudebox harness fork (`wrapper.sh` at its root containing
+  `CLAUDEBOX_VERSION=` — a very specific fingerprint; override with
+  **`CLAUDEBOX_FRAMEWORK_DEV=1`**) and injects a startup note listing every consult with
+  `status=awaiting-framework` (across ALL projects) plus every framework-bug report not
+  yet marked `.reviewed`, pointing at the two new in-container commands below. Skipped for
+  every normal claudebot.
+- **`cb-consult list --all`** — cross-project consult listing (framework-dev view). The
+  default `cb-consult list` still filters to this project's threads only; `--all` widens
+  it to every project and includes the project id column, matching what host
+  `claudebox consult list` shows.
+- **`cb-report-bug list|show|done`** — the missing management surface for the
+  file-drop bug reports. `list` prints every bug in the shared drop dir (marking those
+  with a `.reviewed` sidecar `✓`); `show <slug>` prints the report body; `done <slug>`
+  drops a `.reviewed` sidecar so the framework-dev startup surfacing hides it from the
+  "unreviewed" count. The historic filing form (`cb-report-bug "<title>" ... <<EOF`) is
+  unchanged — subcommands are only recognized as the FIRST arg.
+
+Together these mean a framework-dev claudebot working on this repo (or any renamed fork)
+picks up waiting review work on every session start, instead of only when a human tells
+it. Env-var + doc updated. **Needs `make build`** (entrypoint + baked helpers); the
+rebuild auto-recreates existing containers.
+
 ## [2.15.4] — 2026-07-15 _(fork)_
 
 ### Added

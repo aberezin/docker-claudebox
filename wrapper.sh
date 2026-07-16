@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.15.4"
+CLAUDEBOX_VERSION="2.16.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -1487,6 +1487,7 @@ USEFUL ENV
   CLAUDEBOX_MINIMAL=1             use the minimal image variant
   CLAUDEBOX_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
   CLAUDEBOX_ALLOW_NEW=1           skip the "create a new project here?" prompt (or the non-interactive abort)
+  CLAUDEBOX_FRAMEWORK_DEV=1       force framework-dev startup surfacing (auto-detected when the workspace is a claudebox harness fork)
   CLAUDEBOX_ENV_FOO=bar           forward FOO=bar into the container
   CLAUDEBOX_PRUNE_ON_START=1      docker builder prune (cache) + image prune (dangling) on each start
   CLAUDEBOX_TMPFS_TMP=2g          RAM-back /tmp so docker bloat can't ENOSPC-kill the Bash tool

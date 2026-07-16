@@ -50,7 +50,18 @@ workaround is exactly how DX bugs stay invisible.
    `⚠ N framework bug report(s) on file` when the dir is non-empty, so they don't sit
    unnoticed.
 
-4. **Always-on guidance.** The baked `CLAUDE.md` notes and the always-appended
+4. **In-container surfacing (framework-dev, 2.16.0).** For a framework-dev claudebot —
+   one whose workspace **is** a claudebox harness fork (`wrapper.sh` at root containing
+   `CLAUDEBOX_VERSION=`; override with `CLAUDEBOX_FRAMEWORK_DEV=1`) — the host wrapper
+   isn't reachable, so the same review flow lives in-container:
+   - `cb-report-bug list` — every report in the drop dir (`✓` = reviewed).
+   - `cb-report-bug show <slug>` — print a report.
+   - `cb-report-bug done <slug>` — drop a `.reviewed` sidecar next to the report.
+   The entrypoint scans the drop dir on every start and injects a startup note listing
+   any reports without a `.reviewed` sidecar (plus any `awaiting-framework` consults),
+   so a framework-dev session catches waiting work without a human telling it.
+
+5. **Always-on guidance.** The baked `CLAUDE.md` notes and the always-appended
    system hint tell claudebot to use `cb-report-bug` for framework bugs (not project
    bugs) instead of working around them silently.
 

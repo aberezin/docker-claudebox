@@ -28,12 +28,58 @@ BODY_FILE=""
 
 usage() {
     cat >&2 <<EOF
-usage: cb-report-bug "<title>" [--layer wrapper|entrypoint|image|networking|other] [--body-file F]
-  File a claudebox FRAMEWORK bug report (not a bug in your project).
-  The report body comes from --body-file or stdin.
+usage:
+  cb-report-bug "<title>" [--layer wrapper|entrypoint|image|networking|other] [--body-file F]
+                                file a framework-bug report (body on stdin or --body-file)
+  cb-report-bug list            list every framework-bug in the shared drop dir (marks reviewed)
+  cb-report-bug show <slug>     print a filed report
+  cb-report-bug done <slug>     mark a report reviewed (drops a .reviewed sidecar); framework-dev
+                                startup surfacing then hides it from the "unreviewed" count
 EOF
     exit "${1:-1}"
 }
+
+# subcommands (list/show/done) — recognized only when they are the FIRST arg. Everything
+# else keeps the historic `cb-report-bug "title" ... <<EOF ... EOF` filing pattern.
+case "${1:-}" in
+    list)
+        shift
+        [ -d "$DIR" ] || { echo "no framework-bug reports yet."; exit 0; }
+        found=0
+        for f in "$DIR"/*.md; do
+            [ -f "$f" ] || continue
+            found=1
+            slug="$(basename "$f" .md)"
+            mark="  "; [ -f "${f}.reviewed" ] && mark="✓ "
+            title="$(sed -n '1s/^# //p' "$f" | head -1)"
+            printf '%s%s\n      %s\n' "$mark" "$slug" "${title:-(no title)}"
+        done
+        [ "$found" = 0 ] && echo "no framework-bug reports yet." || {
+            echo ""; echo "read one:  cb-report-bug show <slug>"
+            echo "mark done: cb-report-bug done <slug>"
+        }
+        exit 0
+        ;;
+    show)
+        slug="${2:-}"; [ -n "$slug" ] || usage
+        f="$DIR/${slug}.md"
+        [ -f "$f" ] || { echo "no such bug: $slug" >&2; exit 1; }
+        echo "=== $slug ==="
+        [ -f "${f}.reviewed" ] && echo "(reviewed on $(cat "${f}.reviewed" 2>/dev/null))"
+        echo ""
+        cat "$f"
+        exit 0
+        ;;
+    done)
+        slug="${2:-}"; [ -n "$slug" ] || usage
+        f="$DIR/${slug}.md"
+        [ -f "$f" ] || { echo "no such bug: $slug" >&2; exit 1; }
+        date +%Y-%m-%dT%H-%M-%S > "${f}.reviewed" 2>/dev/null || echo reviewed > "${f}.reviewed"
+        echo "cb-report-bug: marked $slug reviewed."
+        exit 0
+        ;;
+    -h|--help) usage 0 ;;
+esac
 
 while [ $# -gt 0 ]; do
     case "$1" in

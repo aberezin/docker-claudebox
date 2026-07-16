@@ -36,7 +36,7 @@ usage:
   cb-consult open "<title>" [--layer wrapper|entrypoint|image|networking|tooling|other]   (body on stdin)
   cb-consult say <id>          add a turn (body on stdin)
   cb-consult read <id>         print the thread (framework-Claude's reply shows here once the human approves it)
-  cb-consult list              this project's consults + status
+  cb-consult list [--all]      this project's consults + status; --all = every project (framework-dev)
   cb-consult watch [secs]      block until a reply lands / a thread changes, print it, exit
                                (run as a background task; you're re-invoked on exit)
   cb-consult resolve <id> [note]   mark adopted
@@ -108,15 +108,28 @@ case "$cmd" in
     echo "=== consult $id ==="; cat "$td/meta"; echo ""
     for m in "$td"/[0-9][0-9][0-9]-*.md; do [ -f "$m" ] || continue; echo "── $(basename "$m") ──"; cat "$m"; echo ""; done ;;
   list)
+    all=0
+    while [ $# -gt 0 ]; do case "$1" in --all|-a) all=1 ;; -h|--help) usage 0 ;; *) echo "cb-consult list: unknown flag '$1'" >&2; usage ;; esac; shift; done
     [ -d "$DIR" ] || { echo "no consults yet."; exit 0; }
     found=0
     for td in "$DIR"/*/; do
         [ -d "$td" ] || continue; td="${td%/}"
-        [ "$(sed -n 's/^project=//p' "$td/meta" 2>/dev/null | head -1)" = "$PID" ] || continue
+        proj="$(sed -n 's/^project=//p' "$td/meta" 2>/dev/null | head -1)"
+        [ "$all" = 1 ] || [ "$proj" = "$PID" ] || continue
         found=1
-        printf '  %-28s [%s]  %s\n' "$(basename "$td")" "$(sed -n 's/^status=//p' "$td/meta" | tail -1)" "$(sed -n 's/^title=//p' "$td/meta" | head -1)"
+        stat="$(sed -n 's/^status=//p' "$td/meta" | tail -1)"
+        title="$(sed -n 's/^title=//p' "$td/meta" | head -1)"
+        if [ "$all" = 1 ]; then
+            printf '  %-28s  proj=%-10s [%-19s]  %s\n' "$(basename "$td")" "$proj" "$stat" "$title"
+        else
+            printf '  %-28s [%s]  %s\n' "$(basename "$td")" "$stat" "$title"
+        fi
     done
-    [ "$found" = 0 ] && echo "no consults for this project yet." || echo "" && echo "read one: cb-consult read <id>" ;;
+    if [ "$found" = 0 ]; then
+        [ "$all" = 1 ] && echo "no consults across any project yet." || echo "no consults for this project yet."
+    else
+        echo ""; echo "read one: cb-consult read <id>"
+    fi ;;
   resolve)
     id="${1:-}"; [ -n "$id" ] || usage; shift; td="$DIR/$id"; [ -d "$td" ] || { echo "no such consult: $id" >&2; exit 1; }
     note="$*"; [ -n "$note" ] || note="adopted"

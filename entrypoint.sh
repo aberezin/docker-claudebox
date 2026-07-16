@@ -383,6 +383,51 @@ if [ -d "$_cdir" ] && [ -n "${CLAUDEBOX_PROJECT_ID:-}" ]; then
 	fi
 fi
 
+# (A2) Framework-Claude surfacing — if THIS claudebot is developing the harness itself
+# (workspace fingerprint = a wrapper.sh containing CLAUDEBOX_VERSION= at its root, OR
+# CLAUDEBOX_FRAMEWORK_DEV=1 opt-in), also inject a note listing cross-project consults
+# awaiting a framework draft AND framework-bug reports not yet marked reviewed. This is
+# the review flow the host `claudebox consult list` / `claudebox framework-bugs list`
+# surfaces to a human on the Mac — mirrored here so a framework-dev claudebot working
+# from INSIDE a container catches waiting work at startup instead of missing it (there
+# is no host wrapper in here). Skipped for every normal claudebot.
+FRAMEWORK_NOTE=""
+_is_fwdev=0
+case "${CLAUDEBOX_FRAMEWORK_DEV:-}" in 1|true|yes|on) _is_fwdev=1 ;; esac
+if [ "$_is_fwdev" = 0 ] && [ -n "${CLAUDEBOX_WORKSPACE:-}" ] && [ -f "$CLAUDEBOX_WORKSPACE/wrapper.sh" ]; then
+	grep -q '^CLAUDEBOX_VERSION=' "$CLAUDEBOX_WORKSPACE/wrapper.sh" 2>/dev/null && _is_fwdev=1
+fi
+if [ "$_is_fwdev" = 1 ]; then
+	_fwc_dir="${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}"
+	_fwb_dir="${CLAUDEBOX_FRAMEWORK_BUGS_DIR:-/home/claude/framework-bugs}"
+	_fwc_n=0; _fwc_ids=""
+	if [ -d "$_fwc_dir" ]; then
+		for _ctd in "$_fwc_dir"/*/; do
+			[ -d "$_ctd" ] || continue; _ctd="${_ctd%/}"; _cm="$_ctd/meta"
+			[ -f "$_cm" ] || continue
+			[ "$(sed -n 's/^status=//p' "$_cm" | tail -1)" = "awaiting-framework" ] || continue
+			_fwc_n=$((_fwc_n + 1))
+			_fwc_ids="${_fwc_ids:+$_fwc_ids, }$(basename "$_ctd")"
+		done
+	fi
+	_fwb_n=0; _fwb_slugs=""
+	if [ -d "$_fwb_dir" ]; then
+		for _bug in "$_fwb_dir"/*.md; do
+			[ -f "$_bug" ] || continue
+			[ -f "${_bug}.reviewed" ] && continue
+			_fwb_n=$((_fwb_n + 1))
+			_fwb_slugs="${_fwb_slugs:+$_fwb_slugs, }$(basename "$_bug" .md)"
+		done
+	fi
+	if [ "$_fwc_n" -gt 0 ] || [ "$_fwb_n" -gt 0 ]; then
+		FRAMEWORK_NOTE="NOTE (framework-dev):"
+		[ "$_fwc_n" -gt 0 ] && FRAMEWORK_NOTE="${FRAMEWORK_NOTE} ${_fwc_n} consult(s) awaiting your framework draft (${_fwc_ids});"
+		[ "$_fwb_n" -gt 0 ] && FRAMEWORK_NOTE="${FRAMEWORK_NOTE} ${_fwb_n} unreviewed framework-bug report(s) (${_fwb_slugs});"
+		FRAMEWORK_NOTE="${FRAMEWORK_NOTE} review with \`cb-consult list --all\` / \`cb-report-bug list\`. Adopt or reject each; mark bugs handled with \`cb-report-bug done <slug>\`."
+		dbg "framework-dev surfacing: $_fwc_n consult(s) awaiting-framework, $_fwb_n unreviewed bug(s)"
+	fi
+fi
+
 # (Disk) startup MOTD — if the VM's shared overlay is already low at boot, warn the claudebot
 # up front (docker images/build cache and the Bash tool's /tmp share ONE disk; a full disk =
 # ENOSPC on every Bash call). See docs/design/disk-management.md.
@@ -666,6 +711,11 @@ if [ -n "$CONSULT_NOTE" ]; then
 	COMBINED_APPEND="${COMBINED_APPEND:+$COMBINED_APPEND
 
 }$CONSULT_NOTE"
+fi
+if [ -n "$FRAMEWORK_NOTE" ]; then
+	COMBINED_APPEND="${COMBINED_APPEND:+$COMBINED_APPEND
+
+}$FRAMEWORK_NOTE"
 fi
 if [ -n "$DISK_NOTE" ]; then
 	COMBINED_APPEND="${COMBINED_APPEND:+$COMBINED_APPEND

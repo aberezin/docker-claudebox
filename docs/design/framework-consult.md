@@ -162,7 +162,14 @@ sessions), so there are two alerting layers:
   `awaiting-claudebot` (an approved reply is waiting). On the **framework-Claude side**, a
   `SessionStart` hook (`.claude/hooks/consult-session-start.sh`, wired in
   `.claude/settings.json`) surfaces pending consults and — if no watcher is running —
-  nudges the session to launch `claudebox consult watch`. So a session *starts* aware.
+  nudges the session to launch `claudebox consult watch`. **In-container framework-dev
+  variant (2.16.0):** for a claudebot whose workspace **is** a claudebox harness fork (auto-
+  detected by `wrapper.sh` containing `CLAUDEBOX_VERSION=`; override
+  `CLAUDEBOX_FRAMEWORK_DEV=1`), the entrypoint also injects a note listing every
+  `awaiting-framework` consult **across all projects** plus every unreviewed framework-bug
+  report — the same surface the host wrapper gives, mirrored for a session that has no host
+  wrapper. Use `cb-consult list --all` and `cb-report-bug list` from inside. So a session
+  *starts* aware.
 - **(B) `watch` — block until change, mid-session.** `claudebox consult watch` (host) and
   `cb-consult watch` (container) are **token-free** loops that block until a relevant
   thread changes state (a new consult / a reply landing / a new turn), print what changed,
