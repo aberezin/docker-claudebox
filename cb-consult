@@ -46,13 +46,20 @@ EOF
     exit "${1:-1}"
 }
 
-# append the next numbered turn (body on stdin) to a thread dir
+# append the next numbered turn (body on stdin) to a thread dir. Serialised via a
+# per-thread flock so two concurrent writers (e.g. framework-Claude posting a reply
+# and the claudebot running `cb-consult resolve` in the same second) don't both
+# compute the same "next" number and produce 004-framework.md + 004-claudebot.md.
 _post() {
-    local td="$1" author="$2" n next
+    local td="$1" author="$2" n next body
     mkdir -p "$td"
-    n=$(find "$td" -maxdepth 1 -name '[0-9][0-9][0-9]-*.md' 2>/dev/null | wc -l | tr -d ' ')
-    next=$(printf '%03d' $((n + 1)))
-    cat > "$td/${next}-${author}.md"
+    body="$(cat)"                              # read stdin BEFORE acquiring the lock
+    (
+        flock -x 9
+        n=$(find "$td" -maxdepth 1 -name '[0-9][0-9][0-9]-*.md' 2>/dev/null | wc -l | tr -d ' ')
+        next=$(printf '%03d' $((n + 1)))
+        printf '%s' "$body" > "$td/${next}-${author}.md"
+    ) 9>"$td/.post-lock"
 }
 
 _meta_set() {

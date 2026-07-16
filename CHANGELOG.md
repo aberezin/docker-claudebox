@@ -16,6 +16,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.20.2] — 2026-07-16 _(fork)_
+
+### Fixed
+- **`cb-consult` `_post` numbering race.** Two concurrent writers on the same thread
+  (e.g. framework-Claude posting a reply and the claudebot running `cb-consult
+  resolve` in the same second) both computed the same "next" turn number from
+  `find ... | wc -l` and produced e.g. `004-framework.md` + `004-claudebot.md`
+  (different author suffixes, so no clobber — but breaks chronological ordering).
+  Hit this twice in a single session working gammaray's consults; renamed to `005`
+  manually both times. Fix: `_post` now serialises the count+write inside a
+  per-thread `flock` on `<thread>/.post-lock`. Verified with 10 concurrent writers
+  → sequential 001–010, zero collisions. **Needs `make build`** (baked helper);
+  rebuild auto-recreates containers.
+
 ## [2.20.1] — 2026-07-16 _(fork)_
 
 ### Fixed
