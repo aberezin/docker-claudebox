@@ -126,6 +126,13 @@ mechanism is the **Chrome DevTools Protocol**, not the extension:
 The fork provides the host-side helper `claudebox browser-bridge up`, which
 launches the dedicated debug Chrome + the Python forwarder and writes the reachable
 CDP URL to a per-project **marker** (`~/.config/claudebox/projects/<id>/.cdp-url`).
+**The initial tab is a data-URL welcome page whose `<title>` is `"Claudebox Chrome
+-- <hash>"`** (8-hex-digit instance hash, persisted for the life of the bridge in
+`~/.config/claudebox/cdp/window-hash` and refreshed on the next `up` after `down`).
+macOS Chrome's window title mirrors the active tab's title, so the debug window is
+identifiable at a glance in Mission Control / Cmd+Tab / Dock tooltip. Navigate that
+tab and the title moves with it — reopen the welcome URL (or the tab) if you want
+the marker back.
 The wrapper exposes it as `CLAUDEBOX_HOST_CDP_URL` two ways: via `docker run -e` for
 a freshly-created container, **and** — because `-e` never reaches a container that
 already exists (a restart is `docker start`, which can't add env) — by writing a

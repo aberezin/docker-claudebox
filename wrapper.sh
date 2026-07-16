@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.17.1"
+CLAUDEBOX_VERSION="2.18.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -1089,6 +1089,17 @@ s.bind(LISTEN); s.listen(64)
 while True:
     c,_=s.accept(); threading.Thread(target=handle,args=(c,),daemon=True).start()
 PYEOF
+    # Generate/persist an 8-hex-digit instance hash and open the initial tab with a
+    # data URL whose <title> is "Claudebox Chrome -- <hash>". macOS Chrome's window
+    # title mirrors the active tab's <title>, so this makes the debug window
+    # identifiable in Mission Control / Cmd+Tab / Dock tooltip. The hash lives in a
+    # file so a second `browser-bridge up` (without an intervening `down`) reuses it.
+    local hash_file="$home/window-hash" hash window_title welcome_url
+    [ -s "$hash_file" ] || od -An -N4 -tx1 /dev/urandom | tr -d ' \n' > "$hash_file"
+    hash="$(cat "$hash_file")"
+    window_title="Claudebox Chrome -- $hash"
+    welcome_url="data:text/html;charset=utf-8,<html><head><title>${window_title}</title></head><body style='font-family:-apple-system;padding:2em;color:#333;max-width:44em;margin:auto'><h1 style='color:#c05621'>${window_title}</h1><p>This is the claudebot's <b>dedicated CDP debug Chrome</b>. It's driven by <code>cb-browser cdp</code> / <code>cb-browser script-cdp</code> via the CDP bridge on <code>$CB_CDP_BIND:$CB_CDP_PORT</code>.</p><p style='color:#888;font-size:0.9em'>If you navigate this tab, the window title changes to match — leave this tab open (or reopen this URL) if you want the marker back.</p></body></html>"
+
     if [ -f "$home/pids" ] && kill -0 $(cat "$home/pids") 2>/dev/null; then
         echo "🔗 CDP bridge already running"
     else
@@ -1096,7 +1107,7 @@ PYEOF
         # from a disallowed Origin; without this, Playwright connectOverCDP can 403.
         "$chrome" --remote-debugging-port="$CB_CDP_CHROME_PORT" --user-data-dir="$profile" \
             --remote-allow-origins='*' \
-            --no-first-run --no-default-browser-check about:blank >/dev/null 2>&1 &
+            --no-first-run --no-default-browser-check "$welcome_url" >/dev/null 2>&1 &
         local cpid=$!
         sleep 2
         python3 "$fwd" >"$home/forward.log" 2>&1 &
@@ -1105,7 +1116,7 @@ PYEOF
     fi
     url="http://$CB_CDP_BIND:$CB_CDP_PORT"
     local marker; marker="$(cb_cdp_marker "$id")"; mkdir -p "$(dirname "$marker")"; printf '%s' "$url" > "$marker"
-    echo "🔗 CDP bridge up — a dedicated debug Chrome window is open; claudebot can drive it."
+    echo "🔗 CDP bridge up — dedicated debug Chrome window \"$window_title\" is open; claudebot can drive it."
     echo "   in claudebot:  cb-browser cdp <url>   (uses CLAUDEBOX_HOST_CDP_URL=$url)"
     echo "   ⚠️  targets must be reachable FROM THIS MAC (VM IP or localhost) — the human's"
     echo "       Chrome can't resolve cb-net container names; use shot/script for those."
@@ -1118,6 +1129,7 @@ PYEOF
 cb_bridge_down() {  # $1=id
     local id="$1" home; home="$(cb_cdp_home)"
     [ -f "$home/pids" ] && { kill $(cat "$home/pids") 2>/dev/null; rm -f "$home/pids"; }
+    rm -f "$home/window-hash"   # fresh instance hash on next `up`
     rm -f "$(cb_cdp_marker "$id")"
     echo "🔗 CDP bridge down"
 }

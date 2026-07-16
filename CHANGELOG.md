@@ -16,6 +16,25 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.18.0] — 2026-07-16 _(fork)_
+
+### Added
+- **CDP debug Chrome window is named "Claudebox Chrome -- `<hash>`".** `claudebox
+  browser-bridge up` now launches Chrome with a data-URL welcome tab whose `<title>`
+  is `"Claudebox Chrome -- <hash>"` (8-hex-digit instance hash from `/dev/urandom`,
+  persisted to `~/.config/claudebox/cdp/window-hash` so a subsequent `up` reuses the
+  same hash; wiped by `down` so the next `up` gets a fresh one). macOS Chrome's window
+  title mirrors the active tab's title, so the debug window is now identifiable at a
+  glance in Mission Control / Cmd+Tab / Dock tooltip — no more "which of these Chrome
+  windows is claudebot's?". The welcome message also prints the full window title so
+  you can grep for it. Tradeoff (documented): if you navigate the welcome tab, the
+  title changes with it — reopen the welcome URL (or the tab) to get the marker back.
+  `--app`-mode was rejected as an alternative because it strips the tab strip / URL bar
+  / DevTools, which defeats the point of interactive debugging.
+
+Host-only (wrapper.sh) — **no image rebuild needed**; reinstall the wrapper (`install.sh`)
+to pick it up.
+
 ## [2.17.1] — 2026-07-16 _(fork)_
 
 ### Fixed
