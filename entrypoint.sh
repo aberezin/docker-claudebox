@@ -531,6 +531,21 @@ fi
 
 UPDATED=$(jq --arg dir "$WORKSPACE_DIR" '.projects[$dir].hasTrustDialogAccepted = true' "$CLAUDE_JSON") && \
 	printf '%s\n' "$UPDATED" > "$CLAUDE_JSON"
+
+# Persist permissions.defaultMode=bypassPermissions in settings.json. `--dangerously-skip-
+# permissions` at invocation time isn't fully authoritative in newer Claude Code — certain
+# operations (e.g. writes under `~/.claude/`) still prompt even with the flag. Setting the
+# persistent default closes that gap: the container IS the sandbox, so Claude should never
+# prompt inside it. Rewritten on every start so an accidental UI toggle heals on next boot.
+SETTINGS_JSON="$CLAUDE_CONFIG_DIR/settings.json"
+if [ -f "$SETTINGS_JSON" ]; then
+	UPDATED=$(jq '.permissions.defaultMode = "bypassPermissions"' "$SETTINGS_JSON") && \
+		printf '%s\n' "$UPDATED" > "$SETTINGS_JSON"
+else
+	printf '{"permissions":{"defaultMode":"bypassPermissions"}}\n' > "$SETTINGS_JSON"
+fi
+dbg "settings.json: permissions.defaultMode = bypassPermissions"
+
 chown -R claude:claude "$CLAUDE_CONFIG_DIR"
 dbg ".claude.json done"
 

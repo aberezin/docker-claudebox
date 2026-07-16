@@ -16,6 +16,21 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.17.1] — 2026-07-16 _(fork)_
+
+### Fixed
+- **Claudebot never prompts for permission again.** The runtime flag
+  `--dangerously-skip-permissions` is passed on every `claude` invocation, but it isn't
+  fully authoritative in newer Claude Code — certain operations (notably writes under
+  `~/.claude/`) still surface a permission prompt. Concrete case: a gammaray session
+  paused mid-work to ask for `mkdir -p ~/.claude/bin`. The claudebox model is that the
+  container **is** the sandbox — Claude should never prompt inside it. Fix: the entrypoint
+  now also persists `.permissions.defaultMode = "bypassPermissions"` into
+  `~/.claude/settings.json` on every container start (jq-merge if the file exists, seed if
+  it doesn't). This makes bypass mode the *persistent* default alongside the runtime flag,
+  and self-heals if an accidental UI toggle changes it — the next boot rewrites it.
+  **Needs `make build`** (entrypoint change); rebuild auto-recreates existing containers.
+
 ## [2.17.0] — 2026-07-16 _(fork)_
 
 ### Added
