@@ -67,9 +67,63 @@ upstream fork point and 2.0.0 were not recorded** in the changelog (they live in
 git history / are summarized in the README's "What's different in this fork"); the
 changelog is **authoritative from 2.0.0 onward**.
 
+## Backlog / issue tracking
+
+Work not yet shipped lives in **GitHub Issues on the fork**:
+[github.com/aberezin/docker-claudebox/issues](https://github.com/aberezin/docker-claudebox/issues).
+That's the single source of truth for open work — the running list of proposals,
+open design decisions, and residual TODOs. If it's not filed there, it isn't tracked.
+
+### Standard labels
+
+| Label | Meaning |
+|---|---|
+| `3.0-bundle` | Queued for the `2.x → 3.0` breaking migration (dridock rename, host↔container command unification, plugin system, etc.). Don't ship in isolation. |
+| `framework-dev` | Ergonomics for developing the harness itself (from inside a claudebot or on the Mac). |
+| `browser-bridge` | CDP bridge, Chrome control, browser testing. |
+| `backlog` | Filed from `.claudebox/BRIEF.md`'s handoff log during a working session (as opposed to a fresh user-reported issue). |
+| `enhancement` / `bug` / `documentation` | Standard GitHub defaults. Use them. |
+
+Custom labels are managed with `gh label create --repo aberezin/docker-claudebox …`.
+Enable Issues on a new fork with `gh repo edit --enable-issues` (once per repo — the
+fork inherits upstream's "issues disabled" default).
+
+### Filing an issue
+
+Use `gh issue create` (from anywhere with a working `GH_TOKEN` — the Mac, or a
+framework-dev claudebot with fresh secrets), and follow the template shape:
+
+```
+## Problem            — what's the concrete symptom / gap
+## Options            — the two or three shapes worth considering, with tradeoffs
+## Sizing / timing    — small / medium / big; urgent or queue for a bundle
+## Related            — links to prior commits, CHANGELOG entries, sibling issues
+```
+
+A backlog item is complete when a reader can act on it without asking a follow-up
+question. Copy-pasting a paragraph from `BRIEF.md` is fine — that log's TODO entries
+are already written in this shape.
+
+### Closing an issue
+
+Link the commit that ships the work with `Fixes #N` in the commit body (or as a PR
+title if you're going through a PR). GitHub auto-closes the issue when the commit
+lands on `master`. Reference the same issue number in the `CHANGELOG.md` entry so the
+audit trail is bidirectional.
+
+### Relationship to `.claudebox/BRIEF.md`
+
+The BRIEF's Progress/handoff log stays the **narrative** — what happened this session,
+what's next, what's undecided *right now*. When a decision solidifies into "we should
+do this eventually," file it as an issue and cross-reference from the log entry. The
+log is a scratchpad; the issue tracker is the ledger.
+
 ## See also
 
 - `CHANGELOG.md` — the running record of version bumps.
+- [github.com/aberezin/docker-claudebox/issues](https://github.com/aberezin/docker-claudebox/issues) — the backlog.
 - [Per-project VM lifecycle](design/per-project-vm.md) — where `version` /
   `checkversion` sit among the VM commands.
+- [bootstrap.md](design/bootstrap.md) — where `.claudebox/BRIEF.md` fits in the
+  project lifecycle (the log side of the backlog / log split).
 - The top-level `CLAUDE.md` "Conventions worth knowing" — the one-line rule.
