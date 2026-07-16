@@ -16,6 +16,24 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.21.0] — 2026-07-16 _(fork)_
+
+### Added
+- **`claudebox harness sync --repair`** — automatic recovery from BuildKit snapshotter
+  corruption. That corruption (`failed to prepare extraction snapshot ... parent
+  snapshot ... does not exist`) is rare-but-real (interrupted build, prune racing with
+  a build, an upgrade across BuildKit versions); the manual recovery is always
+  `docker builder prune -af` + retry, and now the harness wraps it. `--repair` runs
+  `make build` as normal; if it succeeds, we're done. If it fails, the wrapper greps
+  stderr for the specific corruption pattern — matches → auto-prunes cb-infra's build
+  cache and retries once; no match → surfaces the error and exits (won't nuke the
+  cache for unrelated failures like a Dockerfile syntax error or an apt-get network
+  timeout). Concrete case that motivated this: Alan hit the corruption after four days
+  of harness iteration and had to run the exact `builder prune -af` + retry sequence
+  manually. Now it's one flag. Costs ~10-20 min extra for a cold-start rebuild when it
+  fires — same cost as the manual recovery, just no keyboard mash. Host-only (wrapper)
+  — **no image rebuild needed**; reinstall the wrapper to pick it up.
+
 ## [2.20.2] — 2026-07-16 _(fork)_
 
 ### Fixed

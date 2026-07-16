@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.20.2"
+CLAUDEBOX_VERSION="2.21.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -208,11 +208,21 @@ cb_check_infra_drift() {
 # cb_harness_sync — rebuild cb-infra's claudebox:latest from the current wrapper
 # checkout. Thin wrapper around `make build`. On the Mac (colima backend) this is what
 # `make build` already does; the value of a wrapper verb is (a) discoverability from
-# `claudebox --help` and (b) an explicit in-container guard — running it from inside a
+# `claudebox --help`, (b) an explicit in-container guard — running it from inside a
 # framework-dev claudebot would build on the CONTAINER's own VM daemon (docker backend),
-# NOT cb-infra, so we refuse and print the exact Mac command to run instead.
+# NOT cb-infra, so we refuse and print the exact Mac command to run instead, and
+# (c) `--repair`: on the specific BuildKit snapshot-corruption failure that surfaces
+# as `failed to prepare extraction snapshot ... parent snapshot ... does not exist`,
+# auto-prune cb-infra's build cache and retry once. That failure is rare-but-real
+# (interrupted build, prune racing with build, upgrade-across-versions) and the manual
+# recovery is always `docker builder prune -af` followed by a retry — this wraps it.
 cb_harness_sync() {
-    local root="$CB_PROJECT_ROOT"
+    local root="$CB_PROJECT_ROOT" repair=0 build_log rc pattern
+    while [ $# -gt 0 ]; do case "$1" in
+        --repair)   repair=1 ;;
+        -h|--help)  echo "usage: claudebox harness sync [--repair]  (--repair: on BuildKit snapshot corruption, auto-prune cb-infra cache and retry)" >&2; return 0 ;;
+        *)          echo "claudebox harness sync: unknown arg '$1'" >&2; return 1 ;;
+    esac; shift; done
     if ! cb_is_framework_dev "$root"; then
         echo "❌ claudebox harness sync: $root is not a claudebox harness fork (no wrapper.sh with CLAUDEBOX_VERSION= at its root)." >&2
         echo "   This command rebuilds the cb-infra image from a harness checkout; it's meaningful only when developing the harness itself." >&2
@@ -225,7 +235,44 @@ cb_harness_sync() {
         return 1
     fi
     echo "🔨 claudebox harness sync: rebuilding cb-infra image from $root (this is 'make build' on the colima backend)…"
+    if [ "$repair" = 0 ]; then
+        ( cd "$root" && make build )
+        return $?
+    fi
+    # --repair: tee build output (stdout+stderr) so user sees it live AND we can grep
+    # for the corruption pattern on failure. `set -o pipefail` isn't safe to enable
+    # here (the wrapper's own shell), so use PIPESTATUS to preserve make's exit code.
+    build_log="$(mktemp -t cb-harness-sync.XXXXXX)"
+    trap 'rm -f "$build_log"' RETURN
+    ( cd "$root" && make build ) 2>&1 | tee "$build_log"
+    rc=${PIPESTATUS[0]}
+    [ "$rc" = 0 ] && return 0
+    # Match BuildKit snapshotter corruption specifically — do NOT prune on unrelated
+    # failures (Dockerfile syntax error, apt-get network timeout, disk full, etc.).
+    pattern='failed to prepare extraction snapshot|parent snapshot .* does not exist'
+    if ! grep -qE "$pattern" "$build_log"; then
+        echo "" >&2
+        echo "❌ build failed, but not with a recognized BuildKit corruption pattern — --repair can't help here." >&2
+        echo "   Fix the underlying error and retry with 'claudebox harness sync' (no --repair)." >&2
+        return "$rc"
+    fi
+    echo "" >&2
+    echo "🛠  detected BuildKit snapshotter corruption — pruning cb-infra build cache and retrying…" >&2
+    docker --context "$(cb_infra_context)" builder prune -af
+    echo "" >&2
+    echo "🔨 retrying build with clean cache (this will be a cold start — expect ~10-20 min)…" >&2
     ( cd "$root" && make build )
+    rc=$?
+    if [ "$rc" = 0 ]; then
+        echo "" >&2
+        echo "✅ recovered — cb-infra rebuilt from a clean cache." >&2
+        return 0
+    fi
+    echo "" >&2
+    echo "❌ still failing after a nuclear cache prune. Next thing to try is a colima restart:" >&2
+    echo "     colima stop -p cb-infra && colima start -p cb-infra" >&2
+    echo "     claudebox harness sync   (or: make build)" >&2
+    return "$rc"
 }
 
 cb_project_config_path() { printf '%s/.claudebox/config.yml' "$1"; }
@@ -1555,7 +1602,7 @@ VERSION
 OTHER
   browser-bridge up|down           opt-in: let claudebot drive your real Chrome via CDP
   host-agent up|down|status        opt-in (TRUSTED): let a HARNESS-DEV claudebot run allowlisted colima/limactl on the Mac (#15)
-  harness <verb>                   framework-dev: harness-dev-only ops. Verbs: sync (rebuild cb-infra from this checkout)
+  harness <verb>                   framework-dev: harness-dev-only ops. Verbs: sync [--repair] (rebuild cb-infra; --repair auto-prunes on BuildKit corruption)
   framework-bugs [list|clear]      review bugs claudebot filed with cb-report-bug
   consult list|show|approve|watch  supervised claudebot<->framework-Claude threads (watch=block-until-change)
   setup-token                      run 'claude setup-token' in a throwaway container
@@ -1638,10 +1685,12 @@ HELP
     harness)
         # framework-dev-only ops (gated by cb_is_framework_dev). Namespace so more
         # dev-only verbs can accrete without cluttering the top-level command list.
-        case "${2:-}" in
-            sync) cb_harness_sync; exit $? ;;
-            "")   echo "usage: claudebox harness <verb>  (framework-dev only; verbs: sync)" >&2; exit 1 ;;
-            *)    echo "claudebox harness: unknown verb '$2'  (verbs: sync)" >&2; exit 1 ;;
+        _harness_verb="${2:-}"
+        shift 2 2>/dev/null || shift $# 2>/dev/null || true   # drop `harness` + verb; $@ = flags for the verb
+        case "$_harness_verb" in
+            sync) cb_harness_sync "$@"; exit $? ;;
+            "")   echo "usage: claudebox harness <verb>  (framework-dev only; verbs: sync [--repair])" >&2; exit 1 ;;
+            *)    echo "claudebox harness: unknown verb '$_harness_verb'  (verbs: sync)" >&2; exit 1 ;;
         esac
         ;;
     framework-bugs)

@@ -192,7 +192,10 @@ reclaim (also fstrims so freed guest blocks return to macOS — the only path th
 the sparse host raw disks). The nuclear escape hatch is always
 `docker --context colima-cb-<id> builder prune -af` (build cache) +
 `docker --context colima-cb-<id> system prune -af` (everything else) — reserved for when
-BuildKit's snapshotter has corrupted itself (rare but real).
+BuildKit's snapshotter has corrupted itself (rare but real). For the specific case of
+cb-infra BuildKit corruption during a rebuild, **`claudebox harness sync --repair`**
+(2.21.0) automates it: runs `make build`, greps stderr on failure for the corruption
+pattern, and if matched auto-prunes the cache and retries once.
 
 ### Individual mechanisms
 
