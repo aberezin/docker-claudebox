@@ -168,5 +168,9 @@ case ":$PATH:" in
 esac
 
 echo ""
-echo "🔑 Don't forget to add your public key to GitHub:"
+echo "🔑 SSH key for git auth INSIDE the container is at:"
 echo "   $HOME/.ssh/claudebox/id_ed25519.pub"
+echo "   Add it to your git host ONLY if you'll push/pull over SSH from claudebot"
+echo "   (non-GitHub hosts, or GitHub without an HTTPS token). For GitHub, prefer"
+echo "   GH_TOKEN via '.claudebox/secrets.env' — 'claudebox bootstrap --gh-token'"
+echo "   seeds it from your host 'gh auth token' and 'git push https://…' just works."
