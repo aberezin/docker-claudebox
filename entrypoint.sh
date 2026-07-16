@@ -209,6 +209,8 @@ so they're reachable by name:
   READ-ONLY at `/work`; write ALL artifacts (screenshots, JSON, logs) to **`/out`** — it maps to
   `./cb-browser-out` in the workspace (also in `$CB_OUT`). cwd is `/out`, so `page.screenshot({path:'shot.png'})`
   lands there. Writing to `/work` or a workspace path fails with `EROFS` — use `/out` instead of dropping the output.
+  **A1 only** (in-VM, `cb-net`, headless — no CDP env forwarded). For CDP-driven custom flows against the
+  human's real Chrome, use **`cb-browser script-cdp`** (see the CDP gotchas below).
 - `cb-browser watch http://api:8080` → headful browser with a noVNC web UI the human watches/drives live at http://<project-vm-ip>:<port>; `cb-browser watch-stop` to stop
 - `cb-browser net` → the network name to attach workloads to
 This is the standard way to browser-test here; prefer it over ad-hoc setups.
@@ -223,10 +225,18 @@ CDP gotchas (these waste cycles if you rediscover them each time):
   NOT a `cb-net` name like `http://api:8080` (Chrome can't resolve it). `cb-browser cdp`
   auto-rewrites a localhost URL to the VM IP for you, but pass the VM IP directly.
 - Same VM-IP-rotation rule as above: use `$CLAUDEBOX_VM_IP` fresh; don't paste a past IP.
-- Use `cb-browser cdp` / `cb-browser script` (Playwright is preinstalled and works over
-  this bridge). Rolling your OWN `chromium.connectOverCDP(...)` against the human's real
-  Chrome can trip on `Browser.setDownloadBehavior` (a CDP quirk vs a real, non-Playwright
-  Chrome); if you must go raw, use a `CDPSession` (`Page.navigate` / `Page.captureScreenshot`).
+- **Writing a custom CDP script? Use `cb-browser script-cdp <file.cjs>`, NOT `cb-browser script`.**
+  `script` runs on `cb-net` and does NOT forward `$CLAUDEBOX_HOST_CDP_URL` — a `connectOverCDP()`
+  from there won't reach the bridge. `script-cdp` forwards the URL, uses `--network host`, and
+  **closes any page tabs your script opened but didn't `page.close()`** on exit (opt-out:
+  `CB_BROWSER_CDP_KEEP=1`). This matters because `browser.close()` alone only detaches the CDP
+  connection — the tab is backed by the human's real Chrome process and stays until an explicit
+  `page.close()` / `Target.closeTarget`. Running the naïve pattern (`connectOverCDP → newPage →
+  browser.close()`) under `script-cdp` still leaks in principle but the wrapper cleans up after you.
+- `cb-browser cdp` and `cb-browser script-cdp` are the two supported CDP entry points; both use
+  the baked Playwright. Rolling your OWN `chromium.connectOverCDP(...)` against a stock
+  (non-Playwright) Chrome can trip on `Browser.setDownloadBehavior`; if you must go raw, use a
+  `CDPSession` (`Page.navigate` / `Page.captureScreenshot`).
 - For cb-net / in-VM-only targets (incl. their websockets), use `shot`/`script` instead —
   those run inside the VM on `cb-net` and reach workloads by container name.
 

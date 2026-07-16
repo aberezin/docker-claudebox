@@ -97,6 +97,21 @@ its environment. Read them; don't hardcode their values in project source.
 | `CLAUDEBOX_HOST_AGENT_URL` / `CLAUDEBOX_HOST_AGENT_TOKEN` | Injected only while the opt-in host agent is up (`claudebox host-agent up`) — the address + per-session token the baked `colima`/`limactl` shims use to proxy to the Mac. See [design/backends.md](design/backends.md). |
 | `CLAUDEBOX_FRAMEWORK_BUGS_DIR`| Mount path for the shared framework-bug drop (`cb-report-bug`).             |
 
+## Container-side `cb-browser` knobs
+
+Set these in the claudebot's shell to tune `cb-browser`. Container-only (not read by the host wrapper).
+
+| Variable                | What it is                                                                 | Default            |
+| ----------------------- | -------------------------------------------------------------------------- | ------------------ |
+| `CB_BROWSER_NET`        | Shared docker network for A-side flows (`shot`, `script`, `watch`).       | `cb-net`           |
+| `CB_BROWSER_IMAGE`      | Playwright image tag used by A-side flows.                                 | `mcr.microsoft.com/playwright:v${CB_BROWSER_PWVER}-jammy` |
+| `CB_BROWSER_PWVER`      | Playwright version used by A-side flows (matches the image's cached browsers). | `1.48.0`      |
+| `CB_BROWSER_OUT`        | Artifact directory for A-side flows (mounted at `/out` in the script container). | `$PWD/cb-browser-out` |
+| `CB_WATCH_IMAGE`        | headful+noVNC image for `cb-browser watch`.                                | `lscr.io/linuxserver/chromium:latest` |
+| `CB_WATCH_PORT`         | port `cb-browser watch` publishes on the VM.                               | `3010`             |
+| `CB_WATCH_NAME`         | container name for `cb-browser watch`.                                     | `cb-watch`         |
+| `CB_BROWSER_CDP_KEEP`   | Set to `1` to disable `cb-browser script-cdp`'s snapshot-diff tab cleanup on exit. Use when the script deliberately leaves tabs open for the human to inspect. | _(off — cleanup on)_ |
+
 ## See also
 
 - [design/per-project-vm.md](design/per-project-vm.md) — data dir, secrets, VM sizing.

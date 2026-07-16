@@ -16,6 +16,53 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.17.0] — 2026-07-16 _(fork)_
+
+### Added
+- **`cb-browser script-cdp <file.cjs>`** — Approach-B's `script`: a dedicated CDP-aware
+  subcommand for custom Playwright flows against the human's real Chrome. Resolves
+  gammaray consult `2026-07-16T15-12-59-51cb139f` (CDP tab-lifecycle standard) and
+  closes an untriaged framework gap: `cb-browser script` is A-only (cb-net, headless,
+  no CDP env forwarded), but the docs implicitly recommended it for custom CDP flows —
+  which meant claudebots either rolled their own `docker run -e CLAUDEBOX_HOST_CDP_URL
+  --network host …` (defeating the point of `cb-*` helpers) or hit an obscure
+  connection failure. `script-cdp` closes that gap end-to-end:
+  - Requires the CDP bridge (`claudebox browser-bridge up`); errors clearly if down.
+  - Forwards `CLAUDEBOX_HOST_CDP_URL` (both under its full name and as `$CDP_URL`) plus
+    `CLAUDEBOX_VM_IP`; uses `--network host` so the container reaches
+    `192.168.64.1:9223` over `col0`.
+  - **Tab-leak safety net.** Snapshots page targets on the debug Chrome via
+    `/json/list` before the script runs; on exit (any status, incl. `SIGINT`/`SIGTERM`)
+    closes any *new* page targets whose ids weren't in the pre-snapshot. So the
+    natural Playwright pattern (`connectOverCDP → newPage → browser.close`) can't
+    leak tabs — `browser.close()` alone only detaches CDP, the tab lives on until an
+    explicit `page.close()`. Filter is `type === "page"`, so service workers,
+    iframes, background pages, and workers are never touched. Opt-out:
+    **`CB_BROWSER_CDP_KEEP=1`** (env — a flag would collide with pass-through
+    `args...`).
+  - **Assumption (baked into the design):** the debug Chrome is a dedicated profile
+    (per `docs/design/browser-testing.md` § "B security"), so the human isn't doing
+    casual browsing there. A tab the human opens in the debug profile mid-run is
+    included in "opened during the run" and will be closed on cleanup — this is
+    acceptable because that's precisely what "dedicated" means.
+- **`docs/design/browser-testing.md`** gains a new "Custom CDP flows:
+  `cb-browser script-cdp`" subsection under Approach B (canonical `try/finally` +
+  `page.close` snippet, the `$CLAUDEBOX_VM_IP:<port>` addressing pattern for hitting
+  in-VM workloads from a host-networked container, and the opt-out). The A1 section
+  now explicitly marks `cb-browser script` as A-only. The "Prefer `cb-browser cdp` /
+  `script-cdp` over a hand-rolled `connectOverCDP`" paragraph now warns against
+  reproducing `connectOverCDP` under `cb-browser script`. Phased-plan gains item 6.
+- **Baked container guidance** (`entrypoint.sh`) gains a "Custom CDP script? Use
+  `cb-browser script-cdp`, NOT `cb-browser script`" bullet under CDP gotchas, and the
+  A1 `script` bullet is marked A-only with a pointer to `script-cdp`.
+- **`docs/environment-variables.md`** gains a "Container-side `cb-browser` knobs"
+  section documenting `CB_BROWSER_*` (previously undocumented — the whole family) and
+  the new `CB_BROWSER_CDP_KEEP`.
+
+No new sidecar files, no new host↔container env-forwarding schema, no marker — pure
+additive baked-helper surface + docs. **Needs `make build`** (`cb-browser` +
+entrypoint changes); rebuild auto-recreates existing containers.
+
 ## [2.16.1] — 2026-07-16 _(fork)_
 
 ### Changed

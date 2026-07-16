@@ -78,6 +78,12 @@ trivial. Two flavors:
   artifact. (`cb-browser shot` already writes `/out/{screenshot.png,page.json}`.)
 - This is the standard way to automate web-app testing: reproducible, isolated, no
   host dependency, safe by default.
+- **`cb-browser script` is A-only** — it runs on the `cb-net` per-project docker
+  network with no CDP env forwarded and no `--network host`. A `chromium.connectOverCDP()`
+  call from a `cb-browser script` invocation won't reach the Approach-B bridge. For
+  CDP-driven custom flows against the human's real Chrome, use
+  **[`cb-browser script-cdp`](#custom-cdp-flows-cb-browser-script-cdp)** (under Approach B
+  below), not `cb-browser script`.
 
 ### A2 — headful + noVNC (watch it live, no host coupling)
 
@@ -165,11 +171,63 @@ A stale baked IP is a top cause of "worked yesterday, blocked today". To spare t
 the rediscovery loop, `cb-browser cdp` **auto-rewrites** a `localhost`/`127.0.0.1`/`0.0.0.0`
 target to `$CLAUDEBOX_VM_IP` (with a printed note) instead of silently failing.
 
-**Prefer `cb-browser cdp`/`script` over a hand-rolled `connectOverCDP`.** Driving the
-human's *real* (non-Playwright) Chrome with your own `chromium.connectOverCDP(...)` can trip
-on `Browser.setDownloadBehavior` ("not supported") — a protocol quirk against a stock Chrome.
-The baked helpers connect cleanly; if you genuinely need raw control, use a `CDPSession`
-(`Page.navigate` / `Page.captureScreenshot`) rather than the high-level context/page API.
+**Prefer `cb-browser cdp` / `cb-browser script-cdp` over a hand-rolled `connectOverCDP`.**
+Driving the human's *real* (non-Playwright) Chrome with your own `chromium.connectOverCDP(...)`
+can trip on `Browser.setDownloadBehavior` ("not supported") — a protocol quirk against a stock
+Chrome. The baked helpers connect cleanly; if you genuinely need raw control, use a `CDPSession`
+(`Page.navigate` / `Page.captureScreenshot`) rather than the high-level context/page API. **Do
+NOT** reproduce a `chromium.connectOverCDP(...)` inside a `cb-browser script` invocation —
+`script` runs on `cb-net` with no CDP env forwarded (A-only). Use `cb-browser script-cdp`
+(below) for custom CDP flows.
+
+### Custom CDP flows: `cb-browser script-cdp`
+
+For a custom Playwright/CDP flow against the human's real Chrome (that isn't the built-in
+single-page-load `cb-browser cdp <url>`), use **`cb-browser script-cdp <file.cjs>`**. It's
+Approach-B's `script`: same read-only `/work` + writable `/out` shape as A-side `script`, but
+with the CDP wiring done for you and a safety net against the tab-lifecycle footgun:
+
+- **`$CLAUDEBOX_HOST_CDP_URL` and `$CDP_URL`** are forwarded into the script container (both
+  names, so either idiom works). The script does
+  `chromium.connectOverCDP(process.env.CDP_URL)` and connects to the bridge.
+- **`--network host`** so the container can reach the Mac's Colima gateway
+  `192.168.64.1:9223` over `col0` (same as `cb-browser cdp`).
+- **Tab-leak safety net** — before the script runs, `cb-browser script-cdp` snapshots page
+  targets on the debug Chrome via `/json/list`; on exit (any status, incl. `SIGINT`/`SIGTERM`)
+  it closes any *new* page targets whose ids weren't in the pre-snapshot. So the natural but
+  wrong Playwright pattern (`chromium.connectOverCDP() → newPage() → do stuff →
+  browser.close()`) can't leak tabs into the human's Chrome — `browser.close()` alone only
+  detaches the CDP connection; the tab is backed by the real Chrome process and stays until
+  an explicit `page.close()` / `Target.closeTarget`. Filter is `type === "page"`, so service
+  workers, iframes, background pages, and workers are never touched. **Opt-out**:
+  `CB_BROWSER_CDP_KEEP=1` (env var — a flag would collide with pass-through `args...`).
+- **The debug Chrome is dedicated** (see §Security) — don't open tabs in it manually while
+  a `script-cdp` run is in flight; they'll be included in "opened during the run" and closed
+  on cleanup. Use your normal Chrome for casual browsing.
+- **`--network host` can't resolve `cb-net` names.** If your script also needs to hit an
+  in-VM workload (the app under test), address it at
+  `$CLAUDEBOX_VM_IP:<published-port>` — that env var is forwarded too. `cb-net` names like
+  `http://api:8080` only work from A-side `script` (which is on `cb-net`).
+
+Canonical snippet — the recommended in-script pattern is still to close pages explicitly in
+a `try/finally`; the harness safety net is a backstop, not a substitute:
+
+```js
+// mytest.cjs — cb-browser script-cdp mytest.cjs
+const { chromium } = require('playwright');
+(async () => {
+  const browser = await chromium.connectOverCDP(process.env.CDP_URL);
+  const ctx = browser.contexts()[0] || (await browser.newContext());
+  const page = await ctx.newPage();
+  try {
+    await page.goto(`http://${process.env.CLAUDEBOX_VM_IP}:3000/login`);
+    // ... your flow ...
+  } finally {
+    await page.close();           // explicit — don't rely solely on the harness's safety net
+    await browser.close();        // detaches CDP; leaves other tabs alone
+  }
+})().catch(e => { console.error(e); process.exit(1); });
+```
 
 ### Security (why B is opt-in)
 
@@ -253,6 +311,11 @@ A), not the extension.
    command, explicit control-handover warning.
 5. **Tests** — A1/A2/B verified manually end-to-end on throwaway `--network-address`
    VMs. TODO: fold a B smoke test into the bash suite behind the opt-in.
+6. **`cb-browser script-cdp` (2.17.0)** ✅ — dedicated CDP-aware subcommand for custom
+   Playwright flows against the human's real Chrome: forwards `$CLAUDEBOX_HOST_CDP_URL` +
+   `$CDP_URL` + `$CLAUDEBOX_VM_IP`, uses `--network host`, and snapshot-diffs page targets
+   over `/json/list` so the natural `browser.close()` pattern can't leak tabs
+   (opt-out: `CB_BROWSER_CDP_KEEP=1`). Resolves consult `2026-07-16T15-12-59-51cb139f`.
 
 ## Open questions
 

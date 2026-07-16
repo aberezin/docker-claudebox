@@ -38,6 +38,7 @@ usage:
   cb-browser script <file.cjs> [args...]  run a Playwright script (require('playwright')). Your script is
                                           READ-ONLY at /work; write ALL artifacts to /out (= ./cb-browser-out,
                                           also \$CB_OUT). cwd is /out, so screenshot({path:'shot.png'}) just works.
+                                          A1 only: cb-net, headless, no CDP env. For CDP-driven scripts use script-cdp.
   cb-browser watch <url> [port]           open a HEADFUL browser on <url> with a noVNC web UI you watch/drive
                                           from your Mac at http://<project-vm-ip>:<port> (default $WATCH_PORT)
   cb-browser watch-stop                   stop the watch browser
@@ -46,6 +47,11 @@ usage:
                                           <url> must be reachable FROM THE MAC (VM IP / localhost), NOT a
                                           cb-net container name — the Mac's Chrome can't resolve those.
                                           For cb-net / in-VM targets (incl. their websockets) use shot/script.
+  cb-browser script-cdp <file.cjs> [args...]  run a custom Playwright script against the HUMAN's real Chrome
+                                          over the CDP bridge. Sets \$CDP_URL + \$CLAUDEBOX_HOST_CDP_URL,
+                                          --network host. On exit (any status, incl. SIGINT), closes any page
+                                          tabs the script opened but didn't page.close() — so browser.close()
+                                          alone can't leak tabs. Opt-out: CB_BROWSER_CDP_KEEP=1.
   cb-browser net                          ensure/print the shared network name
   cb-browser ip                           print this project VM's reachable IP (\$CLAUDEBOX_VM_IP) —
                                           the address the human's Mac/Chrome uses; NOT localhost.
@@ -123,6 +129,51 @@ RUNNER
     docker run --rm --network "$NET" -e CB_OUT=/out -v "$sdir:/work:ro" -v "$outdir:/out" -w /out "$PW_IMAGE" \
         bash -lc "$INSTALL && NODE_PATH=/pw/node_modules node /work/$sfile $*"
     echo "cb-browser: /out -> $outdir/  (write artifacts to /out; /work is read-only)" ;;
+
+  script-cdp)
+    script="${1:-}"; [ -f "$script" ] || _usage; shift
+    [ -n "${CLAUDEBOX_HOST_CDP_URL:-}" ] || {
+        echo "cb-browser script-cdp: no host CDP bridge. On the Mac run 'claudebox browser-bridge up', then restart this session." >&2; exit 1; }
+    sdir="$(cd "$(dirname "$script")" && pwd)"; sfile="$(basename "$script")"
+    outdir="${CB_BROWSER_OUT:-$PWD/cb-browser-out}"; mkdir -p "$outdir"
+    # Snapshot page-target ids BEFORE the script runs; on exit, close any page targets
+    # that appeared during the run and are still around. Keyed on target id (not url).
+    # A tab the human opens in the DEBUG profile mid-run — different id — is included
+    # in "opened during the run" and will be closed. That's why the debug profile is
+    # dedicated (see browser-testing.md § "B security"); the human shouldn't be doing
+    # casual browsing in it. Non-page targets (service workers, iframes, background_page,
+    # workers) are never touched — we filter type=="page".
+    _cdp_base="$(printf '%s' "$CLAUDEBOX_HOST_CDP_URL" | sed -E 's#/+$##')"
+    _pre="$(curl -sf --max-time 3 "$_cdp_base/json/list" 2>/dev/null \
+        | (jq -r '.[] | select(.type=="page") | .id' 2>/dev/null || true))" || _pre=""
+    _cleanup() {
+      [ "${CB_BROWSER_CDP_KEEP:-0}" = "1" ] && { echo "cb-browser script-cdp: cleanup skipped (CB_BROWSER_CDP_KEEP=1)" >&2; return 0; }
+      _post="$(curl -sf --max-time 3 "$_cdp_base/json/list" 2>/dev/null \
+          | (jq -r '.[] | select(.type=="page") | .id' 2>/dev/null || true))"
+      if [ -z "${_post:-}" ]; then
+        echo "cb-browser script-cdp: cleanup skipped (CDP bridge unreachable — check 'claudebox browser-bridge up' on the Mac)" >&2
+        return 0
+      fi
+      _new="$(comm -23 <(printf '%s\n' "$_post" | sort -u) <(printf '%s\n' "$_pre" | sort -u))"
+      [ -z "$_new" ] && return 0
+      _n=0; while IFS= read -r _id; do
+        [ -z "$_id" ] && continue
+        curl -sf --max-time 3 "$_cdp_base/json/close/$_id" >/dev/null 2>&1 && _n=$((_n+1)) || true
+      done <<<"$_new"
+      [ "$_n" -gt 0 ] && echo "cb-browser script-cdp: closed $_n leaked page tab(s) (set CB_BROWSER_CDP_KEEP=1 to disable)" >&2
+    }
+    trap _cleanup EXIT INT TERM
+    # --network host so the container reaches the Mac's bridge (192.168.64.1) over col0
+    # (same as `cdp`). --network host CANNOT resolve cb-net container names — if your
+    # script also needs to hit an in-VM workload, address it at $CLAUDEBOX_VM_IP:<port>
+    # (its published port), not by cb-net name. See browser-testing.md § "Custom CDP flows".
+    docker run --rm --network host \
+        -e CB_OUT=/out -e CDP_URL="$CLAUDEBOX_HOST_CDP_URL" \
+        -e CLAUDEBOX_HOST_CDP_URL="$CLAUDEBOX_HOST_CDP_URL" \
+        -e CLAUDEBOX_VM_IP="${CLAUDEBOX_VM_IP:-}" \
+        -v "$sdir:/work:ro" -v "$outdir:/out" -w /out "$PW_IMAGE" \
+        bash -lc "$INSTALL && NODE_PATH=/pw/node_modules node /work/$sfile $*"
+    echo "cb-browser: /out -> $outdir/  (script-cdp: cleanup on exit; opt-out CB_BROWSER_CDP_KEEP=1)" ;;
 
   watch)
     url="${1:-}"; [ -n "$url" ] || _usage
