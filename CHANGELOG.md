@@ -5,11 +5,21 @@ All notable changes to **claudebox** (formerly `docker-claude-code`).
 Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions before `v1.0.0` are pre-release; the rename to `claudebox` at `v1.0.0` is the only breaking change in the project's history.
 
 > **Fork note:** this fork maintains its **own** semver line, starting at `2.0.0`
-> (2026-07-06) — deliberately **above** upstream's highest pre-fork tag (`v1.11.0`)
-> so the fork's versions/tags never collide with the inherited upstream history and
-> sort cleanly above it (useful if upstream ever pulls from us, or we pull from
-> them). The `v1.x` history further below is upstream claudebox's (by
-> [psyb0t](https://github.com/psyb0t/docker-claudebox)) up to the fork point.
+> (2026-07-06) — chosen at the time to sit **above** upstream's then-highest tag
+> (`v1.11.0`) so version/tag ordering was coherent across the shared lineage.
+>
+> **Fork/upstream directions have since diverged (2026-07-17 audit — issue #8):**
+> upstream `psyb0t/docker-claudebox` also went to `2.x` starting at their own
+> `v2.0.0` (2026-07-04, two days before this fork's `v2.0.0`) — but as a full
+> architectural rebase onto a shared `psyb0t/aicodebox` base image. That direction
+> is orthogonal to this fork's (macOS + per-project Colima VM + framework-Claude
+> tooling + `harness` namespace + dridock rebrand), so upstream commits are not
+> merge-compatible. Only the tag name `v2.0.0` collides between the two lineages —
+> pointing at completely different commits. See
+> [docs/design/upstream-sync.md](docs/design/upstream-sync.md) for the audit and
+> policy.
+>
+> The `v1.x` history further below is upstream claudebox's up to the fork point.
 > Detailed fork changes *between* the fork point and `2.0.0` were **not** recorded
 > here (see the git history and the README's
 > [What's different in this fork](README.md#whats-different-in-this-fork)); the
