@@ -13,8 +13,9 @@ Framework-dev mode is the **runtime mode** the harness enters when the claudebot
 workspace is a claudebox harness fork itself. It is **auto-detected by a workspace
 fingerprint** — the `cb_is_framework_dev` helper in `wrapper.sh` returns true when
 `$CB_PROJECT_ROOT/wrapper.sh` exists and contains a `CLAUDEBOX_VERSION=` line.
-`CLAUDEBOX_FRAMEWORK_DEV=1` forces the mode for a renamed/relocated fork
-(see [environment-variables.md](../environment-variables.md)).
+`CLAUDEBOX_HARNESS_DEV=1` forces the mode for a renamed/relocated fork
+(see [environment-variables.md](../environment-variables.md); the legacy
+`CLAUDEBOX_FRAMEWORK_DEV` alias is still accepted for backward compat).
 
 **It is a mode, not a feature.** You don't opt in per project — you're either developing
 the harness or you aren't. Because it's a mode, it deliberately does **not** fit into the
@@ -43,7 +44,8 @@ Inventory of every framework-dev behavior baked in as of 2.21.1, with pointers:
 | **Skip** the "cb-infra image is behind wrapper" drift warning | `wrapper.sh:cb_check_infra_drift` | 2.19.0 |
 | `claudebox harness sync` — rebuild cb-infra from the current wrapper checkout | `wrapper.sh:cb_harness_sync` + dispatch under `harness)` | 2.20.0 |
 | `claudebox harness sync --repair` — auto-recover from BuildKit snapshotter corruption | `wrapper.sh:cb_harness_sync` (flag) | 2.21.0 |
-| `cb_is_framework_dev` helper (the fingerprint check) | `wrapper.sh` (single source of truth) | 2.20.0 (extracted from 2.19.0's inline check) |
+| `cb_is_framework_dev` helper (the fingerprint check + env-var override) | `wrapper.sh` (single source of truth) | 2.20.0 (extracted from 2.19.0's inline check); env override unified in 2.22.0 |
+| **`cb-harness-watch-consults`** — in-container watcher for cross-project `awaiting-framework` consults + new unreviewed framework-bug reports; run as background task | new baked helper (`cb-harness-<name>`, first application of this doc's convention) | 2.22.0 |
 
 Additions after this doc lands (2026-07-17+) should follow the convention below.
 
@@ -97,6 +99,26 @@ predate this convention; leave them where they are. Rules of thumb:
 - **Moving existing framework-dev subcommands** for consistency → churn without payoff.
   Don't.
 
+### Env-var naming convention
+
+Env vars that gate or tune framework-dev-mode behavior use the **`CLAUDEBOX_HARNESS_*`**
+prefix (mirrors the `claudebox harness <verb>` / `cb-harness-<name>` / `cb_harness_<verb>`
+naming). Established 2.22.0. Current inventory:
+
+| Env var | Effect | Default |
+|---|---|---|
+| `CLAUDEBOX_HARNESS_DEV=1` | Force framework-dev mode (bypasses the fingerprint check). Used for a renamed/relocated fork whose `wrapper.sh` no longer contains `CLAUDEBOX_VERSION=`. | auto-detected via fingerprint |
+| `CLAUDEBOX_HARNESS_WATCH_INTERVAL=<secs>` | Poll interval for `cb-harness-watch-consults`. | 20 |
+
+**Backward compat**: `CLAUDEBOX_FRAMEWORK_DEV=1` is honored as an alias for
+`CLAUDEBOX_HARNESS_DEV=1` (renamed 2.22.0; the old name predates the convention).
+Follows the same `CLAUDE_* → CLAUDEBOX_*` alias pattern already in the wrapper.
+
+**Not framework-dev knobs** (documented elsewhere), even though they interact:
+`CLAUDEBOX_NO_DRIFT_WARN=1` silences a warning that's already auto-skipped in
+framework-dev mode, so it targets non-framework-dev users needing to silence it in
+scripted/CI contexts.
+
 ## Why not consolidate more aggressively?
 
 Considered and rejected:
@@ -121,7 +143,7 @@ Considered and rejected:
 - [../versioning.md](../versioning.md) — the SDLC that framework-dev-mode changes ship
   under (per-verb PATCH/MINOR bumps).
 - [../environment-variables.md](../environment-variables.md) —
-  `CLAUDEBOX_FRAMEWORK_DEV=1` and related.
+  `CLAUDEBOX_HARNESS_*` env family and related.
 - [Issue #5](https://github.com/aberezin/docker-claudebox/issues/5) — the plugin/features
   system for **project-level** opt-ins. Distinct concern from framework-dev-mode; keep
   them separate.

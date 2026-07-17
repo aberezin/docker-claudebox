@@ -23,14 +23,24 @@ claudebox consult watch                # block until a thread changes, then exit
 - `awaiting-claudebot` → the human approved; **apply + reply** (step 3).
 - `awaiting-approval` → waiting on the human; do nothing but tell them.
 
-**To stay alerted without babysitting**, run `claudebox consult watch` as a **background
-task** (`run_in_background: true`). It's token-free and blocks until any thread changes,
-then exits and prints what changed — the harness re-invokes you on exit. Handle the
-change (usually: draft an `awaiting-framework` thread), then **relaunch the watcher** —
-that relaunch is the loop; without it you only catch one change. A **SessionStart hook**
+**To stay alerted without babysitting**, run a watcher as a **background task**
+(`run_in_background: true`). Which watcher depends on where you're running:
+
+- **On the Mac (host session)**: `claudebox consult watch` — blocks until any thread
+  changes, prints what changed, exits.
+- **Inside a framework-dev claudebot (container session)**: `cb-harness-watch-consults`
+  (2.22.0+) — the in-container mirror; blocks until a cross-project consult enters
+  `awaiting-framework` OR a new unreviewed framework-bug appears; prints what changed,
+  exits. This is the right one when you're working the harness itself from inside a
+  container (per `docs/design/framework-dev-mode.md`); the host `claudebox` binary
+  isn't reachable from in here.
+
+Both are token-free. Both exit on change — the harness re-invokes you, you handle the
+change (usually: draft an `awaiting-framework` thread), then **relaunch the watcher**.
+That relaunch is the loop; without it you only catch one change. A **SessionStart hook**
 (`.claude/hooks/consult-session-start.sh`) surfaces pending consults and nudges you to
-start the watcher at the beginning of each session in this repo, so you rarely have to
-remember — but you still own launching and relaunching it.
+start the watcher at the beginning of each host session, so you rarely have to remember
+— but you still own launching and relaunching it.
 
 ## 1. Draft with an Agent-tool sub-agent (the "auto-draft")
 

@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.21.1"
+CLAUDEBOX_VERSION="2.22.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -163,9 +163,12 @@ cb_guard_new_project() {
 }
 
 # true if $1 is a claudebox harness fork workspace (fingerprint: wrapper.sh at root with
-# CLAUDEBOX_VERSION= line). Used to gate framework-dev behaviors: skip the drift warning,
-# gate `claudebox harness <verb>` commands, mirror the entrypoint's fw-dev surfacing.
+# CLAUDEBOX_VERSION= line), OR CLAUDEBOX_HARNESS_DEV=1 forces the mode. Used to gate
+# framework-dev behaviors: skip the drift warning, gate `claudebox harness <verb>`
+# commands, mirror the entrypoint's fw-dev surfacing. CLAUDEBOX_FRAMEWORK_DEV kept as
+# a backward-compat alias (renamed 2.22.0 to match the harness naming convention).
 cb_is_framework_dev() {
+    case "${CLAUDEBOX_HARNESS_DEV:-${CLAUDEBOX_FRAMEWORK_DEV:-}}" in 1|true|yes|on) return 0 ;; esac
     [ -f "$1/wrapper.sh" ] && grep -q '^CLAUDEBOX_VERSION=' "$1/wrapper.sh" 2>/dev/null
 }
 
@@ -1613,7 +1616,7 @@ USEFUL ENV
   CLAUDEBOX_MINIMAL=1             use the minimal image variant
   CLAUDEBOX_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
   CLAUDEBOX_ALLOW_NEW=1           skip the "create a new project here?" prompt (or the non-interactive abort)
-  CLAUDEBOX_FRAMEWORK_DEV=1       force framework-dev startup surfacing (auto-detected when the workspace is a claudebox harness fork)
+  CLAUDEBOX_HARNESS_DEV=1         force framework-dev mode (auto-detected when the workspace is a claudebox harness fork). Alias: CLAUDEBOX_FRAMEWORK_DEV.
   CLAUDEBOX_NO_DRIFT_WARN=1       silence the "cb-infra image is behind wrapper" warning on each claudebox invocation
   CLAUDEBOX_ENV_FOO=bar           forward FOO=bar into the container
   CLAUDEBOX_PRUNE_ON_START=1      docker builder prune (cache) + image prune (dangling) on each start

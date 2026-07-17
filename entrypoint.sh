@@ -426,7 +426,7 @@ fi
 
 # (A2) Framework-Claude surfacing — if THIS claudebot is developing the harness itself
 # (workspace fingerprint = a wrapper.sh containing CLAUDEBOX_VERSION= at its root, OR
-# CLAUDEBOX_FRAMEWORK_DEV=1 opt-in), also inject a note listing cross-project consults
+# CLAUDEBOX_HARNESS_DEV=1 opt-in, or the legacy alias CLAUDEBOX_FRAMEWORK_DEV=1), also inject a note listing cross-project consults
 # awaiting a framework draft AND framework-bug reports not yet marked reviewed. This is
 # the review flow the host `claudebox consult list` / `claudebox framework-bugs list`
 # surfaces to a human on the Mac — mirrored here so a framework-dev claudebot working
@@ -434,7 +434,7 @@ fi
 # is no host wrapper in here). Skipped for every normal claudebot.
 FRAMEWORK_NOTE=""
 _is_fwdev=0
-case "${CLAUDEBOX_FRAMEWORK_DEV:-}" in 1|true|yes|on) _is_fwdev=1 ;; esac
+case "${CLAUDEBOX_HARNESS_DEV:-${CLAUDEBOX_FRAMEWORK_DEV:-}}" in 1|true|yes|on) _is_fwdev=1 ;; esac
 if [ "$_is_fwdev" = 0 ] && [ -n "${CLAUDEBOX_WORKSPACE:-}" ] && [ -f "$CLAUDEBOX_WORKSPACE/wrapper.sh" ]; then
 	grep -q '^CLAUDEBOX_VERSION=' "$CLAUDEBOX_WORKSPACE/wrapper.sh" 2>/dev/null && _is_fwdev=1
 fi

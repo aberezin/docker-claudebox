@@ -93,7 +93,7 @@ COPY entrypoint.sh api_server.py telegram_bot.py telegram_utils.py cron.py jsonp
 # Bake the harness changelog OUTSIDE the mount (/home/claude/.claude is shadowed) so
 # claudebot can read it; the entrypoint points claudebot here and flags version bumps.
 COPY CHANGELOG.md /h/home/
-COPY cb-browser cb-report-bug cb-consult cb-df cb-help /h/bin/
+COPY cb-browser cb-report-bug cb-consult cb-df cb-help cb-harness-watch-consults /h/bin/
 COPY cb-host-shim /h/bin/colima
 # Profile installers: named tool bundles a project opts into (.claudebox config
 # `profiles:`); the entrypoint runs the matching one on first enable. See

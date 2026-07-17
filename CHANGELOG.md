@@ -16,6 +16,38 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.22.0] — 2026-07-17 _(fork)_
+
+### Added
+- **`cb-harness-watch-consults`** — in-container mirror of host `claudebox consult
+  watch`, scoped to framework-dev needs: blocks until any cross-project consult enters
+  `awaiting-framework` (a new thread OR a fresh `cb-consult say` turn on an existing
+  awaiting-framework thread) OR any new unreviewed framework-bug report appears. Prints
+  what changed, exits. Run as a background task from a framework-dev session; the
+  harness re-invokes on exit; handle the change; relaunch to keep watching. Closes the
+  mid-session-alert gap that let gammaray's consult `2026-07-17T01-36-41-51cb139f` sit
+  unnoticed for hours. Default poll 20s (arg or `$CLAUDEBOX_HARNESS_WATCH_INTERVAL`).
+  **First application of the `cb-harness-<name>` convention** established in
+  `docs/design/framework-dev-mode.md` (`c717031`). Also referenced from the
+  `framework-consult` skill so future framework-Claude sessions launch it as a
+  background task. Closes #7.
+
+### Changed
+- **Renamed `CLAUDEBOX_FRAMEWORK_DEV` → `CLAUDEBOX_HARNESS_DEV`** to match the
+  `harness` naming convention established in 2.20.0 (`claudebox harness <verb>`,
+  `cb-harness-<name>`, `cb_harness_<verb>`). Backward-compat: the legacy name is still
+  honored as an alias — same pattern as `CLAUDE_* → CLAUDEBOX_*`. Fixes a latent
+  inconsistency: the env override was honored in `entrypoint.sh` but NOT in
+  `wrapper.sh`'s `cb_is_framework_dev`, so a renamed/relocated fork got startup
+  surfacing but not the `claudebox harness` commands. Both now check the env, and
+  `cb_is_framework_dev` is the single source of truth (called from both files).
+- **New env-var naming convention** documented in
+  `docs/design/framework-dev-mode.md` — `CLAUDEBOX_HARNESS_*` for framework-dev-mode
+  env; `CLAUDEBOX_HARNESS_WATCH_INTERVAL` is the second in the family.
+
+**Needs `make build`** (new baked helper + entrypoint change); rebuild auto-recreates
+containers.
+
 ## [2.21.1] — 2026-07-17 _(fork)_
 
 ### Fixed

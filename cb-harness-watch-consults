@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# summary: framework-dev: watch cross-project awaiting-framework consults + new unreviewed bugs
+# cb-harness-watch-consults — the in-container mirror of host `claudebox consult watch`,
+# but scoped to framework-dev needs: wake on any cross-project consult entering
+# awaiting-framework, or any new framework-bug report landing in the drop dir. Run as a
+# BACKGROUND task from a framework-dev claudebot; the harness re-invokes you on exit
+# (blocking watcher exits when something changes), you handle it, then relaunch to
+# resume watching. That relaunch is the loop.
+#
+# Follows the framework-dev-mode.md convention: cb-harness-<name>, first application.
+# See docs/design/framework-dev-mode.md.
+set -euo pipefail
+
+CDIR="${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}"
+BDIR="${CLAUDEBOX_FRAMEWORK_BUGS_DIR:-/home/claude/framework-bugs}"
+
+_usage() {
+    cat >&2 <<EOF
+usage: cb-harness-watch-consults [interval-secs]
+  Framework-dev: block until a cross-project consult enters 'awaiting-framework'
+  (a new one, or one that got a fresh turn from the claudebot side), OR a new
+  unreviewed framework-bug report appears. Print what changed, exit.
+
+  Run as a BACKGROUND task in a framework-dev session — the harness re-invokes
+  you on exit; handle the change (draft the reply / triage the bug) then relaunch
+  this watcher. That relaunch IS the loop.
+
+  Default poll interval: 20s (override with arg or CLAUDEBOX_HARNESS_WATCH_INTERVAL).
+EOF
+    exit "${1:-1}"
+}
+
+case "${1:-}" in -h|--help) _usage 0 ;; esac
+
+iv="${1:-${CLAUDEBOX_HARNESS_WATCH_INTERVAL:-20}}"
+case "$iv" in ''|*[!0-9]*) iv=20 ;; esac
+
+# Consult signature: `CONSULT|<id>|<turn-count>` for every thread whose status is
+# awaiting-framework. Turn-count is in the key so a fresh `cb-consult say` on an
+# already-awaiting-framework thread (claudebot added more context) also wakes us.
+_consult_sig() {
+    [ -d "$CDIR" ] || return 0
+    local td m n
+    for td in "$CDIR"/*/; do
+        [ -d "$td" ] || continue; td="${td%/}"; m="$td/meta"; [ -f "$m" ] || continue
+        [ "$(sed -n 's/^status=//p' "$m" | tail -1)" = "awaiting-framework" ] || continue
+        n=$(find "$td" -maxdepth 1 -name '[0-9][0-9][0-9]-*.md' 2>/dev/null | wc -l | tr -d ' ')
+        printf 'CONSULT|%s|%s\n' "$(basename "$td")" "$n"
+    done
+}
+
+# Bug signature: `BUG|<slug>` for every report in the drop dir that lacks a .reviewed
+# sidecar. A `cb-report-bug done <slug>` creates the sidecar and silently drops the
+# item from the signature (no false wake).
+_bug_sig() {
+    [ -d "$BDIR" ] || return 0
+    local f
+    for f in "$BDIR"/*.md; do
+        [ -f "$f" ] || continue
+        [ -f "${f}.reviewed" ] && continue
+        printf 'BUG|%s\n' "$(basename "$f" .md)"
+    done
+}
+
+_sig() { { _consult_sig; _bug_sig; } | sort; }
+
+base="$(_sig)"
+echo "👁  cb-harness-watch-consults: watching cross-project awaiting-framework consults + unreviewed framework-bug reports (every ${iv}s)…" >&2
+
+while :; do
+    sleep "$iv"
+    cur="$(_sig)"
+    if [ "$cur" = "$base" ]; then
+        continue
+    fi
+    # Compute additions (present in cur, absent in base). Anything that only DISAPPEARED
+    # (a consult you resolved or a bug you marked done) is silently absorbed — not
+    # actionable, don't wake for it.
+    new="$(comm -13 <(printf '%s\n' "$base") <(printf '%s\n' "$cur"))"
+    if [ -z "$new" ]; then
+        base="$cur"
+        continue
+    fi
+    new_consults="$(printf '%s\n' "$new" | grep '^CONSULT|' | cut -d'|' -f2- || true)"
+    new_bugs="$(printf '%s\n' "$new" | grep '^BUG|' | cut -d'|' -f2- || true)"
+    if [ -n "${new_consults:-}" ]; then
+        echo "🗣  new / updated cross-project awaiting-framework consult(s):" >&2
+        printf '%s\n' "$new_consults" | while IFS='|' read -r cid _cn; do
+            [ -n "$cid" ] && printf '  %-32s  (cb-consult read %s)\n' "$cid" "$cid" >&2
+        done
+    fi
+    if [ -n "${new_bugs:-}" ]; then
+        echo "🐞 new unreviewed framework-bug report(s):" >&2
+        printf '%s\n' "$new_bugs" | while IFS= read -r slug; do
+            [ -n "$slug" ] && printf '  %-32s  (cb-report-bug show %s)\n' "$slug" "$slug" >&2
+        done
+    fi
+    exit 0
+done
