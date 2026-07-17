@@ -176,6 +176,7 @@ do not enable it for arbitrary projects.
 ## See also
 
 - [developing-in-a-claudebox.md](developing-in-a-claudebox.md) — the **runbook**: the actual dev loop this enables (build/test the harness in a container).
+- [framework-dev-mode.md](framework-dev-mode.md) — the runtime mode + convention for framework-dev-only harness code that this backend makes possible.
 - [per-project-vm.md](per-project-vm.md) — the Colima model both approaches work around.
 - [browser-testing.md](browser-testing.md) — the CDP bridge's host-agent pattern the proxy reuses (gateway-bound, token-auth ethos).
 - [../../CLAUDE.md](../../CLAUDE.md) — the DooD orchestration vision (Container 1 spinning up Container 2/3).

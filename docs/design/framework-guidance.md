@@ -79,3 +79,4 @@ follow-up.
 - [bootstrap.md](bootstrap.md) — `.claudebox/BRIEF.md` and the mission banner now surfaced via user memory.
 - [n-tier-networking.md](n-tier-networking.md) · [disk-management.md](disk-management.md) — standards summarized in the baked guidance.
 - [../../CLAUDE.md](../../CLAUDE.md) — the repo convention that `~/.claude` is bind-mounted, so framework `.claude` content must be seeded at runtime (this is that pattern).
+- [framework-dev-mode.md](framework-dev-mode.md) — the framework-dev runtime mode that includes the surfacing block emitted alongside this baked guidance.
