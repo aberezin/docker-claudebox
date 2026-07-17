@@ -181,11 +181,16 @@ target to `$CLAUDEBOX_VM_IP` (with a printed note) instead of silently failing.
 **Prefer `cb-browser cdp` / `cb-browser script-cdp` over a hand-rolled `connectOverCDP`.**
 Driving the human's *real* (non-Playwright) Chrome with your own `chromium.connectOverCDP(...)`
 can trip on `Browser.setDownloadBehavior` ("not supported") — a protocol quirk against a stock
-Chrome. The baked helpers connect cleanly; if you genuinely need raw control, use a `CDPSession`
-(`Page.navigate` / `Page.captureScreenshot`) rather than the high-level context/page API. **Do
-NOT** reproduce a `chromium.connectOverCDP(...)` inside a `cb-browser script` invocation —
-`script` runs on `cb-net` with no CDP env forwarded (A-only). Use `cb-browser script-cdp`
-(below) for custom CDP flows.
+Chrome that fires specifically when the debug Chrome has **zero page targets** at attach time.
+The baked helpers (`cdp`, `script-cdp`) auto-warm the debug Chrome with an `about:blank` scratch
+page when they see zero pages, so they connect cleanly across repeated runs; a hand-rolled
+`connectOverCDP` doesn't, and will fail the moment the debug Chrome is empty (which happens
+immediately after any run whose script closed all its own tabs). If you genuinely need raw
+control, either `PUT $CDP_URL/json/new?about:blank` yourself before you connect, or use a
+`CDPSession` (`Page.navigate` / `Page.captureScreenshot`) rather than the high-level
+context/page API. **Do NOT** reproduce a `chromium.connectOverCDP(...)` inside a
+`cb-browser script` invocation — `script` runs on `cb-net` with no CDP env forwarded
+(A-only). Use `cb-browser script-cdp` (below) for custom CDP flows.
 
 ### Custom CDP flows: `cb-browser script-cdp`
 
@@ -199,6 +204,12 @@ with the CDP wiring done for you and a safety net against the tab-lifecycle foot
   `chromium.connectOverCDP(process.env.CDP_URL)` and connects to the bridge.
 - **`--network host`** so the container can reach the Mac's Colima gateway
   `192.168.64.1:9223` over `col0` (same as `cb-browser cdp`).
+- **Empty-Chrome auto-warm** — if `/json/list` shows zero `type == "page"` targets when
+  `script-cdp` starts, it `PUT`s `/json/new?about:blank` first so Playwright's
+  `connectOverCDP` has a page to bootstrap from (without this, Playwright falls through
+  to a browser-level `setDownloadBehavior` call that stock Chrome rejects). The warm-up
+  fires *before* the pre-snapshot below, so the warm-up tab is inside `_pre` and the
+  cleanup preserves it across runs — no accumulation. Same treatment in `cb-browser cdp`.
 - **Tab-leak safety net** — before the script runs, `cb-browser script-cdp` snapshots page
   targets on the debug Chrome via `/json/list`; on exit (any status, incl. `SIGINT`/`SIGTERM`)
   it closes any *new* page targets whose ids weren't in the pre-snapshot. So the natural but

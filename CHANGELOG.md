@@ -16,6 +16,29 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.21.1] — 2026-07-17 _(fork)_
+
+### Fixed
+- **`cb-browser cdp` / `cb-browser script-cdp` fail on the second run of a session**
+  with `browserType.connectOverCDP: Protocol error (Browser.setDownloadBehavior):
+  Browser context management is not supported.` Root cause: Playwright's
+  `connectOverCDP` falls through to a browser-level `Browser.setDownloadBehavior`
+  call when the debug Chrome has zero page targets at attach time (stock Chrome
+  rejects that API — it's a Playwright-owned-Chrome-only knob). And 2.17.0's
+  `script-cdp` snapshot-diff cleanup guarantees zero page targets after any run
+  whose script opened all its own tabs from an empty starting state. First run of
+  a session works (welcome tab exists); subsequent runs fail until the human
+  manually opens a tab. Fix: new `_cdp_ensure_page` helper in `cb-browser` —
+  `PUT /json/new?about:blank` (with GET fallback for pre-v100 Chrome) when
+  `/json/list` shows zero page targets, before Playwright attaches. Wired into
+  both `script-cdp` (fires BEFORE the `_pre` snapshot so the warm-up tab is
+  inside `_pre` and cleanup preserves it across runs — no accumulation) and
+  `cdp` (fires before the `docker run` — no snapshot there to interact with).
+  Diagnostic log if the warm-up itself fails so the failure mode is obvious
+  instead of Playwright's cryptic error. Resolves gammaray consult
+  `2026-07-17T01-36-41-51cb139f`. **Needs `make build`** (`cb-browser` +
+  entrypoint guidance); rebuild auto-recreates containers.
+
 ## [2.21.0] — 2026-07-16 _(fork)_
 
 ### Added

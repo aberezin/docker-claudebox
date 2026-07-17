@@ -70,6 +70,27 @@ _ensure_net() { docker network inspect "$NET" >/dev/null 2>&1 || docker network 
 # rotation); the container can't self-discover it. Empty => bridge/VM not ready.
 _vm_ip() { printf '%s' "${CLAUDEBOX_VM_IP:-}"; }
 
+# Ensure the debug Chrome has at least one page target before Playwright attaches.
+# Playwright's chromium.connectOverCDP against a stock (non-Playwright) Chrome falls
+# through to Browser.setDownloadBehavior when it finds zero pages, which real Chrome
+# rejects with "Browser context management is not supported" — a hard, cryptic failure.
+# /json/new?about:blank is the DevTools canonical way to add a scratch page; it returns
+# synchronously with the new target's metadata. PUT is required on Chrome ≥100 (GET was
+# deprecated for CSRF); older bridges fall through to the GET path. No-op if a page
+# already exists. Args: $1 = _cdp_base (e.g. http://192.168.64.1:9223, no trailing slash).
+_cdp_ensure_page() {
+    local _base="$1" _pages
+    _pages="$(curl -sf --max-time 3 "$_base/json/list" 2>/dev/null \
+        | (jq -r '.[] | select(.type=="page") | .id' 2>/dev/null || true))" || _pages=""
+    [ -n "${_pages:-}" ] && return 0
+    if curl -sf --max-time 3 -X PUT "$_base/json/new?about:blank" >/dev/null 2>&1 \
+       || curl -sf --max-time 3      "$_base/json/new?about:blank" >/dev/null 2>&1; then
+        echo "cb-browser: warmed empty debug Chrome with about:blank (Playwright connectOverCDP requires a page target)" >&2
+    else
+        echo "cb-browser: WARNING debug Chrome has 0 page targets and warm-up (/json/new) failed — connectOverCDP will likely fail with 'Browser.setDownloadBehavior: not supported'. Check 'claudebox browser-bridge up' on the Mac." >&2
+    fi
+}
+
 cmd="${1:-}"; shift || true
 case "$cmd" in
   net)
@@ -144,6 +165,11 @@ RUNNER
     # casual browsing in it. Non-page targets (service workers, iframes, background_page,
     # workers) are never touched — we filter type=="page".
     _cdp_base="$(printf '%s' "$CLAUDEBOX_HOST_CDP_URL" | sed -E 's#/+$##')"
+    # Auto-warm: our cleanup drives the debug Chrome to zero pages after a run whose
+    # script only opened its own tabs, which would make the NEXT script-cdp/cdp attach
+    # fail with "Browser.setDownloadBehavior: not supported". Fire BEFORE _pre so the
+    # warm tab is inside _pre and cleanup preserves it — no accumulation across runs.
+    _cdp_ensure_page "$_cdp_base"
     _pre="$(curl -sf --max-time 3 "$_cdp_base/json/list" 2>/dev/null \
         | (jq -r '.[] | select(.type=="page") | .id' 2>/dev/null || true))" || _pre=""
     _cleanup() {
@@ -224,6 +250,10 @@ RUNNER
         fi ;;
     esac
     outdir="${2:-${CB_BROWSER_OUT:-$PWD/cb-browser-out}}"; mkdir -p "$outdir"
+    # Same auto-warm as script-cdp — Playwright connectOverCDP fails against a stock
+    # Chrome with zero page targets. See _cdp_ensure_page for the full rationale.
+    _cdp_base="$(printf '%s' "$CLAUDEBOX_HOST_CDP_URL" | sed -E 's#/+$##')"
+    _cdp_ensure_page "$_cdp_base"
     read -r -d '' runner <<'RUNNER' || true
 const { chromium } = require("playwright");
 (async () => {

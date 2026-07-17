@@ -234,9 +234,14 @@ CDP gotchas (these waste cycles if you rediscover them each time):
   `page.close()` / `Target.closeTarget`. Running the naïve pattern (`connectOverCDP → newPage →
   browser.close()`) under `script-cdp` still leaks in principle but the wrapper cleans up after you.
 - `cb-browser cdp` and `cb-browser script-cdp` are the two supported CDP entry points; both use
-  the baked Playwright. Rolling your OWN `chromium.connectOverCDP(...)` against a stock
-  (non-Playwright) Chrome can trip on `Browser.setDownloadBehavior`; if you must go raw, use a
-  `CDPSession` (`Page.navigate` / `Page.captureScreenshot`).
+  the baked Playwright, and both **auto-warm** the debug Chrome with an `about:blank` scratch
+  page when `/json/list` shows zero page targets — Playwright's `connectOverCDP` against a stock
+  (non-Playwright) Chrome fails with `Browser.setDownloadBehavior: not supported` when the debug
+  Chrome is empty, and the warm-up prevents it. Rolling your OWN `chromium.connectOverCDP(...)`
+  doesn't get that warm-up and hits the same failure the moment the debug Chrome empties (which
+  happens right after any script that closes all its own tabs). If you must go raw, either
+  `PUT $CDP_URL/json/new?about:blank` first, or use a `CDPSession` (`Page.navigate` /
+  `Page.captureScreenshot`) instead of the high-level context/page API.
 - For cb-net / in-VM-only targets (incl. their websockets), use `shot`/`script` instead —
   those run inside the VM on `cb-net` and reach workloads by container name.
 
