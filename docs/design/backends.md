@@ -7,10 +7,12 @@ Mac). Phase 3 (v2.15.0): the "docker" decision — resolved as **docker LOCAL, n
 daemon, so the harness builds+tests inside a container with no host-exec surface. This doc
 captures both approaches, their trade-offs, and the security model.
 
+> In 2.x this framework was called `claudebox`; 3.0 renames the host wrapper and harness to `dridock`. The `DRIDOCK_BACKEND` env var below is the canonical 3.0 name; `CLAUDEBOX_BACKEND` is still accepted as a legacy alias.
+
 ## The goal
 
 Develop, build, and test **this harness** somewhere other than directly on Alan's Mac —
-specifically **inside a claudebox** (dogfooding — a claudebot editing `wrapper.sh`/
+specifically **inside a dridock** (dogfooding — a claudebot editing `wrapper.sh`/
 `entrypoint.sh` and running the suite) and/or in **Linux CI** (the repo currently has none).
 
 ## Why it's hard — the Colima coupling
@@ -30,20 +32,20 @@ You cannot run the Colima path inside a Linux container — there is no Colima t
 
 Underneath, the real work is **plain Docker** (`docker build` / `docker run`). Colima only
 provides the *substrate*: per-project VM isolation, the image store, reachable IPs, disk
-management. And **inside a claudebox you already have a Docker daemon** (the mounted socket /
+management. And **inside a dridock you already have a Docker daemon** (the mounted socket /
 DooD). So the question is only *how the framework reaches an orchestration substrate when it
 isn't on the Mac* — and there are two very different answers.
 
-## Approach 1 — a `docker` backend (`CLAUDEBOX_BACKEND`)
+## Approach 1 — a `docker` backend (`DRIDOCK_BACKEND`)
 
-Introduce `CLAUDEBOX_BACKEND = colima | docker` and factor the backend-specific ops behind
+Introduce `DRIDOCK_BACKEND = colima | docker` and factor the backend-specific ops behind
 dispatch helpers:
 
 | Op | `colima` (default, macOS/prod) | `docker` (CI / in-container) |
 |---|---|---|
 | context | `colima-cb-<id>` | default / ambient daemon |
 | ensure-up | `colima start <profile>` | no-op (daemon already there) |
-| image | build into `cb-infra`, reseed to project VMs | just `claudebox:latest` locally, no reseed |
+| image | build into `cb-infra`, reseed to project VMs | just `dridock:latest` locally, no reseed |
 | address | reachable `col0` IP (rotating) | `localhost` (published ports) |
 | gc / usage | lima disks + `fstrim` | `docker system prune` / `df` |
 
@@ -92,7 +94,7 @@ Proxying `docker` is nearly *"the container can run anything on the Mac"* (`dock
 host paths. So the agent MUST be:
 
 - **Opt-in, off by default** — enabled only for the deliberate "develop the harness in a dev
-  claudebox" use case, never a general claudebot capability.
+  dridock" use case, never a general claudebot capability.
 - **Bound to `192.168.64.1` only** — the Colima gateway the project VMs reach; **never**
   `0.0.0.0`/LAN. Torn down when not in use (like the CDP bridge).
 - **Token-authenticated per session** — a secret the wrapper injects, so a random VM neighbour
@@ -102,7 +104,7 @@ host paths. So the agent MUST be:
   sharpest edge.
 
 **Realistic framing:** this is a **trusted, single-operator tool** — appropriate for *you*
-driving your own harness dev from your own dev claudebox, not something to ship enabled for
+driving your own harness dev from your own dev dridock, not something to ship enabled for
 arbitrary projects/claudebots.
 
 ## The two are complementary, not rivals
@@ -113,11 +115,11 @@ arbitrary projects/claudebots.
 | Isolation | real per-project VMs (unchanged) | shared daemon (weaker) |
 | Reimplements Colima? | no — drives the real one | partially (docker equivalents) |
 | Security | **high** (remote host exec) → opt-in, trusted-only | low (self-contained) |
-| Best for | Alan driving the real thing from a dev claudebox | Linux CI / other contributors |
+| Best for | Alan driving the real thing from a dev dridock | Linux CI / other contributors |
 
 ## Recommendation
 
-- For **"Alan develops the harness end-to-end inside a claudebox, against real Colima"** →
+- For **"Alan develops the harness end-to-end inside a dridock, against real Colima"** →
   **Approach 2 (proxy)**, built as a tight opt-in agent (gateway-bound, token-auth, reusing the
   CDP-bridge machinery), accepted as a trusted capability. Start **colima-only** (defer the
   `docker` shim) to keep the first cut's blast radius small.
@@ -128,26 +130,26 @@ arbitrary projects/claudebots.
 
 1. ✅ **Host agent** (`host-agent.py`) — daemon on the Mac (reusing the CDP bridge's gateway-bound
    pattern), **token-auth + binary/subcommand allowlisted**, streams an allowlisted `colima`/
-   `limactl`. Control with **`claudebox host-agent up|down|status`** (opt-in, off by default).
+   `limactl`. Control with **`dridock host-agent up|down|status`** (opt-in, off by default).
 2. ✅ **`colima`/`limactl` shims** (`cb-host-shim`, baked as both) proxy the framework's calls to
    the agent; the wrapper injects the agent URL+token (durable `-hostagent` sidecar, empty when
    the agent is down). Proven: a bridge-network container ran real `colima list` on the Mac.
 3. ✅ **The `docker` decision — resolved as "docker LOCAL, not proxied" (v2.15.0).** A `docker`
    shim proxying to the Mac was rejected: it's near-full host compromise (`docker --context
    colima-cb-X run -v /:/mac …` on the Mac) for little gain. Instead `make build` and
-   `tests/common.sh` are **backend-aware** (`CLAUDEBOX_BACKEND`, auto `docker` inside a
+   `tests/common.sh` are **backend-aware** (`DRIDOCK_BACKEND`, auto `docker` inside a
    container): in `docker` mode they build the image and run the integration tests on the dev
    claudebot's **own** VM daemon — no colima, no host proxy. So a dev claudebot can `make build`
    + `bash test.sh` end-to-end. The phase-1 host-agent stays for the narrow slice that genuinely
-   needs *real* Colima (e.g. exercising `claudebox vm gc` against live VMs).
-4. ⬜ A "develop-the-harness-in-a-claudebox" runbook. And note (confirmed): much of it needs **no
+   needs *real* Colima (e.g. exercising `dridock vm gc` against live VMs).
+4. ⬜ A "develop-the-harness-in-a-dridock" runbook. And note (confirmed): much of it needs **no
    proxy at all** — unit tests (`test_cbvm.sh`, `test_bootstrap.sh`) are pure bash and run
    anywhere; the integration suite is `docker build`/`run` that the local daemon satisfies. The
    host-agent is only for the Colima-*orchestration* tests.
 
 ### The docker backend for build/test (phase 3)
 
-`CLAUDEBOX_BACKEND = colima | docker` (auto: `docker` when `/.dockerenv` exists) selects where
+`DRIDOCK_BACKEND = colima | docker` (auto: `docker` when `/.dockerenv` exists) selects where
 `make build` and the integration tests run:
 
 | | `colima` (Mac/prod) | `docker` (CI / in-container) |
@@ -156,13 +158,13 @@ arbitrary projects/claudebots.
 | `tests/common.sh` | throwaway `colima` test VM + build/run in its context | build/run on the ambient daemon (no VM) |
 
 This is **not** the docker *shim* (no host proxy) — it's the same-machine ambient daemon the dev
-claudebot already has. Overridable: `make build CLAUDEBOX_BACKEND=docker`, `CLAUDEBOX_BACKEND=docker bash test.sh`.
+claudebot already has. Overridable: `make build DRIDOCK_BACKEND=docker`, `DRIDOCK_BACKEND=docker bash test.sh`.
 
 ### How to use phase 1
-On the Mac: `claudebox host-agent up` (prints a trust warning). Restart your harness-dev
+On the Mac: `dridock host-agent up` (prints a trust warning). Restart your harness-dev
 claudebot so it picks up the injected agent URL/token. Inside it, `colima list` (and other
 allowlisted `colima`/`limactl` subcommands) now execute on the Mac. Stop with
-`claudebox host-agent down`. It is **off by default** and a **trusted single-operator tool** —
+`dridock host-agent down`. It is **off by default** and a **trusted single-operator tool** —
 do not enable it for arbitrary projects.
 
 ## Open questions
@@ -180,4 +182,4 @@ do not enable it for arbitrary projects.
 - [per-project-vm.md](per-project-vm.md) — the Colima model both approaches work around.
 - [browser-testing.md](browser-testing.md) — the CDP bridge's host-agent pattern the proxy reuses (gateway-bound, token-auth ethos).
 - [../../CLAUDE.md](../../CLAUDE.md) — the DooD orchestration vision (Container 1 spinning up Container 2/3).
-- [versioning.md](versioning.md) — where a `CLAUDEBOX_BACKEND` contract change would land.
+- [versioning.md](versioning.md) — where a `DRIDOCK_BACKEND` contract change would land.

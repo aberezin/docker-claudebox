@@ -14,7 +14,7 @@ mkdir -p ~/.claude/bin
 echo '#!/bin/bash
 echo "hello from custom script"' > ~/.claude/bin/my-tool
 chmod +x ~/.claude/bin/my-tool
-# my-tool is now available inside every claudebox session
+# my-tool is now available inside every dridock session
 ```
 
 ## Init hooks (`~/.claude/init.d`)
@@ -35,10 +35,10 @@ This is particularly useful with the minimal image — pre-install your tools on
 
 ## Profiles (opt-in tool bundles)
 
-For **common** tooling — especially language servers — prefer **profiles** over a hand-written init.d hook. Add them to `.claudebox/config.yml`:
+For **common** tooling — especially language servers — prefer **profiles** over a hand-written init.d hook. Add them to `.dridock/config.yml`:
 
 ```yaml
-profiles: [typescript, python]   # run `claudebox profiles` to list available ones
+profiles: [typescript, python]   # run `dridock profiles` to list available ones
 ```
 
 The harness ships curated installers (e.g. `typescript` / `python` / `go` enable the matching `*-lsp` plugin; their servers are baked into the image), installs each once on first enable, and re-checks on later runs so adding a profile doesn't need a fresh container. `init.d` remains the escape hatch for anything a profile doesn't cover. Full details, and how to add your own profile, in [design/profiles.md](design/profiles.md).
@@ -79,7 +79,7 @@ Multiple skills stack — every `SKILL.md` found is injected. Any user-supplied 
 
 ## MCP servers
 
-Claude Code reads MCP server definitions from a few standard locations. Inside claudebox, all of these work because `~/.claude` is mounted from the host and the workspace is mounted from the host cwd:
+Claude Code reads MCP server definitions from a few standard locations. Inside dridock, all of these work because `~/.claude` is mounted from the host and the workspace is mounted from the host cwd:
 
 | Scope     | Path                                                  | Description                                                                          |
 | --------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------ |
@@ -109,13 +109,13 @@ Claude Code reads MCP server definitions from a few standard locations. Inside c
 
 ```bash
 # project scope — writes to ./.mcp.json in the workspace (commit-friendly)
-claudebox mcp add --scope project my-server -- npx -y @some/mcp-server
+dridock mcp add --scope project my-server -- npx -y @some/mcp-server
 
 # user scope — writes to ~/.claude.json, available in every project
-claudebox mcp add --scope user my-server -- npx -y @some/mcp-server
+dridock mcp add --scope user my-server -- npx -y @some/mcp-server
 
 # local scope (default) — per-project entry inside ~/.claude.json
-claudebox mcp add my-server -- npx -y @some/mcp-server
+dridock mcp add my-server -- npx -y @some/mcp-server
 ```
 
 **Inspect what's loaded:** run `/mcp` inside an interactive session.
@@ -124,7 +124,7 @@ This is how cron and Telegram modes reach external systems — drop your server 
 
 ## Plugins
 
-Claude Code plugins bundle slash commands, agents, hooks, MCP servers, and skills, and are declared **non-interactively** in `settings.json` — no `/plugin` commands required. Two keys drive it: `extraKnownMarketplaces` (register a marketplace) and `enabledPlugins` (turn plugins on). The claudebox entrypoint manages `.claude.json` but leaves `settings.json` to you, so it won't clobber your config.
+Claude Code plugins bundle slash commands, agents, hooks, MCP servers, and skills, and are declared **non-interactively** in `settings.json` — no `/plugin` commands required. Two keys drive it: `extraKnownMarketplaces` (register a marketplace) and `enabledPlugins` (turn plugins on). The dridock entrypoint manages `.claude.json` but leaves `settings.json` to you, so it won't clobber your config.
 
 ### Baked default
 
@@ -142,7 +142,7 @@ It's deliberately scoped to be cheap and unobtrusive:
 - **Once per project** — a marker in the project's `.claude` is set after a successful install, so it runs at most once (a failed attempt, e.g. offline, retries on a later interactive session).
 - **Best-effort + time-bounded** — if it can't reach GitHub it prints a note and moves on; it never blocks the session.
 
-Opt out entirely with `CLAUDEBOX_DEFAULT_PLUGINS=0`. Remove it from a project with `claude plugin uninstall commit-commands@claude-plugins-official` — the one-shot marker means it won't be reinstalled.
+Opt out entirely with `DRIDOCK_DEFAULT_PLUGINS=0`. Remove it from a project with `claude plugin uninstall commit-commands@claude-plugins-official` — the one-shot marker means it won't be reinstalled.
 
 ### Specifying your own plugins — three scopes
 
@@ -150,13 +150,13 @@ Opt out entirely with `CLAUDEBOX_DEFAULT_PLUGINS=0`. Remove it from a project wi
 
 | Scope        | Path                                                | Use case                                                  |
 | ------------ | --------------------------------------------------- | --------------------------------------------------------- |
-| This project | `$(claudebox claude-dir)/settings.json`             | just this claudebot (per-project host `.claude`, mounted) |
+| This project | `$(dridock claude-dir)/settings.json`               | just this claudebot (per-project host `.claude`, mounted) |
 | Committed    | `<workspace>/.claude/settings.json`                 | versioned with the repo; travels with the project / team  |
 | Every project | bake into the entrypoint (as the default above does) | one standard set across all claudebots                    |
 
 To add a plugin, put its marketplace under `extraKnownMarketplaces` and enable it under `enabledPlugins` with the key `"<plugin-name>@<marketplace-key>"`. Make the marketplace **key match the marketplace's manifest `name`** to avoid resolution ambiguity (that's why the default uses `claude-plugins-official` for both). Plugins auto-load on the next run — their commands/agents/hooks/MCP servers/skills become available with no further steps.
 
-**Interactive alternative:** run `claudebox` and use `/plugin marketplace add <repo>` / `/plugin install <name>@<marketplace>`; it writes to the project's mounted `.claude`, so it persists.
+**Interactive alternative:** run `dridock` and use `/plugin marketplace add <repo>` / `/plugin install <name>@<marketplace>`; it writes to the project's mounted `.claude`, so it persists.
 
 **Note:** the plugin cache (`~/.claude/plugins/cache/`) is per-project, so the same plugin enabled across N projects is fetched N times. For a single shared standard, prefer the baked default (scope #3).
 

@@ -1,6 +1,9 @@
-# claudebox documentation
+# dridock documentation
 
 Documentation for this fork of claudebox — Claude Code in a per-project Colima VM.
+(The fork was rebranded from `claudebox` to `dridock` in 3.0; the wrapper still
+reads legacy `CLAUDEBOX_*` env vars + `.claudebox/` project dirs for one cycle.
+See [design/3.0-migration.md](design/3.0-migration.md) for the migration.)
 New here? Start with the top-level [README](../README.md) for install + quick start,
 and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 
@@ -8,9 +11,9 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 
 | Doc | What it covers |
 |---|---|
-| [environment-variables.md](environment-variables.md) | Every `CLAUDEBOX_*` setting; `CLAUDEBOX_ENV_*` (forward vars), `CLAUDEBOX_MOUNT_*` (extra mounts), secrets, caffeinate. |
+| [environment-variables.md](environment-variables.md) | Every `DRIDOCK_*` setting (legacy `CLAUDEBOX_*` accepted); `DRIDOCK_ENV_*` (forward vars), `DRIDOCK_MOUNT_*` (extra mounts), secrets, caffeinate. |
 | [customization.md](customization.md) | `~/.claude/bin` scripts, `init.d` hooks, always-active skills, MCP servers, plugins, and **profiles**. |
-| [versioning.md](versioning.md) | Semver, the host↔image contract, release steps, and `claudebox checkversion`. |
+| [versioning.md](versioning.md) | Semver, the host↔image contract, release steps, and `dridock checkversion`. |
 | [documentation.md](documentation.md) | How to document this framework — house style, the `See also` rule, and the Mermaid convention (+ the `;` gotcha). |
 
 ## Modes
@@ -27,8 +30,9 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 
 | Doc | What it covers |
 |---|---|
+| [3.0-migration.md](design/3.0-migration.md) | The `dridock` rebrand + coordinated 3.0 migration guide. |
 | [per-project-vm.md](design/per-project-vm.md) | The core: one isolated Colima VM per project, identity, image seeding, VM lifecycle. |
-| [bootstrap.md](design/bootstrap.md) | `claudebox bootstrap` — scaffolding a project + the durable `BRIEF.md`; secrets. |
+| [bootstrap.md](design/bootstrap.md) | `dridock bootstrap` — scaffolding a project + the durable `BRIEF.md`; secrets. |
 | [multi-repo-projects.md](design/multi-repo-projects.md) | One project/VM spanning several repos. |
 | [profiles.md](design/profiles.md) | Opt-in tool bundles (`profiles: [...]`) and the bake-vs-install policy. |
 | [convenience-scripts.md](design/convenience-scripts.md) | The container-side `cb-*` command convention + `cb-help`. |
@@ -38,7 +42,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [framework-guidance.md](design/framework-guidance.md) | How framework guidance reaches every claudebot — `~/.claude/CLAUDE.md` (user memory), rewritten each start. |
 | [framework-consult.md](design/framework-consult.md) | Supervised claudebot ↔ framework-Claude threads that turn recurring problems into baked standards. |
 | [backends.md](design/backends.md) | Developing/testing the harness off the Mac (#15) — the docker backend + the host-agent proxy, and the security model. |
-| [developing-in-a-claudebox.md](design/developing-in-a-claudebox.md) | Runbook: the dev loop for editing/building/testing the harness *inside* a claudebox (dogfooding). |
+| [developing-in-a-claudebox.md](design/developing-in-a-claudebox.md) | Runbook: the dev loop for editing/building/testing the harness *inside* a dridock container (dogfooding). |
 | [framework-bug-reporting.md](design/framework-bug-reporting.md) | `cb-report-bug` — claudebot flags harness bugs to the host. |
 
 ## See also

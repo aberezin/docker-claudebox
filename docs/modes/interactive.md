@@ -1,14 +1,14 @@
 # Interactive Mode
 
 ```bash
-claudebox
+dridock
 ```
 
 Works just like the native `claude` CLI but runs inside a container. The container persists between runs, and `--continue` is applied automatically so each session picks up where you left off.
 
 ```bash
-claudebox --update        # opt in to a Claude Code CLI update on this run
-claudebox --no-continue   # start a fresh session instead of resuming the last one
+dridock --update        # opt in to a Claude Code CLI update on this run
+dridock --no-continue   # start a fresh session instead of resuming the last one
 ```
 
 ## Utility commands
@@ -16,15 +16,17 @@ claudebox --no-continue   # start a fresh session instead of resuming the last o
 Some commands are passed through directly without entering interactive mode:
 
 ```bash
-claudebox --version      # show the Claude Code CLI version
-claudebox -v             # same thing
-claudebox doctor         # run health checks
-claudebox auth           # manage authentication
-claudebox mcp <args...>  # manage MCP servers (e.g. `claudebox mcp list`, `claudebox mcp add ...`)
-claudebox setup-token    # interactive OAuth token setup
-claudebox stop           # stop the running interactive container for this workspace
-claudebox clear-session  # delete session history for this workspace
+dridock --version      # show the Claude Code CLI version
+dridock -v             # same thing
+dridock doctor         # run health checks
+dridock auth           # manage authentication
+dridock mcp <args...>  # manage MCP servers (e.g. `dridock mcp list`, `dridock mcp add ...`)
+dridock setup-token    # interactive OAuth token setup
+dridock stop           # stop the running interactive container for this workspace
+dridock clear-session  # delete session history for this workspace
 ```
+
+> In 2.x these were `claudebox <verb>`; the 2.x binary name is kept as a legacy alias during the deprecation cycle.
 
 ## See also
 

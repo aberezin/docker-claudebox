@@ -1,20 +1,20 @@
-# Multi-repo projects (one claudebox project, N repos)
+# Multi-repo projects (one dridock project, N repos)
 
-The flat "one repo = one claudebox project" layout is ideal for a single repo or a
+The flat "one repo = one dridock project" layout is ideal for a single repo or a
 monorepo. But many projects span **several repos** — a frontend, a backend, an infra
 repo, shared libraries. This describes how to structure those without fighting the
 tooling.
 
 ## The model: the project is the *workspace*, not a repo
 
-claudebox's isolation boundary is the **project / VM**, not the git repo. A project is
-a **directory** with a `.claudebox/` and its own per-project Colima VM; the claudebot
-mounts that directory and works inside it. So an N-repo project is **one** claudebox
+dridock's isolation boundary is the **project / VM**, not the git repo. A project is
+a **directory** with a `.dridock/` and its own per-project Colima VM; the claudebot
+mounts that directory and works inside it. So an N-repo project is **one** dridock
 project whose workspace *contains* the N repos as siblings:
 
 ```
-myproject/                 ← the claudebox project (.claudebox/ here; ONE VM, one claudebot)
-├── .claudebox/            ← id, config.yml, BRIEF.md (the multi-repo mission)
+myproject/                 ← the dridock project (.dridock/ here; ONE VM, one claudebot)
+├── .dridock/              ← id, config.yml, BRIEF.md (the multi-repo mission)
 ├── frontend/              ← repo 1 (its own .git, own remote)
 ├── backend/               ← repo 2 (its own .git, own remote)
 ├── infra/                 ← repo 3 (its own .git, own remote)
@@ -24,10 +24,10 @@ myproject/                 ← the claudebox project (.claudebox/ here; ONE VM, 
 One VM, one claudebot, all repos in view — it can change code across them, build an
 image per service, and run them together.
 
-## Why not N separate claudebox projects?
+## Why not N separate dridock projects?
 
 Because the fork is **shared-nothing per VM** (see [per-project-vm.md](per-project-vm.md)).
-If each repo were its own claudebox project, each claudebot would run in its own VM and
+If each repo were its own dridock project, each claudebot would run in its own VM and
 be **blind to the other repos** — no cross-repo edits, no coordinated build/run, and N
 VMs of overhead. Cross-*project* isolation is the point; a coherent multi-repo system is
 **one** project.
@@ -52,8 +52,8 @@ about **what the parent's git tracks**, and there are two clean choices:
    /frontend/
    /backend/
    /infra/
-   /.claudebox/config.yml
-   /.claudebox/secrets.env
+   /.dridock/config.yml
+   /.dridock/secrets.env
    ```
 
 **Avoid:** a parent git repo that `git add`s the sub-dirs — that creates broken
@@ -70,7 +70,7 @@ in the top-level `CLAUDE.md`. The claudebot:
   code in — don't bind-mount, the VM daemon can't see the host workspace path),
 - runs them on the shared **`cb-net`** network so they reach each other by container
   name (`http://backend:8080`),
-- publishes ports so the human reaches them at the **project VM's IP** (`claudebox ip`),
+- publishes ports so the human reaches them at the **project VM's IP** (`dridock ip`),
   collision-free across projects.
 
 The per-project VM gives the whole multi-repo system one clean, disposable sandbox.
@@ -83,7 +83,7 @@ parent never tracks them as gitlinks):
 
 ```bash
 mkdir -p ~/Development/myproject && cd ~/Development/myproject
-claudebox bootstrap --workspace \
+dridock bootstrap --workspace \
   --repo <frontend-url> --repo <backend-url> --repo <infra-url> \
   "myproject spans frontend + backend + infra — <goal>"
 # → git init parent (orchestration, NO workloads/), README, multi-repo BRIEF,
@@ -94,7 +94,7 @@ claudebox bootstrap --workspace \
 `--workspace` alone sets up the parent without cloning (add repos yourself — they're
 auto-gitignored as `--repo` adds them). Each `--repo <url>` takes a URL or `gh owner/repo`
 and uses the host's git/`gh` auth (add `--gh-token` for private repos). State each repo's
-role + wiring in `.claudebox/BRIEF.md` (the generated multi-repo section prompts for it) so
+role + wiring in `.dridock/BRIEF.md` (the generated multi-repo section prompts for it) so
 any later session picks up the topology.
 
 > `--workspace` and `--adopt` are mutually exclusive: `--adopt` is *one existing repo IS the

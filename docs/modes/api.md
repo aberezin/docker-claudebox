@@ -5,13 +5,13 @@ Run the container as an HTTP API server with workspace management, file operatio
 ```yaml
 # docker-compose.yml
 services:
-  claudebox:
-    image: claudebox:latest    # build locally first: make build
+  dridock:
+    image: dridock:latest    # build locally first: make build
     ports:
       - "8080:8080"
     environment:
-      - CLAUDEBOX_MODE_API=1
-      - CLAUDEBOX_MODE_API_TOKEN=your-secret-token
+      - DRIDOCK_MODE_API=1
+      - DRIDOCK_MODE_API_TOKEN=your-secret-token
       - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxx
     volumes:
       - ~/.claude:/home/claude/.claude
@@ -21,12 +21,12 @@ services:
 
 | Variable                   | Description                                                         | Default  |
 | -------------------------- | ------------------------------------------------------------------- | -------- |
-| `CLAUDEBOX_MODE_API`       | Set to `1` to start in API server mode                              | _(none)_ |
-| `CLAUDEBOX_MODE_API_PORT`  | Port the API server listens on                                      | `8080`   |
-| `CLAUDEBOX_MODE_API_TOKEN` | Bearer token for API authentication (if unset, no auth is required) | _(none)_ |
+| `DRIDOCK_MODE_API`         | Set to `1` to start in API server mode                              | _(none)_ |
+| `DRIDOCK_MODE_API_PORT`    | Port the API server listens on                                      | `8080`   |
+| `DRIDOCK_MODE_API_TOKEN`   | Bearer token for API authentication (if unset, no auth is required) | _(none)_ |
 | `DEBUG`                    | Set to `1` or `true` for structured JSON debug logging              | _(none)_ |
 
-> Legacy `CLAUDE_MODE_API`, `CLAUDE_MODE_API_PORT`, `CLAUDE_MODE_API_TOKEN` are still accepted as fallbacks.
+> Legacy `CLAUDEBOX_MODE_API`, `CLAUDEBOX_MODE_API_PORT`, `CLAUDEBOX_MODE_API_TOKEN` (and the older `CLAUDE_MODE_API*`) are still accepted as fallbacks.
 
 The API server outputs structured JSON logs (timestamp, level, logger, function name, line number, and file) for every request, error, and lifecycle event.
 
@@ -178,7 +178,7 @@ All file paths are relative to `/workspaces`. Path traversal attempts outside th
 
 ## OpenAI-Compatible Endpoints
 
-claudebox exposes an OpenAI-compatible adapter so tools like [LiteLLM](https://github.com/BerriAI/litellm), OpenAI SDKs, and anything that speaks the `chat/completions` protocol can connect directly. This is not a simple model proxy — every request runs the full Claude Code agentic CLI behind the scenes, meaning Claude can read and write files, run shell commands, and use all of its tools.
+dridock exposes an OpenAI-compatible adapter so tools like [LiteLLM](https://github.com/BerriAI/litellm), OpenAI SDKs, and anything that speaks the `chat/completions` protocol can connect directly. This is not a simple model proxy — every request runs the full Claude Code agentic CLI behind the scenes, meaning Claude can read and write files, run shell commands, and use all of its tools.
 
 **`GET /openai/v1/models`** — list available models:
 
@@ -201,7 +201,7 @@ curl -X POST http://localhost:8080/openai/v1/chat/completions \
   -d '{"model":"haiku","messages":[{"role":"user","content":"hello"}],"stream":true}'
 ```
 
-**Model names:** use the same aliases as the CLI (`haiku`, `sonnet`, `opus`, `opusplan`). Provider prefixes are stripped automatically — `claudebox/haiku` becomes `haiku`, `openai/sonnet` becomes `sonnet`.
+**Model names:** use the same aliases as the CLI (`haiku`, `sonnet`, `opus`, `opusplan`). Provider prefixes are stripped automatically — `dridock/haiku` becomes `haiku`, `openai/sonnet` becomes `sonnet`.
 
 **System messages:** messages with `role: "system"` are extracted and passed to Claude Code as `--system-prompt`.
 
@@ -219,7 +219,7 @@ curl -X POST http://localhost:8080/openai/v1/chat/completions \
 
 **File workflow tip:** for best performance with large inputs or outputs, upload files via `PUT /files/...`, reference them by path in your prompt, and then download output files via `GET /files/...`. This is significantly faster than embedding large content directly in message bodies.
 
-**Custom headers** for claudebox-specific behavior:
+**Custom headers** for dridock-specific behavior:
 
 | Header                          | Description                                                   |
 | ------------------------------- | ------------------------------------------------------------- |
@@ -233,7 +233,7 @@ curl -X POST http://localhost:8080/openai/v1/chat/completions \
 import litellm
 
 response = litellm.completion(
-    model="claudebox/haiku",
+    model="dridock/haiku",
     messages=[{"role": "user", "content": "hello"}],
     api_base="http://localhost:8080/openai/v1",
     api_key="your-secret-token",  # or any string if no API token is configured
@@ -243,14 +243,14 @@ print(response.choices[0].message.content)
 
 ## MCP Server
 
-claudebox exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/mcp/` using streamable HTTP transport. Any MCP-compatible client — Claude Desktop, other Claude Code instances, AI agent frameworks — can connect to it and use Claude Code as a tool. The `claude_run` tool executes the full agentic CLI, meaning it can read/write files, run commands, and use tools in the workspace, not just generate text.
+dridock exposes an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) server at `/mcp/` using streamable HTTP transport. Any MCP-compatible client — Claude Desktop, other Claude Code instances, AI agent frameworks — can connect to it and use Claude Code as a tool. The `claude_run` tool executes the full agentic CLI, meaning it can read/write files, run commands, and use tools in the workspace, not just generate text.
 
 **Configuration for MCP clients:**
 
 ```json
 {
   "mcpServers": {
-    "claudebox": {
+    "dridock": {
       "url": "http://localhost:8080/mcp/",
       "headers": { "Authorization": "Bearer your-secret-token" }
     }
@@ -274,4 +274,4 @@ If your MCP client does not support custom headers, you can pass the API token a
 
 - [programmatic.md](programmatic.md) — one-shot CLI runs.
 - [cron.md](cron.md) & [telegram.md](telegram.md) — the other daemon modes.
-- [environment-variables.md](../environment-variables.md) — `CLAUDEBOX_MODE_API_*` and auth.
+- [environment-variables.md](../environment-variables.md) — `DRIDOCK_MODE_API_*` and auth.

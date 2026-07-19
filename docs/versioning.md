@@ -9,7 +9,7 @@ keeps things coherent if upstream ever pulls from us or we pull from them. Upstr
 
 ## Why a version matters here
 
-The host wrapper (`wrapper.sh`, installed as `claudebox`) and the built image
+The host wrapper (`wrapper.sh`, installed as `dridock` in 3.0+ — was `claudebox` in 2.x) and the built image
 (entrypoint + baked helpers like `cb-browser`) share an **IPC contract**: sidecar
 filenames/formats (`.<container>-auth` / `-secrets` / `-args` / …), forwarded env,
 the `cb-browser` `/out` convention, secrets injection. If they drift — you update
@@ -19,15 +19,18 @@ one but not the other — you get subtle, confusing breakage. The version makes 
 ## Source of truth
 
 - **`VERSION`** (repo root) holds the current semver — the single source of truth.
-- **`wrapper.sh`** embeds it as `CLAUDEBOX_VERSION`; a unit test
-  (`tests/test_cbvm.sh`) asserts the two match, so they can't silently diverge.
+- **`wrapper.sh`** embeds it as `DRIDOCK_VERSION` (3.0+; was `CLAUDEBOX_VERSION` in
+  2.x); a unit test (`tests/test_cbvm.sh`) asserts the two match, so they can't
+  silently diverge.
 - The **image** stamps it at build time via `Dockerfile` `ARG`/`ENV`/`LABEL
-  org.claudebox.version`, passed by `make` / `install.sh` as `--build-arg`.
+  org.dridock.version` (3.0+; the `checkversion` reader still falls back to the
+  legacy `org.claudebox.version` label for one deprecation cycle), passed by
+  `make` / `install.sh` as `--build-arg DRIDOCK_VERSION=…`.
 
 ## Checking for drift
 
-- `claudebox version` — print the host wrapper's semver.
-- `claudebox checkversion` — compare the wrapper against the version baked into the
+- `dridock version` — print the host wrapper's semver.
+- `dridock checkversion` — compare the wrapper against the version baked into the
   claudebot image (both the `cb-infra` build/store image and this project's VM), and
   warn on drift with direction-specific guidance (rebuild the image / reinstall the
   wrapper). Read-only; never boots a VM. Images built before versioning read as
@@ -46,7 +49,7 @@ one but not the other — you get subtle, confusing breakage. The version makes 
 
 ## Release steps
 
-1. Bump **`VERSION`** and the `CLAUDEBOX_VERSION` constant in **`wrapper.sh`** to the
+1. Bump **`VERSION`** and the `DRIDOCK_VERSION` constant in **`wrapper.sh`** to the
    same value (the sync test enforces this).
 2. Add a **`CHANGELOG.md`** entry under a new `## [X.Y.Z] — <date>` heading — one
    entry per bump (see the changelog policy below).
@@ -57,7 +60,7 @@ one but not the other — you get subtle, confusing breakage. The version makes 
    and use `git tag -f -a vX.Y.Z HEAD` (then `git push --force <remote> vX.Y.Z`) if it
    resolved to an upstream commit. The remote fork only carries the tags we push.
 4. `make build` to stamp the image; reinstall the wrapper (`./install.sh`, or
-   `install -m 755 wrapper.sh ~/.local/bin/claudebox`). `claudebox checkversion`
+   `install -m 755 wrapper.sh ~/.local/bin/dridock`). `dridock checkversion`
    should then read **in sync**.
 
 ## Changelog policy
@@ -81,7 +84,7 @@ open design decisions, and residual TODOs. If it's not filed there, it isn't tra
 | `3.0-bundle` | Queued for the `2.x → 3.0` breaking migration (dridock rename, host↔container command unification, plugin system, etc.). Don't ship in isolation. |
 | `framework-dev` | Ergonomics for developing the harness itself (from inside a claudebot or on the Mac). |
 | `browser-bridge` | CDP bridge, Chrome control, browser testing. |
-| `backlog` | Filed from `.claudebox/BRIEF.md`'s handoff log during a working session (as opposed to a fresh user-reported issue). |
+| `backlog` | Filed from `.dridock/BRIEF.md`'s handoff log during a working session (as opposed to a fresh user-reported issue). |
 | `enhancement` / `bug` / `documentation` | Standard GitHub defaults. Use them. |
 
 Custom labels are managed with `gh label create --repo aberezin/docker-claudebox …`.
@@ -111,7 +114,7 @@ title if you're going through a PR). GitHub auto-closes the issue when the commi
 lands on `master`. Reference the same issue number in the `CHANGELOG.md` entry so the
 audit trail is bidirectional.
 
-### Relationship to `.claudebox/BRIEF.md`
+### Relationship to `.dridock/BRIEF.md`
 
 The BRIEF's Progress/handoff log stays the **narrative** — what happened this session,
 what's next, what's undecided *right now*. When a decision solidifies into "we should
@@ -124,6 +127,6 @@ log is a scratchpad; the issue tracker is the ledger.
 - [github.com/aberezin/docker-claudebox/issues](https://github.com/aberezin/docker-claudebox/issues) — the backlog.
 - [Per-project VM lifecycle](design/per-project-vm.md) — where `version` /
   `checkversion` sit among the VM commands.
-- [bootstrap.md](design/bootstrap.md) — where `.claudebox/BRIEF.md` fits in the
+- [bootstrap.md](design/bootstrap.md) — where `.dridock/BRIEF.md` fits in the
   project lifecycle (the log side of the backlog / log split).
 - The top-level `CLAUDE.md` "Conventions worth knowing" — the one-line rule.

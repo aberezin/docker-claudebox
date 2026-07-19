@@ -9,7 +9,7 @@ A concrete flow this fork must support:
 2. He asks host-Claude to **create a new claudebot-based project** — say "build
    Project-A, a three-tier app (React front end, Node API, Postgres) that runs in
    containers orchestrated under Colima."
-3. Host-Claude scaffolds the project and sets it up as a claudebox project.
+3. Host-Claude scaffolds the project and sets it up as a dridock project.
 4. Later, **claudebot** (the containerized Claude) spins up in that project — in its
    own per-project VM — and starts working.
 
@@ -48,10 +48,12 @@ surface *at creation time* with an install hint rather than deep inside a VM boo
   `socket_vmnet` at `/opt/local/bin/socket_vmnet` (needed for reachable per-VM IPs
   via `colima --network-address`).
 
-Override with `CLAUDEBOX_SKIP_PREFLIGHT=1`. On this machine everything installs via
+Override with `DRIDOCK_SKIP_PREFLIGHT=1`. On this machine everything installs via
 MacPorts (`sudo port install …`, `/opt/local/bin`), so the hints point there.
 
-### 1. `.claudebox/BRIEF.md` — the durable mission brief
+### 1. `.dridock/BRIEF.md` — the durable mission brief
+
+> In 2.x this file lived at `.claudebox/BRIEF.md`; 3.0 renames the project dir to `.dridock/`.
 
 A single file per project holding the project-specific intent. Structure:
 
@@ -72,7 +74,7 @@ A single file per project holding the project-specific intent. Structure:
 - ... (tech choices, must/never, deadlines)
 
 ## Standards (inherited — you already follow these)
-Uses the claudebox orchestration standard: per-project Colima VM, sibling workloads
+Uses the dridock orchestration standard: per-project Colima VM, sibling workloads
 on `cb-net` reachable by name, `cb-browser` for browser tests, prefer VM-IP over
 localhost. See the baked CLAUDE.md and docs/design/*.
 
@@ -81,23 +83,25 @@ localhost. See the baked CLAUDE.md and docs/design/*.
 so a later host-Claude or claudebot session catches up without re-reading everything>
 ```
 
-Unlike `.claudebox/config.yml` (machine-local, **gitignored**), the brief is meant
+Unlike `.dridock/config.yml` (machine-local, **gitignored**), the brief is meant
 to **travel with the project** and be readable by any future session.
 
-### 2. `claudebox bootstrap` — the host-side scaffolder
+### 2. `dridock bootstrap` — the host-side scaffolder
+
+> In 2.x this was `claudebox bootstrap`. Same semantics; the wrapper is renamed in 3.0.
 
 A standard command host-Claude (or Alan) runs to create the brief the same way
 every time. Non-interactive so host-Claude can drive it in one shot:
 
 ```bash
-claudebox bootstrap --brief-file intent.md      # from a file
-claudebox bootstrap "one-line intent"           # from an arg
-claudebox bootstrap <<'EOF' ... EOF             # from stdin (multi-line)
-claudebox bootstrap                             # no input -> writes a TODO template
+dridock bootstrap --brief-file intent.md      # from a file
+dridock bootstrap "one-line intent"           # from an arg
+dridock bootstrap <<'EOF' ... EOF             # from stdin (multi-line)
+dridock bootstrap                             # no input -> writes a TODO template
 ```
 
 It wraps whatever intent it's given in the standard BRIEF.md template, ensures
-`.claudebox/` exists, and initializes project config. It is **idempotent-safe**: it
+`.dridock/` exists, and initializes project config. It is **idempotent-safe**: it
 won't clobber an existing brief without `--force`.
 
 ### 2b. `--adopt` — an existing repo, without the nesting tangle
@@ -106,12 +110,12 @@ Plain `bootstrap` scaffolds a *greenfield* project (git init, README, `workloads
 For an **existing repo** that would be wrong — you'd get a nested-repo tangle if the
 claudebot cloned it *inside* the workspace. So:
 
-- **`claudebox bootstrap --adopt`** — adopt the git repo already in this dir. Bootstrap
+- **`dridock bootstrap --adopt`** — adopt the git repo already in this dir. Bootstrap
   auto-detects this too (an existing `.git` ⇒ adopt): it **skips** the greenfield
   scaffolding (no README/`workloads/`/`git init`) so it never pollutes your repo, writes
-  the `.claudebox/` files, and frames the BRIEF as *"this repo IS your workspace — extend
+  the `.dridock/` files, and frames the BRIEF as *"this repo IS your workspace — extend
   it in place, don't re-clone it."*
-- **`claudebox bootstrap --adopt <url>`** — clone `<url>` (a URL or `gh owner/repo`) **into
+- **`dridock bootstrap --adopt <url>`** — clone `<url>` (a URL or `gh owner/repo`) **into
   the current empty dir first**, so the repo becomes the workspace *root*, then adopt.
   Refuses a non-empty dir (run it in a fresh `mkdir`ed dir). Uses the host's git/`gh` auth.
 - Adopting nudges you to seed **`--gh-token`** for a private repo (so `git push`/`pull`
@@ -119,7 +123,7 @@ claudebot cloned it *inside* the workspace. So:
 
 ### 3. First-run surfacing — claudebot can't miss it
 
-Framework guidance (incl. *"read `.claudebox/BRIEF.md` first"*) reaches the claudebot two
+Framework guidance (incl. *"read `.dridock/BRIEF.md` first"*) reaches the claudebot two
 ways, both handled by the entrypoint:
 
 - **Framework user memory** — the guidance is written to `~/.claude/CLAUDE.md` (user
@@ -129,14 +133,14 @@ ways, both handled by the entrypoint:
 - **System hint** — `system-hint.txt`, appended to every `claude` invocation, also carries
   the "read your BRIEF.md first" line.
 
-### 4. Secrets — `.claudebox/secrets.env` (credentials the project needs)
+### 4. Secrets — `.dridock/secrets.env` (credentials the project needs)
 
 Some projects need claudebot to start up already holding a credential — e.g. a
 GitHub token so `gh` / `git push` work without an interactive `gh auth login`. The
 mechanism is deliberately **file-based, never command-line**, so secrets are never
 echoed into shell history or process listings.
 
-- **Source of truth:** `.claudebox/secrets.env` — `KEY=VALUE` per line, **gitignored**
+- **Source of truth:** `.dridock/secrets.env` — `KEY=VALUE` per line, **gitignored**
   and `chmod 600`. It is the sibling of the committed `BRIEF.md`: the brief travels
   with the repo, the secrets never do.
 - **Durable injection:** the wrapper reads it on every invocation and both (a) passes
@@ -147,27 +151,27 @@ echoed into shell history or process listings.
 - **GitHub, specifically:** a `GH_TOKEN` line is all it takes — `gh` reads it
   automatically and the entrypoint runs `gh auth setup-git` so `git push https://…`
   is authenticated too. Seed it without typing the token:
-  - `claudebox bootstrap --gh-token "intent…"` pulls from the host's own
+  - `dridock bootstrap --gh-token "intent…"` pulls from the host's own
     `gh auth token` (you're already logged in on the Mac).
-  - `claudebox bootstrap --secrets-file F "intent…"` merges a file of `KEY=VALUE`
+  - `dridock bootstrap --secrets-file F "intent…"` merges a file of `KEY=VALUE`
     lines (for non-GitHub creds, or a specific scoped PAT).
 - **Trust boundary:** secrets are host-local, human-authorized material — treated
   like auth tokens, not like untrusted input.
 
 ## Decisions
 
-1. **Scope — full scaffolder by default.** `claudebox bootstrap` stands up a whole
+1. **Scope — full scaffolder by default.** `dridock bootstrap` stands up a whole
    project: `git init` (if not already a repo), a starter layout
    (`README.md`, `workloads/`), the brief, and project config — then **boots
    claudebot** so it comes up with the mission loaded. Flags trim it back:
    - `--no-start` — scaffold but don't boot (host-Claude uses this, then tells Alan
-     `cd <proj> && claudebox` to enter).
-   - `--brief-only` — just `.claudebox/BRIEF.md` + config, no git/dirs/boot.
+     `cd <proj> && dridock` to enter).
+   - `--brief-only` — just `.dridock/BRIEF.md` + config, no git/dirs/boot.
    - `--brief-file F` / positional arg / stdin — where the intent text comes from.
    - `--force` — overwrite an existing brief.
 2. **BRIEF.md is committed.** It travels with the repo so any future host-Claude
    session, claudebot restart, or teammate sees the mission. Only
-   `.claudebox/config.yml` (machine-local VM sizing) stays gitignored.
+   `.dridock/config.yml` (machine-local VM sizing) stays gitignored.
 3. **Two-way handoff.** The brief carries a **"Progress / handoff log"** section
    that claudebot maintains as it works, so the brief is the shared ledger a later
    session reads to catch up — not just write-once intent.
@@ -178,7 +182,7 @@ The entrypoint copies the **baked** `CLAUDE.md` template (container conventions,
 `cb-browser`, docker notes) into the workspace on claudebot's first boot. Bootstrap
 must not pre-create `CLAUDE.md` or it would suppress that. Instead, on first boot
 the entrypoint **prepends a one-block mission banner** to the baked `CLAUDE.md`
-pointing at `.claudebox/BRIEF.md` (guarded by a marker comment so it's done once).
+pointing at `.dridock/BRIEF.md` (guarded by a marker comment so it's done once).
 
 ## Trust note
 

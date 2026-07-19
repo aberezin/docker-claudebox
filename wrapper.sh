@@ -236,10 +236,10 @@ cb_guard_new_project() {
         printf "   Create a new dridock project at this path? [y/N] " >&2
         read -r ans
         case "$ans" in y|Y|yes|YES) return 0 ;; esac
-        echo "   aborted — cd to an existing project, or use 'claudebox bootstrap'." >&2
+        echo "   aborted — cd to an existing project, or use 'dridock bootstrap'." >&2
         return 1
     fi
-    echo "   aborting (non-interactive) — use 'claudebox bootstrap', or set DRIDOCK_ALLOW_NEW=1 to override." >&2
+    echo "   aborting (non-interactive) — use 'dridock bootstrap', or set DRIDOCK_ALLOW_NEW=1 to override." >&2
     return 1
 }
 
@@ -304,21 +304,21 @@ cb_harness_sync() {
     local root="$CB_PROJECT_ROOT" repair=0 build_log rc pattern
     while [ $# -gt 0 ]; do case "$1" in
         --repair)   repair=1 ;;
-        -h|--help)  echo "usage: claudebox harness sync [--repair]  (--repair: on BuildKit snapshot corruption, auto-prune cb-infra cache and retry)" >&2; return 0 ;;
-        *)          echo "claudebox harness sync: unknown arg '$1'" >&2; return 1 ;;
+        -h|--help)  echo "usage: dridock harness sync [--repair]  (--repair: on BuildKit snapshot corruption, auto-prune cb-infra cache and retry)" >&2; return 0 ;;
+        *)          echo "dridock harness sync: unknown arg '$1'" >&2; return 1 ;;
     esac; shift; done
     if ! cb_is_framework_dev "$root"; then
-        echo "❌ claudebox harness sync: $root is not a claudebox harness fork (no wrapper.sh with DRIDOCK_VERSION= or CLAUDEBOX_VERSION= at its root)." >&2
+        echo "❌ dridock harness sync: $root is not a dridock harness fork (no wrapper.sh with DRIDOCK_VERSION= or legacy CLAUDEBOX_VERSION= at its root)." >&2
         echo "   This command rebuilds the cb-infra image from a harness checkout; it's meaningful only when developing the harness itself." >&2
         return 1
     fi
     if [ -f /.dockerenv ]; then
-        echo "❌ claudebox harness sync: must run on the Mac (colima backend) to update cb-infra." >&2
+        echo "❌ dridock harness sync: must run on the Mac (colima backend) to update cb-infra." >&2
         echo "   From inside a container the docker backend would build on this VM's own daemon, not cb-infra." >&2
-        echo "   On your Mac:  cd $(printf '%q' "$root") && claudebox harness sync   (equivalent: make build)" >&2
+        echo "   On your Mac:  cd $(printf '%q' "$root") && dridock harness sync   (equivalent: make build)" >&2
         return 1
     fi
-    echo "🔨 claudebox harness sync: rebuilding cb-infra image from $root (this is 'make build' on the colima backend)…"
+    echo "🔨 dridock harness sync: rebuilding cb-infra image from $root (this is 'make build' on the colima backend)…"
     if [ "$repair" = 0 ]; then
         ( cd "$root" && make build )
         return $?
@@ -337,7 +337,7 @@ cb_harness_sync() {
     if ! grep -qE "$pattern" "$build_log"; then
         echo "" >&2
         echo "❌ build failed, but not with a recognized BuildKit corruption pattern — --repair can't help here." >&2
-        echo "   Fix the underlying error and retry with 'claudebox harness sync' (no --repair)." >&2
+        echo "   Fix the underlying error and retry with 'dridock harness sync' (no --repair)." >&2
         return "$rc"
     fi
     echo "" >&2
@@ -355,7 +355,7 @@ cb_harness_sync() {
     echo "" >&2
     echo "❌ still failing after a nuclear cache prune. Next thing to try is a colima restart:" >&2
     echo "     colima stop -p cb-infra && colima start -p cb-infra" >&2
-    echo "     claudebox harness sync   (or: make build)" >&2
+    echo "     dridock harness sync   (or: make build)" >&2
     return "$rc"
 }
 
@@ -614,7 +614,7 @@ cb_lima_home() {
 # `colima start` hijacks the global active docker context. We address every VM
 # explicitly via `docker --context`, so restore the human's previously-active
 # context afterward — otherwise their bare `docker` would silently point at a
-# claudebox VM instead of `default`.
+# dridock VM instead of `default`.
 cb_colima_start() {
     local prev rc
     prev="$(docker context show 2>/dev/null)"
@@ -708,8 +708,8 @@ cb_ensure_vm() {
         hard="$(cb_machine_get vm.hard_max)"
         decision="$(cb_vm_limit_decision "$count" "$warn" "$hard")"
         case "$decision" in
-            deny) echo "❌ $count claudebox VMs already running (hard_max=$hard). Free one with 'claudebox down' or 'claudebox destroy'." >&2; return 1 ;;
-            warn) echo "⚠️  $count claudebox VMs running (warn_max=$warn); starting another." >&2 ;;
+            deny) echo "❌ $count dridock VMs already running (hard_max=$hard). Free one with 'dridock down' or 'dridock destroy'." >&2; return 1 ;;
+            warn) echo "⚠️  $count dridock VMs running (warn_max=$warn); starting another." >&2 ;;
         esac
         cpu="$(cb_vm_get "$root" cpu)"
         mem="$(cb_vm_get "$root" memory)"
@@ -741,7 +741,7 @@ cb_vm_down() {
     local profile; profile="$(cb_project_profile "$1")"
     cb_guard_profile "$profile" || return 1
     if [ "$(cb_vm_status "$profile")" = "absent" ]; then echo "no VM for this project ($profile)"; return 0; fi
-    echo "⏹  stopping colima VM '$profile' (keeps disk; 'claudebox' restarts it)..."
+    echo "⏹  stopping colima VM '$profile' (keeps disk; 'dridock' restarts it)..."
     colima stop -p "$profile"
 }
 
@@ -793,7 +793,7 @@ cb_vm_ls() {
     proj="$(printf '%s\n' "$rows"  | awk -F'\t' '$1 ~ /^cb-/ && $1 != "cb-infra"')"
     infra="$(printf '%s\n' "$rows" | awk -F'\t' '$1 == "cb-infra" { print $2 }')"
     if [ -z "$proj" ]; then
-        echo "no claudebox project VMs"
+        echo "no dridock project VMs"
     else
         { printf 'PROFILE\tSTATUS\n'; printf '%s\n' "$proj"; } | column -t -s "$(printf '\t')"
     fi
@@ -806,7 +806,7 @@ cb_h() { awk -v b="${1:-0}" 'BEGIN{split("B K M G T P",u," ");i=1;while(b>=1024&
 # actual host KB used by a path (0 if missing) — measures the sparse file's real footprint
 cb_du_k() { if [ -e "$1" ]; then du -sk "$1" 2>/dev/null | awk '{print $1; exit}'; else echo 0; fi; }
 
-# `claudebox vm usage` — how much Mac disk each claudebox VM (and each orphaned disk)
+# `claudebox vm usage` — how much Mac disk each dridock VM (and each orphaned disk)
 # actually occupies. VM disks are sparse: the "MAX" cap rarely reflects real usage, and
 # `colima delete` leaks disks, so this surfaces both live footprint and reclaimable junk.
 cb_vm_usage() {
@@ -841,11 +841,11 @@ cb_vm_usage() {
         fi
     done < <(LIMA_HOME="$lh" limactl disk ls 2>/dev/null | awk 'NR>1{iu=(NF>=5?$5:""); print $1"\t"$2"\t"iu}')
 
-    echo "claudebox VM disk usage (actual on the Mac / provisioned max):"
+    echo "dridock VM disk usage (actual on the Mac / provisioned max):"
     { printf 'PROFILE\tSTATUS\tON-DISK\tMAX\n'; printf '%b' "$live"; } | column -t -s "$(printf '\t')"
     if [ -n "$orph" ]; then
         echo ""
-        echo "orphaned disks — no VM owns these (reclaim with 'claudebox vm gc'):"
+        echo "orphaned disks — no VM owns these (reclaim with 'dridock vm gc'):"
         { printf 'DISK\tON-DISK\tMAX\n'; printf '%b' "$orph"; } | column -t -s "$(printf '\t')"
     fi
     echo ""
@@ -855,7 +855,7 @@ cb_vm_usage() {
 }
 
 # `claudebox vm gc` — reclaim Mac disk: delete orphaned lima disks colima left behind,
-# then fstrim every running claudebox VM (cb-* incl. cb-infra) so freed blocks return to
+# then fstrim every running dridock VM (cb-* incl. cb-infra) so freed blocks return to
 # macOS. The human's `default` VM is deliberately left untouched.
 cb_vm_gc() {
     local lh before after freed orphans n p trimmed=0 _pr
@@ -885,7 +885,7 @@ cb_vm_gc() {
         echo "   (none)"
     fi
 
-    echo "🖼  pruning dangling images + BuildKit build cache in running claudebox VMs…"
+    echo "🖼  pruning dangling images + BuildKit build cache in running dridock VMs…"
     while IFS= read -r p; do
         [ -n "$p" ] || continue
         # dangling images AND build cache — build cache is the real accumulator on
@@ -896,7 +896,7 @@ cb_vm_gc() {
         printf '   - %-14s images %s · build cache %s\n' "$p" "${_pi:-0B}" "${_pb:-0B}"
     done < <(_cb_vm_list_json | cb_parse_vm_lines | awk -F'\t' '$1 ~ /^cb-/ && $2 == "Running" {print $1}')
 
-    echo "🧻 fstrim on running claudebox VMs (return freed blocks to macOS)…"
+    echo "🧻 fstrim on running dridock VMs (return freed blocks to macOS)…"
     while IFS= read -r p; do
         [ -n "$p" ] || continue
         printf '   - %s … ' "$p"
@@ -905,7 +905,7 @@ cb_vm_gc() {
         if colima ssh -p "$p" -- sudo fstrim -av </dev/null >/dev/null 2>&1; then echo "ok"; trimmed=$((trimmed + 1))
         else echo "skipped (unreachable?)"; fi
     done < <(_cb_vm_list_json | cb_parse_vm_lines | awk -F'\t' '$1 ~ /^cb-/ && $2 == "Running" {print $1}')
-    [ "$trimmed" -eq 0 ] && echo "   (no running claudebox VMs)"
+    [ "$trimmed" -eq 0 ] && echo "   (no running dridock VMs)"
 
     after="$(cb_du_k "$lh")"
     freed=$(( (before - after) * 1024 )); [ "$freed" -lt 0 ] && freed=0
@@ -997,10 +997,10 @@ cb_checkversion() {
     local wv="$DRIDOCK_VERSION" civ pv cid ctx cmp all=0
     while [ $# -gt 0 ]; do case "$1" in
         --all|-a) all=1 ;;
-        -h|--help) echo "usage: claudebox checkversion [--all]  (--all = scan every cb-* project VM in addition to cb-infra + this project)" >&2; return 0 ;;
+        -h|--help) echo "usage: dridock checkversion [--all]  (--all = scan every cb-* project VM in addition to cb-infra + this project)" >&2; return 0 ;;
         *) echo "checkversion: unknown arg '$1'" >&2; return 1 ;;
     esac; shift; done
-    echo "claudebox versions:"
+    echo "dridock versions:"
     echo "  wrapper (host):        $wv"
     civ="$(cb_image_status "$(cb_infra_context)")"
     echo "  image (cb-infra):      $civ"
@@ -1038,7 +1038,7 @@ cb_checkversion() {
     # we don't also print misleading "make build" advice.
     if [ -n "$cid" ] && [ -n "$cver" ] && [ "$cver" = "$wv" ] && [ "$pver" != "$cver" ]; then
         echo "ℹ️  cb-infra is current ($cver); this project's VM still runs ${pver:-$pv}."
-        echo "   → run 'claudebox' in this project — it auto-reseeds $cver and recreates the container"
+        echo "   → run 'dridock' in this project — it auto-reseeds $cver and recreates the container"
         echo "     (session preserved). No rebuild needed."
         return 0
     fi
@@ -1075,7 +1075,7 @@ cb_checkversion() {
 cb_info() {
     local root="$1" id ctx profile status ip host cfg sf dd pv civ cname cstat keys
     id="$(cb_project_id_ro "$root")"
-    echo "claudebox — info"
+    echo "dridock — info"
     echo ""
     echo "versions:"
     printf '  %-18s %s   (%s)\n' "wrapper (host):" "$DRIDOCK_VERSION" "$(command -v claudebox 2>/dev/null || echo "$0")"
@@ -1089,7 +1089,7 @@ cb_info() {
     echo "project:"
     printf '  %-18s %s\n' "workspace:" "$root"
     if [ -z "$id" ]; then
-        echo "  (not a claudebox project yet — run 'claudebox' here to initialize)"
+        echo "  (not a dridock project yet — run 'dridock' here to initialize)"
     else
         status="$(cb_vm_status "$profile")"
         printf '  %-18s %s\n' "project id:" "$id"
@@ -1110,9 +1110,9 @@ cb_info() {
             printf '  %-18s %s\n' "VM IP:" "$ip"
             printf '  %-18s %s\n' "browse:" "http://$ip:<port>   (or http://localhost:<port>, collides across projects)"
         else
-            printf '  %-18s %s\n' "VM IP:" "(VM not running — start with 'claudebox')"
+            printf '  %-18s %s\n' "VM IP:" "(VM not running — start with 'dridock')"
         fi
-        if [ -n "$host" ]; then printf '  %-18s %s   → http://%s:<port>   ('\''claudebox net'\'' for the /etc/hosts line)\n' "hostname:" "$host" "$host"
+        if [ -n "$host" ]; then printf '  %-18s %s   → http://%s:<port>   ('\''dridock net'\'' for the /etc/hosts line)\n' "hostname:" "$host" "$host"
         else printf '  %-18s %s\n' "hostname:" "(unset — set network.hostname in config.yml for a friendly name)"; fi
         printf '  %-18s %s\n' "cb-net:" "cb-net   (attach sibling workloads: docker run --network cb-net ...)"
     fi
@@ -1221,7 +1221,7 @@ cb_profiles_cmd() {
     else echo "  (none — add e.g.  profiles: [typescript, python]  to ${_dotname}/config.yml)"; fi
     echo ""
     avail="$(docker --context "$(cb_infra_context)" run --rm --entrypoint sh "$CLAUDE_IMAGE" -c \
-        'for f in /usr/local/lib/claudebox/profiles/*.sh; do [ -f "$f" ] || continue; printf "%s\t%s\n" "$(basename "$f" .sh)" "$(sed -n "s/^# summary: //p" "$f" | head -1)"; done' 2>/dev/null)"
+        'for f in /usr/local/lib/dridock/profiles/*.sh /usr/local/lib/claudebox/profiles/*.sh; do [ -f "$f" ] || continue; printf "%s\t%s\n" "$(basename "$f" .sh)" "$(sed -n "s/^# summary: //p" "$f" | head -1)"; done | sort -u -k1,1' 2>/dev/null)"
     if [ -n "$avail" ]; then
         echo "available (baked in the image):"
         printf '%s\n' "$avail" | awk -F'\t' '{printf "  %-14s %s\n", $1, $2}'
@@ -1276,7 +1276,7 @@ cb_network_info() {
     # poll — the reachable IP lags VM start by a couple seconds
     ip="$(cb_wait_reachable "$profile")"
     if [ -z "$ip" ]; then
-        echo "🌐 VM $profile has no reachable IP yet (is it running? try 'claudebox')."
+        echo "🌐 VM $profile has no reachable IP yet (is it running? try 'dridock')."
         return 0
     fi
     echo "🌐 project VM $profile: $ip"
@@ -1285,14 +1285,14 @@ cb_network_info() {
     if [ -z "$host" ]; then
         local suggest; suggest="$(basename "$root")"
         echo "   no network.hostname set (so no friendly name yet). To add one, run:"
-        echo "       claudebox net $suggest"
+        echo "       dridock net $suggest"
         echo "   — that sets it, then prints a one-line /etc/hosts entry for http://$suggest:<port>"
         return 0
     fi
     line="$ip  $host"
     case "$(cb_hosts_status /etc/hosts "$host" "$ip")" in
         ok)      echo "   /etc/hosts: $host → $ip ✓   browse  http://$host:<port>" ;;
-        missing) echo "   add to /etc/hosts (claudebox won't edit it — one-time, your call):"
+        missing) echo "   add to /etc/hosts (dridock won't edit it — one-time, your call):"
                  echo "       echo \"$line\" | sudo tee -a /etc/hosts" ;;
         stale)   echo "   /etc/hosts has a STALE IP for $host — update that line to:"
                  echo "       $line" ;;
@@ -1432,7 +1432,7 @@ PYEOF
     echo "       Chrome can't resolve cb-net container names; use shot/script for those."
     echo "   profile: $profile   (override with DRIDOCK_CDP_PROFILE)"
     echo "   restart claudebot (just re-run \`claudebox\`) to pick up the bridge URL."
-    echo "   stop:  claudebox browser-bridge down"
+    echo "   stop:  dridock browser-bridge down"
     echo "   ⚠️  this hands claudebot full control of that Chrome instance (dedicated profile)."
 }
 
@@ -1476,7 +1476,7 @@ cb_host_agent_up() {
     if kill -0 "$(cat "$home/pid")" 2>/dev/null; then
         echo "🛰  host agent up on $CB_HOST_AGENT_BIND:$CB_HOST_AGENT_PORT (allowlisted colima/limactl)"
         echo "   ⚠️  this lets a claudebot run allowlisted colima/limactl ON YOUR MAC — trusted harness dev only."
-        echo "   restart your dev claudebot to pick up the agent; stop:  claudebox host-agent down"
+        echo "   restart your dev claudebot to pick up the agent; stop:  dridock host-agent down"
     else
         echo "❌ host agent failed to start — see $home/log" >&2; tail -3 "$home/log" >&2; return 1
     fi
@@ -1491,7 +1491,7 @@ cb_host_agent_status() {
     local home; home="$(cb_host_agent_home)"
     if [ -f "$home/pid" ] && kill -0 "$(cat "$home/pid" 2>/dev/null)" 2>/dev/null; then
         echo "host agent: UP ($CB_HOST_AGENT_BIND:$CB_HOST_AGENT_PORT, pid $(cat "$home/pid"))"
-    else echo "host agent: down (enable with 'claudebox host-agent up')"; fi
+    else echo "host agent: down (enable with 'dridock host-agent up')"; fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1866,15 +1866,15 @@ CB_PROJECT_ROOT="$(cb_project_root "$PWD")"
 dbg "CB_PROJECT_ROOT=$CB_PROJECT_ROOT"
 case "${1:-}" in
     "")
-        # Bare `claudebox` (no args) prints version + hint. Explicit `claudebox start`
+        # Bare `dridock` (no args) prints version + hint. Explicit `dridock start`
         # is now required to launch the claudebot (#12, 2.24.0). Rationale: reduces
-        # accidental container starts from muscle-typing `claudebox` in the wrong dir,
+        # accidental container starts from muscle-typing `dridock` in the wrong dir,
         # and matches the reflex-inspection habit for most CLIs (bare = info).
-        printf 'claudebox %s\n' "$DRIDOCK_VERSION"
+        printf 'dridock %s\n' "$DRIDOCK_VERSION"
         printf '\n'
-        printf '  claudebox start                start/attach the claudebot for $PWD\n'
-        printf '  claudebox start -p "<prompt>"  one-shot programmatic run\n'
-        printf '  claudebox --help               full help\n'
+        printf '  dridock start                start/attach the claudebot for $PWD\n'
+        printf '  dridock start -p "<prompt>"  one-shot programmatic run\n'
+        printf '  dridock --help               full help\n'
         exit 0
         ;;
     start)
@@ -1884,14 +1884,15 @@ case "${1:-}" in
         ;;
     -h|--help|help)
         cat <<HELP
-claudebox $DRIDOCK_VERSION — run Claude Code in a per-project Colima VM.
+dridock $DRIDOCK_VERSION — run Claude Code in a per-project Colima VM.
+             (renamed from 'claudebox' in 3.0; 'CLAUDEBOX_*' env vars still accepted.)
 
 USAGE
-  claudebox start [claude args...]  start/attach the interactive claudebot for \$PWD
-  claudebox start -p "<prompt>" ... one-shot programmatic run (JSON via --output-format)
-  claudebox <command>               a management command (below)
-  claudebox                         print version + start hint
-  claudebox completion bash         emit a bash completion script (installed by install.sh)
+  dridock start [claude args...]  start/attach the interactive claudebot for \$PWD
+  dridock start -p "<prompt>" ... one-shot programmatic run (JSON via --output-format)
+  dridock <command>               a management command (below)
+  dridock                         print version + start hint
+  dridock completion bash         emit a bash completion script (installed by install.sh)
 
 PROJECT
   bootstrap [--gh-token] [...]      scaffold a project + mission brief (see --help on it)
@@ -1946,12 +1947,12 @@ HELP
             ls|list|"")  cb_vm_ls; exit 0 ;;
             usage|df)    cb_vm_usage; exit $? ;;
             gc)          cb_vm_gc; exit $? ;;
-            *) echo "usage: claudebox vm [ls|usage|gc]" >&2; exit 1 ;;
+            *) echo "usage: dridock vm [ls|usage|gc]" >&2; exit 1 ;;
         esac
         ;;
     version)
         # the host wrapper's own semver (cheap; no docker). See also: checkversion.
-        printf 'claudebox %s\n' "$DRIDOCK_VERSION"; exit 0
+        printf 'dridock %s\n' "$DRIDOCK_VERSION"; exit 0
         ;;
     completion)
         # #13 (2.24.0): emit a shell completion script. Bash for now — zsh users with

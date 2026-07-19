@@ -1,12 +1,12 @@
 # Design: Docker disk management under the per-project VM
 
 **Status:** Accepted standard — produced by a [framework consult](framework-consult.md).
-**Applies to:** every claudebox project (any claudebot that builds/pulls docker images).
+**Applies to:** every dridock project (any claudebot that builds/pulls docker images).
 See [per-project-vm.md](per-project-vm.md) for the VM model this builds on.
 
 ## Summary
 
-Each claudebox project runs in **its own Colima VM with a single overlay disk**. That
+Each dridock project runs in **its own Colima VM with a single overlay disk**. That
 one disk holds *both* the project's docker data (images, containers, and BuildKit build
 cache) *and* the claudebot container's `/tmp` — where the Claude Code **Bash tool**
 writes `/tmp/claude-501/<id>` for every command. Docker bloat and the Bash tool
@@ -52,7 +52,7 @@ Rules of thumb:
 
 - **Build cache is the thing that grows without bound**, not tagged images. `docker
   builder prune -f` after each `docker compose build` iteration is the single most
-  effective habit. `docker image prune` alone (which is all the host `claudebox vm gc`
+  effective habit. `docker image prune` alone (which is all the host `dridock vm gc`
   does per VM) does **not** touch build cache.
 - **Detached workloads pin their images.** `docker image prune -af` won't remove an
   image a running container uses — stop throwaway test containers first.
@@ -61,7 +61,7 @@ Rules of thumb:
 
 ## In-VM disk visibility
 
-You cannot manage what you cannot see, and the host tools (`claudebox vm usage`) are on
+You cannot manage what you cannot see, and the host tools (`dridock vm usage`) are on
 the Mac — not reachable from inside the container.
 
 - `df -h /` — the one number that matters: free space on the shared overlay. Watch it
@@ -77,17 +77,17 @@ Host-side, the human has the complementary view and reclaim path:
 
 | Command (on the Mac) | What it does |
 |---|---|
-| `claudebox vm usage` | per-VM **actual** Mac footprint (VM disks are sparse) + orphaned disks |
-| `claudebox vm gc` | reclaim: delete orphaned lima disks + prune images **and build cache** + `fstrim` running cb-* VMs so freed guest blocks return to macOS |
+| `dridock vm usage` | per-VM **actual** Mac footprint (VM disks are sparse) + orphaned disks |
+| `dridock vm gc` | reclaim: delete orphaned lima disks + prune images **and build cache** + `fstrim` running cb-* VMs so freed guest blocks return to macOS |
 
 Note the sparse-disk subtlety (see [per-project-vm.md](per-project-vm.md)): pruning
 *inside* the guest frees guest space immediately, but the **host** raw disk file keeps
-its high-water mark until a TRIM — which `claudebox vm gc` issues via `fstrim`. So "I
+its high-water mark until a TRIM — which `dridock vm gc` issues via `fstrim`. So "I
 pruned but the Mac still shows the VM as huge" is expected until `gc`.
 
 ## VM disk sizing
 
-The per-project disk is set in `.claudebox/config.yml`:
+The per-project disk is set in `.dridock/config.yml`:
 
 ```yaml
 vm:
@@ -100,9 +100,9 @@ vm:
   actually used, so a project that iterates on Next/Playwright images can safely bump
   `disk: 100GiB` with little downside.
 - **Growing the disk needs a VM recreate** — Colima sizes the disk at VM creation.
-  Change `vm.disk`, then `claudebox down` and start again (a bigger `disk:` on an
+  Change `vm.disk`, then `dridock down` and start again (a bigger `disk:` on an
   existing VM is not applied live).
-- The `cb-infra` image-store VM is separate (`CLAUDEBOX_INFRA_DISK`, install-time only,
+- The `cb-infra` image-store VM is separate (`DRIDOCK_INFRA_DISK`, install-time only,
   default 40) and is not where your build churn lands — that's your project VM.
 
 ### Budget rule of thumb
@@ -122,10 +122,10 @@ Prune per iteration and this never approaches the 60 GiB cap.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `ENOSPC: no space left on device, mkdir '/tmp/claude-501'` on **every** Bash call | Shared overlay full; Bash tool can't create its scratch dir | You can't shell out. Use the **Write-tool escape** (below) to report, then have the human run `docker system prune -af` / `claudebox vm gc` on the Mac. Bash recovers once `/` has room. |
+| `ENOSPC: no space left on device, mkdir '/tmp/claude-501'` on **every** Bash call | Shared overlay full; Bash tool can't create its scratch dir | You can't shell out. Use the **Write-tool escape** (below) to report, then have the human run `docker system prune -af` / `dridock vm gc` on the Mac. Bash recovers once `/` has room. |
 | `df -h /` "Use%" in the 90s mid-session | Build cache / unused images accumulating | `docker builder prune -f`, then `docker image prune -af` |
-| Pruned inside the VM but `claudebox vm usage` still shows it huge | Sparse host disk keeps its high-water mark until TRIM | `claudebox vm gc` (fstrims running cb-* VMs) |
-| Disk fills fast on an image-heavy project even with pruning | 60 GiB too small for the workload | Raise `vm.disk` in `.claudebox/config.yml`, `claudebox down`, restart |
+| Pruned inside the VM but `dridock vm usage` still shows it huge | Sparse host disk keeps its high-water mark until TRIM | `dridock vm gc` (fstrims running cb-* VMs) |
+| Disk fills fast on an image-heavy project even with pruning | 60 GiB too small for the workload | Raise `vm.disk` in `.dridock/config.yml`, `dridock down`, restart |
 | `docker image prune` frees little though the disk is full | Build **cache** (not images) is the hog; `image prune` doesn't touch it | `docker builder prune -f` (or `docker system prune -f`) |
 
 ## Graceful ENOSPC & the out-of-band report path
@@ -138,8 +138,8 @@ scripts and will themselves fail with ENOSPC.
 a shell or a tempdir. Both the framework-bug drop and the consult store are **host
 bind-mounts** present in every container:
 
-- Framework bugs → `/home/claude/framework-bugs/` (env `CLAUDEBOX_FRAMEWORK_BUGS_DIR`)
-- Consults → `/home/claude/framework-consult/` (env `CLAUDEBOX_CONSULT_DIR`)
+- Framework bugs → `/home/claude/framework-bugs/` (env `DRIDOCK_FRAMEWORK_BUGS_DIR`)
+- Consults → `/home/claude/framework-consult/` (env `DRIDOCK_CONSULT_DIR`)
 
 So when Bash is failing on ENOSPC, **Write a Markdown file straight into the drop dir** —
 mirror the layout `cb-report-bug` would produce:
@@ -164,16 +164,16 @@ the VM overlay is full. Filed via the Write tool because cb-report-bug (Bash) al
 ```
 
 This reaches the maintainer exactly as `cb-report-bug` output does (same dir, same
-collection path `claudebox framework-bugs`). Then tell the human to reclaim disk from the
-Mac (`docker system prune -af` / `claudebox vm gc`); Bash recovers once `/` has room.
+collection path `dridock framework-bugs`). Then tell the human to reclaim disk from the
+Mac (`docker system prune -af` / `dridock vm gc`); Bash recovers once `/` has room.
 
 The **bare, guidance-free ENOSPC** message the Bash tool surfaces (a raw Node error with
-no hint about the VM disk) is a **Claude Code upstream** concern, not something claudebox
-can fix in the tool itself. claudebox mitigates it with this doc, the baked "Disk
+no hint about the VM disk) is a **Claude Code upstream** concern, not something dridock
+can fix in the tool itself. dridock mitigates it with this doc, the baked "Disk
 discipline" guidance, `cb-df`, prune-aware `vm gc`, and an optional startup disk MOTD —
 but the in-tool message improvement belongs upstream.
 
-## What claudebox bakes in
+## What dridock bakes in
 
 ### Cleanup mechanisms at a glance
 
@@ -182,9 +182,9 @@ Cleanup is spread across three layers because the disk problem shows up in three
 
 | Mechanism | Runs where | What it prunes | Trigger |
 |---|---|---|---|
-| Makefile `build` / `build-minimal` (2.20.1) | **cb-infra** daemon | dangling images + **BuildKit cache** (non-`-a`, unreferenced only) | every `make build` (or `claudebox harness sync`) |
-| `CLAUDEBOX_PRUNE_ON_START=1` (2.11.0, 2.15.3) | **project VMs** | BuildKit cache + dangling images | every container start (opt-in) |
-| `claudebox vm gc` (2.9.0) | all running `cb-*` VMs (incl. cb-infra) | orphaned lima disks + dangling images + **BuildKit cache** + `fstrim` | manual, on the Mac |
+| Makefile `build` / `build-minimal` (2.20.1) | **cb-infra** daemon | dangling images + **BuildKit cache** (non-`-a`, unreferenced only) | every `make build` (or `dridock harness sync`) |
+| `DRIDOCK_PRUNE_ON_START=1` (2.11.0, 2.15.3) | **project VMs** | BuildKit cache + dangling images | every container start (opt-in) |
+| `dridock vm gc` (2.9.0) | all running `cb-*` VMs (incl. cb-infra) | orphaned lima disks + dangling images + **BuildKit cache** + `fstrim` | manual, on the Mac |
 
 None of these is redundant — the Makefile keeps cb-infra tidy where builds happen,
 `PRUNE_ON_START` keeps a project VM tidy where runs happen, and `vm gc` is the manual
@@ -193,7 +193,7 @@ the sparse host raw disks). The nuclear escape hatch is always
 `docker --context colima-cb-<id> builder prune -af` (build cache) +
 `docker --context colima-cb-<id> system prune -af` (everything else) — reserved for when
 BuildKit's snapshotter has corrupted itself (rare but real). For the specific case of
-cb-infra BuildKit corruption during a rebuild, **`claudebox harness sync --repair`**
+cb-infra BuildKit corruption during a rebuild, **`dridock harness sync --repair`**
 (2.21.0) automates it: runs `make build`, greps stderr on failure for the corruption
 pattern, and if matched auto-prunes the cache and retries once.
 
@@ -204,13 +204,13 @@ pattern, and if matched auto-prunes the cache and retries once.
   escape — so every claudebot self-diagnoses.
 - **`cb-df`** — the in-VM disk snapshot helper (see [In-VM disk visibility](#in-vm-disk-visibility)),
   following the [`cb-*` convention](convenience-scripts.md).
-- **Prune-aware `claudebox vm gc`** — the host reclaim command also prunes build cache
+- **Prune-aware `dridock vm gc`** — the host reclaim command also prunes build cache
   per VM (not only dangling images), because build cache is the real accumulator.
 - **Post-build cache prune on cb-infra** — the Makefile's `build` / `build-minimal`
   targets run `docker builder prune -f` (dangling BuildKit cache, non-`-a` so recently-
   used layers survive) after each build. Without this, cb-infra's BuildKit cache grew
   unbounded across rebuilds — a real 41 GB accumulation over four days of harness
-  iteration triggered the addition in 2.20.1. Since `claudebox harness sync` invokes
+  iteration triggered the addition in 2.20.1. Since `dridock harness sync` invokes
   `make build` under the hood, both paths get the same treatment.
 - **Startup disk MOTD** — when `/` is ≥85% full at container boot, the entrypoint injects a
   disk warning into the claudebot's context (via `--append-system-prompt`), so a claudebot
@@ -220,12 +220,12 @@ pattern, and if matched auto-prunes the cache and retries once.
 
 ### Opt-in hardening
 
-- **`CLAUDEBOX_PRUNE_ON_START=1`** — the entrypoint runs `docker builder prune -f` (build
+- **`DRIDOCK_PRUNE_ON_START=1`** — the entrypoint runs `docker builder prune -f` (build
   cache) AND `docker image prune -f` (dangling, untagged, unreferenced images) on every
   start, so both classes of accumulation are cleared on image-iterating projects. Best-effort
   and safe: `image prune -f` only touches untagged images with no container reference — never
   a tagged image, never a running container's image. Off by default.
-- **`CLAUDEBOX_TMPFS_TMP=<size>`** (e.g. `2g`, or `1`/`on` for 2g) — RAM-backs the
+- **`DRIDOCK_TMPFS_TMP=<size>`** (e.g. `2g`, or `1`/`on` for 2g) — RAM-backs the
   claudebot's `/tmp` so docker disk bloat **cannot** starve the Bash tool at all (its
   `/tmp/claude-501` scratch is then on RAM, not the shared overlay). This is the hardest
   isolation; use it for chronically disk-tight projects. `--tmpfs` applies to a fresh

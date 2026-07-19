@@ -1,4 +1,4 @@
-# Documenting claudebox
+# Documenting dridock
 
 How this fork's docs are organized, and the conventions to follow when you add or edit
 one. Keeping to these is what keeps a topic-split doc set navigable.

@@ -7,7 +7,7 @@
 ## TL;DR (2026-07-17 audit)
 
 **Zero cheap merges.** Upstream and this fork have architecturally diverged. At upstream
-`v2.0.0` (2026-07-04, commit `26c3bf8`) psyb0t rebased claudebox onto a shared
+`v2.0.0` (2026-07-04, commit `26c3bf8`) psyb0t rebased the upstream project onto a shared
 `aicodebox` substrate — a full architectural fork. Every subsequent upstream commit
 (v2.0.1 → v2.0.10) sits on that substrate; none of them land cleanly on this fork's
 structure. The one pre-rebase commit (`f97ee89`, v1.14.1) bumps a pinned Claude CLI
@@ -61,7 +61,7 @@ Fork point: `6b71854` (upstream `v1.14.0-1-g6b71854`).
 | `68a43bb` | v2.0.5 | **Skip (post-rebase)** | Wrapper honors `CLAUDEBOX_FULL` env — aicodebox variant selection, not fork's. |
 | `533dd22` | v2.0.6 | **Skip (post-rebase)** | Restores interactive/one-shot defaults (auto-resume, permission bypass, system-hint) that the rebase inadvertently changed. Not applicable — fork never had that regression. |
 | `0137f30` | v2.0.7 | **Skip (post-rebase)** | Makes `Dockerfile.full npm install` resilient to transient registry failures — aicodebox Dockerfile.full, not fork's. Fork's `Dockerfile` has a similar concern but different resolution path (baked cb-infra + `--repair`). |
-| `205dec3` | v2.0.8 | **Skip (post-rebase)** | Persists `CLAUDEBOX_FULL` image-variant choice into the wrapper — aicodebox variant concept, not applicable (fork has `CLAUDEBOX_MINIMAL`, single-lane). |
+| `205dec3` | v2.0.8 | **Skip (post-rebase)** | Persists `CLAUDEBOX_FULL` image-variant choice into the wrapper — aicodebox variant concept, not applicable (fork has `DRIDOCK_MINIMAL`, single-lane; legacy `CLAUDEBOX_MINIMAL` still accepted). |
 | `177de4b` | v2.0.9 | **Skip (post-rebase)** | Puts `go` on PATH in the full image's non-login shells. Fork's `Dockerfile` already has this concern handled differently (baked `go` at image build; PATH set via full image's own layer). Could double-check the fork isn't leaking a similar bug — not an "cherry-pick this commit" candidate either way. |
 | `4cae961` | v2.0.10 | **Skip (post-rebase)** | Fixes a false "claude missing or broken" startup warning on the aicodebox substrate. Fork's entrypoint doesn't emit that warning. |
 

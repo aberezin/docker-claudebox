@@ -7,7 +7,12 @@
 > issue. Existing profiles migrate as-is; `profiles:` remains a backward-compat alias
 > for one deprecation cycle. Content below describes the current 2.x profile system.
 
-As claudebox grows, a claudebot needs project-appropriate tooling — a TypeScript
+> **Rebrand note (3.0):** the project dir moves from `.claudebox/` to `.dridock/`; the
+> profile installer path moves from `/usr/local/lib/claudebox/profiles/` to
+> `/usr/local/lib/dridock/profiles/`. 2.x paths continue to work during the deprecation
+> cycle.
+
+As dridock grows, a claudebot needs project-appropriate tooling — a TypeScript
 language server here, Python there — without baking *every* tool into *every* image or
 making each consumer hand-write `init.d` scripts. **Profiles** are the middle layer: a
 project names the bundles it wants, and the harness turns them on.
@@ -15,8 +20,8 @@ project names the bundles it wants, and the harness turns them on.
 ## The model
 
 - A **profile** is a named, curated installer the fork ships in the image at
-  `/usr/local/lib/claudebox/profiles/<name>.sh`, with a `# summary:` header.
-- A project **opts in** via `.claudebox/config.yml`:
+  `/usr/local/lib/dridock/profiles/<name>.sh`, with a `# summary:` header.
+- A project **opts in** via `.dridock/config.yml`:
 
   ```yaml
   profiles: [typescript, python]      # flow style
@@ -29,7 +34,7 @@ project names the bundles it wants, and the harness turns them on.
 - On first enable, the entrypoint runs the matching installer **once** (marker in
   `~/.claude/.profile-<name>`, set only on success so an offline failure retries next
   start), as the `claude` user. Adding a profile later takes effect on the next
-  `claudebox` run — no container recreation needed.
+  `dridock` run — no container recreation needed.
 - `init.d/*.sh` remains the **escape hatch** for anything a profile doesn't cover.
 
 ## Baked binaries vs. installed-by-profile
@@ -65,16 +70,16 @@ bakes the common servers; `minimal` bakes none and leans entirely on profiles.
 ## Using them
 
 ```bash
-claudebox profiles          # list this project's enabled profiles + the ones available in the image
-# then edit .claudebox/config.yml → profiles: [typescript], and run:
-claudebox                    # the entrypoint installs each enabled profile once
+dridock profiles          # list this project's enabled profiles + the ones available in the image
+# then edit .dridock/config.yml → profiles: [typescript], and run:
+dridock                    # the entrypoint installs each enabled profile once
 ```
 
 ## Adding a profile (maintainer)
 
 1. Add `profiles/<name>.sh` — an executable with a `# summary:` header that installs
    whatever the bundle needs (enable a plugin, and/or install a server binary).
-2. It's `COPY`d to `/usr/local/lib/claudebox/profiles` and `chmod +x`'d by the
+2. It's `COPY`d to `/usr/local/lib/dridock/profiles` and `chmod +x`'d by the
    `Dockerfile` (already wired for the `profiles/` dir).
 3. If it needs a heavy binary, install it in the profile script; if the binary is
    cheap+common, consider baking it in the image instead (see the policy above).
@@ -84,6 +89,6 @@ claudebox                    # the entrypoint installs each enabled profile once
 
 - [convenience-scripts.md](convenience-scripts.md) — the `cb-*` command convention (the
   same "shipped, self-describing, `init.d` as escape hatch" philosophy).
-- [per-project-vm.md](per-project-vm.md) — `.claudebox/config.yml` and per-project `~/.claude`.
+- [per-project-vm.md](per-project-vm.md) — `.dridock/config.yml` and per-project `~/.claude`.
 - [customization.md](../customization.md) — `init.d` hooks and plugins (the escape hatch).
 - The top-level `CLAUDE.md` — conventions for adding profiles.

@@ -1,4 +1,4 @@
-# claudebox
+# dridock
 
 **A sandbox for Claude Code that makes `--dangerously-skip-permissions` reasonably safe. **
 
@@ -7,9 +7,9 @@ shared-nothing — its own daemon, its own images, its own network, its own
 credentials — so you can let the agent run fully autonomous without it ever
 touching your Mac or another project's data.
 
-Built on Anthropic's Claude Code CLI. Fork of [psyb0t/docker-claudebox](https://github.com/psyb0t/docker-claudebox),
-re-targeted for Colima with per-project isolation and multi-container
-orchestration.
+Built on Anthropic's Claude Code CLI. Fork of [psyb0t/docker-claudebox](https://github.com/psyb0t/docker-claudebox)
+(known as `claudebox` in 2.x; renamed to **dridock** in 3.0), re-targeted for Colima with
+per-project isolation and multi-container orchestration.
 
 ---
 
@@ -29,14 +29,14 @@ Mac. `~/.claude` credentials are one `docker cp` away. Two projects publishing
 port 8080 collide. And when Claude decides to spin up test workloads
 (API + database + browser), they land as siblings on that shared daemon too.
 
-claudebox draws the isolation boundary one level up: **every project gets its
+dridock draws the isolation boundary one level up: **every project gets its
 own Colima VM**.
 
 ---
 
-## What claudebox actually gives you
+## What dridock actually gives you
 
-Concretely, when you `cd` into a project and type `claudebox`:
+Concretely, when you `cd` into a project and type `dridock`:
 
 - A dedicated Colima VM (`cb-<project-id>`) boots for that project. First
   time takes ~30–60s; after that it's warm.
@@ -97,7 +97,7 @@ from touching your Mac filesystem — that's real. What they don't give you:
   standard for how the browser reaches the app you're testing, no
   rotating-IP handling, no per-project network.
 
-claudebox does not eliminate every risk devcontainers have (a compromised
+dridock does not eliminate every risk devcontainers have (a compromised
 Claude can still exfiltrate what's inside its own container — its own
 `~/.claude`, its own SSH key). It puts a hard boundary between projects and
 between a project and the Mac.
@@ -106,7 +106,7 @@ between a project and the Mac.
 
 Codespaces gives you a full remote VM per repo — the strongest isolation on
 this list. The tradeoffs are latency, cloud spend, cold-start time, and that
-your dev environment now lives on someone else's server. claudebox is the
+your dev environment now lives on someone else's server. dridock is the
 local equivalent for when you want the isolation without the roundtrip.
 
 ### vs. ad-hoc `docker run` with the Claude Code image
@@ -120,14 +120,14 @@ one-off; painful as a workflow.
 
 ### 1. Per-project isolation is at the VM level, not the container level
 
-Every `claudebox` project gets its own Colima profile (`cb-<id>`), which
+Every `dridock` project gets its own Colima profile (`cb-<id>`), which
 means its own Lima VM, its own `dockerd`, its own docker context, its own
 network. A Claude session working in project A cannot see, list, kill, or
 `docker cp` anything in project B — not because of a wrapper policy the
 agent could bypass, but because it's a different daemon on a different VM.
 
 The macOS `default` Colima profile is reserved for you and never touched by
-claudebox.
+dridock.
 
 Design: [per-project-vm.md](../design/per-project-vm.md).
 
@@ -147,7 +147,7 @@ freely inside it. The boundary holds because:
 ### 3. Docker-out-of-docker for real multi-tier test workloads
 
 Claude often needs to spin up a full app to test its own changes: an API,
-a database, a headless browser. In claudebox, `docker run` inside the
+a database, a headless browser. In dridock, `docker run` inside the
 container talks to the project VM's daemon, so those workloads:
 
 - Are real sibling containers with native performance (no nested VM tax).
@@ -157,8 +157,8 @@ container talks to the project VM's daemon, so those workloads:
 
 There's a published standard for multi-tier apps under this model — how
 tiers address each other (service plane vs browser plane), the rotating VM
-IP, CORS/allowed-origins from `$CLAUDEBOX_VM_IP` — so every Claude session
-in every claudebox project builds them the same way.
+IP, CORS/allowed-origins from `$DRIDOCK_VM_IP` — so every Claude session
+in every dridock project builds them the same way.
 
 Design: [n-tier-networking.md](../design/n-tier-networking.md).
 
@@ -168,17 +168,17 @@ The stuff that trips up any "put Claude in a container" setup, worked out
 and baked in:
 
 - **Rotating VM IPs self-heal.** Colima VMs get a new IP on restart. The
-  wrapper injects `$CLAUDEBOX_VM_IP` fresh on every launch, so hardcoding
+  wrapper injects `$DRIDOCK_VM_IP` fresh on every launch, so hardcoding
   it in `next.config.ts` or CORS allowlists (a top cause of "worked
   yesterday") isn't necessary.
 - **Disk starvation is diagnosed and recoverable.** The VM's overlay disk
   is shared between docker images and the Claude Code Bash tool's `/tmp`;
   when docker fills it, `ENOSPC` kills every shell command including the
-  bug-report tool. There's a runbook (`cb-df`, `CLAUDEBOX_PRUNE_ON_START`,
-  a Write-tool escape when Bash is down, `claudebox vm gc` from the Mac)
+  bug-report tool. There's a runbook (`cb-df`, `DRIDOCK_PRUNE_ON_START`,
+  a Write-tool escape when Bash is down, `dridock vm gc` from the Mac)
   and it's built into the claudebot's baked guidance so it self-diagnoses.
 - **Secrets never touch the command line.** Credentials live in a
-  gitignored `.claudebox/secrets.env` (chmod 600), get re-injected on every
+  gitignored `.dridock/secrets.env` (chmod 600), get re-injected on every
   container start, and survive `docker start` (which normally can't take
   new env). The pattern is enforced end-to-end and baked into the guidance
   Claude follows inside every project.
@@ -204,16 +204,16 @@ don't prompt for your password).
 limactl sudoers | sudo tee /etc/sudoers.d/lima
 
 # clone and install (builds the image locally, no docker hub pull)
-git clone <your-fork-url> claudebox && cd claudebox
+git clone <your-fork-url> dridock && cd dridock
 ./install.sh
 
 # scaffold a project with a mission brief
 mkdir project-a && cd project-a
-claudebox bootstrap "Build a 3-tier app: React UI, Node API, Postgres."
+dridock bootstrap "Build a 3-tier app: React UI, Node API, Postgres."
 
 # or drop into interactive mode in an existing repo
 cd my-existing-repo
-claudebox
+dridock
 ```
 
 First run in a project boots the VM (~30–60s) and starts Claude. Subsequent
@@ -223,9 +223,9 @@ Full setup: [README](../../README.md).
 
 ---
 
-## When claudebox is not the right choice
+## When dridock is not the right choice
 
-- **You're on Windows or Linux.** claudebox targets macOS + Colima
+- **You're on Windows or Linux.** dridock targets macOS + Colima
   specifically. Upstream `docker-claudebox` is Docker Desktop-agnostic and
   fits a Windows/Linux workflow better.
 - **You don't want the VM overhead.** A dedicated VM per project reserves
@@ -233,7 +233,7 @@ Full setup: [README](../../README.md).
   per project; VM disks are sparse, so the 100 GiB cap costs no Mac disk
   until used). Ten simultaneous projects on a 16 GB Mac isn't the target.
   The `hard_max` cap is 5 concurrent VMs by default.
-- **You want the same container to hit multiple projects.** claudebox is
+- **You want the same container to hit multiple projects.** dridock is
   shared-nothing. Cross-project image caches, shared global `~/.claude`,
   and shared workload networks are non-goals.
 - **You want your Claude to touch things outside its project.** The
@@ -250,4 +250,4 @@ Full setup: [README](../../README.md).
 - **[N-tier networking standard](../design/n-tier-networking.md)** — how Claude builds multi-container apps under this model.
 - **[Disk management](../design/disk-management.md)** — the ENOSPC runbook.
 - **[Bootstrap](../design/bootstrap.md)** — creating a project with a mission brief.
-- **[CHANGELOG](../../CHANGELOG.md)** — the 2.x fork's history.
+- **[CHANGELOG](../../CHANGELOG.md)** — the fork's history.

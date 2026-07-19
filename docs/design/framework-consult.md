@@ -4,17 +4,17 @@ A **consult** is a supervised conversation between a **claudebot** (a Claude bui
 app inside a project container) and **framework-Claude** (a Claude working on *this*
 harness repo on the Mac), mediated by a shared file substrate and gated by **you**. Its
 purpose: when a claudebot hits a problem that is really about the *harness/environment*
-and would **recur in any claudebox project**, it escalates — and the resolution becomes a
-**baked-in claudebox best practice** instead of something every project re-derives.
+and would **recur in any dridock project**, it escalates — and the resolution becomes a
+**baked-in dridock best practice** instead of something every project re-derives.
 
 The motivating case: the localhost-vs-VM-IP / CORS tangle in N-tier app dev. That is not
-one project's bug; it is an *N-tier-under-claudebox* problem. See the worked example that
+one project's bug; it is an *N-tier-under-dridock* problem. See the worked example that
 produced [n-tier-networking.md](n-tier-networking.md).
 
 ## Topology — peers, not parent/child
 
 The claudebot and framework-Claude are **independent peers**. The claudebot is a full
-Claude Code process in its own container/VM, launched by the human via `claudebox`, with
+Claude Code process in its own container/VM, launched by the human via `dridock`, with
 its own lifecycle (it can run under cron/Telegram/API with no framework-Claude present).
 It is **not** a sub-agent of framework-Claude; neither owns the other's lifecycle. The
 consult channel connects them through durable files + the human — never an in-memory
@@ -30,7 +30,7 @@ sub-agent is a child of framework-Claude — the *app-building claudebot never i
 
 A shared host dir, sibling to the framework-bugs drop:
 
-    $(cb_config_home)/claudebox/consult/            # = ~/.config/claudebox/consult
+    $(cb_config_home)/dridock/consult/            # = ~/.config/dridock/consult
       <thread-id>/
         meta                 # KEY=VALUE: id, project, title, status, created, updated, [layer], [commit]
         001-claudebot.md     # turns, numbered, author ∈ claudebot|framework|human
@@ -39,7 +39,7 @@ A shared host dir, sibling to the framework-bugs drop:
         proposed.diff        # optional: the drafting sub-agent's proposed harness patch
 
 It is bind-mounted into **every** container at `/home/claude/framework-consult` and the
-path is exposed as `CLAUDEBOX_CONSULT_DIR` — exactly the framework-bugs pattern. All files;
+path is exposed as `DRIDOCK_CONSULT_DIR` — exactly the framework-bugs pattern. All files;
 fully auditable (you can just `cat` a thread); no network surface; works offline. This is
 the same file-IPC ethos as the auth/secrets/`-cdp`/`-vmip` sidecars.
 
@@ -68,15 +68,15 @@ approved. That is the supervision guarantee.
 - `cb-consult list`                         — this project's threads + status
 - `cb-consult resolve <id> [note]`          — mark adopted (`resolved`)
 
-**you** (host, `claudebox consult`):
-- `claudebox consult list [--json]`         — all threads across all projects + status
-- `claudebox consult show <id>`             — full thread + proposed.diff
-- `claudebox consult approve <id>`          — gate: `awaiting-approval` → `awaiting-claudebot` (framework-Claude then applies + replies)
-- `claudebox consult revise <id> [note]`    — bounce back: `awaiting-approval` → `awaiting-framework`
-- `claudebox consult reject <id> [reason]`  — close without action
-- `claudebox consult post <id> …`           — low-level append used by framework-Claude/you (author, status, attach diff)
+**you** (host, `dridock consult`):
+- `dridock consult list [--json]`         — all threads across all projects + status
+- `dridock consult show <id>`             — full thread + proposed.diff
+- `dridock consult approve <id>`          — gate: `awaiting-approval` → `awaiting-claudebot` (framework-Claude then applies + replies)
+- `dridock consult revise <id> [note]`    — bounce back: `awaiting-approval` → `awaiting-framework`
+- `dridock consult reject <id> [reason]`  — close without action
+- `dridock consult post <id> …`           — low-level append used by framework-Claude/you (author, status, attach diff)
 
-A normal `claudebox` run surfaces pending work the same way `checkversion` warns:
+A normal `dridock` run surfaces pending work the same way `checkversion` warns:
 `⚠ N framework consult(s) awaiting your approval` / `… awaiting a framework draft`.
 
 **framework-Claude** (this repo; the [`framework-consult` skill](../../.claude/skills/framework-consult/SKILL.md)):
@@ -85,7 +85,7 @@ drives the loop below.
 ## Hybrid auto-draft flow
 
 1. claudebot `cb-consult open` → thread `awaiting-framework`.
-2. You bring it into a framework-Claude session (a `claudebox` run surfaced it; you say
+2. You bring it into a framework-Claude session (a `dridock` run surfaced it; you say
    "work consult `<id>`"). Framework-Claude reads the thread.
 3. Framework-Claude **spawns an Agent-tool drafting sub-agent** with the thread + this
    repo's code/docs/baked guidance. It returns a structured draft: a **reply**, a
@@ -93,7 +93,7 @@ drives the loop below.
    helper/baked-guidance edit/new env — and *why it generalizes*), and optionally a
    **`proposed.diff`**. Framework-Claude writes the draft and sets `awaiting-approval`.
    **It is not sent to the claudebot.**
-4. You **review** (`claudebox consult show <id>`) and `approve` / `revise` / `reject`.
+4. You **review** (`dridock consult show <id>`) and `approve` / `revise` / `reject`.
    For hard ones you skip the auto-draft and reason it out with framework-Claude directly.
 5. On `approve` → framework-Claude **applies** the change in the harness (edit + `make
    build` if needed + semver bump + CHANGELOG), commits, posts the reply *with the commit
@@ -123,7 +123,7 @@ sequenceDiagram
 
     CB->>S: cb-consult open "N-tier CORS…"
     Note over S: status = awaiting-framework
-    S-->>H: surfaced on a `claudebox` run:<br/>"N awaiting a framework draft"
+    S-->>H: surfaced on a `dridock` run:<br/>"N awaiting a framework draft"
     H->>FC: "work consult <id>"
     FC->>S: read thread
     FC->>SA: spawn (thread + repo context)
@@ -133,16 +133,16 @@ sequenceDiagram
     S-->>H: "N consult(s) awaiting YOUR approval"
 
     alt human approves
-        H->>S: claudebox consult approve
+        H->>S: dridock consult approve
         Note over S: status = awaiting-claudebot
         FC->>FC: apply change, commit (vX.Y.Z)
         FC->>S: post apply-reply (with commit hash)
     else human revises
-        H->>S: claudebox consult revise "note"
+        H->>S: dridock consult revise "note"
         Note over S: status → awaiting-framework
         Note over FC: re-draft addressing the note
     else human rejects
-        H->>S: claudebox consult reject "reason"
+        H->>S: dridock consult reject "reason"
         Note over S: status = rejected (closed)
     end
 
@@ -156,21 +156,21 @@ sequenceDiagram
 Acting on a consult needs a **live** session (both framework-Claude and a claudebot are
 sessions), so there are two alerting layers:
 
-- **(A) Startup surfacing** — cheap, fires at session boot. A host `claudebox` run prints
+- **(A) Startup surfacing** — cheap, fires at session boot. A host `dridock` run prints
   `🗣 N consult(s) awaiting YOUR approval / a framework draft`; the entrypoint injects an
   equivalent note into the **claudebot's** startup context when one of its threads is
   `awaiting-claudebot` (an approved reply is waiting). On the **framework-Claude side**, a
   `SessionStart` hook (`.claude/hooks/consult-session-start.sh`, wired in
   `.claude/settings.json`) surfaces pending consults and — if no watcher is running —
-  nudges the session to launch `claudebox consult watch`. **In-container framework-dev
-  variant (2.16.0):** for a claudebot whose workspace **is** a claudebox harness fork (auto-
-  detected by `wrapper.sh` containing `CLAUDEBOX_VERSION=`; override
-  `CLAUDEBOX_FRAMEWORK_DEV=1`), the entrypoint also injects a note listing every
+  nudges the session to launch `dridock consult watch`. **In-container framework-dev
+  variant (2.16.0):** for a claudebot whose workspace **is** a dridock harness fork (auto-
+  detected by `wrapper.sh` containing `DRIDOCK_VERSION=`; override
+  `DRIDOCK_FRAMEWORK_DEV=1`), the entrypoint also injects a note listing every
   `awaiting-framework` consult **across all projects** plus every unreviewed framework-bug
   report — the same surface the host wrapper gives, mirrored for a session that has no host
   wrapper. Use `cb-consult list --all` and `cb-report-bug list` from inside. So a session
   *starts* aware.
-- **(B) `watch` — block until change, mid-session.** `claudebox consult watch` (host) and
+- **(B) `watch` — block until change, mid-session.** `dridock consult watch` (host) and
   `cb-consult watch` (container) are **token-free** loops that block until a relevant
   thread changes state (a new consult / a reply landing / a new turn), print what changed,
   and **exit**. Run as a **background task** in a live session: the harness re-invokes the
@@ -189,7 +189,7 @@ Baked into the container `CLAUDE.md` so a claudebot knows the boundary. Open one
 **all** hold:
 - The problem is about the **harness/environment** (wrapper, entrypoint, image, Colima/
   Docker networking, the `cb-*` tooling), not your app's own logic.
-- It would **recur in any claudebox project** — it's a general engineering concern, not
+- It would **recur in any dridock project** — it's a general engineering concern, not
   project-specific.
 - It is **not already covered** by the baked guidance / docs.
 
@@ -206,7 +206,7 @@ one-way `cb-report-bug` drop.
 ## Design choices & non-goals
 
 - **No headless auto-relay in v1.** The drafter is an Agent-tool sub-agent of a live
-  framework-Claude session, not a bash daemon spawning Claude — so a `claudebox consult
+  framework-Claude session, not a bash daemon spawning Claude — so a `dridock consult
   watch` daemon that answers on its own is explicitly out of scope (a possible phase 2).
   The bash layer only handles the substrate, surfacing, and your gates.
 - **Human is always the gate.** No draft reaches a claudebot without `approve`.

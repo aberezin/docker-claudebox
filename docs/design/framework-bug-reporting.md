@@ -2,7 +2,7 @@
 
 ## The problem
 
-A claudebot building a project may discover a bug in the **claudebox framework**
+A claudebot building a project may discover a bug in the **dridock framework**
 itself — the wrapper, the entrypoint, the image, or the Colima/Docker networking —
 as opposed to a bug in the project it's building. It must not try to patch the
 framework from inside a project (it can't, cleanly, and shouldn't), and a mention in
@@ -38,21 +38,21 @@ workaround is exactly how DX bugs stay invisible.
    format — just run the command.
 
 2. **Shared host drop dir (deliberate shared-nothing exception).** The wrapper
-   mounts `~/.config/claudebox/framework-bugs/` into **every** container at
-   `/home/claude/framework-bugs` and passes `CLAUDEBOX_FRAMEWORK_BUGS_DIR` +
-   `CLAUDEBOX_PROJECT_ID`. Reports from *any* project collect in one place. This is
+   mounts `~/.config/dridock/framework-bugs/` into **every** container at
+   `/home/claude/framework-bugs` and passes `DRIDOCK_FRAMEWORK_BUGS_DIR` +
+   `DRIDOCK_PROJECT_ID`. Reports from *any* project collect in one place. This is
    the one intentional break from the per-project shared-nothing model, because
    framework feedback is inherently cross-project. If the mount is somehow absent,
-   `cb-report-bug` falls back to `./.claudebox/FRAMEWORK-BUGS.md` in the workspace.
+   `cb-report-bug` falls back to `./.dridock/FRAMEWORK-BUGS.md` in the workspace.
 
-3. **Host surfacing.** `claudebox framework-bugs` lists the reports (title + file);
-   `claudebox framework-bugs clear` empties them. Any normal `claudebox` run prints
+3. **Host surfacing.** `dridock framework-bugs` lists the reports (title + file);
+   `dridock framework-bugs clear` empties them. Any normal `dridock` run prints
    `⚠ N framework bug report(s) on file` when the dir is non-empty, so they don't sit
    unnoticed.
 
 4. **In-container surfacing (framework-dev, 2.16.0).** For a framework-dev claudebot —
-   one whose workspace **is** a claudebox harness fork (`wrapper.sh` at root containing
-   `CLAUDEBOX_VERSION=`; override with `CLAUDEBOX_FRAMEWORK_DEV=1`) — the host wrapper
+   one whose workspace **is** a dridock harness fork (`wrapper.sh` at root containing
+   `DRIDOCK_VERSION=`; override with `DRIDOCK_FRAMEWORK_DEV=1`) — the host wrapper
    isn't reachable, so the same review flow lives in-container:
    - `cb-report-bug list` — every report in the drop dir (`✓` = reviewed).
    - `cb-report-bug show <slug>` — print a report.

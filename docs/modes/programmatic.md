@@ -3,22 +3,24 @@
 Pass a prompt and get a response. The `-p` flag is added automatically. No TTY required — works from scripts, cron jobs, CI pipelines, and anywhere else you need non-interactive output.
 
 ```bash
-claudebox "explain this codebase"                                       # plain text output (default)
-claudebox "explain this codebase" --output-format json                  # structured JSON response
-claudebox "list all TODOs" --output-format json-verbose | jq .          # JSON with full tool call history
-claudebox "list all TODOs" --output-format stream-json | jq .           # streaming NDJSON
-claudebox "explain this codebase" --model opus                          # choose a specific model
-claudebox "review this" --system-prompt "You are a security auditor"    # override the system prompt
-claudebox "review this" --append-system-prompt "Focus on SQL injection" # append to the default system prompt
-claudebox "debug this" --effort max                                     # maximum reasoning effort
-claudebox "quick question" --effort low                                 # fast, lightweight response
-claudebox "start over" --no-continue                                    # fresh session, no history
-claudebox "keep going" --resume abc123-def456                           # resume a specific session by ID
+dridock "explain this codebase"                                       # plain text output (default)
+dridock "explain this codebase" --output-format json                  # structured JSON response
+dridock "list all TODOs" --output-format json-verbose | jq .          # JSON with full tool call history
+dridock "list all TODOs" --output-format stream-json | jq .           # streaming NDJSON
+dridock "explain this codebase" --model opus                          # choose a specific model
+dridock "review this" --system-prompt "You are a security auditor"    # override the system prompt
+dridock "review this" --append-system-prompt "Focus on SQL injection" # append to the default system prompt
+dridock "debug this" --effort max                                     # maximum reasoning effort
+dridock "quick question" --effort low                                 # fast, lightweight response
+dridock "start over" --no-continue                                    # fresh session, no history
+dridock "keep going" --resume abc123-def456                           # resume a specific session by ID
 
 # structured output with a JSON schema
-claudebox "extract the author and title" --output-format json \
+dridock "extract the author and title" --output-format json \
   --json-schema '{"type":"object","properties":{"author":{"type":"string"},"title":{"type":"string"}},"required":["author","title"]}'
 ```
+
+> In 2.x the wrapper was `claudebox`; the 2.x binary name is kept as a legacy alias during the deprecation cycle.
 
 `--continue` is applied automatically so successive programmatic runs in the same workspace share conversation context. Use `--no-continue` to start fresh or `--resume <session_id>` to continue a specific conversation.
 

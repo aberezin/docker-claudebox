@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to **claudebox** (formerly `docker-claude-code`).
+All notable changes to **dridock** (renamed from `claudebox` at 3.0; upstream was `docker-claude-code` before that).
 
-Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions before `v1.0.0` are pre-release; the rename to `claudebox` at `v1.0.0` is the only breaking change in the project's history.
+Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions before `v1.0.0` are pre-release; the upstream rename to `claudebox` at `v1.0.0` and this fork's rename to `dridock` at `3.0.0` are the two breaking name changes in the project's history.
 
 > **Fork note:** this fork maintains its **own** semver line, starting at `2.0.0`
 > (2026-07-06) — chosen at the time to sit **above** upstream's then-highest tag

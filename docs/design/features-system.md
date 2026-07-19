@@ -6,12 +6,12 @@
 
 ## Context
 
-The current `profiles:` system in `.claudebox/config.yml` opts a project into
-language-specific tool bundles. Three profiles exist as of 2.x: `go`, `python`,
-`typescript`. Each activates a Claude Code LSP plugin whose language-server binary is
-already baked into the image. The profile script (`profiles/<name>.sh`) is essentially
-empty except for turning the plugin on. See [profiles.md](profiles.md) for the current
-design.
+The current `profiles:` system in `.dridock/config.yml` (2.x: `.claudebox/config.yml`)
+opts a project into language-specific tool bundles. Three profiles exist as of 2.x:
+`go`, `python`, `typescript`. Each activates a Claude Code LSP plugin whose
+language-server binary is already baked into the image. The profile script
+(`profiles/<name>.sh`) is essentially empty except for turning the plugin on. See
+[profiles.md](profiles.md) for the current design.
 
 **Problems this system doesn't solve today:**
 
@@ -25,7 +25,7 @@ design.
    binary was baked at image build. A general plugin system needs an explicit answer
    to "how does a plugin get its binary dependencies?" for cases beyond
    maintainer-blessed baking.
-4. **No machine-wide defaults.** `~/.config/claudebox/config.yml` doesn't currently
+4. **No machine-wide defaults.** `~/.config/dridock/config.yml` doesn't currently
    propagate feature preferences to every new project.
 5. **Adding a plugin today requires editing the Dockerfile.** For any user-authored
    plugin (a company-internal auth setup, a local dev-server), the current system
@@ -35,7 +35,7 @@ design.
 
 Broaden `profiles:` into a **`features:`** system with:
 
-1. **Renamed config key** — `.claudebox/config.yml` `features: [...]` replaces
+1. **Renamed config key** — `.dridock/config.yml` `features: [...]` replaces
    `profiles: [...]`. `profiles:` accepted as a backward-compat alias for one
    deprecation cycle (3.x); removed in 4.0. Existing LSP profiles migrate as-is.
 2. **Manifest per feature** — each `features/<name>/` (baked into image) contains:
@@ -57,10 +57,10 @@ Broaden `profiles:` into a **`features:`** system with:
      at image build. User-authored project-local features (see below) can't set
      `requires-bake: true` — they'd have no way to influence image build; they must
      runtime-install.
-4. **Machine-wide defaults** — new `~/.config/claudebox/config.yml`
+4. **Machine-wide defaults** — new `~/.config/dridock/config.yml`
    `default_features: [...]` field that seeds every new project's `features:` list.
    Wrapper reads both files and merges (project-level entries take precedence).
-5. **Project-local features** — new lookup path `.claudebox/features/<name>/` (in the
+5. **Project-local features** — new lookup path `.dridock/features/<name>/` (in the
    project workspace, gitignored by default). Users can drop in `on.sh` / `off.sh` /
    `manifest.yml` for one-off project needs without forking the harness. These can't
    `requires-bake: true` (see above) but everything else works identically.
@@ -69,10 +69,10 @@ Broaden `profiles:` into a **`features:`** system with:
    change. Their scripts move from `profiles/<name>.sh` to `features/<name>/on.sh`.
    Adding a companion `off.sh` for each (disable the plugin) is small.
 7. **CLI surface** —
-   - `claudebox features` (`profiles` alias for one cycle) — list enabled + available.
-   - `claudebox features enable <name>` / `disable <name>` — edit `.claudebox/config.yml`
+   - `dridock features` (`profiles` alias for one cycle) — list enabled + available.
+   - `dridock features enable <name>` / `disable <name>` — edit `.dridock/config.yml`
      safely; run `on.sh` / `off.sh` immediately if the container is up.
-   - `claudebox features info <name>` — show the manifest.
+   - `dridock features info <name>` — show the manifest.
 
 ## Consequences
 
@@ -87,10 +87,10 @@ Broaden `profiles:` into a **`features:`** system with:
 - `off.sh` gives genuine feature toggles instead of "enabled forever" semantics.
 
 **Negative / to plan for:**
-- **`.claudebox/features/` in the workspace** is a new place users can drop code that
+- **`.dridock/features/` in the workspace** is a new place users can drop code that
   runs in the container. Trust posture: the `on.sh` runs as the `claude` user with
   passwordless sudo, so a malicious project-local feature has container-full-control.
-  This is no worse than the existing `.claudebox/init.d/` pattern and doesn't cross
+  This is no worse than the existing `.dridock/init.d/` pattern and doesn't cross
   the VM boundary — but it should be documented as a trust surface, and framework-dev
   mode should probably require an extra opt-in for auto-running project-local features
   (paranoia budget).
@@ -116,7 +116,7 @@ Broaden `profiles:` into a **`features:`** system with:
   like the LSP servers. Rejected: the 3 current profiles' servers weigh tens of MB
   each; re-downloading them per project is worse UX than one bigger image.
 - **Layered images (one Docker layer per feature)** — `features: [rust]` triggers a
-  build of `claudebox:latest+rust`. Cache-friendly but forces per-project image
+  build of `dridock:latest+rust`. Cache-friendly but forces per-project image
   variants; `cb-infra` now has to hold N images. Rejected: matrix explosion (2^N
   images for N features), complex `checkversion` semantics, migration nightmare.
 - **Keep `profiles:` name, broaden its meaning** — "profile" retains its LSP-tool
@@ -127,7 +127,7 @@ Broaden `profiles:` into a **`features:`** system with:
 - **Fold framework-dev-mode into `features:`** — argued against in
   [framework-dev-mode.md](framework-dev-mode.md): mode ≠ feature. The auto-detected
   fingerprint check doesn't fit an opt-in feature flag surface. Rejected. But
-  `CLAUDEBOX_HARNESS_DEV=1` (the manual override) could become
+  `DRIDOCK_HARNESS_DEV=1` (the manual override) could become
   `features: [harness-dev]` — that's a legitimate opt-in shape. TBD in
   implementation.
 
@@ -142,9 +142,9 @@ Broaden `profiles:` into a **`features:`** system with:
 - **Marker file location** — today's profile marker is `~/.claude/.profile-<name>`.
   Rename to `.feature-<name>`? Then keep both readable for one cycle for 2.x → 3.0
   migration.
-- **Interaction with the `dridock` rebrand (Issue #11)** — do baked features live in
-  `dridock/features/` or stay `claudebox/features/` for the deprecation cycle? Cross-
-  reference decision when #11 is worked.
+- **Interaction with the `dridock` rebrand (Issue #11)** — baked features live in
+  the `dridock/`-namespaced tree (3.0); the `.claudebox/` project-dir alias is kept
+  as backward-compat during the deprecation cycle. See [Issue #11].
 - **How do we test features?** — the bash suite has no notion of features today.
   Adding a `test_features.sh` that enables + disables each baked feature against a
   throwaway VM is straightforward but real test-suite work.
@@ -160,4 +160,4 @@ Broaden `profiles:` into a **`features:`** system with:
   the first non-LSP feature this system enables (`ssh-git` becomes a feature).
 - [framework-dev-mode.md](framework-dev-mode.md) — the argument for why runtime modes
   don't fit into the features surface.
-- [bootstrap.md](bootstrap.md) — where `.claudebox/config.yml` semantics are documented.
+- [bootstrap.md](bootstrap.md) — where `.dridock/config.yml` semantics are documented.

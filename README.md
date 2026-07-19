@@ -1,14 +1,14 @@
-# claudebox
+# dridock
 
 [![License: WTFPL](https://img.shields.io/badge/License-WTFPL-brightgreen.svg?style=flat-square)](http://www.wtfpl.net/)
 
-> **This is a fork.** claudebox was created by [psyb0t](https://github.com/psyb0t/docker-claudebox). This fork keeps the same interfaces but re-targets it to run under **[Colima](https://github.com/abiosoft/colima) with an isolated per-project VM** and adds **docker-out-of-docker orchestration** (claudebot spins up and wires sibling workload containers), a **no-sudo local-build install**, and per-project bootstrapping, browser testing, and plugins. It builds the image **locally** and pulls nothing from Docker Hub. See [What's different in this fork](#whats-different-in-this-fork).
+> **This is a fork, rebranded in 3.0.** The upstream project is [psyb0t/docker-claudebox](https://github.com/psyb0t/docker-claudebox) (`claudebox`). This fork keeps the same interfaces but was renamed to **`dridock`** at 3.0 and re-targets the harness to run under **[Colima](https://github.com/abiosoft/colima) with an isolated per-project VM**, adding **docker-out-of-docker orchestration** (claudebot spins up and wires sibling workload containers), a **no-sudo local-build install**, and per-project bootstrapping, browser testing, and plugins. It builds the image **locally** and pulls nothing from Docker Hub. Legacy 2.x env vars (`CLAUDEBOX_*`) and project dirs (`.claudebox/`) are still accepted for one deprecation cycle — see [3.0 migration guide](docs/design/3.0-migration.md). For the fork's rationale see [What's different in this fork](#whats-different-in-this-fork).
 
 A runtime harness for [Claude Code](https://claude.com/product/claude-code) — the agentic coding CLI from Anthropic — running in a fully isolated Docker container with every dev tool pre-installed, passwordless sudo, docker-in-docker support, and `--dangerously-skip-permissions` enabled by default.
 
-claudebox wraps Claude Code with several distinct interfaces:
+dridock wraps Claude Code with several distinct interfaces:
 
-- **Interactive CLI** — a drop-in replacement for the native `claude` command, with persistent containers and automatic session resumption across runs
+- **Interactive CLI (`dridock`)** — a drop-in replacement for the native `claude` command, with persistent containers and automatic session resumption across runs
 - **Programmatic CLI** — non-interactive mode for scripts, CI/CD pipelines, and automation; pass a prompt, get structured output, pipe it wherever you need
 - **HTTP API server** — a full REST API with workspace management, file operations, structured output formats, and workspace isolation for multi-tenant deployments
 - **OpenAI-compatible endpoint** — a `chat/completions` adapter that lets LiteLLM, OpenAI SDKs, and any OpenAI-compatible client talk to Claude Code, complete with streaming SSE, multi-turn conversations, and multimodal image handling
@@ -16,7 +16,7 @@ claudebox wraps Claude Code with several distinct interfaces:
 - **Telegram bot** — a conversational interface with per-chat workspaces, configurable models and effort levels, file sharing, shell access, and group chat support
 - **Cron scheduler** — yaml-defined Claude jobs running on cron schedules with per-job activity history, sub-minute resolution, and overlap protection
 
-Beyond just running Claude Code in Docker, claudebox adds skill injection (auto-load `SKILL.md` files into every session), init hooks, custom script directories, structured JSON logging, and a workspace management layer that handles multi-tenant isolation with automatic busy/idle tracking.
+Beyond just running Claude Code in Docker, dridock adds skill injection (auto-load `SKILL.md` files into every session), init hooks, custom script directories, structured JSON logging, and a workspace management layer that handles multi-tenant isolation with automatic busy/idle tracking.
 
 ## What's different in this fork
 
@@ -30,11 +30,11 @@ Colima-based, orchestration-first workflow:
   workload containers (an API server, a database, …) under its VM, so it can build and
   test multi-tier apps. The [todo-app example](examples/todo-app/) does this end-to-end.
 - **Local build only** — nothing is pulled from Docker Hub; the wrapper runs the
-  `claudebox:latest` image you build from this checkout (into a `cb-infra` image-store VM).
+  `dridock:latest` image you build from this checkout (into a `cb-infra` image-store VM).
 - **No-sudo userspace install** — installs to `~/.local/bin` by default.
 - **Reachable per-project VM IPs** — published workloads are browsable from your Mac at
   the VM's own IP (collision-free across projects).
-- **Project workflow additions** — `claudebox bootstrap` (mission-brief handoff),
+- **Project workflow additions** — `dridock bootstrap` (mission-brief handoff),
   `cb-browser` + an opt-in CDP bridge (browser testing), `cb-report-bug` (framework bug
   reports), per-project plugins, and `cbx-*` shell helpers.
 
@@ -64,32 +64,32 @@ Project VMs are started with `colima start --network-address` to get a reachable
 
 ```bash
 # after installing socket_vmnet (port/brew):
-limactl sudoers | sudo tee /etc/sudoers.d/lima     # one-time; the only sudo claudebox needs
+limactl sudoers | sudo tee /etc/sudoers.d/lima     # one-time; the only sudo dridock needs
 limactl sudoers --check /etc/sudoers.d/lima        # validate
 ```
 
-`limactl sudoers` auto-detects the `socket_vmnet` path (MacPorts `/opt/local/bin` or Homebrew), so the generated file is correct either way. After this, `claudebox` never prompts for a password at runtime.
+`limactl sudoers` auto-detects the `socket_vmnet` path (MacPorts `/opt/local/bin` or Homebrew), so the generated file is correct either way. After this, `dridock` never prompts for a password at runtime.
 
 ## Quick Start
 
-> **Local build, no registry.** Nothing is pulled from Docker Hub — the installer builds the image from this checkout with `docker build`, and the wrapper runs that local `claudebox:latest`.
+> **Local build, no registry.** Nothing is pulled from Docker Hub — the installer builds the image from this checkout with `docker build`, and the wrapper runs that local `dridock:latest`.
 
 ### Install
 
 Clone the repo and run the installer from the checkout. It builds the image locally with `docker build`, generates SSH keys for git operations inside the container, and installs the wrapper as a command on your system.
 
 ```bash
-git clone <your-fork-url> claudebox && cd claudebox
+git clone <your-fork-url> dridock && cd dridock
 
 # full image (recommended — all dev tools pre-installed)
 ./install.sh
 
 # minimal image (just the essentials — Claude installs what it needs on the fly)
-export CLAUDEBOX_MINIMAL=1 && ./install.sh
+export DRIDOCK_MINIMAL=1 && ./install.sh
 
-# custom binary name (e.g. if you want to call it 'claude' instead of 'claudebox')
+# custom binary name (e.g. if you want to call it 'claude' instead of 'dridock')
 ./install.sh claude
-# or: export CLAUDEBOX_BIN_NAME=claude && ./install.sh
+# or: export DRIDOCK_BIN_NAME=claude && ./install.sh
 ```
 
 The installer must run from a checkout of the repo — it needs the `Dockerfile` and `wrapper.sh` beside it, and it will not pipe from `curl` since there is no registry image to fall back to.
@@ -112,27 +112,27 @@ make build
 # or minimal: make build-minimal
 
 # 4. install the wrapper script as a command (no sudo — user-writable dir)
-mkdir -p ~/.local/bin && install -m 755 wrapper.sh ~/.local/bin/claudebox
+mkdir -p ~/.local/bin && install -m 755 wrapper.sh ~/.local/bin/dridock
 # make sure ~/.local/bin is on your PATH (add to ~/.zshrc if needed)
 ```
 
-### Create a new claudebot project (`claudebox bootstrap`)
+### Create a new claudebot project (`dridock bootstrap`)
 
 To stand up a fresh project *and hand claudebot the reason it's being created*, use
 `bootstrap`. It runs a **preflight** (asserts `colima`/`docker`/`git` are present),
 `git init`s the repo, scaffolds a starter layout, and writes a **committed mission
-brief** at `.claudebox/BRIEF.md`. On first boot, claudebot is pointed at that brief
+brief** at `.dridock/BRIEF.md`. On first boot, claudebot is pointed at that brief
 (a banner is prepended to its `CLAUDE.md`) so it starts knowing *why* it exists.
 
 ```bash
 mkdir project-a && cd project-a
-claudebox bootstrap "Build a 3-tier app: React UI, Node API, Postgres, all in containers."
-#   ...or pipe a longer brief:   claudebox bootstrap < intent.md
-#   ...or from a file:           claudebox bootstrap --brief-file intent.md
+dridock bootstrap "Build a 3-tier app: React UI, Node API, Postgres, all in containers."
+#   ...or pipe a longer brief:   dridock bootstrap < intent.md
+#   ...or from a file:           dridock bootstrap --brief-file intent.md
 ```
 
 Flags: `--no-start` (scaffold but don't boot claudebot — a host Claude session uses
-this, then tells you to `cd project-a && claudebox`), `--brief-only` (just the brief
+this, then tells you to `cd project-a && dridock`), `--brief-only` (just the brief
 + config, no git/dirs/boot), `--force` (overwrite an existing brief). As claudebot
 works it keeps the brief's *Progress / handoff log* current, so any later session
 catches up from one file. See [docs/design/bootstrap.md](docs/design/bootstrap.md).
@@ -141,8 +141,8 @@ catches up from one file. See [docs/design/bootstrap.md](docs/design/bootstrap.m
 
 `install.sh` also installs `claudebox-shell.sh` and sources it from your rc, adding
 convenience functions (with tab-completion) for getting a shell into the layers of a
-project — all scoped to that project's Colima VM (resolved from `.claudebox/config.yml`,
-so they work from any subdirectory):
+project — all scoped to that project's Colima VM (resolved from `.dridock/config.yml`,
+falling back to legacy `.claudebox/config.yml`, so they work from any subdirectory):
 
 ```bash
 cbx-ps                 # list containers running in this project's VM
@@ -153,7 +153,7 @@ cbx-vm                 # ssh into the project VM (the Lima guest) itself
 cbx-claude             # shell into claudebot's own harness container (when a session is up)
 cbx-claude-dir [-o]    # print (or -o open) this project's host .claude data dir
 cbx-up                 # ensure this project's VM (+ its workloads) is running
-cbx-up-all             # ensure EVERY claudebox VM (+ workloads) is running
+cbx-up-all             # ensure EVERY dridock VM (+ workloads) is running
 ```
 
 After a Colima or Mac restart, all per-project VMs (and their workloads) are down.
@@ -163,22 +163,23 @@ ephemeral `claude-*` harness containers are skipped). `cbx-up` does the same for
 the current project.
 
 Each project's claudebot config/session/auth lives in its own host dir
-(`~/.config/claudebox/projects/<id>/claude`, mounted at `/home/claude/.claude`) —
-this fork is shared-nothing, so there's no global `~/.claude`. `claudebox claude-dir`
-prints that path for the current project.
+(`~/.config/dridock/projects/<id>/claude`, mounted at `/home/claude/.claude`; legacy
+2.x projects are under `~/.config/claudebox/projects/…` until `dridock migrate`
+moves them) — this fork is shared-nothing, so there's no global `~/.claude`.
+`dridock claude-dir` prints that path for the current project.
 
 **Init hooks.** Drop executable `*.sh` scripts in that dir's `init.d/` (i.e.
-`$(claudebox claude-dir)/init.d/`) and the entrypoint runs them **once**, on first
+`$(dridock claude-dir)/init.d/`) and the entrypoint runs them **once**, on first
 container create, before starting claudebot — handy for per-project setup. They're
 skipped on container reuse (a marker in the container filesystem). This inherited
 behavior is covered by `tests/test_e2e.sh::test_e2e_init_hook_runs_once`.
 
-Skip installing them with `CLAUDEBOX_SKIP_SHELL_HELPERS=1 ./install.sh`, or source
+Skip installing them with `DRIDOCK_SKIP_SHELL_HELPERS=1 ./install.sh`, or source
 `claudebox-shell.sh` manually from a checkout.
 
 ## Image Variants
 
-### `claudebox:latest` (full)
+### `dridock:latest` (full)
 
 Everything pre-installed. Go, Python, Node.js, C/C++ toolchains, Terraform, kubectl, database clients, linters, formatters — the works. Large image, but Claude wakes up and gets to work immediately with zero wait time. This is the recommended variant for most users.
 
@@ -186,12 +187,12 @@ Everything pre-installed. Go, Python, Node.js, C/C++ toolchains, Terraform, kube
 ./install.sh    # or: make build
 ```
 
-### `claudebox:latest-minimal`
+### `dridock:latest-minimal`
 
 Just enough to run Claude: Ubuntu, git, curl, Node.js, and Docker. Claude has passwordless sudo, so it will install whatever else it needs on the fly via `apt-get`, `pip`, `npm`, etc. Smaller image to build, but the first run takes longer as Claude sorts out its dependencies.
 
 ```bash
-export CLAUDEBOX_MINIMAL=1 && ./install.sh    # or: make build-minimal
+export DRIDOCK_MINIMAL=1 && ./install.sh    # or: make build-minimal
 ```
 
 Use `~/.claude/init.d/*.sh` hooks (see [Init Hooks](docs/customization.md#init-hooks-claudeinitd)) to pre-install your tools on first container create so Claude doesn't burn tokens figuring out package management.
@@ -244,8 +245,8 @@ Use `~/.claude/init.d/*.sh` hooks (see [Init Hooks](docs/customization.md#init-h
 - Claude Code CLI with auto-updates disabled by default (opt in with `--update`)
 - Workspace trust dialog pre-accepted — no interactive prompts
 - Baked **`cb-*` helper commands** — `cb-browser` (self-contained browser testing), `cb-report-bug` (file a framework bug to the host), `cb-help` (list them). See [convenience scripts](docs/design/convenience-scripts.md).
-- **Profiles** — opt-in tool bundles (`profiles: [typescript, python, …]` in `.claudebox/config.yml`) that enable code-intelligence plugins on first run. See [profiles](docs/design/profiles.md).
-- A container-side **`/claudebox` skill** so the claudebot can self-report its harness version, tools, and environment.
+- **Profiles** — opt-in tool bundles (`profiles: [typescript, python, …]` in `.dridock/config.yml`) that enable code-intelligence plugins on first run. See [profiles](docs/design/profiles.md).
+- A container-side **`/dridock` skill** so the claudebot can self-report its harness version, tools, and environment.
 - Custom scripts via `~/.claude/bin` (added to PATH automatically)
 - Init hooks via `~/.claude/init.d/*.sh` (run once on first container create)
 - Always-active skills via `~/.claude/.always-skills/` (injected into every invocation)
@@ -258,22 +259,22 @@ You need either an Anthropic API key or an OAuth token. Set up once, use everywh
 
 ```bash
 # interactive OAuth token setup (one-time)
-claudebox setup-token
+dridock setup-token
 
 # then use the token for programmatic and headless runs
-CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxx claudebox "do stuff"
+CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxx dridock "do stuff"
 
 # or use an API key directly
-ANTHROPIC_API_KEY=sk-ant-api03-xxx claudebox "do stuff"
+ANTHROPIC_API_KEY=sk-ant-api03-xxx dridock "do stuff"
 ```
 
-**Using your Claude subscription (not the API):** claudebox forwards a host
+**Using your Claude subscription (not the API):** dridock forwards a host
 `ANTHROPIC_API_KEY` into the container, and Claude Code prefers it over subscription
-auth. If you usually want the **subscription** (browser OAuth via `claudebox
+auth. If you usually want the **subscription** (browser OAuth via `dridock
 setup-token`), block the key so it's never sent:
 
 ```bash
-export CLAUDEBOX_NO_API_KEY=1   # put in ~/.zshrc to make it the default
+export DRIDOCK_NO_API_KEY=1   # put in ~/.zshrc to make it the default
 ```
 
 This drops the API key even if one is exported on your Mac (and clears one already
@@ -281,14 +282,14 @@ baked into an existing container), so claudebot falls through to the subscriptio
 
 ## Modes
 
-claudebox can run in several modes — pick the one that matches how you want to use Claude Code. Each has its own page with full setup, env vars, and examples.
+dridock can run in several modes — pick the one that matches how you want to use Claude Code. Each has its own page with full setup, env vars, and examples.
 
 ### [Interactive Mode →](docs/modes/interactive.md)
 
-Drop-in replacement for `claude`. Persistent per-workspace container, automatic session resumption, plus utility commands like `claudebox doctor`, `claudebox mcp list`, `claudebox stop`, and `claudebox clear-session`.
+Drop-in replacement for `claude`. Persistent per-workspace container, automatic session resumption, plus utility commands like `dridock doctor`, `dridock mcp list`, `dridock stop`, and `dridock clear-session`.
 
 ```bash
-claudebox
+dridock
 ```
 
 ### [Programmatic Mode →](docs/modes/programmatic.md)
@@ -296,7 +297,7 @@ claudebox
 Non-interactive prompt → response for scripts, pipelines, and automation. Plain text, JSON, JSON-verbose (with full tool-call history), and stream-json output formats. Model selection, system prompt overrides, JSON-schema-constrained output, session continuation.
 
 ```bash
-claudebox "explain this codebase" --output-format json --model haiku
+dridock "explain this codebase" --output-format json --model haiku
 ```
 
 ### [API Mode →](docs/modes/api.md)
@@ -305,8 +306,8 @@ Run as a long-lived HTTP server. Full REST API for prompts and file ops with wor
 
 ```yaml
 environment:
-  - CLAUDEBOX_MODE_API=1
-  - CLAUDEBOX_MODE_API_TOKEN=your-secret-token
+  - DRIDOCK_MODE_API=1
+  - DRIDOCK_MODE_API_TOKEN=your-secret-token
 ```
 
 ### [Telegram Mode →](docs/modes/telegram.md)
@@ -315,8 +316,8 @@ Talk to Claude from Telegram. Per-chat isolated workspaces, configurable models/
 
 ```yaml
 environment:
-  - CLAUDEBOX_MODE_TELEGRAM=1
-  - CLAUDEBOX_TELEGRAM_BOT_TOKEN=...
+  - DRIDOCK_MODE_TELEGRAM=1
+  - DRIDOCK_TELEGRAM_BOT_TOKEN=...
 ```
 
 ### [Cron Mode →](docs/modes/cron.md)
@@ -325,13 +326,13 @@ YAML-defined scheduled jobs. Standard 5-field cron or 6-field for sub-minute res
 
 ```yaml
 environment:
-  - CLAUDEBOX_MODE_CRON=1
-  - CLAUDEBOX_MODE_CRON_FILE=/home/claude/.claude/cron.yaml
+  - DRIDOCK_MODE_CRON=1
+  - DRIDOCK_MODE_CRON_FILE=/home/claude/.claude/cron.yaml
 ```
 
 ## Configuration
 
-- **[Environment variables →](docs/environment-variables.md)** — full table of `CLAUDEBOX_*` settings the wrapper and entrypoint understand, plus `CLAUDEBOX_ENV_*` (forward arbitrary vars into the container) and `CLAUDEBOX_MOUNT_*` (extra volume mounts).
+- **[Environment variables →](docs/environment-variables.md)** — full table of `DRIDOCK_*` settings the wrapper and entrypoint understand (legacy `CLAUDEBOX_*` accepted), plus `DRIDOCK_ENV_*` (forward arbitrary vars into the container) and `DRIDOCK_MOUNT_*` (extra volume mounts).
 - **[Customization →](docs/customization.md)** — extend Claude's container with custom scripts (`~/.claude/bin`), one-time init hooks (`~/.claude/init.d`), always-active skills auto-injected into every session (`~/.claude/.always-skills`), and MCP server definitions (project `.mcp.json` or global `~/.claude.json`).
 
 ## Gotchas
@@ -344,7 +345,7 @@ environment:
 - **Two containers per workspace** — the wrapper creates `claude-<path>` for interactive (TTY) sessions and `claude-<path>_prog` for programmatic (no TTY) sessions. Both share the same mounted volumes and data.
 - **Workspace busy tracking** — in API mode, each workspace can only have one active Claude process at a time. Concurrent requests to the same workspace return a 409 Conflict response. Use different workspace subpaths for parallel work.
 - **Telegram config is required** — the Telegram bot will not start without a `telegram.yml` config file. This is intentional to prevent accidentally exposing Claude to the public.
-- **Auto-updates disabled** — Claude Code CLI auto-updates are disabled by default inside the container to ensure reproducible behavior. Opt in with `claudebox --update` when you want to update.
+- **Auto-updates disabled** — Claude Code CLI auto-updates are disabled by default inside the container to ensure reproducible behavior. Opt in with `dridock --update` when you want to update.
 
 ## Documentation
 
@@ -352,8 +353,8 @@ environment:
 
 - **Modes:** [interactive](docs/modes/interactive.md) · [programmatic](docs/modes/programmatic.md) · [API](docs/modes/api.md) · [Telegram](docs/modes/telegram.md) · [cron](docs/modes/cron.md)
 - **Config:** [environment variables](docs/environment-variables.md) · [customization](docs/customization.md)
-- **Design:** [per-project VM](docs/design/per-project-vm.md) · [versioning & releases](docs/versioning.md) · [bootstrap](docs/design/bootstrap.md) · [multi-repo projects](docs/design/multi-repo-projects.md) · [profiles](docs/design/profiles.md) · [browser testing](docs/design/browser-testing.md) · [N-tier networking](docs/design/n-tier-networking.md) · [disk management](docs/design/disk-management.md) · [framework guidance](docs/design/framework-guidance.md) · [framework consult](docs/design/framework-consult.md) · [backends](docs/design/backends.md) · [developing in a claudebox](docs/design/developing-in-a-claudebox.md) · [framework bug reporting](docs/design/framework-bug-reporting.md) · [framework-dev mode](docs/design/framework-dev-mode.md) · [convenience scripts (`cb-*`)](docs/design/convenience-scripts.md) · [upstream sync](docs/design/upstream-sync.md) · [features system (3.0 design)](docs/design/features-system.md) · [3.0 migration guide](docs/design/3.0-migration.md)
-- **Meta:** [documenting claudebox](docs/documentation.md) (house style + Mermaid) · [CHANGELOG](CHANGELOG.md) · [CLAUDE.md](CLAUDE.md) (repo conventions)
+- **Design:** [per-project VM](docs/design/per-project-vm.md) · [versioning & releases](docs/versioning.md) · [3.0 migration guide](docs/design/3.0-migration.md) · [bootstrap](docs/design/bootstrap.md) · [multi-repo projects](docs/design/multi-repo-projects.md) · [profiles](docs/design/profiles.md) · [browser testing](docs/design/browser-testing.md) · [N-tier networking](docs/design/n-tier-networking.md) · [disk management](docs/design/disk-management.md) · [framework guidance](docs/design/framework-guidance.md) · [framework consult](docs/design/framework-consult.md) · [backends](docs/design/backends.md) · [developing in a dridock](docs/design/developing-in-a-claudebox.md) · [framework bug reporting](docs/design/framework-bug-reporting.md) · [framework-dev mode](docs/design/framework-dev-mode.md) · [convenience scripts (`cb-*`)](docs/design/convenience-scripts.md) · [upstream sync](docs/design/upstream-sync.md) · [features system (3.0 design)](docs/design/features-system.md)
+- **Meta:** [documenting dridock](docs/documentation.md) (house style + Mermaid) · [CHANGELOG](CHANGELOG.md) · [CLAUDE.md](CLAUDE.md) (repo conventions)
 
 ## License
 

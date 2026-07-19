@@ -1,16 +1,18 @@
 # Convention: `cb-*` convenience commands (inside the container)
 
-As claudebox grows, the claudebot needs small, discoverable helper commands for the
+As dridock grows, the claudebot needs small, discoverable helper commands for the
 things the harness standardizes — browser testing, framework bug reports, and more to
 come. Rather than scatter ad-hoc scripts, they follow one convention so the set stays
 self-describing.
 
 ## The convention
 
-1. **Name it `cb-<name>`.** Every claudebox convenience command is an executable whose
+1. **Name it `cb-<name>`.** Every dridock convenience command is an executable whose
    basename starts with `cb-` (e.g. `cb-browser`, `cb-report-bug`, `cb-help`). The
    shared prefix makes them one discoverable namespace (`cb-<TAB>`), and marks them as
-   "provided by the harness" vs. the project's own tooling.
+   "provided by the harness" vs. the project's own tooling. (The `cb-` prefix is
+   preserved from the 2.x `claudebox` name; the container-side convention is stable
+   across the 3.0 rebrand.)
 
 2. **Carry a one-line `# summary:` header.** Near the top of the script:
 
@@ -37,18 +39,18 @@ self-describing.
 5. **Self-documenting.** Each command should also respond to `--help` (or have a clear
    header comment) for details beyond the one-line summary.
 
-## Why not the host `claudebox` CLI?
+## Why not the host `dridock` CLI?
 
-The host `claudebox` wrapper is **not** inside the container (it's the host-side
+The host `dridock` wrapper is **not** inside the container (it's the host-side
 orchestrator that manages VMs/containers). Inside the container the claudebot has
 `claude`, the docker socket, and these `cb-*` commands. So container-side convenience
-belongs in `cb-*`, and host-side convenience belongs in `claudebox <subcommand>`.
+belongs in `cb-*`, and host-side convenience belongs in `dridock <subcommand>`.
 
 ## Surfacing it to the claudebot
 
 - The baked `CLAUDE.md` tells the claudebot that `cb-*` commands exist and to run
   `cb-help` to list them.
-- The container-side `/claudebox` skill (seeded by the entrypoint) runs `cb-help` as
+- The container-side `/dridock` skill (seeded by the entrypoint) runs `cb-help` as
   part of its self-report.
 
 ## See also

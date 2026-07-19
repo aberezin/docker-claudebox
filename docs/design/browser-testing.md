@@ -1,12 +1,14 @@
-# Design: Browser testing from claudebox
+# Design: Browser testing from dridock
 
 **Status:** Draft / accepted direction — not yet implemented
 **Applies to:** this fork (local-build, per-project Colima VMs). See
 [per-project-vm.md](per-project-vm.md) for the VM model this builds on.
 
+> In 2.x this framework was called `claudebox`; 3.0 renames the host wrapper and harness to `dridock`. The container helpers stay under the `cb-*` prefix.
+
 ## Summary
 
-The Claude running *inside* claudebox ("claudebot") frequently spins up web
+The Claude running *inside* dridock ("claudebot") frequently spins up web
 workloads (an API server, a frontend) and then needs to **drive a browser against
 them** to test. Two paths, and we implement both:
 
@@ -23,7 +25,7 @@ Default to A; enable B per project only when you mean it.
 
 The "Claude in Chrome" automation the **host** Claude Code uses (the browser
 extension + native-messaging bridge) is a **host capability** — it talks to the
-host Claude over native messaging, not the network. The Claude inside claudebox is
+host Claude over native messaging, not the network. The Claude inside dridock is
 a **separate `claude` process in a container** and cannot reach that extension. So
 "have claudebot use the Claude-in-Chrome tab" is not possible; claudebot must
 drive a browser it can reach over a protocol (Playwright/CDP), not the extension.
@@ -46,9 +48,9 @@ Approach B (opt-in): drive your real Chrome
                                                  └─ python forwarder ─> 127.0.0.1:9222 -> debug Chrome
 ```
 
-> **Status: implemented & verified (2026-07-05).** `claudebox browser-bridge up`
+> **Status: implemented & verified (2026-07-05).** `dridock browser-bridge up`
 > launches the debug Chrome + a dependency-free Python TCP forwarder bound to the
-> Colima gateway `192.168.64.1:9223`, and injects `CLAUDEBOX_HOST_CDP_URL` into the
+> Colima gateway `192.168.64.1:9223`, and injects `DRIDOCK_HOST_CDP_URL` into the
 > container. `cb-browser cdp <url>` then drives your Chrome. End-to-end proof: a
 > container in a `--network-address` VM ran `connectOverCDP(192.168.64.1:9223)` and
 > navigated the Mac's Chrome to example.com. See "What shipped" below.
@@ -107,8 +109,8 @@ mechanism is the **Chrome DevTools Protocol**, not the extension:
 1. **Launch a debug Chrome on the Mac** with `--remote-debugging-port=9222`,
    `--remote-allow-origins=*` (Chrome ≥111 otherwise 403s the CDP WebSocket
    upgrade), and a **dedicated profile** — `--user-data-dir` defaults to a clearly
-   named `<state>/claudebox/cdp/chrome-debug-profile` and is tunable via
-   `CLAUDEBOX_CDP_PROFILE`. Never point it at your main profile — so B carries no
+   named `<state>/dridock/cdp/chrome-debug-profile` and is tunable via
+   `DRIDOCK_CDP_PROFILE`. Never point it at your main profile — so B carries no
    ambient logins unless you opt each one in.
 2. **Bridge the debug port to the VM.** CDP binds to `127.0.0.1:9222` only (by
    design — it's total control of the browser). A tiny **dependency-free Python TCP
@@ -123,34 +125,34 @@ mechanism is the **Chrome DevTools Protocol**, not the extension:
    **Note: the URL must be an IP, not a hostname** — Chrome's CDP endpoint rejects
    requests whose `Host` header isn't an IP or `localhost`.
 
-The fork provides the host-side helper `claudebox browser-bridge up`, which
+The fork provides the host-side helper `dridock browser-bridge up`, which
 launches the dedicated debug Chrome + the Python forwarder and writes the reachable
-CDP URL to a per-project **marker** (`~/.config/claudebox/projects/<id>/.cdp-url`).
-**The initial tab is a data-URL welcome page whose `<title>` is `"Claudebox Chrome
+CDP URL to a per-project **marker** (`~/.config/dridock/projects/<id>/.cdp-url`).
+**The initial tab is a data-URL welcome page whose `<title>` is `"Dridock Chrome
 -- <hash>"`** (8-hex-digit instance hash, persisted for the life of the bridge in
-`~/.config/claudebox/cdp/window-hash` and refreshed on the next `up` after `down`).
+`~/.config/dridock/cdp/window-hash` and refreshed on the next `up` after `down`).
 macOS Chrome's window title mirrors the active tab's title, so the debug window is
 identifiable at a glance in Mission Control / Cmd+Tab / Dock tooltip. Navigate that
 tab and the title moves with it — reopen the welcome URL (or the tab) if you want
 the marker back.
-The wrapper exposes it as `CLAUDEBOX_HOST_CDP_URL` two ways: via `docker run -e` for
+The wrapper exposes it as `DRIDOCK_HOST_CDP_URL` two ways: via `docker run -e` for
 a freshly-created container, **and** — because `-e` never reaches a container that
 already exists (a restart is `docker start`, which can't add env) — by writing a
 durable **`-cdp` sidecar** the entrypoint re-reads on every start. So a bridge you
 bring up (or down) takes effect on the *already-running* claudebot on its next
-`claudebox` invocation, no container recreation required. `down` kills both and
+`dridock` invocation, no container recreation required. `down` kills both and
 removes the marker. All userspace — **no sudo**. (One shared bridge — single Chrome,
 fixed forwarder port — serves every project, so the profile is global, not per-id.)
 
 **Marker vs. sidecar — lifecycle (why the sidecar isn't stale junk).** The marker is
 the *source of truth*, owned explicitly: `browser-bridge up` creates it, `browser-bridge
 down` deletes it. The `-cdp` sidecar (`~/.claude/.<container>-cdp`, one per container
-role) is a *derived mirror* the wrapper **rewrites on every `claudebox` invocation** —
+role) is a *derived mirror* the wrapper **rewrites on every `dridock` invocation** —
 the URL when the marker is present, **empty** when it isn't (empty → the entrypoint
-*unsets* `CLAUDEBOX_HOST_CDP_URL`, so a stale value baked in at `docker run` can't
+*unsets* `DRIDOCK_HOST_CDP_URL`, so a stale value baked in at `docker run` can't
 linger). Nobody has to garbage-collect it: it's a fixed set of files that never
 accumulate, self-heal to empty when the bridge is down, and are removed wholesale by
-`claudebox destroy --purge`. The only lag is the usual restart boundary — a container
+`dridock destroy --purge`. The only lag is the usual restart boundary — a container
 already running keeps the old value until its next start re-reads the file. This is the
 same durability pattern as the auth/secrets sidecars (see
 [per-project-vm.md](per-project-vm.md)).
@@ -168,15 +170,15 @@ reachable in-VM (or whose websocket endpoint is in-VM), use Approach A
 
 **Where the claudebot gets the VM IP — and why it must read it fresh.** The claudebot
 container is on the VM's docker *bridge* (`172.x`); it **cannot self-discover** the VM's
-reachable `192.168.64.x` (col0) address. So the wrapper injects it as **`CLAUDEBOX_VM_IP`**
-(also `cb-browser ip` inside, `claudebox ip` on the Mac). Critically, that IP **rotates
+reachable `192.168.64.x` (col0) address. So the wrapper injects it as **`DRIDOCK_VM_IP`**
+(also `cb-browser ip` inside, `dridock ip` on the Mac). Critically, that IP **rotates
 across VM restarts** (a real case here: `.13` → `.16`), so it is injected the same durable,
-self-healing way as the CDP url — a `-vmip` sidecar refreshed on *every* `claudebox` run —
+self-healing way as the CDP url — a `-vmip` sidecar refreshed on *every* `dridock` run —
 and **must never be hardcoded** in project source/config (`next.config.ts`
 `allowedDevOrigins`, Vite `server.allowedHosts`, CORS allowlists, `.env`, test base URLs).
 A stale baked IP is a top cause of "worked yesterday, blocked today". To spare the claudebot
 the rediscovery loop, `cb-browser cdp` **auto-rewrites** a `localhost`/`127.0.0.1`/`0.0.0.0`
-target to `$CLAUDEBOX_VM_IP` (with a printed note) instead of silently failing.
+target to `$DRIDOCK_VM_IP` (with a printed note) instead of silently failing.
 
 **Prefer `cb-browser cdp` / `cb-browser script-cdp` over a hand-rolled `connectOverCDP`.**
 Driving the human's *real* (non-Playwright) Chrome with your own `chromium.connectOverCDP(...)`
@@ -199,7 +201,7 @@ single-page-load `cb-browser cdp <url>`), use **`cb-browser script-cdp <file.cjs
 Approach-B's `script`: same read-only `/work` + writable `/out` shape as A-side `script`, but
 with the CDP wiring done for you and a safety net against the tab-lifecycle footgun:
 
-- **`$CLAUDEBOX_HOST_CDP_URL` and `$CDP_URL`** are forwarded into the script container (both
+- **`$DRIDOCK_HOST_CDP_URL` and `$CDP_URL`** are forwarded into the script container (both
   names, so either idiom works). The script does
   `chromium.connectOverCDP(process.env.CDP_URL)` and connects to the bridge.
 - **`--network host`** so the container can reach the Mac's Colima gateway
@@ -224,7 +226,7 @@ with the CDP wiring done for you and a safety net against the tab-lifecycle foot
   on cleanup. Use your normal Chrome for casual browsing.
 - **`--network host` can't resolve `cb-net` names.** If your script also needs to hit an
   in-VM workload (the app under test), address it at
-  `$CLAUDEBOX_VM_IP:<published-port>` — that env var is forwarded too. `cb-net` names like
+  `$DRIDOCK_VM_IP:<published-port>` — that env var is forwarded too. `cb-net` names like
   `http://api:8080` only work from A-side `script` (which is on `cb-net`).
 
 Canonical snippet — the recommended in-script pattern is still to close pages explicitly in
@@ -238,7 +240,7 @@ const { chromium } = require('playwright');
   const ctx = browser.contexts()[0] || (await browser.newContext());
   const page = await ctx.newPage();
   try {
-    await page.goto(`http://${process.env.CLAUDEBOX_VM_IP}:3000/login`);
+    await page.goto(`http://${process.env.DRIDOCK_VM_IP}:3000/login`);
     // ... your flow ...
   } finally {
     await page.close();           // explicit — don't rely solely on the harness's safety net
@@ -268,26 +270,26 @@ all required for B:
   always-skill and/or a small baked-in helper so every project's Claude tests the
   same way (shared project network, headless + artifacts, or the A2 noVNC runner).
 - **B** needs no config flag to stay safe: the bridge only exists while you run
-  `claudebox browser-bridge up` on the Mac, and the container only sees a CDP URL
+  `dridock browser-bridge up` on the Mac, and the container only sees a CDP URL
   when the marker is present. Starting the bridge is the per-session opt-in.
   ```
-  claudebox browser-bridge up      # launch debug Chrome + forwarder, write marker + sidecar
-  # ...restart the claudebot session (plain `claudebox` — docker start re-reads the sidecar)...
+  dridock browser-bridge up      # launch debug Chrome + forwarder, write marker + sidecar
+  # ...restart the claudebot session (plain `dridock` — docker start re-reads the sidecar)...
   cb-browser cdp https://example.com   # (inside claudebot) drive your Chrome
-  claudebox browser-bridge down    # kill both, remove marker (sidecar blanks on next run)
+  dridock browser-bridge down    # kill both, remove marker (sidecar blanks on next run)
   ```
-  Overridable via env: `CLAUDEBOX_CDP_BIND` (default `192.168.64.1`),
-  `CLAUDEBOX_CDP_PORT` (`9223`), `CLAUDEBOX_CHROME` (Chrome binary path).
+  Overridable via env: `DRIDOCK_CDP_BIND` (default `192.168.64.1`),
+  `DRIDOCK_CDP_PORT` (`9223`), `DRIDOCK_CHROME` (Chrome binary path).
 
 ### What shipped (B)
 
 - Host: `wrapper.sh` — `cb_bridge_up` / `cb_bridge_down` and the `browser-bridge
   up|down` subcommand; a per-project marker at
-  `~/.config/claudebox/projects/<id>/.cdp-url`; the wrapper exposes
-  `CLAUDEBOX_HOST_CDP_URL` both via `docker run -e` (fresh container) and via a
+  `~/.config/dridock/projects/<id>/.cdp-url`; the wrapper exposes
+  `DRIDOCK_HOST_CDP_URL` both via `docker run -e` (fresh container) and via a
   durable `.<container>-cdp` sidecar the entrypoint re-reads each start (so an
   already-running container picks up the bridge on restart, no recreation).
-- Container: `cb-browser cdp <url>` — `connectOverCDP($CLAUDEBOX_HOST_CDP_URL)` on a
+- Container: `cb-browser cdp <url>` — `connectOverCDP($DRIDOCK_HOST_CDP_URL)` on a
   `--network host` container, navigates your Chrome, drops a screenshot in the
   workspace.
 - Forwarder: a ~20-line embedded Python TCP relay (`192.168.64.1:9223 →
@@ -295,7 +297,7 @@ all required for B:
 
 ## Responsibility split
 
-- **claudebox (this project):** define and enforce the standard so Project-A and
+- **dridock (this project):** define and enforce the standard so Project-A and
   Project-B test identically — the A convention (network + Playwright + artifact
   location, or the A2 noVNC image) and the B bridge (dedicated Chrome + scoped
   Python forwarder + CDP-URL injection + the security guardrails). The boundary and
@@ -320,18 +322,18 @@ A), not the extension.
 2. **A2 runner** ✅ — `cb-browser watch`: a headful+noVNC browser container
    (`linuxserver/chromium`), published on the VM so it's watchable at
    `http://<vm-ip>:<port>` (reuses Mac→VM networking). Verified via VNC.
-3. **B bridge** ✅ — `claudebox browser-bridge up|down`: launches dedicated debug
+3. **B bridge** ✅ — `dridock browser-bridge up|down`: launches dedicated debug
    Chrome (`--remote-debugging-port`, dedicated `--user-data-dir`) + a **Python TCP
    forwarder** bound to `192.168.64.1:9223` (Colima gateway, not `socat`, not
-   `0.0.0.0`); injects `CLAUDEBOX_HOST_CDP_URL` into the container; tears down on
+   `0.0.0.0`); injects `DRIDOCK_HOST_CDP_URL` into the container; tears down on
    `down`. `cb-browser cdp <url>` drives your Chrome. Verified end-to-end.
 4. **B security** ✅ — dedicated profile, colima-only bind, opt-in = running the
    command, explicit control-handover warning.
 5. **Tests** — A1/A2/B verified manually end-to-end on throwaway `--network-address`
    VMs. TODO: fold a B smoke test into the bash suite behind the opt-in.
 6. **`cb-browser script-cdp` (2.17.0)** ✅ — dedicated CDP-aware subcommand for custom
-   Playwright flows against the human's real Chrome: forwards `$CLAUDEBOX_HOST_CDP_URL` +
-   `$CDP_URL` + `$CLAUDEBOX_VM_IP`, uses `--network host`, and snapshot-diffs page targets
+   Playwright flows against the human's real Chrome: forwards `$DRIDOCK_HOST_CDP_URL` +
+   `$CDP_URL` + `$DRIDOCK_VM_IP`, uses `--network host`, and snapshot-diffs page targets
    over `/json/list` so the natural `browser.close()` pattern can't leak tabs
    (opt-out: `CB_BROWSER_CDP_KEEP=1`). Resolves consult `2026-07-16T15-12-59-51cb139f`.
 
@@ -344,10 +346,10 @@ A), not the extension.
   default port `3010`, overridable.
 - ~~**B: exact Mac-side bind target** / CDP-URL discovery~~ — resolved: bind
   `192.168.64.1:9223` (Colima gateway, reachable from a `--network host` container
-  over `col0`); discovery via `CLAUDEBOX_HOST_CDP_URL` injected from a per-project
+  over `col0`); discovery via `DRIDOCK_HOST_CDP_URL` injected from a per-project
   marker file.
 - ~~**B: dedicated vs real Chrome profile**~~ — resolved: **dedicated** profile
-  (`--user-data-dir`), overridable via `CLAUDEBOX_CHROME`/env if you want your real
+  (`--user-data-dir`), overridable via `DRIDOCK_CHROME`/env if you want your real
   one.
 
 ## See also
@@ -355,4 +357,4 @@ A), not the extension.
 - [per-project-vm.md](per-project-vm.md) — the VM IP / `cb-net` networking browser tests rely on.
 - [convenience-scripts.md](convenience-scripts.md) — `cb-browser` and the `cb-*` convention.
 - [framework-bug-reporting.md](framework-bug-reporting.md) — report harness/browser-tool friction with `cb-report-bug`.
-- [environment-variables.md](../environment-variables.md) — `CLAUDEBOX_CDP_*` and related knobs.
+- [environment-variables.md](../environment-variables.md) — `DRIDOCK_CDP_*` and related knobs.

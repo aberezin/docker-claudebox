@@ -34,7 +34,7 @@ It fixes two failure modes of the previous approach (copying a template into the
 | **Guidance went stale.** The workspace copy was made once and never refreshed, so harness updates never reached existing projects (the "task #10" propagation gap). | Rewritten from the image on *every* start, so a reseed to a newer image always carries current guidance. |
 | **It mixed with project content.** Once copied, framework text and the project's own notes lived in one file. | The framework file is separate and framework-owned; the project's `./CLAUDE.md` is never touched. |
 
-This is the same "shipped content, rewritten every start" pattern as the container `/claudebox`
+This is the same "shipped content, rewritten every start" pattern as the container `/dridock`
 skill — a file the framework owns, so overwriting it each boot is safe.
 
 ## What each kind of project gets
@@ -45,7 +45,7 @@ skill — a file the framework owns, so overwriting it each boot is safe.
   something project-specific to say. The framework guidance is already covered by user memory.
 - **An existing-repo project** (has its own `./CLAUDE.md`): untouched — it keeps its file *and*
   now also gets the framework guidance via user memory.
-- **A bootstrapped project** (`.claudebox/BRIEF.md` present): the "read your BRIEF.md first"
+- **A bootstrapped project** (`.dridock/BRIEF.md` present): the "read your BRIEF.md first"
   mission banner is emitted **into the user-memory file** (conditionally), where it's always
   loaded — it is no longer prepended to the workspace `CLAUDE.md`.
 
@@ -75,8 +75,8 @@ follow-up.
 
 ## See also
 
-- [convenience-scripts.md](convenience-scripts.md) — the `cb-*` tooling the guidance points at, and the "rewritten every start" `/claudebox` skill pattern this mirrors.
-- [bootstrap.md](bootstrap.md) — `.claudebox/BRIEF.md` and the mission banner now surfaced via user memory.
+- [convenience-scripts.md](convenience-scripts.md) — the `cb-*` tooling the guidance points at, and the "rewritten every start" `/dridock` skill pattern this mirrors.
+- [bootstrap.md](bootstrap.md) — `.dridock/BRIEF.md` and the mission banner now surfaced via user memory.
 - [n-tier-networking.md](n-tier-networking.md) · [disk-management.md](disk-management.md) — standards summarized in the baked guidance.
 - [../../CLAUDE.md](../../CLAUDE.md) — the repo convention that `~/.claude` is bind-mounted, so framework `.claude` content must be seeded at runtime (this is that pattern).
 - [framework-dev-mode.md](framework-dev-mode.md) — the framework-dev runtime mode that includes the surfacing block emitted alongside this baked guidance.

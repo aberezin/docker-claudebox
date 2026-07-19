@@ -8,7 +8,7 @@ Run scheduled Claude jobs from a YAML cron file. Each job has a cron expression 
 model: haiku                    # default model for all jobs; per-job "model" overrides this
 append_system_prompt: |
   The current date and time is {system_datetime}.
-telegram_chat_id: -1001234567890  # optional: send results to this chat (requires CLAUDEBOX_TELEGRAM_BOT_TOKEN)
+telegram_chat_id: -1001234567890  # optional: send results to this chat (requires DRIDOCK_TELEGRAM_BOT_TOKEN)
 
 jobs:
   - name: every_30_seconds
@@ -41,7 +41,7 @@ jobs:
 | `effort`               | Default reasoning effort: `low`, `medium`, `high`, `xhigh`, `max` — per-job overrides |
 | `system_prompt`        | Default system prompt — replaces Claude's built-in system prompt                     |
 | `append_system_prompt` | Default text appended to the system prompt                                           |
-| `telegram_chat_id`     | Chat/channel ID to send results to — requires `CLAUDEBOX_TELEGRAM_BOT_TOKEN` env var |
+| `telegram_chat_id`     | Chat/channel ID to send results to — requires `DRIDOCK_TELEGRAM_BOT_TOKEN` env var  |
 
 ## Per-job fields
 
@@ -57,7 +57,7 @@ Per-job values override the root-level defaults. `telegram_chat_id` can be set a
 
 ## Telegram notifications
 
-Set `telegram_chat_id` (root or per-job) and `CLAUDEBOX_TELEGRAM_BOT_TOKEN` to get Claude's result posted to a Telegram chat after each job finishes. The bot must already be set up — see [Telegram mode](telegram.md) for setup.
+Set `telegram_chat_id` (root or per-job) and `DRIDOCK_TELEGRAM_BOT_TOKEN` to get Claude's result posted to a Telegram chat after each job finishes. The bot must already be set up — see [Telegram mode](telegram.md) for setup.
 
 ```yaml
 telegram_chat_id: -1001234567890   # root default — all jobs notify here
@@ -93,12 +93,12 @@ Standard 5-field (`min hr dom mon dow`) for minute resolution, or 6-field (`sec 
 ```yaml
 # docker-compose.yml
 services:
-  claudebox-cron:
-    image: claudebox:latest    # build locally first: make build
+  dridock-cron:
+    image: dridock:latest    # build locally first: make build
     environment:
-      - CLAUDEBOX_MODE_CRON=1
-      - CLAUDEBOX_MODE_CRON_FILE=/home/claude/.claude/cron.yaml
-      - CLAUDEBOX_WORKSPACE=/workspace
+      - DRIDOCK_MODE_CRON=1
+      - DRIDOCK_MODE_CRON_FILE=/home/claude/.claude/cron.yaml
+      - DRIDOCK_WORKSPACE=/workspace
       - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxx
       - DEBUG=true # optional, verbose per-tick logs
     volumes:
@@ -108,13 +108,13 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
 ```
 
-The scheduler is a single foreground process — `docker logs` shows every tick (job fired, finished, errors). All jobs share the workspace at `CLAUDEBOX_WORKSPACE`. If a previous run is still in progress when the next tick fires, that tick is skipped (logged as a warning).
+The scheduler is a single foreground process — `docker logs` shows every tick (job fired, finished, errors). All jobs share the workspace at `DRIDOCK_WORKSPACE`. If a previous run is still in progress when the next tick fires, that tick is skipped (logged as a warning).
 
 To target external systems (Telegram, Discord, Slack, email, web hooks, ...), tell Claude in the instruction to use an MCP server you've configured under `~/.claude` — it has full tool access during cron runs just like in interactive mode. See [Customization → MCP servers](../customization.md#mcp-servers) for setup.
 
 ## Combined cron + telegram mode
 
-Set both `CLAUDEBOX_MODE_CRON=1` and `CLAUDEBOX_MODE_TELEGRAM=1` in the same container and you get a single workspace shared between the cron scheduler (background) and the telegram bot (foreground). When the bot exits, the scheduler is killed too.
+Set both `DRIDOCK_MODE_CRON=1` and `DRIDOCK_MODE_TELEGRAM=1` in the same container and you get a single workspace shared between the cron scheduler (background) and the telegram bot (foreground). When the bot exits, the scheduler is killed too.
 
 In this mode:
 
@@ -130,14 +130,14 @@ Example combined-mode `docker-compose.yml`:
 
 ```yaml
 services:
-  claudebox-cron-tg:
-    image: claudebox:latest    # build locally first: make build
+  dridock-cron-tg:
+    image: dridock:latest    # build locally first: make build
     environment:
-      - CLAUDEBOX_MODE_CRON=1
-      - CLAUDEBOX_MODE_TELEGRAM=1
-      - CLAUDEBOX_MODE_CRON_FILE=/home/claude/.claude/cron.yaml
-      - CLAUDEBOX_WORKSPACE=/workspace
-      - CLAUDEBOX_TELEGRAM_BOT_TOKEN=123456:ABC-DEF
+      - DRIDOCK_MODE_CRON=1
+      - DRIDOCK_MODE_TELEGRAM=1
+      - DRIDOCK_MODE_CRON_FILE=/home/claude/.claude/cron.yaml
+      - DRIDOCK_WORKSPACE=/workspace
+      - DRIDOCK_TELEGRAM_BOT_TOKEN=123456:ABC-DEF
       - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxx
     volumes:
       - ./cron.yaml:/home/claude/.claude/cron.yaml:ro
@@ -163,15 +163,15 @@ jobs:
 
 | Variable                   | Description                                                  | Default      |
 | -------------------------- | ------------------------------------------------------------ | ------------ |
-| `CLAUDEBOX_MODE_CRON`      | Set to `1` to start in cron mode                             | _(none)_     |
-| `CLAUDEBOX_MODE_CRON_FILE` | Path inside the container to the cron yaml                   | _(none)_     |
-| `CLAUDEBOX_WORKSPACE`      | Absolute path to the workspace directory (cwd for every job) | `/workspace` |
+| `DRIDOCK_MODE_CRON`        | Set to `1` to start in cron mode                             | _(none)_     |
+| `DRIDOCK_MODE_CRON_FILE`   | Path inside the container to the cron yaml                   | _(none)_     |
+| `DRIDOCK_WORKSPACE`        | Absolute path to the workspace directory (cwd for every job) | `/workspace` |
 | `DEBUG`                    | Set to `true` for per-tick + per-line debug logs             | _(none)_     |
 
-> Legacy `CLAUDE_MODE_CRON`, `CLAUDE_MODE_CRON_FILE`, `CLAUDE_WORKSPACE` are still accepted as fallbacks.
+> Legacy `CLAUDEBOX_MODE_CRON`, `CLAUDEBOX_MODE_CRON_FILE`, `CLAUDEBOX_WORKSPACE` (and the older `CLAUDE_MODE_CRON*` / `CLAUDE_WORKSPACE`) are still accepted as fallbacks.
 
 ## See also
 
 - [telegram.md](telegram.md) — pairs with cron for notifications.
 - [api.md](api.md) — the other long-running daemon.
-- [environment-variables.md](../environment-variables.md) — `CLAUDEBOX_MODE_CRON_*`.
+- [environment-variables.md](../environment-variables.md) — `DRIDOCK_MODE_CRON_*`.

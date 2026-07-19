@@ -6,7 +6,7 @@ BIN_NAME="${1:-${DRIDOCK_BIN_NAME:-${CLAUDEBOX_BIN_NAME:-${CLAUDE_BIN_NAME:-drid
 INSTALL_DIR="${CLAUDEBOX_INSTALL_DIR:-${CLAUDE_INSTALL_DIR:-$HOME/.local/bin}}"
 BIN_PATH="$INSTALL_DIR/$BIN_NAME"
 
-echo "🚀 Starting Claude Code setup (binary: $BIN_NAME)..."
+echo "🚀 Starting dridock setup (binary: $BIN_NAME)..."
 
 # Check for Docker + Colima (this fork runs under colima with per-project VMs)
 if ! command -v docker &>/dev/null; then
@@ -76,7 +76,7 @@ if ! colima status -p "$CB_INFRA_PROFILE" >/dev/null 2>&1; then
 	fi
 fi
 
-# stamp the fork semver into the image (LABEL + ENV); `claudebox checkversion` reads it
+# stamp the fork semver into the image (LABEL + ENV); `dridock checkversion` reads it
 DRIDOCK_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 0.0.0)"
 echo "🔨 Building local Claude Code image into $CB_INFRA_PROFILE ($IMAGE_NAME:$CLAUDE_TAG v$DRIDOCK_VERSION, target: $BUILD_TARGET)..."
 if ! docker --context "$CB_INFRA_CTX" build --build-arg DRIDOCK_VERSION="$DRIDOCK_VERSION" --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
@@ -118,19 +118,20 @@ fi
 rm -f "$WRAPPER_TMP"
 
 # Install host-agent.py next to the wrapper (the wrapper resolves it there) — the opt-in
-# Mac agent for `claudebox host-agent up` (Approach 2 / #15). Best-effort; skip if absent.
+# Mac agent for `dridock host-agent up` (Approach 2 / #15). Best-effort; skip if absent.
 if [ -f "$SCRIPT_DIR/host-agent.py" ]; then
 	if [ -w "$INSTALL_DIR" ]; then install -m 755 "$SCRIPT_DIR/host-agent.py" "$INSTALL_DIR/host-agent.py"
 	elif command -v sudo >/dev/null 2>&1; then sudo install -m 755 "$SCRIPT_DIR/host-agent.py" "$INSTALL_DIR/host-agent.py"; fi
-	echo "📝 Installed host-agent.py to $INSTALL_DIR (for 'claudebox host-agent')"
+	echo "📝 Installed host-agent.py to $INSTALL_DIR (for 'dridock host-agent')"
 fi
 
-# Install the /claudebox Claude Code skill (human status glance) into the user's global
-# skills dir, so /claudebox works in any project. Skip with CLAUDEBOX_SKIP_SKILL=1.
-if [ -z "${CLAUDEBOX_SKIP_SKILL:-}" ] && [ -d "$SCRIPT_DIR/skills" ]; then
+# Install the /dridock Claude Code skill (human status glance) into the user's global
+# skills dir, so /dridock works in any project. Skip with CLAUDEBOX_SKIP_SKILL=1
+# (kept as the alias name for one deprecation cycle).
+if [ -z "${DRIDOCK_SKIP_SKILL:-${CLAUDEBOX_SKIP_SKILL:-}}" ] && [ -d "$SCRIPT_DIR/skills" ]; then
 	SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
 	if mkdir -p "$SKILLS_DIR" 2>/dev/null && cp -R "$SCRIPT_DIR/skills/." "$SKILLS_DIR/" 2>/dev/null; then
-		echo "📝 Installed Claude Code skill(s) to $SKILLS_DIR (use /claudebox in a project)"
+		echo "📝 Installed Claude Code skill(s) to $SKILLS_DIR (use /dridock in a project)"
 	fi
 fi
 
@@ -172,7 +173,7 @@ if mkdir -p "$COMPLETION_DIR" 2>/dev/null; then
 	fi
 fi
 
-echo "✅ Claude Code setup complete! You can now use '$BIN_NAME' command from any directory."
+echo "✅ dridock (Claude Code) setup complete! You can now use '$BIN_NAME' command from any directory."
 
 # Nudge if the install dir isn't on PATH (common for ~/.local/bin on macOS)
 case ":$PATH:" in

@@ -86,7 +86,7 @@ WORKDIR /workspace
 # The staging layout mirrors the install destinations:
 #   /h/home     → /home/claude          (entrypoint, daemons, CHANGELOG)
 #   /h/bin      → /usr/local/bin         (cb-* helpers + the host-agent shim colima/limactl)
-#   /h/profiles → /usr/local/lib/claudebox/profiles
+#   /h/profiles → /usr/local/lib/dridock/profiles
 FROM ubuntu:24.04 AS harness
 RUN mkdir -p /h/home /h/bin /h/profiles
 COPY entrypoint.sh api_server.py telegram_bot.py telegram_utils.py cron.py jsonpipe.py /h/home/
@@ -113,7 +113,7 @@ FROM base AS minimal
 ENV DRIDOCK_IMAGE_VARIANT=minimal
 COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
-COPY --from=harness /h/profiles/ /usr/local/lib/claudebox/profiles/
+COPY --from=harness /h/profiles/ /usr/local/lib/dridock/profiles/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION
@@ -235,7 +235,7 @@ RUN pip install --no-cache-dir pipenv poetry
 # harness install (shared tail — keep in sync with the minimal variant above)
 COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
-COPY --from=harness /h/profiles/ /usr/local/lib/claudebox/profiles/
+COPY --from=harness /h/profiles/ /usr/local/lib/dridock/profiles/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION

@@ -78,9 +78,9 @@ CLAUDE_MD_USER="/home/claude/.claude/CLAUDE.md"
 dbg "writing framework guidance to user memory (variant: ${CLAUDE_IMAGE_VARIANT:-full})"
 {
 		cat <<'CLAUDEMD_HEADER'
-# claudebox — framework guidance (auto-generated; do not edit)
+# dridock — framework guidance (auto-generated; do not edit)
 
-> This is claudebox **framework** guidance, loaded as *user memory* and **rewritten on every
+> This is dridock **framework** guidance, loaded as *user memory* and **rewritten on every
 > container start** — edits here are lost next boot. It describes the container/environment you
 > run in. Your project's own `./CLAUDE.md` (if it has one) is loaded alongside this and is
 > authoritative for project-specific conventions — put project notes there, not here.
@@ -135,7 +135,7 @@ your session, and the human can reach them.
   it detached: `docker run -d --restart unless-stopped -p 8080:8080 <image>`. It is
   then reachable at **this project's VM IP**, e.g. `http://<vm-ip>:8080`. That IP is in
   your env as **`$DRIDOCK_VM_IP`** (also `cb-browser ip`) — the container can't
-  self-discover it, so use that var; the human gets it with `claudebox ip`.
+  self-discover it, so use that var; the human gets it with `dridock ip`.
 - **The VM IP ROTATES across VM restarts** (e.g. .13 → .16). So NEVER hardcode it in
   project source or config — not in `next.config.ts` `allowedDevOrigins`, Vite
   `server.allowedHosts`, CORS allowlists, `.env`, or a test's base URL. Read
@@ -146,7 +146,7 @@ your session, and the human can reach them.
   to be forwarding that exact port to the Mac, and it COLLIDES when two projects publish
   the same port. Always prefer the VM IP.
 
-### N-tier apps: two addressing planes (the claudebox standard)
+### N-tier apps: two addressing planes (the dridock standard)
 For any multi-tier app (frontend + API + db …) there are TWO address spaces — keep them
 straight or you'll chase phantom CORS/connection bugs:
 - **Service ↔ service** (API→db, Next SSR→API): runs inside the VM on `cb-net` → address
@@ -158,8 +158,8 @@ Rules: bind services to **`0.0.0.0`** (not `127.0.0.1`) so they're reachable on 
 planes; the browser tier's API base URL must be the VM IP (e.g. `NEXT_PUBLIC_API_BASE=
 http://$DRIDOCK_VM_IP:8080`), while server-side code calls the API by container name;
 drive **CORS / `allowedDevOrigins`** from `$DRIDOCK_VM_IP` (and `$DRIDOCK_HOSTNAME` if
-the human set one via `claudebox net`) at server start — do NOT hardcode a rotating IP,
-and don't paper over it with wildcard CORS. This is a claudebox STANDARD (so every project
+the human set one via `dridock net`) at server start — do NOT hardcode a rotating IP,
+and don't paper over it with wildcard CORS. This is a dridock STANDARD (so every project
 does it the same way): the full spec — snippets, a worked Next+API+postgres layout, and a
 symptom→cause→fix table — is in `docs/design/n-tier-networking.md` on the host. If it's
 still unclear or you think the standard is wrong/incomplete, `cb-consult open` it.
@@ -214,7 +214,7 @@ so they're reachable by name:
 - `cb-browser watch http://api:8080` → headful browser with a noVNC web UI the human watches/drives live at http://<project-vm-ip>:<port>; `cb-browser watch-stop` to stop
 - `cb-browser net` → the network name to attach workloads to
 This is the standard way to browser-test here; prefer it over ad-hoc setups.
-Opt-in extra: if the human ran `claudebox browser-bridge up` on their Mac, the env
+Opt-in extra: if the human ran `dridock browser-bridge up` on their Mac, the env
 var `DRIDOCK_HOST_CDP_URL` is set and `cb-browser cdp <url>` drives THEIR real
 Chrome via CDP (dedicated debug profile). Only available when they explicitly start
 the bridge; don't rely on it — the self-contained A modes above are the default.
@@ -249,7 +249,7 @@ CDP gotchas (these waste cycles if you rediscover them each time):
 When you learn something the hard way and go to write it down — as a line in the
 project's `CLAUDE.md`, a project doc, a skill file, an `init.d` hook — pause and ask:
 **is this a project rule or a framework rule?** Getting this wrong is the single most
-common way friction stays local: agent hits a claudebox footgun, solves it, writes
+common way friction stays local: agent hits a dridock footgun, solves it, writes
 "next time do X" into the project's `CLAUDE.md`, and every other claudebot in every
 other project keeps re-discovering the same footgun because the note never propagated.
 - **The check (one question).** Does the rule name any code, filename, schema, service,
@@ -271,7 +271,7 @@ other project keeps re-discovering the same footgun because the note never propa
   triage; a false-negative (framework rule silently written to a project) is invisible
   and permanent. Prefer the visible cost.
 
-## Reporting a bug in the claudebox FRAMEWORK
+## Reporting a bug in the dridock FRAMEWORK
 If you hit something that looks like a bug in the harness that runs you — the
 wrapper, this entrypoint, the image, or the Colima/Docker networking — as opposed
 to a bug in the project you're building, FILE IT with `cb-report-bug`. Don't try to
@@ -297,12 +297,12 @@ Reports go to a shared host-visible location the maintainer reviews across all
 projects. Use it whenever the framework — not your code — is what's misbehaving.
 
 ## Escalating a framework BEST-PRACTICE question (cb-consult)
-Distinct from a bug: sometimes you're stuck on *how a claudebox project SHOULD do
-something* and the answer ought to be a claudebox standard, not a per-project
+Distinct from a bug: sometimes you're stuck on *how a dridock project SHOULD do
+something* and the answer ought to be a dridock standard, not a per-project
 reinvention. Open a **consult** — a supervised conversation with framework-Claude (the
 Claude working on the harness itself) that the human approves. Open one ONLY when ALL
 hold: (a) the problem is about the harness/ENVIRONMENT — networking, the VM, the image,
-the `cb-*` tooling — not your app's own logic; (b) it would recur in ANY claudebox
+the `cb-*` tooling — not your app's own logic; (b) it would recur in ANY dridock
 project (a general engineering concern); (c) it isn't already answered by this guidance.
 The archetype: N-tier networking (how tiers address each other vs how the browser reaches
 them, the rotating VM IP, CORS/allowed-origins). If it's a concrete DEFECT rather than a
@@ -310,7 +310,7 @@ them, the rotating VM IP, CORS/allowed-origins). If it's a concrete DEFECT rathe
 ```
 cb-consult open "<short title>" --layer networking <<'EOF'
 ## Problem            (what you're stuck on)
-## Why it's general   (why any claudebox N-tier project hits this)
+## Why it's general   (why any dridock N-tier project hits this)
 ## What I tried       (and why it didn't hold — e.g. hardcoded IP broke on rotation)
 EOF
 ```
@@ -399,7 +399,7 @@ HARNESS_UPDATE_NOTE=""
 if [ -n "${DRIDOCK_VERSION:-}" ]; then
 	_seen=""; [ -f "$HARNESS_VER_FILE" ] && _seen="$(cat "$HARNESS_VER_FILE" 2>/dev/null)"
 	if [ -n "$_seen" ] && [ "$_seen" != "$DRIDOCK_VERSION" ]; then
-		HARNESS_UPDATE_NOTE="NOTE: the claudebox harness was updated from v${_seen} to v${DRIDOCK_VERSION} since this project last ran. Read ~/CHANGELOG.md (top entry) for what changed before relying on prior assumptions about how the harness behaves."
+		HARNESS_UPDATE_NOTE="NOTE: the dridock harness was updated from v${_seen} to v${DRIDOCK_VERSION} since this project last ran. Read ~/CHANGELOG.md (top entry) for what changed before relying on prior assumptions about how the harness behaves."
 		dbg "harness update detected: $_seen -> $DRIDOCK_VERSION"
 	fi
 	printf '%s' "$DRIDOCK_VERSION" > "$HARNESS_VER_FILE" 2>/dev/null || true
@@ -431,7 +431,7 @@ fi
 # (workspace fingerprint = a wrapper.sh containing DRIDOCK_VERSION= at its root, OR
 # DRIDOCK_HARNESS_DEV=1 opt-in, or the legacy alias DRIDOCK_FRAMEWORK_DEV=1), also inject a note listing cross-project consults
 # awaiting a framework draft AND framework-bug reports not yet marked reviewed. This is
-# the review flow the host `claudebox consult list` / `claudebox framework-bugs list`
+# the review flow the host `dridock consult list` / `dridock framework-bugs list`
 # surfaces to a human on the Mac — mirrored here so a framework-dev claudebot working
 # from INSIDE a container catches waiting work at startup instead of missing it (there
 # is no host wrapper in here). Skipped for every normal claudebot.
@@ -480,26 +480,29 @@ _duse="$(df -P / 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}')"
 case "$_duse" in
 	''|*[!0-9]*) : ;;
 	*) if [ "$_duse" -ge 85 ]; then
-		DISK_NOTE="NOTE: this VM's disk is ${_duse}% full at startup — docker (images + build cache) and your /tmp share ONE overlay, so if it fills the Bash tool dies with ENOSPC on every command. Check with \`cb-df\`; reclaim with \`docker builder prune -f\` then \`docker image prune -af\`. If Bash is already failing, use your Write tool to drop a report into /home/claude/framework-bugs/ and ask the human to \`docker system prune -af\` / \`claudebox vm gc\` on the Mac. (See the Disk discipline section.)"
+		DISK_NOTE="NOTE: this VM's disk is ${_duse}% full at startup — docker (images + build cache) and your /tmp share ONE overlay, so if it fills the Bash tool dies with ENOSPC on every command. Check with \`cb-df\`; reclaim with \`docker builder prune -f\` then \`docker image prune -af\`. If Bash is already failing, use your Write tool to drop a report into /home/claude/framework-bugs/ and ask the human to \`docker system prune -af\` / \`dridock vm gc\` on the Mac. (See the Disk discipline section.)"
 		dbg "disk MOTD: / is ${_duse}% full at boot"
 	fi ;;
 esac
 
-# Seed the container-side /claudebox skill: a harness self-report the claudebot can run
-# from INSIDE (the host `claudebox` binary isn't in here). Rewritten every start so it
-# stays current after an image update (it's shipped content, not user-editable).
-CB_SKILL_DIR="/home/claude/.claude/skills/claudebox"
+# Seed the container-side /dridock skill: a harness self-report the claudebot can run
+# from INSIDE (the host `dridock` binary isn't in here). Rewritten every start so it
+# stays current after an image update (it's shipped content, not user-editable). Legacy
+# /claudebox skill dir (from 2.x images) is removed here for one deprecation cycle so a
+# renamed session doesn't ship two overlapping skills.
+rm -rf /home/claude/.claude/skills/claudebox 2>/dev/null
+CB_SKILL_DIR="/home/claude/.claude/skills/dridock"
 mkdir -p "$CB_SKILL_DIR"
 cat > "$CB_SKILL_DIR/SKILL.md" <<'CBSKILL'
 ---
-name: claudebox
-description: Report the claudebox harness you are running inside — its version, what changed (CHANGELOG), the convenience commands available (cb-help), and this project's container environment (workspace, cb-net, exposing workloads). Use when asked about the claudebox harness/version, available cb-* tools, or the container environment. (You are INSIDE the container — the host `claudebox` CLI is not available here.)
+name: dridock
+description: Report the dridock harness you are running inside — its version, what changed (CHANGELOG), the convenience commands available (cb-help), and this project's container environment (workspace, cb-net, exposing workloads). Use when asked about the dridock harness/version, available cb-* tools, or the container environment. (You are INSIDE the container — the host `dridock` CLI is not available here.)
 ---
 
-# claudebox — harness self-report (from inside the container)
+# dridock — harness self-report (from inside the container)
 
-You run INSIDE a claudebox container. Give a quick self-report of your harness
-environment. Do NOT try to run the host `claudebox` command — it isn't in here.
+You run INSIDE a dridock container. Give a quick self-report of your harness
+environment. Do NOT try to run the host `dridock` command — it isn't in here.
 
 1. **Version** — print the harness semver you're running: `echo "$DRIDOCK_VERSION"`.
    If a "harness was updated" note appeared this session, mention it.
@@ -508,13 +511,13 @@ environment. Do NOT try to run the host `claudebox` command — it isn't in here
    summarize the top entry if they ask).
 4. **Environment** — your workspace is `$DRIDOCK_WORKSPACE` (same path as on the host).
    Sibling workloads go on the `cb-net` docker network and are reachable by container
-   name; publish ports and address them by the VM IP (the human runs `claudebox ip` on
+   name; publish ports and address them by the VM IP (the human runs `dridock ip` on
    their Mac). The full orchestration standard is in this project's `CLAUDE.md`.
 
 Keep it a concise self-report, not a deep dive.
 CBSKILL
 chown -R claude:claude "$CB_SKILL_DIR" 2>/dev/null || true
-dbg "seeded container /claudebox skill"
+dbg "seeded container /dridock skill"
 
 # NOTE: we deliberately do NOT create a workspace ./CLAUDE.md. Framework guidance lives in
 # ~/.claude/CLAUDE.md (user memory, written above); the project's own ./CLAUDE.md — if any —
@@ -864,27 +867,27 @@ _maybe_install_default_plugin "$@"
 
 # Install the project's enabled profiles (wrapper writes the list to ~/.claude/.profiles
 # from the .dridock config `profiles:` field). Each is a baked installer at
-# /usr/local/lib/claudebox/profiles/<name>.sh; run once per profile, marker set only on
+# /usr/local/lib/dridock/profiles/<name>.sh; run once per profile, marker set only on
 # success (so an offline failure retries next start), as the `claude` user, best-effort.
 # See docs/design/profiles.md.
 _install_profiles() {
 	[ "${1:-}" = "setup-token" ] && return 0
-	local pf="$CLAUDE_CONFIG_DIR/.profiles" lib="/usr/local/lib/claudebox/profiles" prof marker
+	local pf="$CLAUDE_CONFIG_DIR/.profiles" lib="/usr/local/lib/dridock/profiles" prof marker
 	[ -f "$pf" ] || return 0
 	for prof in $(cat "$pf" 2>/dev/null); do
 		case "$prof" in ''|*[!A-Za-z0-9_-]*) continue ;; esac
 		marker="$CLAUDE_CONFIG_DIR/.profile-$prof"
 		[ -f "$marker" ] && continue
-		if [ ! -x "$lib/$prof.sh" ]; then echo "claudebox: unknown profile '$prof' (no $lib/$prof.sh)" >&2; continue; fi
+		if [ ! -x "$lib/$prof.sh" ]; then echo "dridock: unknown profile '$prof' (no $lib/$prof.sh)" >&2; continue; fi
 		dbg "installing profile: $prof"
 		if timeout 120 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
 			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:/home/claude/.claude/bin:\$PATH; exec '$lib/$prof.sh'" \
 			>/dev/null 2>&1
 		then
 			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
-			echo "claudebox: enabled profile '$prof'" >&2
+			echo "dridock: enabled profile '$prof'" >&2
 		else
-			echo "claudebox: profile '$prof' install failed (offline?) — retries next start" >&2
+			echo "dridock: profile '$prof' install failed (offline?) — retries next start" >&2
 		fi
 	done
 }
