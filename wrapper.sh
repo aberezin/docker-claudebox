@@ -409,7 +409,7 @@ cb_secrets_path() { printf '%s/secrets.env' "$(cb_project_dot "$1")"; }  # $1=ro
 
 # cb_secrets_put ROOT KEY VALUE — set/replace KEY in .dridock/secrets.env (create
 # with a header + chmod 600 if absent). Never echoes the value. Used by bootstrap
-# --gh-token / --secrets-file; secrets are NEVER accepted on the command line.
+# --seed-secret / --secrets-file (and legacy --gh-token); secrets are NEVER accepted on the command line.
 cb_secrets_put() {
     local root="$1" key="$2" val="$3" sf tmp dotname
     sf="$(cb_secrets_path "$root")"; mkdir -p "$(dirname "$sf")"
@@ -983,7 +983,7 @@ harness framework-bugs consult profiles ip net vm mcp auth doctor \\
         completion)      COMPREPLY=( \$(compgen -W "bash" -- "\$cur") ) ;;
         checkversion)    COMPREPLY=( \$(compgen -W "--all" -- "\$cur") ) ;;
         migrate)         COMPREPLY=( \$(compgen -W "--all" -- "\$cur") ) ;;
-        bootstrap)       COMPREPLY=( \$(compgen -W "--gh-token --secrets-file --brief-file --force --no-start --brief-only --adopt --workspace --multi-repo --repo" -- "\$cur") ) ;;
+        bootstrap)       COMPREPLY=( \$(compgen -W "--seed-secret --gh-token --secrets-file --brief-file --force --no-start --brief-only --adopt --workspace --multi-repo --repo" -- "\$cur") ) ;;
         destroy)         COMPREPLY=( \$(compgen -W "--purge" -- "\$cur") ) ;;
         start)           COMPREPLY=( \$(compgen -W "-p --output-format --model --system-prompt --append-system-prompt --json-schema --effort --resume --no-continue --update" -- "\$cur") ) ;;
         *)               COMPREPLY=() ;;
@@ -1098,7 +1098,7 @@ cb_info() {
         sf="$(cb_secrets_path "$root")"
         if [ -f "$sf" ]; then keys="$(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' "$sf" 2>/dev/null)"
             printf '  %-18s %s   (%s key(s), chmod %s)\n' "secrets.env:" "$sf" "${keys:-0}" "$(stat -c '%a' "$sf" 2>/dev/null)"
-        else printf '  %-18s %s\n' "secrets.env:" "(none — 'dridock bootstrap --gh-token' or add .dridock/secrets.env)"; fi
+        else printf '  %-18s %s\n' "secrets.env:" "(none — 'dridock bootstrap --seed-secret KEY=CMD' or add .dridock/secrets.env)"; fi
         printf '  %-18s %s\n' "data dir:" "$(cb_project_data_dir "$id")   (session history, settings, plugins)"
         cname="claude-$(printf '%s' "$PWD" | sed 's#/#_#g')"
         cstat="$(docker --context "$ctx" ps -a --filter "name=^${cname}\$" --format '{{.Status}}' 2>/dev/null | head -1)"
@@ -1551,10 +1551,10 @@ cb_write_brief() {
 
 This project ADOPTS an existing repository — its code is already checked out at the
 **workspace root** (this directory IS the repo). Extend it **in place**; do NOT re-clone it
-into a subdirectory (that creates a nested-repo tangle). If git/\`gh\` operations on a private
-repo fail (e.g. \`git pull\`/\`push\` auth), the host should seed a token via
-\`claudebox bootstrap --gh-token\`, and prefer \`gh\`-authenticated remotes over an embedded-email
-\`origin\`.
+into a subdirectory (that creates a nested-repo tangle). Git ops (\`git pull\`/\`push\`) use SSH
+via \`~/.ssh/claudebox/id_ed25519.pub\` — add it to your git host. API/CLI tools like \`gh\` need
+an API token: on the host, run
+\`dridock bootstrap --seed-secret GH_TOKEN='gh auth token'\` to seed one into secrets.env.
 " ;;
       workspace) extra_note="
 ## Repositories (multi-repo workspace)
@@ -1895,7 +1895,7 @@ USAGE
   dridock completion bash         emit a bash completion script (installed by install.sh)
 
 PROJECT
-  bootstrap [--gh-token] [...]      scaffold a project + mission brief (see --help on it)
+  bootstrap [--seed-secret KEY=CMD] [...]  scaffold a project + mission brief (see --help on it)
   info | status                    at-a-glance: versions, paths, VM, network
   profiles                         list enabled (config \`profiles:\`) + available tool bundles
   ip                               the project VM's reachable IP + how to browse
@@ -2195,7 +2195,7 @@ HELP
     bootstrap)
         # scaffold a new claudebot project in $PWD + write the mission brief.
         shift
-        _bs_mode=full _bs_force= _bs_start=1 _bs_intent= _bs_file= _bs_secfile= _bs_ghtoken= _bs_adopt= _bs_adopt_url= _bs_workspace= ; _bs_repos=()
+        _bs_mode=full _bs_force= _bs_start=1 _bs_intent= _bs_file= _bs_secfile= _bs_ghtoken= _bs_adopt= _bs_adopt_url= _bs_workspace= ; _bs_repos=() _bs_seed=()
         while [ $# -gt 0 ]; do
             case "$1" in
                 --brief-only) _bs_mode=brief; _bs_start= ;;
@@ -2203,7 +2203,15 @@ HELP
                 --force)      _bs_force=1 ;;
                 --brief-file) _bs_file="${2:-}"; shift ;;
                 --secrets-file) _bs_secfile="${2:-}"; shift ;;
-                --gh-token)   _bs_ghtoken=1 ;;
+                --seed-secret) # provider-agnostic: KEY=CMD; runs CMD on the host, stores stdout as KEY.
+                               # Repeatable. Never accepts a raw secret value on the command line.
+                               [ -n "${2:-}" ] || { echo "bootstrap: --seed-secret needs KEY=CMD" >&2; exit 1; }
+                               case "$2" in *=*) _bs_seed+=("$2") ;;
+                                            *) echo "bootstrap: --seed-secret expects KEY=CMD, got '$2'" >&2; exit 1 ;; esac
+                               shift ;;
+                --gh-token)   # deprecated alias for --seed-secret GH_TOKEN='gh auth token'. Removed in 4.0.
+                              _bs_ghtoken=1
+                              _bs_seed+=("GH_TOKEN=gh auth token") ;;
                 --adopt)      # adopt an EXISTING repo (skip greenfield scaffolding). Optional
                               # next arg = a repo ref to clone into $PWD first (clone-then-adopt).
                               _bs_adopt=1
@@ -2216,7 +2224,7 @@ HELP
                 --repo)       _bs_workspace=1; [ -n "${2:-}" ] && { _bs_repos+=("$2"); shift; } ;;  # clone a sibling repo
                 -h|--help)
                     echo "usage: dridock bootstrap [--adopt [<url>]] [--brief-only] [--no-start] [--force]"
-                    echo "                           [--brief-file F] [--secrets-file F] [--gh-token] [\"intent…\"]"
+                    echo "                           [--brief-file F] [--secrets-file F] [--seed-secret KEY=CMD]... [\"intent…\"]"
                     echo "  scaffold a claudebot project in the current directory + write .dridock/BRIEF.md."
                     echo "  intent comes from the arg, --brief-file, or stdin. Default boots claudebot after."
                     echo ""
@@ -2231,9 +2239,15 @@ HELP
                     echo "                      — parent gitignores the siblings so it never tracks them as gitlinks."
                     echo ""
                     echo "  secrets (never typed on the command line — file-based only):"
-                    echo "    --secrets-file F  merge KEY=VALUE lines from F into .dridock/secrets.env"
-                    echo "    --gh-token        seed GH_TOKEN from the host's own 'gh auth token' (boot authed to GitHub)"
+                    echo "    --secrets-file F        merge KEY=VALUE lines from F into .dridock/secrets.env"
+                    echo "    --seed-secret KEY=CMD   run CMD on the host and store stdout as KEY (repeatable)"
+                    echo "                            e.g. --seed-secret GH_TOKEN='gh auth token'"
+                    echo "                                 --seed-secret GITLAB_TOKEN='glab auth token'"
+                    echo "    --gh-token              deprecated alias for --seed-secret GH_TOKEN='gh auth token'"
                     echo "  secrets.env is gitignored + chmod 600 and injected into claudebot as env each run."
+                    echo "  API-only tokens (per-provider). For git ops, add ~/.ssh/claudebox/id_ed25519.pub"
+                    echo "  to each git host you push to (SSH is the provider-agnostic path — see"
+                    echo "  docs/design/git-and-api-auth.md)."
                     exit 0 ;;
                 --) shift; break ;;
                 -*) echo "bootstrap: unknown flag '$1'" >&2; exit 1 ;;
@@ -2285,12 +2299,14 @@ HELP
                 echo "  ℹ multi-repo parent ready — clone your repos as siblings (they're auto-gitignored as you add them), or use --repo <url>"
             fi
         fi
-        # Adopting/workspace + no GH_TOKEN staged? nudge for private repos (git/gh auth + the
-        # embedded-email `origin` gotcha). Non-fatal.
-        if { [ -n "$_bs_adopt" ] || [ -n "$_bs_adopt_url" ] || [ -n "$_bs_workspace" ]; } && [ -z "$_bs_ghtoken" ] \
-           && ! grep -q '^GH_TOKEN=' "$(cb_secrets_path "$PWD")" 2>/dev/null; then
-            echo "  ℹ private repo(s)? seed GitHub auth so git push/pull works inside claudebot:" >&2
-            echo "     add --gh-token, or put GH_TOKEN in .dridock/secrets.env" >&2
+        # Adopting/workspace + no git-provider token staged? nudge that SSH is the
+        # canonical path for git ops (#10) and remind about API tokens if they want
+        # host CLIs (gh/glab/…) to work. Non-fatal.
+        if { [ -n "$_bs_adopt" ] || [ -n "$_bs_adopt_url" ] || [ -n "$_bs_workspace" ]; } && [ "${#_bs_seed[@]}" -eq 0 ] \
+           && ! grep -qE '^(GH|GITLAB|BITBUCKET|GITEA)_TOKEN=' "$(cb_secrets_path "$PWD")" 2>/dev/null; then
+            echo "  ℹ private repo(s)? git ops use SSH: add ~/.ssh/claudebox/id_ed25519.pub to your git host." >&2
+            echo "     For provider CLI (gh/glab) inside claudebot, also seed an API token, e.g." >&2
+            echo "       --seed-secret GH_TOKEN='gh auth token'" >&2
         fi
         # secrets: file-based only, so nothing sensitive is echoed or shell-history'd.
         if [ -n "$_bs_secfile" ]; then
@@ -2302,20 +2318,30 @@ HELP
             done < "$_bs_secfile"
             echo "  ✓ $(cb_project_dot_basename "$PWD")/secrets.env ($_sn key(s) from $_bs_secfile; gitignored, chmod 600)"
         fi
-        if [ -n "$_bs_ghtoken" ]; then
-            _tok="$(gh auth token 2>/dev/null)"
-            if [ -n "$_tok" ]; then
-                cb_secrets_put "$PWD" GH_TOKEN "$_tok"
-                echo "  ✓ $(cb_project_dot_basename "$PWD")/secrets.env: GH_TOKEN (from host 'gh auth token'; gitignored, chmod 600)"
-            else
-                echo "  ⚠ --gh-token: host 'gh auth token' returned nothing — run 'gh auth login' on the Mac first; skipped" >&2
-            fi
+        # --seed-secret KEY=CMD (repeatable): run CMD on the host, put stdout in secrets.env as KEY.
+        # Handles --gh-token too (which appended GH_TOKEN=gh auth token above). Empty output = skipped
+        # with a hint. Value never touches the command line beyond user's own CMD.
+        if [ "${#_bs_seed[@]}" -gt 0 ]; then
+            for _ss in "${_bs_seed[@]}"; do
+                _k="${_ss%%=*}"; _c="${_ss#*=}"
+                case "$_k" in ''|*[!A-Za-z0-9_]*) echo "  ⚠ --seed-secret: bad KEY '$_k' — skipped" >&2; continue ;; esac
+                [ -n "$_c" ] || { echo "  ⚠ --seed-secret $_k: empty CMD — skipped" >&2; continue; }
+                # Strip leading/trailing whitespace (incl. the trailing newline every
+                # command has, and the leading space `gh auth token` prints).
+                _val="$(eval "$_c" 2>/dev/null | awk '{sub(/^[[:space:]]+/,""); sub(/[[:space:]]+$/,""); print; exit}' || true)"
+                if [ -n "$_val" ]; then
+                    cb_secrets_put "$PWD" "$_k" "$_val"
+                    echo "  ✓ $(cb_project_dot_basename "$PWD")/secrets.env: $_k (from host '$_c'; gitignored, chmod 600)"
+                else
+                    echo "  ⚠ --seed-secret $_k: '$_c' returned nothing — skipped" >&2
+                fi
+            done
         fi
         if [ -n "$_bs_start" ]; then
             echo "  ▶ starting claudebot…"
             exec "$0"   # re-enter the wrapper normally → boots the VM + claudebot with the brief
         fi
-        echo "  (not started) enter later with:  cd $(printf '%q' "$PWD") && claudebox"
+        echo "  (not started) enter later with:  cd $(printf '%q' "$PWD") && dridock"
         exit 0
         ;;
 esac

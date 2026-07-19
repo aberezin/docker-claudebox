@@ -38,6 +38,24 @@ for the migration guide + decision record.
 VERSION file stays at 2.24.0 during 3.0-dev; bumps to 3.0.0 at the final commit of the
 bundle. Entries below are appended per phase / per issue as they land.
 
+### [#10 — split git-vs-API auth]
+
+- **Landed (2026-07-19)**: SSH-for-git, tokens-for-API-only. Entrypoint no
+  longer runs `gh auth setup-git` on start — the credential-helper hijack
+  root cause is gone. Git-over-HTTPS falls through to SSH via
+  `~/.ssh/claudebox/id_ed25519` (path kept for one cycle); one keypair covers
+  every provider a user pushes to. `bootstrap` grows a provider-agnostic
+  `--seed-secret KEY=CMD` flag (repeatable): runs `CMD` on the host, writes
+  stdout as `KEY` in `.dridock/secrets.env` — trimming whitespace so
+  `gh auth token`'s leading-space quirk doesn't corrupt the value.
+  `--gh-token` is kept as a deprecated alias for `--seed-secret
+  GH_TOKEN='gh auth token'` through 3.x. New standard:
+  [`docs/design/git-and-api-auth.md`](docs/design/git-and-api-auth.md).
+  Behavior break for anyone whose `origin` was HTTPS and relied on the baked
+  credential helper — set it to SSH (`git remote set-url origin
+  git@…:owner/repo.git`) or install your own helper. `install.sh` prose
+  un-softened to point users at SSH for git and per-provider tokens for API.
+
 ### [#11 — dridock rebrand]
 
 - **Phase 1 (2026-07-19)**: design decisions locked in

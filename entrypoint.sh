@@ -690,9 +690,12 @@ fi
 
 # load machine-local project secrets the same way (see wrapper.sh: .dridock/secrets.env
 # -> this sidecar). Read from the mount, not `docker run -e`, so they survive restarts.
-# When GH_TOKEN is present, gh reads it automatically; we also point git-over-https at
-# gh so plain `git push https://github.com/...` is authenticated — i.e. claudebot boots
-# logged in to GitHub with no interactive `gh auth login`.
+# GH_TOKEN / GITLAB_TOKEN / BITBUCKET_TOKEN / etc. get picked up by their respective
+# provider CLIs (gh, glab, …) automatically from the env. The harness deliberately
+# does NOT install a git credential helper — git-over-HTTPS falls through to
+# SSH via ~/.ssh/claudebox/id_ed25519 (path kept from 2.x for one deprecation
+# cycle), which is the provider-agnostic path for git ops (#10). See
+# docs/design/git-and-api-auth.md.
 SECRETS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-secrets"
 dbg "secrets file: $SECRETS_FILE (exists: $([ -f "$SECRETS_FILE" ] && echo yes || echo no))"
 if [ -f "$SECRETS_FILE" ]; then
@@ -703,8 +706,6 @@ if [ -f "$SECRETS_FILE" ]; then
 			CMD="$CMD && export $name=$(printf '%q' "$value")"
 		fi
 	done < "$SECRETS_FILE"
-	# idempotent; guarded so a bad/absent token never blocks startup
-	CMD="$CMD && { [ -n \"\${GH_TOKEN:-}\" ] && gh auth setup-git >/dev/null 2>&1 || true; }"
 fi
 
 # load the host CDP bridge URL the same durable way (see wrapper.sh: browser-bridge up
