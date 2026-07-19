@@ -58,6 +58,23 @@ bundle. Entries below are appended per phase / per issue as they land.
   `CLAUDE_IMAGE_NAME` default renamed alongside. Existing installs need to
   reinstall (`./install.sh`) and rebuild (`make build`) to pick up the new tag and
   binary name.
+- **Phase 4b (2026-07-19)**: `dridock migrate` verb + auto-migrate. Three
+  idempotent helpers move the three layers of 2.x state to the 3.0 layout —
+  `cb_migrate_workspace` (project's `.claudebox/*` → `.dridock/*` + rewrite
+  `/.claudebox/…` lines in `.gitignore`), `cb_migrate_data_dir` (per-project
+  `~/.config/claudebox/projects/<id>/` → `~/.config/dridock/projects/<id>/`),
+  `cb_migrate_machine_config` (`~/.config/claudebox/config.yml` → dridock's).
+  New verb `dridock migrate` runs the first three for the current project +
+  the machine config; `dridock migrate --all` also walks every legacy project
+  data dir under `~/.config/claudebox/projects/`. Auto-migrate on the first
+  `dridock` invocation in a `.claudebox/`-only project handles the common
+  case silently (one info line printed); opt out with
+  `DRIDOCK_NO_AUTO_MIGRATE=1`. New `cb_xdg_dir()` helper flips the machine
+  config path + baked `data_root` default to prefer `~/.config/dridock/`
+  when it exists, falling back to `~/.config/claudebox/` for one cycle. Full
+  unit coverage in `tests/test_cbconfig.sh` (workspace + data-dir + machine-
+  config migrations, idempotency, gitignore rewrite preserves unrelated
+  lines, secrets mode preserved).
 - **Phase 4 (2026-07-19)**: project-dir rename `.claudebox/` → `.dridock/`. New
   `cb_project_dot()` helper returns `.dridock` when it exists, `.claudebox` when
   only the legacy dir exists, otherwise the new `.dridock` default — so writers

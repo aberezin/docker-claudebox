@@ -81,8 +81,20 @@ _dridock_alias DRIDOCK_TMPFS_TMP           CLAUDEBOX_TMPFS_TMP
 
 cb_config_home() { printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
 
+# cb_xdg_dir — pick the XDG subdir for our own state. Prefers ~/.config/dridock/
+# (3.0+); falls back to ~/.config/claudebox/ for one deprecation cycle if only
+# the legacy dir exists. Never resolves to both — callers rely on a single path.
+cb_xdg_dir() {
+    local xdg new old
+    xdg="$(cb_config_home)"
+    new="$xdg/dridock"; old="$xdg/claudebox"
+    if [ -d "$new" ]; then printf '%s' "$new"
+    elif [ -d "$old" ]; then printf '%s' "$old"
+    else printf '%s' "$new"; fi
+}
+
 cb_machine_config_path() {
-    local base="$(cb_config_home)/claudebox"
+    local base; base="$(cb_xdg_dir)"
     if [ -f "$base/config.yaml" ] && [ ! -f "$base/config.yml" ]; then
         printf '%s' "$base/config.yaml"
     else
@@ -99,7 +111,7 @@ cb_baked_default() {
         vm.autostop)                 printf 'false' ;;
         vm.warn_max)                 printf '3' ;;
         vm.hard_max)                 printf '5' ;;
-        data_root)                   printf '%s' "$(cb_config_home)/claudebox/projects" ;;
+        data_root)                   printf '%s/projects' "$(cb_xdg_dir)" ;;
         *)                           printf '' ;;
     esac
 }
@@ -946,7 +958,7 @@ _${prog}_complete() {
     cword=\$COMP_CWORD
 
     local top_verbs="start help version checkversion info status stop down destroy \\
-clear-session bootstrap setup-token completion browser-bridge host-agent \\
+clear-session bootstrap migrate setup-token completion browser-bridge host-agent \\
 harness framework-bugs consult profiles ip net vm mcp auth doctor \\
 -h --help -v --version"
 
@@ -970,6 +982,7 @@ harness framework-bugs consult profiles ip net vm mcp auth doctor \\
         consult)         COMPREPLY=( \$(compgen -W "list show approve revise reject post watch" -- "\$cur") ) ;;
         completion)      COMPREPLY=( \$(compgen -W "bash" -- "\$cur") ) ;;
         checkversion)    COMPREPLY=( \$(compgen -W "--all" -- "\$cur") ) ;;
+        migrate)         COMPREPLY=( \$(compgen -W "--all" -- "\$cur") ) ;;
         bootstrap)       COMPREPLY=( \$(compgen -W "--gh-token --secrets-file --brief-file --force --no-start --brief-only --adopt --workspace --multi-repo --repo" -- "\$cur") ) ;;
         destroy)         COMPREPLY=( \$(compgen -W "--purge" -- "\$cur") ) ;;
         start)           COMPREPLY=( \$(compgen -W "-p --output-format --model --system-prompt --append-system-prompt --json-schema --effort --resume --no-continue --update" -- "\$cur") ) ;;
@@ -1299,7 +1312,7 @@ CB_CDP_PORT="${DRIDOCK_CDP_PORT:-9223}"                 # forwarder listen (Mac 
 CB_CDP_CHROME_PORT="${DRIDOCK_CDP_CHROME_PORT:-9222}"   # Chrome --remote-debugging-port
 CB_CDP_BIND="${DRIDOCK_CDP_BIND:-192.168.64.1}"         # Mac reachable-net gateway (colima-only, not LAN)
 cb_cdp_home() { printf '%s/claudebox/cdp' "$(cb_config_home)"; }
-cb_cdp_marker() { printf '%s/claudebox/projects/%s/.cdp-url' "$(cb_config_home)" "$1"; }  # $1=id
+cb_cdp_marker() { printf '%s/projects/%s/.cdp-url' "$(cb_xdg_dir)" "$1"; }  # $1=id
 # The dedicated debug-Chrome user-data-dir. One shared bridge (single Chrome + fixed
 # forwarder port) serves every project, so this is intentionally global, not per-id.
 # Tunable: point DRIDOCK_CDP_PROFILE at your own throwaway dir to relocate/rename it.
@@ -1669,6 +1682,103 @@ cb_bootstrap() {
     esac
 }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 3.0 migration (#11, phase 4b) — move a 2.x install's on-disk state from the
+# `claudebox` layout to the `dridock` layout.
+#
+# Three layers migrate independently, each idempotent:
+#   1. workspace       .claudebox/{config,secrets,BRIEF,config.sample} → .dridock/
+#                      + rewrite /.claudebox/... lines in .gitignore
+#   2. per-project data dir       ~/.config/claudebox/projects/<id>/    → ~/.config/dridock/projects/<id>/
+#   3. machine-wide config file   ~/.config/claudebox/config.yml         → ~/.config/dridock/config.yml
+#
+# The wrapper READS both layouts for one deprecation cycle (see cb_project_dot
+# / cb_xdg_dir), so migration is safe to defer. `dridock migrate` runs (1)+(2)
+# for the current project (and (3) once); `dridock migrate --all` also walks
+# every data dir under the legacy claudebox/projects/. Auto-migrate on first
+# `dridock` in a `.claudebox/`-only project does (1)+(2)+(3) silently unless
+# DRIDOCK_NO_AUTO_MIGRATE=1.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# cb_migrate_workspace ROOT — move ROOT/.claudebox/* → ROOT/.dridock/*, rewrite
+# ROOT/.gitignore lines. Idempotent (no-op when there's nothing to migrate).
+cb_migrate_workspace() {
+    local root="$1" src dst f name tmp
+    src="$root/.claudebox"; dst="$root/.dridock"
+    [ -d "$src" ] || return 0
+    mkdir -p "$dst"
+    for f in "$src/config.yml" "$src/config.sample.yml" "$src/secrets.env" "$src/BRIEF.md"; do
+        [ -e "$f" ] || continue
+        name="$(basename "$f")"
+        if [ -e "$dst/$name" ]; then
+            echo "  ⚠ $(basename "$root")/.claudebox/$name: also exists in .dridock/ — leaving both, resolve by hand" >&2
+            continue
+        fi
+        mv "$f" "$dst/$name"
+        [ "$name" = "secrets.env" ] && chmod 600 "$dst/$name"
+        echo "  ✓ .claudebox/$name → .dridock/$name"
+    done
+    if [ -f "$root/.gitignore" ]; then
+        tmp="$(mktemp)"
+        sed 's#^/\.claudebox/#/.dridock/#' "$root/.gitignore" > "$tmp" && cat "$tmp" > "$root/.gitignore"
+        rm -f "$tmp"
+    fi
+    rmdir "$src" 2>/dev/null && echo "  ✓ removed empty .claudebox/"
+    return 0
+}
+
+# cb_migrate_data_dir ID — move ~/.config/claudebox/projects/<id> → ~/.config/dridock/projects/<id>.
+# Idempotent (no-op when the legacy dir isn't there). Skips if both exist.
+cb_migrate_data_dir() {
+    local id="$1" xdg new_root old_root
+    [ -n "$id" ] || return 0
+    xdg="$(cb_config_home)"
+    new_root="$xdg/dridock/projects"
+    old_root="$xdg/claudebox/projects"
+    [ -d "$old_root/$id" ] || return 0
+    if [ -e "$new_root/$id" ]; then
+        echo "  ⚠ data dir $id: both claudebox/ and dridock/ have it — leaving both, resolve by hand" >&2
+        return 1
+    fi
+    mkdir -p "$new_root"
+    mv "$old_root/$id" "$new_root/$id"
+    echo "  ✓ data dir $id: claudebox/projects/ → dridock/projects/"
+    return 0
+}
+
+# cb_migrate_machine_config — move ~/.config/claudebox/config.yml → ~/.config/dridock/config.yml.
+cb_migrate_machine_config() {
+    local xdg old new
+    xdg="$(cb_config_home)"
+    old="$xdg/claudebox/config.yml"
+    new="$xdg/dridock/config.yml"
+    [ -f "$old" ] || return 0
+    if [ -f "$new" ]; then
+        echo "  ⚠ machine config: both claudebox/config.yml and dridock/config.yml exist — leaving both" >&2
+        return 1
+    fi
+    mkdir -p "$xdg/dridock"
+    mv "$old" "$new"
+    echo "  ✓ machine config: claudebox/config.yml → dridock/config.yml"
+    return 0
+}
+
+# cb_auto_migrate ROOT — silently migrate a legacy `.claudebox/`-only workspace on
+# first `dridock` run. Opt out with DRIDOCK_NO_AUTO_MIGRATE=1. No-op when the
+# project is already on `.dridock/`, or when the wrapper is running a management
+# subcommand (the caller decides — this only checks its own preconditions).
+cb_auto_migrate() {
+    local root="$1" id
+    case "${DRIDOCK_NO_AUTO_MIGRATE:-}" in 1|true|yes|on) return 0 ;; esac
+    [ -d "$root/.claudebox" ] || return 0
+    [ -d "$root/.dridock" ] && return 0
+    echo "🔀 dridock 3.0: migrating .claudebox/ → .dridock/  (opt out: DRIDOCK_NO_AUTO_MIGRATE=1)"
+    cb_migrate_workspace "$root"
+    id="$(cb_project_id_ro "$root")"
+    [ -n "$id" ] && cb_migrate_data_dir "$id"
+    cb_migrate_machine_config
+}
+
 # load functions only (for tests) without running the wrapper body
 [ -n "${DRIDOCK_SOURCE_ONLY:-}" ] && return 0 2>/dev/null || true
 
@@ -1805,6 +1915,7 @@ VERSION
   checkversion [--all]             compare wrapper vs image; warn on drift (must/should/optional). --all = every cb-* project VM
 
 OTHER
+  migrate [--all]                  3.0: move .claudebox/ → .dridock/ (workspace + data dir + machine config); --all sweeps every legacy data dir
   completion bash                  emit a bash completion script (installed by install.sh)
   browser-bridge up|down           opt-in: let claudebot drive your real Chrome via CDP
   host-agent up|down|status        opt-in (TRUSTED): let a HARNESS-DEV claudebot run allowlisted colima/limactl on the Mac (#15)
@@ -1820,7 +1931,8 @@ USEFUL ENV
   DRIDOCK_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
   DRIDOCK_ALLOW_NEW=1           skip the "create a new project here?" prompt (or the non-interactive abort)
   DRIDOCK_HARNESS_DEV=1         force framework-dev mode (auto-detected when the workspace is a claudebox harness fork). Alias: DRIDOCK_FRAMEWORK_DEV.
-  DRIDOCK_NO_DRIFT_WARN=1       silence the "cb-infra image is behind wrapper" warning on each claudebox invocation
+  DRIDOCK_NO_DRIFT_WARN=1       silence the "cb-infra image is behind wrapper" warning on each dridock invocation
+  DRIDOCK_NO_AUTO_MIGRATE=1     skip the 3.0 auto-migration of a legacy .claudebox/ workspace on first run (run 'dridock migrate' by hand)
   DRIDOCK_ENV_FOO=bar             forward FOO=bar (legacy CLAUDEBOX_ENV_FOO accepted) into the container
   DRIDOCK_PRUNE_ON_START=1      docker builder prune (cache) + image prune (dangling) on each start
   DRIDOCK_TMPFS_TMP=2g          RAM-back /tmp so docker bloat can't ENOSPC-kill the Bash tool
@@ -1864,6 +1976,52 @@ HELP
     profiles)
         # list this project's enabled profiles + the ones available in the image.
         cb_profiles_cmd "$CB_PROJECT_ROOT"; exit $?
+        ;;
+    migrate)
+        # 3.0 migration (#11 phase 4b). No-arg: migrate THIS project's workspace + data dir
+        # (+ the machine config, once). --all: also walk every legacy data dir under
+        # ~/.config/claudebox/projects/. Auto-migrate handles the common case; this verb is
+        # for a supervised migration or a bulk cleanup after upgrading multiple projects.
+        shift
+        _mig_all=0
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --all) _mig_all=1 ;;
+                -h|--help)
+                    echo "usage: dridock migrate [--all]"
+                    echo "  migrate this project's .claudebox/ → .dridock/ (workspace + its data dir),"
+                    echo "  plus the machine config (~/.config/claudebox/config.yml)."
+                    echo "  --all also migrates every legacy project data dir under"
+                    echo "        ~/.config/claudebox/projects/ (workspace paths are unknown to the"
+                    echo "        wrapper — those migrate on their next 'dridock' auto-migrate)."
+                    echo "  auto-migrate fires on the first 'dridock' in a .claudebox/-only project;"
+                    echo "  disable with DRIDOCK_NO_AUTO_MIGRATE=1."
+                    exit 0 ;;
+                *) echo "migrate: unknown arg '$1' (try --help)" >&2; exit 1 ;;
+            esac
+            shift
+        done
+        echo "migrate: $CB_PROJECT_ROOT"
+        cb_migrate_workspace "$CB_PROJECT_ROOT"
+        _mig_id="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
+        [ -n "$_mig_id" ] && cb_migrate_data_dir "$_mig_id"
+        cb_migrate_machine_config
+        if [ "$_mig_all" = 1 ]; then
+            echo "migrate --all: sweeping legacy project data dirs…"
+            _mig_old_root="$(cb_config_home)/claudebox/projects"
+            if [ -d "$_mig_old_root" ]; then
+                for _mig_pd in "$_mig_old_root"/*; do
+                    [ -d "$_mig_pd" ] || continue
+                    cb_migrate_data_dir "$(basename "$_mig_pd")"
+                done
+                # remove the now-empty legacy root if it's empty (cheap, silent on failure)
+                rmdir "$_mig_old_root" 2>/dev/null && rmdir "$(dirname "$_mig_old_root")" 2>/dev/null || true
+            else
+                echo "  (no legacy claudebox/projects/ dir — nothing to sweep)"
+            fi
+        fi
+        echo "✅ done."
+        exit 0
         ;;
     down)
         _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
@@ -2172,6 +2330,10 @@ case "${1:-}" in
     setup-token|-v|--version|doctor|auth|mcp|stop|clear-session) : ;;
     *)
         cb_guard_workspace   "$CB_PROJECT_ROOT" || exit 1
+        # Auto-migrate a legacy `.claudebox/`-only project to `.dridock/` before the
+        # new-project guard would (incorrectly) offer to scaffold a fresh project on
+        # top of one that's already there but under the legacy dotname. #11 phase 4b.
+        cb_auto_migrate      "$CB_PROJECT_ROOT"
         cb_guard_new_project "$CB_PROJECT_ROOT" || exit 1
         cb_check_infra_drift "$CB_PROJECT_ROOT"
         ;;
@@ -2185,7 +2347,7 @@ DOCKER=(docker --context "$CB_CONTEXT")
 dbg "project id=$CB_PROJECT_ID context=$CB_CONTEXT"
 
 # ── resolve the per-project data dir (shared-nothing) unless overridden ───────
-# Each project gets its own ~/.claude state under ~/.config/claudebox/projects/<id>.
+# Each project gets its own ~/.claude state under ~/.config/dridock/projects/<id>.
 # Auth is not project state — it still arrives per invocation via env (below) and
 # is written into this dir, so there is no shared mutable directory.
 if [ -z "$CLAUDE_DIR" ]; then
