@@ -26,6 +26,28 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [Unreleased — 3.0.0-dev] _(fork)_
+
+The `3.0-bundle` (issues [#11](https://github.com/aberezin/docker-claudebox/issues/11)
+dridock rebrand, [#1](https://github.com/aberezin/docker-claudebox/issues/1) unify
+command surfaces, [#5](https://github.com/aberezin/docker-claudebox/issues/5) features
+system, [#10](https://github.com/aberezin/docker-claudebox/issues/10) auth split) is
+in-flight as of 2026-07-19. See [`docs/design/3.0-migration.md`](docs/design/3.0-migration.md)
+for the migration guide + decision record.
+
+VERSION file stays at 2.24.0 during 3.0-dev; bumps to 3.0.0 at the final commit of the
+bundle. Entries below are appended per phase / per issue as they land.
+
+### [#11 — dridock rebrand]
+
+- **Phase 1 (2026-07-19)**: design decisions locked in
+  `docs/design/3.0-migration.md`. Kept: `cb-*` container helpers, `cb-<id>` colima
+  profiles, `cb-net`, container name derivation, sidecar file naming, `~/.claude`
+  paths. Renamed: env-var prefix, image tag/label, project dir, per-project data dir,
+  wrapper binary default, skill dir. Backward-compat for one deprecation cycle
+  (`CLAUDEBOX_*` env accepted, `.claudebox/` dir read as fallback, both wrapper.sh
+  fingerprint patterns honored).
+
 ## [2.24.0] — 2026-07-19 _(fork)_
 
 ### Changed (user-visible CLI break)
