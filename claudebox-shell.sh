@@ -5,8 +5,8 @@
 #     source /path/to/claudebox-shell.sh
 #
 # (install.sh does this for you.) Everything is scoped to the PER-PROJECT Colima
-# context, which is derived from the project's .claudebox/config.yml — so these work
-# from any subdirectory of a claudebox project and never touch your default VM.
+# context, which is derived from the project's .dridock/config.yml — so these work
+# from any subdirectory of a dridock project and never touch your default VM.
 #
 # Layers you can shell into:
 #     project VM  (colima cb-<id>, a Linux guest)   -> cbx-vm
@@ -21,18 +21,21 @@
 #     cbx-claude             shell into this workspace's claudebot harness container
 #     cbx-claude-dir [-o]    print this project's host .claude data dir (-o opens it)
 #     cbx-up                 ensure this project's VM (+ its workloads) is running
-#     cbx-up-all             ensure EVERY claudebox VM (+ workloads) is running
+#     cbx-up-all             ensure EVERY dridock VM (+ workloads) is running
 
-# resolve the project id by walking up for .claudebox/config.yml
+# resolve the project id by walking up for .dridock/config.yml (or legacy .claudebox/config.yml)
 _cbx_id() {
-    local d; d="$(cd -P "$PWD" 2>/dev/null && pwd)"
+    local d cfg; d="$(cd -P "$PWD" 2>/dev/null && pwd)"
     while [ -n "$d" ] && [ "$d" != "/" ]; do
-        if [ -f "$d/.claudebox/config.yml" ]; then
-            awk -F'[: ]+' '/^id:/{print $2; exit}' "$d/.claudebox/config.yml"; return 0
+        if [ -f "$d/.dridock/config.yml" ]; then cfg="$d/.dridock/config.yml"
+        elif [ -f "$d/.claudebox/config.yml" ]; then cfg="$d/.claudebox/config.yml"
+        else cfg=""; fi
+        if [ -n "$cfg" ]; then
+            awk -F'[: ]+' '/^id:/{print $2; exit}' "$cfg"; return 0
         fi
         d="$(dirname "$d")"
     done
-    echo "cbx: no .claudebox/config.yml at or above $PWD (not a claudebox project?)" >&2
+    echo "cbx: no .dridock/config.yml (or legacy .claudebox/config.yml) at or above $PWD (not a dridock project?)" >&2
     return 1
 }
 _cbx_ctx() { local id; id="$(_cbx_id)" || return 1; printf 'colima-cb-%s' "$id"; }

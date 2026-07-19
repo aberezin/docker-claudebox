@@ -70,9 +70,9 @@ eq "absent profile"   "$(printf '%s\n' "$FIX" | cb_parse_vm_lines | cb_status_of
 echo "--- cb_project_id_ro (no creation) ---"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 eq "empty when no config" "$(cb_project_id_ro "$TMP")" ""
-[ ! -d "$TMP/.claudebox" ] && ok "id_ro did not create .claudebox" || bad "id_ro created .claudebox"
-mkdir -p "$TMP/.claudebox"
-printf 'id: abc1234f\n' > "$TMP/.claudebox/config.yml"
+[ ! -d "$TMP/.dridock" ] && ok "id_ro did not create .dridock" || bad "id_ro created .dridock"
+mkdir -p "$TMP/.dridock"
+printf 'id: abc1234f\n' > "$TMP/.dridock/config.yml"
 eq "reads existing id" "$(cb_project_id_ro "$TMP")" "abc1234f"
 
 echo "--- cb_lima_home (colima delete leaks the datadisk; cb_vm_destroy reaps it) ---"
@@ -172,14 +172,14 @@ echo "--- bootstrap --adopt (existing repos, no nesting) ---"
 _orig_pf="$(declare -f cb_preflight)"; cb_preflight() { return 0; }   # stub VM/tooling preflight
 BT="$(mktemp -d)"
 # brief framing by flavor (greenfield / adopt / workspace)
-cb_write_brief "$BT/g" "x" ""        ; grep -q 'ADOPTS an existing\|MULTI-REPO' "$BT/g/.claudebox/BRIEF.md" && bad "greenfield brief has a flavor note" || ok "greenfield brief: no flavor note"
-cb_write_brief "$BT/a" "x" adopt     ; grep -q 'ADOPTS an existing' "$BT/a/.claudebox/BRIEF.md" && ok "adopt brief carries the adopt note" || bad "adopt note missing"
-cb_write_brief "$BT/w" "x" workspace ; grep -q 'MULTI-REPO workspace' "$BT/w/.claudebox/BRIEF.md" && ok "workspace brief carries the multi-repo note" || bad "workspace note missing"
+cb_write_brief "$BT/g" "x" ""        ; grep -q 'ADOPTS an existing\|MULTI-REPO' "$BT/g/.dridock/BRIEF.md" && bad "greenfield brief has a flavor note" || ok "greenfield brief: no flavor note"
+cb_write_brief "$BT/a" "x" adopt     ; grep -q 'ADOPTS an existing' "$BT/a/.dridock/BRIEF.md" && ok "adopt brief carries the adopt note" || bad "adopt note missing"
+cb_write_brief "$BT/w" "x" workspace ; grep -q 'MULTI-REPO workspace' "$BT/w/.dridock/BRIEF.md" && ok "workspace brief carries the multi-repo note" || bad "workspace note missing"
 # cb_bootstrap on an existing repo must NOT add README/workloads (greenfield scaffolding)
 mkdir -p "$BT/r"; ( cd "$BT/r" && git init -q && : > f && git add -A && git -c user.email=t@t -c user.name=t commit -qm i ) >/dev/null 2>&1
 ( cd "$BT/r" && cb_bootstrap "$BT/r" "x" brief "" ) >/dev/null 2>&1
 { [ ! -f "$BT/r/README.md" ] && [ ! -d "$BT/r/workloads" ]; } && ok "cb_bootstrap skips greenfield scaffolding on an existing repo" || bad "cb_bootstrap polluted an existing repo"
-grep -q 'ADOPTS an existing' "$BT/r/.claudebox/BRIEF.md" 2>/dev/null && ok "auto-detected adopt (existing .git)" || bad "did not auto-detect adopt"
+grep -q 'ADOPTS an existing' "$BT/r/.dridock/BRIEF.md" 2>/dev/null && ok "auto-detected adopt (existing .git)" || bad "did not auto-detect adopt"
 # cb_clone_adopt refuses a non-empty dir (no clobber / nesting). Capture output (it returns
 # non-zero on refusal, which under `set -o pipefail` would trip a piped grep).
 mkdir "$BT/ne"; : > "$BT/ne/x"
@@ -188,7 +188,7 @@ case "$_ca_out" in *"not empty"*) ok "cb_clone_adopt refuses a non-empty dir" ;;
 # workspace flavor (#13): orchestration parent = git init + README, but NO workloads/
 mkdir -p "$BT/ws"; ( cd "$BT/ws" && cb_bootstrap "$BT/ws" "x" full "" workspace ) >/dev/null 2>&1
 { [ -f "$BT/ws/README.md" ] && [ ! -d "$BT/ws/workloads" ] && [ -e "$BT/ws/.git" ]; } && ok "workspace: git init + README, no workloads/" || bad "workspace scaffolding wrong"
-grep -q 'MULTI-REPO workspace' "$BT/ws/.claudebox/BRIEF.md" 2>/dev/null && ok "workspace BRIEF is multi-repo framed" || bad "workspace BRIEF not multi-repo framed"
+grep -q 'MULTI-REPO workspace' "$BT/ws/.dridock/BRIEF.md" 2>/dev/null && ok "workspace BRIEF is multi-repo framed" || bad "workspace BRIEF not multi-repo framed"
 rm -rf "$BT"; eval "$_orig_pf"   # restore the real cb_preflight
 
 echo "--- disk nice-to-haves (2.11.0): vm.disk default, prune-on-start, tmpfs, disk MOTD ---"
@@ -237,24 +237,24 @@ if grep -q 'CLAUDEBOX_VM_IP=%s' "$WRAPPER"; then ok "wrapper mirrors current IP 
 if grep -A12 '${CLAUDE_CONTAINER_NAME}-vmip' "$ENTRYP" | grep -q 'unset \$name'; then ok "entrypoint unsets VM IP when sidecar empty"; else bad "entrypoint does not unset on empty -vmip"; fi
 
 echo "--- cb_project_profiles (config 'profiles:' — flow + block + none) ---"
-PT="$(mktemp -d)"; mkdir -p "$PT/f/.claudebox" "$PT/b/.claudebox" "$PT/n/.claudebox"
-printf 'id: aaaa1111\nprofiles: [typescript, python]\nvm:\n  cpu: 4\n' > "$PT/f/.claudebox/config.yml"
-printf 'id: bbbb2222\nprofiles:\n  - typescript   # ts\n  - go\nnetwork:\n  hostname:\n' > "$PT/b/.claudebox/config.yml"
-printf 'id: cccc3333\nvm:\n  cpu: 4\n' > "$PT/n/.claudebox/config.yml"
+PT="$(mktemp -d)"; mkdir -p "$PT/f/.dridock" "$PT/b/.dridock" "$PT/n/.dridock"
+printf 'id: aaaa1111\nprofiles: [typescript, python]\nvm:\n  cpu: 4\n' > "$PT/f/.dridock/config.yml"
+printf 'id: bbbb2222\nprofiles:\n  - typescript   # ts\n  - go\nnetwork:\n  hostname:\n' > "$PT/b/.dridock/config.yml"
+printf 'id: cccc3333\nvm:\n  cpu: 4\n' > "$PT/n/.dridock/config.yml"
 eq "flow style"  "$(cb_project_profiles "$PT/f")" "python typescript"
 eq "block style" "$(cb_project_profiles "$PT/b")" "go typescript"
 eq "none"        "$(cb_project_profiles "$PT/n")" ""
 rm -rf "$PT"
 
 echo "--- cb_in_dotclaudebox (workspace guard predicate) ---"
-cb_in_dotclaudebox /Users/x/proj/.claudebox     && ok "flags .claudebox dir"        || bad "missed .claudebox"
-cb_in_dotclaudebox /Users/x/proj/.claudebox/sub && ok "flags .claudebox subpath"    || bad "missed .claudebox/sub"
+cb_in_dotclaudebox /Users/x/proj/.dridock     && ok "flags .dridock dir"        || bad "missed .dridock"
+cb_in_dotclaudebox /Users/x/proj/.dridock/sub && ok "flags .dridock subpath"    || bad "missed .dridock/sub"
 if cb_in_dotclaudebox /Users/x/proj;       then bad "false positive: project root"; else ok "project root not flagged"; fi
 if cb_in_dotclaudebox /Users/x/proj/apps;  then bad "false positive: normal subdir"; else ok "normal subdir not flagged"; fi
 
 echo "--- versioning (host wrapper must match the VERSION file) ---"
 VFILE="$(cat "$SCRIPT_DIR/../VERSION" 2>/dev/null | tr -d '[:space:]')"
-eq "wrapper CLAUDEBOX_VERSION == VERSION file" "$CLAUDEBOX_VERSION" "$VFILE"
+eq "wrapper DRIDOCK_VERSION == VERSION file" "$DRIDOCK_VERSION" "$VFILE"
 echo "--- cb_semver_cmp ---"
 eq "equal"          "$(cb_semver_cmp 0.1.0 0.1.0)" "eq"
 eq "patch greater"  "$(cb_semver_cmp 0.1.2 0.1.0)" "gt"
@@ -272,7 +272,7 @@ eq "major beats minor" "$(cb_semver_severity 3.1.0 2.9.0)" "major"
 echo "--- cb_purge_data (destroy --purge) guards ---"
 if ( cb_purge_data "" >/dev/null 2>&1 ); then bad "purge accepted empty id"; else ok "purge refuses empty id"; fi
 if ( cb_purge_data "../etc" >/dev/null 2>&1 ); then bad "purge accepted path-y id"; else ok "purge refuses path-like id"; fi
-if ( CLAUDEBOX_DATA_DIR=/whatever cb_purge_data deadbeef 2>&1 | grep -q 'not auto-deleting' ); then ok "purge refuses when DATA_DIR override set"; else bad "purge ignored DATA_DIR override"; fi
+if ( DRIDOCK_DATA_DIR=/whatever cb_purge_data deadbeef 2>&1 | grep -q 'not auto-deleting' ); then ok "purge refuses when DATA_DIR override set"; else bad "purge ignored DATA_DIR override"; fi
 # real purge under a temp data root
 PTMP="$(mktemp -d)"; ( export XDG_CONFIG_HOME="$PTMP"
   DDIR="$(cb_data_root)/deadbeef/claude"; mkdir -p "$DDIR"; touch "$DDIR/session.jsonl"

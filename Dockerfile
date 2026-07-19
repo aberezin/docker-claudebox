@@ -95,7 +95,7 @@ COPY entrypoint.sh api_server.py telegram_bot.py telegram_utils.py cron.py jsonp
 COPY CHANGELOG.md /h/home/
 COPY cb-browser cb-report-bug cb-consult cb-df cb-help cb-harness-watch-consults /h/bin/
 COPY cb-host-shim /h/bin/colima
-# Profile installers: named tool bundles a project opts into (.claudebox config
+# Profile installers: named tool bundles a project opts into (.dridock config
 # `profiles:`); the entrypoint runs the matching one on first enable. See
 # docs/design/profiles.md.
 COPY profiles/ /h/profiles/

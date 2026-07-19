@@ -67,9 +67,9 @@ mkdir -p "$PROJ"
 git -C "$PROJ" init -q
 pid="$(cb_init_project_config "$PROJ")"
 match "project id 8 hex" "$pid" '^[0-9a-f]{8}$'
-isfile "$PROJ/.claudebox/config.yml" "config.yml created"
-isfile "$PROJ/.claudebox/config.sample.yml" "config.sample.yml created"
-match "gitignore wired" "$(cat "$PROJ/.gitignore" 2>/dev/null)" '^/\.claudebox/config\.yml$'
+isfile "$PROJ/.dridock/config.yml" "config.yml created"
+isfile "$PROJ/.dridock/config.sample.yml" "config.sample.yml created"
+match "gitignore wired" "$(cat "$PROJ/.gitignore" 2>/dev/null)" '^/\.dridock/config\.yml$'
 
 echo "--- read-back / idempotency ---"
 eq "project_id reads existing" "$(cb_project_id "$PROJ")" "$pid"
@@ -77,7 +77,7 @@ pid2="$(cb_init_project_config "$PROJ")"
 eq "re-init keeps id" "$pid2" "$pid"
 # duplicate gitignore lines must not accumulate
 cb_init_project_config "$PROJ" >/dev/null
-count="$(grep -cxF '/.claudebox/config.yml' "$PROJ/.gitignore")"
+count="$(grep -cxF '/.dridock/config.yml' "$PROJ/.gitignore")"
 eq "gitignore not duplicated" "$count" "1"
 
 echo "--- vm sizing (cpu seeded from machine default_cpu=2) ---"
@@ -87,7 +87,7 @@ eq "vm disk default"     "$(cb_vm_get "$PROJ" disk)"     "60GiB"
 eq "vm autostop default" "$(cb_vm_get "$PROJ" autostop)" "false"
 
 echo "--- comment-only value reads empty ---"
-eq "network.hostname empty" "$(_cb_yaml_get "$PROJ/.claudebox/config.yml" network.hostname)" ""
+eq "network.hostname empty" "$(_cb_yaml_get "$PROJ/.dridock/config.yml" network.hostname)" ""
 
 echo "--- rehome safety (move dir, id stable) ---"
 mv "$PROJ" "$TMP/proj-moved"

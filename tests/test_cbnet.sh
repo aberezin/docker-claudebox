@@ -39,15 +39,15 @@ eq "field-order independent" \
    "10.0.0.9"
 
 echo "--- cb_project_hostname ---"
-mkdir -p "$TMP/proj/.claudebox"
-cat > "$TMP/proj/.claudebox/config.yml" <<'EOF'
+mkdir -p "$TMP/proj/.dridock"
+cat > "$TMP/proj/.dridock/config.yml" <<'EOF'
 id: abc12345
 network:
   hostname: cb-projectA
 EOF
 eq "hostname read" "$(cb_project_hostname "$TMP/proj")" "cb-projectA"
 # blank hostname (comment-only) reads empty
-cat > "$TMP/proj/.claudebox/config.yml" <<'EOF'
+cat > "$TMP/proj/.dridock/config.yml" <<'EOF'
 id: abc12345
 network:
   hostname:               # optional

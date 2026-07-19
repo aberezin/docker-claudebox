@@ -72,9 +72,9 @@ _dridock_alias DRIDOCK_TMPFS_TMP           CLAUDEBOX_TMPFS_TMP
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
 #
-# Pure host-side helpers: per-project identity (.claudebox/config.yml, kept
+# Pure host-side helpers: per-project identity (.dridock/config.yml, kept
 # rehome-safe via a marker file rather than a path hash), the committed sample,
-# .gitignore wiring, and the machine-wide config (~/.config/claudebox/config.yml)
+# .gitignore wiring, and the machine-wide config (~/.config/dridock/config.yml)
 # with baked-in defaults. No docker/colima here. Source this file with
 # DRIDOCK_SOURCE_ONLY=1 to load just these functions (tests/test_cbconfig.sh).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -160,8 +160,14 @@ cb_project_root() {
     git -C "$start" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$start"
 }
 
-# true if a path is inside a `.claudebox` metadata dir — i.e. an accidental workspace.
-cb_in_dotclaudebox() { case "${1:-$PWD}" in */.claudebox|*/.claudebox/*) return 0 ;; *) return 1 ;; esac; }
+# true if a path is inside a `.dridock` or `.claudebox` metadata dir — i.e. an
+# accidental workspace. Both prefixes accepted for one deprecation cycle.
+cb_in_dotclaudebox() {
+    case "${1:-$PWD}" in
+        */.dridock|*/.dridock/*|*/.claudebox|*/.claudebox/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 # Guard against launching the claudebot with `.claudebox` as its workspace (running
 # `claudebox` from inside that metadata dir). The project VM is still correct (root is the
@@ -171,10 +177,15 @@ cb_in_dotclaudebox() { case "${1:-$PWD}" in */.claudebox|*/.claudebox/*) return 
 cb_guard_workspace() {
     local root="$1" ans target
     cb_in_dotclaudebox "$PWD" || return 0
-    target="${PWD%%/.claudebox*}"        # the dir CONTAINING .claudebox = the project root
+    # Strip either .dridock or .claudebox suffix — whichever the path is in.
+    case "$PWD" in
+        */.dridock|*/.dridock/*)     target="${PWD%%/.dridock*}"   ; dotname=".dridock" ;;
+        */.claudebox|*/.claudebox/*) target="${PWD%%/.claudebox*}" ; dotname=".claudebox" ;;
+        *)                           target=""                     ; dotname="" ;;
+    esac
     [ -n "$target" ] || target="$root"
     {
-        echo "⚠️  You're inside a '.claudebox' directory:"
+        echo "⚠️  You're inside a '${dotname:-.dridock}' directory:"
         echo "      $PWD"
         echo "   claudebot would mount THIS dir as its workspace (not your project) and create a"
         echo "   separate stray container for it. You almost certainly want the project root:"
@@ -192,8 +203,8 @@ cb_guard_workspace() {
 }
 
 # Guard accidental "spawn a fresh project in some random dir". Silent creation of
-# .claudebox/config.yml (+ a per-project Colima VM, ~30-60s to boot, resources reserved)
-# is easy to trigger by mistake — cd'ing into a scratch dir, wrong-terminal `claudebox`,
+# .dridock/config.yml (+ a per-project Colima VM, ~30-60s to boot, resources reserved)
+# is easy to trigger by mistake — cd'ing into a scratch dir, wrong-terminal `dridock`,
 # etc. Prompt if interactive; else abort (override: DRIDOCK_ALLOW_NEW=1). Skipped by
 # the utility-command allowlist below (setup-token/mcp/stop/... don't create anything)
 # and by `bootstrap` (it creates the config itself, then re-execs). $1 = project root.
@@ -202,15 +213,15 @@ cb_guard_new_project() {
     cfg="$(cb_project_config_path "$root")"
     [ ! -f "$cfg" ] || return 0
     {
-        echo "⚠️  No claudebox project here — no .claudebox/config.yml at:"
+        echo "⚠️  No dridock project here — no .dridock/config.yml (or legacy .claudebox/config.yml) at:"
         echo "      $root"
-        echo "   Starting claudebox will create a new project (its own Colima VM,"
+        echo "   Starting dridock will create a new project (its own Colima VM,"
         echo "   ~30-60s to boot, reserves CPU/RAM/disk). For a proper new project"
-        echo "   with a mission brief, prefer:  claudebox bootstrap \"<intent>\""
+        echo "   with a mission brief, prefer:  dridock bootstrap \"<intent>\""
     } >&2
     case "${DRIDOCK_ALLOW_NEW:-}" in 1|true|yes|on) echo "   (DRIDOCK_ALLOW_NEW set — proceeding)" >&2; return 0 ;; esac
     if [ -t 0 ]; then
-        printf "   Create a new claudebox project at this path? [y/N] " >&2
+        printf "   Create a new dridock project at this path? [y/N] " >&2
         read -r ans
         case "$ans" in y|Y|yes|YES) return 0 ;; esac
         echo "   aborted — cd to an existing project, or use 'claudebox bootstrap'." >&2
@@ -336,7 +347,27 @@ cb_harness_sync() {
     return "$rc"
 }
 
-cb_project_config_path() { printf '%s/.claudebox/config.yml' "$1"; }
+# cb_project_dot ROOT — the metadata dir path for this project. Prefer .dridock
+# (3.0+); fall back to legacy .claudebox for one deprecation cycle if only that
+# exists. Neither exists → default to .dridock (used by bootstrap / first-run
+# init). This is the single source of truth for "which dir do I read/write to?"
+# — every helper that touches config.yml, secrets.env, BRIEF.md, config.sample.yml
+# routes through here. Migration: `dridock migrate` (Phase 4b) renames on disk.
+cb_project_dot() {
+    local root="$1"
+    if [ -d "$root/.dridock" ]; then
+        printf '%s/.dridock' "$root"
+    elif [ -d "$root/.claudebox" ]; then
+        printf '%s/.claudebox' "$root"
+    else
+        printf '%s/.dridock' "$root"
+    fi
+}
+# cb_project_dot_basename ROOT — just the basename (.dridock or .claudebox), for
+# error messages and gitignore lines that don't want the full path.
+cb_project_dot_basename() { basename "$(cb_project_dot "$1")"; }
+
+cb_project_config_path() { printf '%s/config.yml' "$(cb_project_dot "$1")"; }
 
 # wire the machine-local .claudebox files (config + secrets) into .gitignore, but
 # only inside a real git repo — NEITHER may ever be committed (secrets.env holds
@@ -344,7 +375,9 @@ cb_project_config_path() { printf '%s/.claudebox/config.yml' "$1"; }
 cb_ensure_gitignore() {
     local root="$1" gi="$1/.gitignore" line
     [ -d "$root/.git" ] || return 0
-    for line in /.claudebox/config.yml /.claudebox/secrets.env; do
+    # Add both .dridock (canonical 3.0+) and .claudebox (legacy) entries so a project
+    # mid-migration doesn't accidentally commit either the new or old config/secrets.
+    for line in /.dridock/config.yml /.dridock/secrets.env /.claudebox/config.yml /.claudebox/secrets.env; do
         if [ -f "$gi" ]; then
             grep -qxF "$line" "$gi" 2>/dev/null || printf '%s\n' "$line" >> "$gi"
         else
@@ -354,22 +387,24 @@ cb_ensure_gitignore() {
 }
 
 # ── project secrets (machine-local, gitignored, chmod 600) ───────────────────
-# Source of truth is .claudebox/secrets.env (KEY=VALUE lines). It is injected into
+# Source of truth is .dridock/secrets.env (KEY=VALUE lines; legacy .claudebox/secrets.env is
+# still read for one deprecation cycle). It is injected into
 # the container as env on every run and — crucially — persisted to a per-container
 # sidecar the entrypoint re-reads on each start, so secrets survive `docker start`
 # (which, unlike `docker run`, can't inject new env). A GH_TOKEN line = a claudebot
 # that boots authenticated to GitHub with no interactive `gh auth login`.
-cb_secrets_path() { printf '%s/.claudebox/secrets.env' "$1"; }  # $1=root; gitignored
+cb_secrets_path() { printf '%s/secrets.env' "$(cb_project_dot "$1")"; }  # $1=root; gitignored
 
-# cb_secrets_put ROOT KEY VALUE — set/replace KEY in .claudebox/secrets.env (create
+# cb_secrets_put ROOT KEY VALUE — set/replace KEY in .dridock/secrets.env (create
 # with a header + chmod 600 if absent). Never echoes the value. Used by bootstrap
 # --gh-token / --secrets-file; secrets are NEVER accepted on the command line.
 cb_secrets_put() {
-    local root="$1" key="$2" val="$3" sf tmp
+    local root="$1" key="$2" val="$3" sf tmp dotname
     sf="$(cb_secrets_path "$root")"; mkdir -p "$(dirname "$sf")"
+    dotname="$(basename "$(dirname "$sf")")"
     if [ ! -f "$sf" ]; then
         printf '%s\n%s\n' \
-            '# .claudebox/secrets.env — machine-local, gitignored, chmod 600. KEY=VALUE per line.' \
+            "# ${dotname}/secrets.env — machine-local, gitignored, chmod 600. KEY=VALUE per line." \
             '# Injected into the container as env on every run (survives restarts). NEVER commit.' > "$sf"
         chmod 600 "$sf"
     fi
@@ -381,9 +416,10 @@ cb_secrets_put() {
 }
 
 cb_write_sample() {
-    cat > "$1/.claudebox/config.sample.yml" <<'CBSAMPLE'
-# .claudebox/config.sample.yml — schema reference (committed).
-# claudebox generates the real, gitignored .claudebox/config.yml on first run.
+    local dot; dot="$(cb_project_dot "$1")"; local dotname; dotname="$(basename "$dot")"
+    cat > "$dot/config.sample.yml" <<CBSAMPLE
+# ${dotname}/config.sample.yml — schema reference (committed).
+# The wrapper generates the real, gitignored ${dotname}/config.yml on first run.
 id: auto                  # stable project identity; generated once, never change
 vm:
   cpu: 4
@@ -391,15 +427,16 @@ vm:
   disk: 100GiB
   autostop: false         # stop the VM when the harness container exits
 network:
-  hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'claudebox net'); blank = raw IP
-# profiles: []            # tool bundles to enable, e.g. [typescript, python] — list them: 'claudebox profiles'
+  hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'dridock net'); blank = raw IP
+# profiles: []            # tool bundles to enable, e.g. [typescript, python] — list them: 'dridock profiles'
 CBSAMPLE
 }
 
 # cb_init_project_config ROOT — ensure config + sample + gitignore; print the id.
 cb_init_project_config() {
-    local root="$1" cfg id cpu mem disk
-    mkdir -p "$root/.claudebox"
+    local root="$1" cfg id cpu mem disk dot dotname
+    dot="$(cb_project_dot "$root")"; dotname="$(basename "$dot")"
+    mkdir -p "$dot"
     cfg="$(cb_project_config_path "$root")"
     [ -f "$cfg" ] && id="$(_cb_yaml_get "$cfg" id)"
     if [ -z "${id:-}" ] || [ "${id:-}" = "auto" ]; then
@@ -408,7 +445,7 @@ cb_init_project_config() {
         mem="$(cb_machine_get vm.default_memory)"
         disk="$(cb_machine_get vm.default_disk)"
         cat > "$cfg" <<CBCONF
-# .claudebox/config.yml — generated by claudebox; edit to taste. Gitignored.
+# ${dotname}/config.yml — generated by the wrapper; edit to taste. Gitignored.
 id: $id
 vm:
   cpu: $cpu
@@ -416,8 +453,8 @@ vm:
   disk: $disk
   autostop: false         # stop the VM when the harness container exits
 network:
-  hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'claudebox net'); blank = raw IP
-# profiles: []            # tool bundles to enable, e.g. [typescript, python] — list them: 'claudebox profiles'
+  hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'dridock net'); blank = raw IP
+# profiles: []            # tool bundles to enable, e.g. [typescript, python] — list them: 'dridock profiles'
 CBCONF
     fi
     cb_write_sample "$root"
@@ -961,7 +998,7 @@ cb_checkversion() {
         echo "  image (this project):  $pv   (VM $(cb_project_profile "$cid"))"
     else
         pv=""
-        echo "  image (this project):  <no .claudebox project in $PWD>"
+        echo "  image (this project):  <no dridock project in $PWD>"
     fi
     if [ "$all" = 1 ]; then
         echo ""
@@ -1048,7 +1085,7 @@ cb_info() {
         sf="$(cb_secrets_path "$root")"
         if [ -f "$sf" ]; then keys="$(grep -cE '^[A-Za-z_][A-Za-z0-9_]*=' "$sf" 2>/dev/null)"
             printf '  %-18s %s   (%s key(s), chmod %s)\n' "secrets.env:" "$sf" "${keys:-0}" "$(stat -c '%a' "$sf" 2>/dev/null)"
-        else printf '  %-18s %s\n' "secrets.env:" "(none — 'claudebox bootstrap --gh-token' or add .claudebox/secrets.env)"; fi
+        else printf '  %-18s %s\n' "secrets.env:" "(none — 'dridock bootstrap --gh-token' or add .dridock/secrets.env)"; fi
         printf '  %-18s %s\n' "data dir:" "$(cb_project_data_dir "$id")   (session history, settings, plugins)"
         cname="claude-$(printf '%s' "$PWD" | sed 's#/#_#g')"
         cstat="$(docker --context "$ctx" ps -a --filter "name=^${cname}\$" --format '{{.Status}}' 2>/dev/null | head -1)"
@@ -1141,7 +1178,7 @@ cb_inject_vm_env() {
     done
 }
 
-# read the `profiles:` list from .claudebox/config.yml -> space-separated names. Supports
+# read the `profiles:` list from .dridock/config.yml -> space-separated names. Supports
 # flow style (`profiles: [typescript, go]`) and block style (`profiles:` then `- name`).
 # Names are validated to profile-name chars; the entrypoint maps each to a baked installer.
 cb_project_profiles() {
@@ -1165,9 +1202,10 @@ cb_project_profiles() {
 cb_profiles_cmd() {
     local root="$1" enabled avail
     enabled="$(cb_project_profiles "$root")"
-    echo "enabled for this project (.claudebox/config.yml → profiles:):"
+    local _dotname; _dotname="$(cb_project_dot_basename "$root")"
+    echo "enabled for this project (${_dotname}/config.yml → profiles:):"
     if [ -n "$enabled" ]; then printf '  %s\n' $enabled
-    else echo "  (none — add e.g.  profiles: [typescript, python]  to .claudebox/config.yml)"; fi
+    else echo "  (none — add e.g.  profiles: [typescript, python]  to ${_dotname}/config.yml)"; fi
     echo ""
     avail="$(docker --context "$(cb_infra_context)" run --rm --entrypoint sh "$CLAUDE_IMAGE" -c \
         'for f in /usr/local/lib/claudebox/profiles/*.sh; do [ -f "$f" ] || continue; printf "%s\t%s\n" "$(basename "$f" .sh)" "$(sed -n "s/^# summary: //p" "$f" | head -1)"; done' 2>/dev/null)"
@@ -1178,17 +1216,18 @@ cb_profiles_cmd() {
         echo "available: (build the image to list — see docs/design/profiles.md)"
     fi
     echo ""
-    echo "enable: edit .claudebox/config.yml, then run 'claudebox' (installed once, on first enable)."
+    echo "enable: edit ${_dotname}/config.yml, then run 'dridock' (installed once, on first enable)."
 }
 
-# cb_set_hostname ROOT NAME — set network.hostname in .claudebox/config.yml (so
-# `claudebox net` can then print the /etc/hosts line). Validated to hostname chars;
+# cb_set_hostname ROOT NAME — set network.hostname in .dridock/config.yml (so
+# `dridock net` can then print the /etc/hosts line). Validated to hostname chars;
 # portable rewrite via temp file (no sed -i). $1=root $2=name.
 cb_set_hostname() {
-    local root="$1" name="$2" cfg tmp
+    local root="$1" name="$2" cfg tmp _dotname
     case "$name" in ''|*[!a-zA-Z0-9._-]*) echo "invalid hostname '$name' (letters, digits, '.', '-', '_' only)" >&2; return 1 ;; esac
     cfg="$(cb_project_config_path "$root")"
-    [ -f "$cfg" ] || { echo "no .claudebox/config.yml here — run 'claudebox' first to initialize" >&2; return 1; }
+    _dotname="$(cb_project_dot_basename "$root")"
+    [ -f "$cfg" ] || { echo "no ${_dotname}/config.yml here — run 'dridock' first to initialize" >&2; return 1; }
     tmp="$(mktemp)"
     if grep -qE '^[[:space:]]*hostname:' "$cfg"; then
         sed -E "s|^([[:space:]]*)hostname:.*|\\1hostname: $name|" "$cfg" > "$tmp" && cat "$tmp" > "$cfg"
@@ -1196,7 +1235,7 @@ cb_set_hostname() {
         cat "$cfg" > "$tmp"; printf 'network:\n  hostname: %s\n' "$name" >> "$tmp"; cat "$tmp" > "$cfg"
     fi
     rm -f "$tmp"
-    echo "  ✓ set network.hostname: $name  (.claudebox/config.yml)"
+    echo "  ✓ set network.hostname: $name  (${_dotname}/config.yml)"
 }
 
 # the IP currently mapped to HOSTNAME in an /etc/hosts-style FILE (empty if none)
@@ -1444,12 +1483,12 @@ cb_host_agent_status() {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Bootstrap — hand off *intent* from host-Claude into a new claudebot project.
-# See docs/design/bootstrap.md. `claudebox bootstrap` scaffolds a project and
-# writes a durable, COMMITTED mission brief (.claudebox/BRIEF.md) so claudebot
+# See docs/design/bootstrap.md. `dridock bootstrap` scaffolds a project and
+# writes a durable, COMMITTED mission brief (.dridock/BRIEF.md) so claudebot
 # boots knowing WHY it was created. Full scaffolder by default; --brief-only for
 # just the brief + config.
 # ─────────────────────────────────────────────────────────────────────────────
-cb_brief_path() { printf '%s/.claudebox/BRIEF.md' "$1"; }  # $1=root; COMMITTED (unlike config.yml)
+cb_brief_path() { printf '%s/BRIEF.md' "$(cb_project_dot "$1")"; }  # $1=root; COMMITTED (unlike config.yml)
 
 # cb_preflight MODE — assert the host tooling a claudebot project needs is in place
 # BEFORE we scaffold or boot. HARD requirements (colima, docker; git for full mode)
@@ -1561,18 +1600,18 @@ cb_write_readme() {
     cat > "$root/README.md" <<RMEOF
 # $name
 
-A claudebox (claudebot) project. Its mission lives in
-[.claudebox/BRIEF.md](.claudebox/BRIEF.md) — read that first.
+A dridock (claudebot) project. Its mission lives in
+[.dridock/BRIEF.md](.dridock/BRIEF.md) — read that first.
 
 ## Working in it
 
 \`\`\`bash
-claudebox            # enter claudebot (spins up this project's own Colima VM)
+dridock            # enter claudebot (spins up this project's own Colima VM)
 \`\`\`
 
 Sibling workloads (API servers, databases, …) go under \`workloads/\` and run as
 containers on the \`cb-net\` network inside this project's VM. See the baked
-CLAUDE.md and the claudebox design docs for the orchestration / networking /
+CLAUDE.md and the dridock design docs for the orchestration / networking /
 browser-testing conventions.
 RMEOF
 }
@@ -1598,7 +1637,7 @@ cb_clone_adopt() {
 # Does NOT boot claudebot or write a workspace CLAUDE.md (the entrypoint bakes that on first
 # boot). An existing .git auto-implies `adopt` so we never pollute an existing repo.
 cb_bootstrap() {
-    local root="$1" intent="$2" mode="${3:-full}" force="${4:-}" flavor="${5:-}" brief
+    local root="$1" intent="$2" mode="${3:-full}" force="${4:-}" flavor="${5:-}" brief _dot _dotname
     cb_preflight "$mode" || return 1
     brief="$(cb_brief_path "$root")"
     if [ -f "$brief" ] && [ -z "$force" ]; then
@@ -1606,7 +1645,8 @@ cb_bootstrap() {
     fi
     # an existing git repo means we're ADOPTING it, not greenfielding (unless workspace)
     [ -z "$flavor" ] && [ -e "$root/.git" ] && flavor=adopt
-    mkdir -p "$root/.claudebox"
+    _dot="$(cb_project_dot "$root")"; _dotname="$(basename "$_dot")"
+    mkdir -p "$_dot"
     if [ "$mode" = "full" ]; then
         case "$flavor" in
             adopt) : ;;   # existing repo — deliberately no greenfield scaffolding
@@ -1620,8 +1660,8 @@ cb_bootstrap() {
                 [ -e "$root/workloads/.gitkeep" ] || : > "$root/workloads/.gitkeep" ;;
         esac
     fi
-    cb_write_brief "$root" "$intent" "$flavor";    echo "  ✓ .claudebox/BRIEF.md (committed)"
-    cb_init_project_config "$root" >/dev/null;     echo "  ✓ .claudebox/config.yml (gitignored)"
+    cb_write_brief "$root" "$intent" "$flavor";    echo "  ✓ ${_dotname}/BRIEF.md (committed)"
+    cb_init_project_config "$root" >/dev/null;     echo "  ✓ ${_dotname}/config.yml (gitignored)"
     case "$flavor" in
         adopt)     echo "🚀 adopted: $(basename "$root")" ;;
         workspace) echo "🚀 multi-repo workspace: $(basename "$root")" ;;
@@ -1827,7 +1867,7 @@ HELP
         ;;
     down)
         _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
-        if [ -z "$_cbid" ]; then echo "no claudebox VM for this project (no .claudebox/config.yml)"; exit 0; fi
+        if [ -z "$_cbid" ]; then echo "no dridock VM for this project (no .dridock/config.yml or legacy .claudebox/config.yml)"; exit 0; fi
         cb_vm_down "$_cbid"; exit $?
         ;;
     destroy)
@@ -1838,7 +1878,7 @@ HELP
             *) echo "usage: claudebox destroy [--purge]   (--purge also deletes this project's session/data dir)" >&2; exit 1 ;;
         esac
         _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
-        if [ -z "$_cbid" ]; then echo "no claudebox project here (.claudebox/config.yml missing)"; exit 0; fi
+        if [ -z "$_cbid" ]; then echo "no dridock project here (.dridock/config.yml missing)"; exit 0; fi
         cb_vm_destroy "$_cbid" || exit $?
         [ -n "$_purge" ] && cb_purge_data "$_cbid"
         exit 0
@@ -1988,7 +2028,7 @@ HELP
             printf '%s\n' "$_dd"
         else
             _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
-            [ -n "$_cbid" ] || { echo "no claudebox project here (.claudebox/config.yml missing)" >&2; exit 1; }
+            [ -n "$_cbid" ] || { echo "no dridock project here (.dridock/config.yml missing)" >&2; exit 1; }
             printf '%s\n' "$(cb_project_data_dir "$_cbid")"
         fi
         exit 0
@@ -2016,9 +2056,9 @@ HELP
                 --workspace|--multi-repo) _bs_workspace=1 ;;   # multi-repo orchestration parent
                 --repo)       _bs_workspace=1; [ -n "${2:-}" ] && { _bs_repos+=("$2"); shift; } ;;  # clone a sibling repo
                 -h|--help)
-                    echo "usage: claudebox bootstrap [--adopt [<url>]] [--brief-only] [--no-start] [--force]"
+                    echo "usage: dridock bootstrap [--adopt [<url>]] [--brief-only] [--no-start] [--force]"
                     echo "                           [--brief-file F] [--secrets-file F] [--gh-token] [\"intent…\"]"
-                    echo "  scaffold a claudebot project in the current directory + write .claudebox/BRIEF.md."
+                    echo "  scaffold a claudebot project in the current directory + write .dridock/BRIEF.md."
                     echo "  intent comes from the arg, --brief-file, or stdin. Default boots claudebot after."
                     echo ""
                     echo "  existing repos (avoids the nested-repo tangle):"
@@ -2032,7 +2072,7 @@ HELP
                     echo "                      — parent gitignores the siblings so it never tracks them as gitlinks."
                     echo ""
                     echo "  secrets (never typed on the command line — file-based only):"
-                    echo "    --secrets-file F  merge KEY=VALUE lines from F into .claudebox/secrets.env"
+                    echo "    --secrets-file F  merge KEY=VALUE lines from F into .dridock/secrets.env"
                     echo "    --gh-token        seed GH_TOKEN from the host's own 'gh auth token' (boot authed to GitHub)"
                     echo "  secrets.env is gitignored + chmod 600 and injected into claudebot as env each run."
                     exit 0 ;;
@@ -2065,7 +2105,7 @@ HELP
         # --workspace: gitignore the machine-local files, then clone each --repo as a
         # GITIGNORED sibling so the parent orchestration repo never tracks it as a gitlink.
         if [ -n "$_bs_workspace" ]; then
-            for _ig in '/.claudebox/config.yml' '/.claudebox/secrets.env'; do
+            for _ig in '/.dridock/config.yml' '/.dridock/secrets.env'; do
                 grep -qxF "$_ig" "$PWD/.gitignore" 2>/dev/null || echo "$_ig" >> "$PWD/.gitignore"
             done
             if [ "${#_bs_repos[@]}" -gt 0 ]; then
@@ -2091,7 +2131,7 @@ HELP
         if { [ -n "$_bs_adopt" ] || [ -n "$_bs_adopt_url" ] || [ -n "$_bs_workspace" ]; } && [ -z "$_bs_ghtoken" ] \
            && ! grep -q '^GH_TOKEN=' "$(cb_secrets_path "$PWD")" 2>/dev/null; then
             echo "  ℹ private repo(s)? seed GitHub auth so git push/pull works inside claudebot:" >&2
-            echo "     add --gh-token, or put GH_TOKEN in .claudebox/secrets.env" >&2
+            echo "     add --gh-token, or put GH_TOKEN in .dridock/secrets.env" >&2
         fi
         # secrets: file-based only, so nothing sensitive is echoed or shell-history'd.
         if [ -n "$_bs_secfile" ]; then
@@ -2101,13 +2141,13 @@ HELP
                 case "$_k" in ''|\#*) continue ;; esac
                 cb_secrets_put "$PWD" "$_k" "$_v"; _sn=$((_sn + 1))
             done < "$_bs_secfile"
-            echo "  ✓ .claudebox/secrets.env ($_sn key(s) from $_bs_secfile; gitignored, chmod 600)"
+            echo "  ✓ $(cb_project_dot_basename "$PWD")/secrets.env ($_sn key(s) from $_bs_secfile; gitignored, chmod 600)"
         fi
         if [ -n "$_bs_ghtoken" ]; then
             _tok="$(gh auth token 2>/dev/null)"
             if [ -n "$_tok" ]; then
                 cb_secrets_put "$PWD" GH_TOKEN "$_tok"
-                echo "  ✓ .claudebox/secrets.env: GH_TOKEN (from host 'gh auth token'; gitignored, chmod 600)"
+                echo "  ✓ $(cb_project_dot_basename "$PWD")/secrets.env: GH_TOKEN (from host 'gh auth token'; gitignored, chmod 600)"
             else
                 echo "  ⚠ --gh-token: host 'gh auth token' returned nothing — run 'gh auth login' on the Mac first; skipped" >&2
             fi
@@ -2123,10 +2163,10 @@ esac
 
 # Guards that catch the run paths (interactive / programmatic / daemon) before any VM
 # work. Skipped for management/throwaway commands that legitimately run from anywhere.
-#   cb_guard_workspace   — refuse to mount .claudebox itself as the workspace (2.5.1)
+#   cb_guard_workspace   — refuse to mount .dridock/.claudebox itself as the workspace (2.5.1)
 #   cb_guard_new_project — refuse to silently spin up a fresh VM in some random dir
 #   cb_check_infra_drift — warn (never block) if cb-infra image is behind the wrapper
-# `bootstrap` is handled above and re-execs into the wrapper AFTER writing .claudebox/,
+# `bootstrap` is handled above and re-execs into the wrapper AFTER writing the project dir,
 # so it never trips the new-project guard.
 case "${1:-}" in
     setup-token|-v|--version|doctor|auth|mcp|stop|clear-session) : ;;
@@ -2287,7 +2327,7 @@ echo "$AUTH_CONTENT" > "$CLAUDE_DIR/.${container_name}_cron-auth"
 chmod 600 "$CLAUDE_DIR/.${container_name}_cron-auth"
 dbg "wrote auth files"
 
-# ── inject machine-local project secrets (.claudebox/secrets.env) ────────────
+# ── inject machine-local project secrets (.dridock/secrets.env) ──────────────
 # (a) forward each KEY=VALUE as env for THIS run and (b) persist to per-container
 # sidecars the entrypoint re-reads on every start — so secrets survive `docker
 # start` (which can't take new env). Same durable pattern as the auth files above.

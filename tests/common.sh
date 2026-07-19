@@ -11,7 +11,7 @@ ALL_TESTS=()
 # The whole suite runs against ONE dedicated throwaway colima profile so it never
 # touches the human's `default` VM. The test image is built into it, it becomes the
 # active docker context for the run, and the wrapper (which derives its VM from a
-# project's .claudebox/config.yml) is pointed at it via a fixed-id test workspace.
+# project's .dridock/config.yml) is pointed at it via a fixed-id test workspace.
 CBX_TEST_ID="cbxtest"
 CBX_TEST_PROFILE="cb-${CBX_TEST_ID}"
 # Backend: colima (build/run in a throwaway VM) or docker (CI / in-container harness dev — use
@@ -199,8 +199,8 @@ setup() {
     # fixed-id workspace so the wrapper resolves to $CBX_TEST_PROFILE (already up,
     # so cb_ensure_vm reuses it and never adds --network-address).
     rm -rf "$CBX_TEST_WS"
-    mkdir -p "$CBX_TEST_WS/.claudebox"
-    cat > "$CBX_TEST_WS/.claudebox/config.yml" <<EOF
+    mkdir -p "$CBX_TEST_WS/.dridock"
+    cat > "$CBX_TEST_WS/.dridock/config.yml" <<EOF
 id: $CBX_TEST_ID
 vm:
   cpu: 4

@@ -46,7 +46,7 @@ g="$(ls "$TMP/fwb2"/p2-*.md 2>/dev/null | head -1)"
 ws="$TMP/ws"; mkdir -p "$ws"
 ( cd "$ws" && CLAUDEBOX_FRAMEWORK_BUGS_DIR="/cannot-create-$RANDOM/x" \
     bash "$RB" "fallback case" <<<'## x' >/dev/null 2>&1 )
-[ -f "$ws/.claudebox/FRAMEWORK-BUGS.md" ] && ok "falls back to workspace FRAMEWORK-BUGS.md" || bad "no fallback file"
+[ -f "$ws/.dridock/FRAMEWORK-BUGS.md" ] && ok "falls back to workspace FRAMEWORK-BUGS.md" || bad "no fallback file"
 
 # ── requires a title ─────────────────────────────────────────────────────────
 if CLAUDEBOX_FRAMEWORK_BUGS_DIR="$TMP/fwb3" bash "$RB" <<<'' >/dev/null 2>&1; then

@@ -109,7 +109,7 @@ You have passwordless sudo — install anything else with `apt-get`/`pip`/`npm`/
 for a tool you keep needing, `cb-report-bug` it so it gets baked in (or add it via a profile /
 `~/.claude/init.d`), rather than reinstalling every session. Discover what's present with
 `which <tool>` / `apt list --installed` / `pip list`; heavy/niche language servers install per
-**profile** (`.claudebox/config.yml` `profiles: [...]` — list them with `claudebox profiles`).
+**profile** (`.dridock/config.yml` `profiles: [...]` — list them with `dridock profiles`).
 CLAUDEMD_FULL
 		else
 			cat <<'CLAUDEMD_MINIMAL'
@@ -178,19 +178,19 @@ bloat fills it, the Bash tool can't create its tempdir and **every** command fai
   Your **Write tool still works**: write a Markdown report file directly into the mounted
   drop dir `/home/claude/framework-bugs/<project-id>-<ts>-<slug>.md` (mirroring what
   `cb-report-bug` produces), then ask the human to reclaim disk on the Mac
-  (`docker system prune -af` or `claudebox vm gc`). Bash recovers once `/` has room.
-- Image-heavy project? The human can raise `vm.disk` in `.claudebox/config.yml` (sparse —
-  near-zero Mac cost; needs `claudebox down` + restart). Full standard:
+  (`docker system prune -af` or `dridock vm gc`). Bash recovers once `/` has room.
+- Image-heavy project? The human can raise `vm.disk` in `.dridock/config.yml` (sparse —
+  near-zero Mac cost; needs `dridock down` + restart). Full standard:
   `docs/design/disk-management.md` on the host.
 
 ## Secrets & credentials
 NEVER put a secret value on a command line — arguments leak into shell history, `ps`,
 process listings, and logs. This is a hard rule for the flows you build here AND for
 anything you tell the human to run.
-- This project's secrets live in `.claudebox/secrets.env` on the host (gitignored,
+- This project's secrets live in `.dridock/secrets.env` on the host (gitignored,
   chmod 600, `KEY=VALUE` per line); the harness injects them into you as env on every
   run. Read a credential from its env var — never hardcode, echo, or commit it.
-- Need a NEW secret from the human? Ask them to add a line to `.claudebox/secrets.env`
+- Need a NEW secret from the human? Ask them to add a line to `.dridock/secrets.env`
   (or to bootstrap with `--gh-token` / `--secrets-file`) — never ask them to paste it
   as a command argument or inline in a prompt.
 - GitHub is pre-wired: if `GH_TOKEN` is set, `gh` and `git push https://…` are already
@@ -256,9 +256,9 @@ other project keeps re-discovering the same footgun because the note never propa
   or concept **that belongs to this project**? If yes → project rule, write it locally.
   If no → it's a framework rule and it does NOT belong in this project.
 - **Signals you're on the framework side** (not exhaustive — the check above is
-  authoritative): the rule only mentions `cb-*` helpers, `cb-net`, `CLAUDEBOX_*` env
-  vars, the VM IP / rotation, `.claudebox/secrets.env`, `~/.claude/init.d`, the browser
-  bridge, the Docker socket, sidecar files, or "how any claudebox project should…". If
+  authoritative): the rule only mentions `cb-*` helpers, `cb-net`, `DRIDOCK_*` env
+  vars, the VM IP / rotation, `.dridock/secrets.env`, `~/.claude/init.d`, the browser
+  bridge, the Docker socket, sidecar files, or "how any dridock project should…". If
   the rule would read identically in a different project you've never seen — framework.
 - **What to do with a framework rule.** Route it to the right channel and stop:
   - Concrete defect / missing warning / under-documented helper → `cb-report-bug`
@@ -359,13 +359,16 @@ needs its own conventions, put them in the project's own `./CLAUDE.md`, which is
 this file and takes precedence for project-specific instructions.
 CLAUDEMD_NOTES
 
-	# Bootstrapped project? Surface its mission brief here (this file is always loaded) — only
-	# when .claudebox/BRIEF.md exists. (Formerly prepended to the workspace CLAUDE.md.)
-	if [ -f "$WORKSPACE_DIR/.claudebox/BRIEF.md" ]; then
-		cat <<'CLAUDEMD_BRIEF'
+	# Bootstrapped project? Surface its mission brief here (this file is always loaded) — check
+	# .dridock/BRIEF.md (3.0+) first, fall back to legacy .claudebox/BRIEF.md.
+	_BRIEF_DOTNAME=""
+	if [ -f "$WORKSPACE_DIR/.dridock/BRIEF.md" ]; then _BRIEF_DOTNAME=".dridock"
+	elif [ -f "$WORKSPACE_DIR/.claudebox/BRIEF.md" ]; then _BRIEF_DOTNAME=".claudebox"; fi
+	if [ -n "$_BRIEF_DOTNAME" ]; then
+		cat <<CLAUDEMD_BRIEF
 
-## 🎯 Your mission — read `.claudebox/BRIEF.md` FIRST
-This project was bootstrapped with a mission brief at `.claudebox/BRIEF.md`. It states WHY this
+## 🎯 Your mission — read \`${_BRIEF_DOTNAME}/BRIEF.md\` FIRST
+This project was bootstrapped with a mission brief at \`${_BRIEF_DOTNAME}/BRIEF.md\`. It states WHY this
 project exists and what to build. Read it before anything else, follow it as the project spec,
 and keep its "Progress / handoff log" section updated as you work.
 CLAUDEMD_BRIEF
@@ -378,7 +381,7 @@ dbg "framework guidance written to $CLAUDE_MD_USER"
 SYSTEM_HINT_FILE="/home/claude/.claude/system-hint.txt"
 if [ ! -f "$SYSTEM_HINT_FILE" ]; then
 	cat > "$SYSTEM_HINT_FILE" <<SYSHINT
-You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .claudebox/BRIEF.md exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work. If you hit a bug in the claudebox FRAMEWORK itself (the wrapper/entrypoint/image/networking that runs you, not your project), file it with the \`cb-report-bug\` command rather than working around it silently. The harness changelog is at ~/CHANGELOG.md — consult it to see what claudebox features and conventions exist and what recently changed (especially if a harness behavior surprises you).
+You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .dridock/BRIEF.md (or legacy .claudebox/BRIEF.md) exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work. If you hit a bug in the dridock FRAMEWORK itself (the wrapper/entrypoint/image/networking that runs you, not your project), file it with the \`cb-report-bug\` command rather than working around it silently. The harness changelog is at ~/CHANGELOG.md — consult it to see what dridock features and conventions exist and what recently changed (especially if a harness behavior surprises you).
 SYSHINT
 	chown claude:claude "$SYSTEM_HINT_FILE"
 	dbg "system hint created"
@@ -517,7 +520,7 @@ dbg "seeded container /claudebox skill"
 # ~/.claude/CLAUDE.md (user memory, written above); the project's own ./CLAUDE.md — if any —
 # is left entirely to the project. A greenfield project starts with none and creates its own
 # (via /init or as it develops). The bootstrap mission brief is surfaced in the user-memory
-# file above (conditional on .claudebox/BRIEF.md). See docs/design/framework-guidance.md.
+# file above (conditional on .dridock/BRIEF.md or legacy .claudebox/BRIEF.md). See docs/design/framework-guidance.md.
 
 # ensure .claude.json has required native install properties
 # this helps users who mount their existing .claude directory
@@ -682,7 +685,7 @@ if [ -f "$AUTH_FILE" ]; then
 	done < "$AUTH_FILE"
 fi
 
-# load machine-local project secrets the same way (see wrapper.sh: .claudebox/secrets.env
+# load machine-local project secrets the same way (see wrapper.sh: .dridock/secrets.env
 # -> this sidecar). Read from the mount, not `docker run -e`, so they survive restarts.
 # When GH_TOKEN is present, gh reads it automatically; we also point git-over-https at
 # gh so plain `git push https://github.com/...` is authenticated — i.e. claudebot boots
@@ -839,7 +842,9 @@ _maybe_install_default_plugin() {
 	# One-shot marker (on the per-project mount) — set after a SUCCESSFUL install so we
 	# never reinstall: a user who later `plugin uninstall`s it isn't fought. On failure
 	# (e.g. offline) the marker isn't set, so a later interactive session retries.
-	local marker="$CLAUDE_CONFIG_DIR/.claudebox-default-plugins"
+	local marker="$CLAUDE_CONFIG_DIR/.dridock-default-plugins"
+	# legacy marker name still respected (one deprecation cycle)
+	[ -f "$CLAUDE_CONFIG_DIR/.claudebox-default-plugins" ] && marker="$CLAUDE_CONFIG_DIR/.claudebox-default-plugins"
 	[ -f "$marker" ] && return 0
 	dbg "installing default plugin commit-commands (first interactive run)…"
 	# Two steps: register the marketplace (clones it), then install the plugin by
@@ -858,7 +863,7 @@ _maybe_install_default_plugin() {
 _maybe_install_default_plugin "$@"
 
 # Install the project's enabled profiles (wrapper writes the list to ~/.claude/.profiles
-# from the .claudebox config `profiles:` field). Each is a baked installer at
+# from the .dridock config `profiles:` field). Each is a baked installer at
 # /usr/local/lib/claudebox/profiles/<name>.sh; run once per profile, marker set only on
 # success (so an offline failure retries next start), as the `claude` user, best-effort.
 # See docs/design/profiles.md.

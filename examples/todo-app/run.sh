@@ -41,10 +41,10 @@ install -m 755 "$HERE/init.d/10-typescript-lsp.sh" "$HOOK_DIR/10-typescript-lsp.
 
 echo ""
 echo "==> driving claudebot to build + run the app (autonomous, no prompts)…"
-claudebox -p "Read .claudebox/BRIEF.md in full and execute it end-to-end, fully autonomously — build the TODO app and leave the todo-app container running and reachable on port 3000 exactly as the brief specifies. Do not ask any questions. Print a line starting with DONE: when the container is up."
+claudebox -p "Read .dridock/BRIEF.md in full and execute it end-to-end, fully autonomously — build the TODO app and leave the todo-app container running and reachable on port 3000 exactly as the brief specifies. Do not ask any questions. Print a line starting with DONE: when the container is up."
 
 # figure out where to reach it
-id="$(awk '/^id:/{print $2}' "$PROJ/.claudebox/config.yml")"
+id="$(awk '/^id:/{print $2}' "$PROJ/.dridock/config.yml")"
 ip="$(colima list 2>/dev/null | awk -v p="cb-$id" '$1==p{print $NF}')"
 
 echo ""

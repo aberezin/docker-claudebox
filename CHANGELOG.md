@@ -58,6 +58,21 @@ bundle. Entries below are appended per phase / per issue as they land.
   `CLAUDE_IMAGE_NAME` default renamed alongside. Existing installs need to
   reinstall (`./install.sh`) and rebuild (`make build`) to pick up the new tag and
   binary name.
+- **Phase 4 (2026-07-19)**: project-dir rename `.claudebox/` → `.dridock/`. New
+  `cb_project_dot()` helper returns `.dridock` when it exists, `.claudebox` when
+  only the legacy dir exists, otherwise the new `.dridock` default — so writers
+  route to `.dridock/` on fresh projects while existing 2.x projects keep working
+  from `.claudebox/`. `cb_project_config_path`, `cb_secrets_path`,
+  `cb_brief_path`, `cb_write_sample`, `cb_init_project_config`, `cb_bootstrap`
+  all use it. `cb_ensure_gitignore` writes BOTH `/.dridock/config.yml` +
+  `/.dridock/secrets.env` AND the legacy `/.claudebox/*` entries (dedup'd), so a
+  workspace opened by either a 2.x or 3.0 wrapper stays clean. Guard predicate
+  `cb_in_dotclaudebox` recognizes both `.dridock` and `.claudebox` subpaths;
+  `cb_guard_workspace` strips whichever suffix it finds. Entrypoint's baked
+  guidance / brief lookup / plugin-marker check the new location first, fall
+  back to legacy. Wrapper user-facing messages and `dridock` command names
+  updated in the strings that don't need dynamic dot resolution. Tests +
+  examples updated to the new dotname.
 - **Phase 2 (2026-07-19)**: env var rename `CLAUDEBOX_*` → `DRIDOCK_*` across
   `wrapper.sh` + `entrypoint.sh` + `Dockerfile` + `Makefile`. Wrapper adds a
   `_dridock_alias` compat block at the top that copies every user-supplied
