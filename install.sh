@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-BIN_NAME="${1:-${CLAUDEBOX_BIN_NAME:-${CLAUDE_BIN_NAME:-claudebox}}}"
+BIN_NAME="${1:-${DRIDOCK_BIN_NAME:-${CLAUDEBOX_BIN_NAME:-${CLAUDE_BIN_NAME:-dridock}}}}"
 # Default to a user-writable dir so install needs no sudo (this fork avoids macOS
 # sudo). Override with CLAUDEBOX_INSTALL_DIR (e.g. /usr/local/bin) if you prefer.
 INSTALL_DIR="${CLAUDEBOX_INSTALL_DIR:-${CLAUDE_INSTALL_DIR:-$HOME/.local/bin}}"
@@ -43,7 +43,7 @@ fi
 # run from a checkout of the repo (the Dockerfile and wrapper.sh live next to it).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/null}")" 2>/dev/null && pwd)"
 
-IMAGE_NAME="${CLAUDEBOX_IMAGE_NAME:-claudebox}"
+IMAGE_NAME="${DRIDOCK_IMAGE_NAME:-${CLAUDEBOX_IMAGE_NAME:-dridock}}"
 CLAUDE_TAG="latest"
 BUILD_TARGET="full"
 _minimal="${CLAUDEBOX_MINIMAL:-${CLAUDE_MINIMAL:-}}"
@@ -78,8 +78,8 @@ fi
 
 # stamp the fork semver into the image (LABEL + ENV); `claudebox checkversion` reads it
 CLAUDEBOX_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 0.0.0)"
-echo "🔨 Building local Claude Code image into $CB_INFRA_PROFILE ($IMAGE_NAME:$CLAUDE_TAG v$CLAUDEBOX_VERSION, target: $BUILD_TARGET)..."
-if ! docker --context "$CB_INFRA_CTX" build --build-arg CLAUDEBOX_VERSION="$CLAUDEBOX_VERSION" --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
+echo "🔨 Building local Claude Code image into $CB_INFRA_PROFILE ($IMAGE_NAME:$CLAUDE_TAG v$DRIDOCK_VERSION, target: $BUILD_TARGET)..."
+if ! docker --context "$CB_INFRA_CTX" build --build-arg DRIDOCK_VERSION="$DRIDOCK_VERSION" --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
 	echo "❌ Image build failed."
 	exit 1
 fi

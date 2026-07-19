@@ -47,6 +47,17 @@ bundle. Entries below are appended per phase / per issue as they land.
   wrapper binary default, skill dir. Backward-compat for one deprecation cycle
   (`CLAUDEBOX_*` env accepted, `.claudebox/` dir read as fallback, both wrapper.sh
   fingerprint patterns honored).
+- **Phase 3 (2026-07-19)**: image tag / label / binary defaults renamed.
+  `IMAGE_NAME` default in `Makefile` + `install.sh` flipped `claudebox` → `dridock`
+  (image tag becomes `dridock:latest`). `LABEL org.claudebox.version` in `Dockerfile`
+  renamed to `org.dridock.version`. `cb_image_status` in `wrapper.sh` reads
+  `org.dridock.version` primarily and falls back to `org.claudebox.version` for one
+  cycle — so `checkversion` on a 3.0 wrapper against a 2.x image shows the version
+  instead of "unstamped." `BIN_NAME` default in `install.sh` flipped `claudebox` →
+  `dridock` (wrapper binary installed as `~/.local/bin/dridock`). Wrapper's
+  `CLAUDE_IMAGE_NAME` default renamed alongside. Existing installs need to
+  reinstall (`./install.sh`) and rebuild (`make build`) to pick up the new tag and
+  binary name.
 - **Phase 2 (2026-07-19)**: env var rename `CLAUDEBOX_*` → `DRIDOCK_*` across
   `wrapper.sh` + `entrypoint.sh` + `Dockerfile` + `Makefile`. Wrapper adds a
   `_dridock_alias` compat block at the top that copies every user-supplied

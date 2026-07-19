@@ -1,7 +1,7 @@
 # Docker image configuration
 # This fork builds a LOCAL image (bare repo name, no registry prefix) so Docker
 # never pulls from Docker Hub. Override with `make IMAGE_NAME=... build`.
-IMAGE_NAME ?= claudebox
+IMAGE_NAME ?= dridock
 TAG ?= latest
 
 # Fork semver stamped into the image (LABEL + ENV); read by `claudebox checkversion`.
@@ -43,7 +43,7 @@ infra-up:
 # Build the full image into cb-infra
 build: $(INFRA_DEP)
 	$(DOCKER_INFRA) build --build-arg DRIDOCK_VERSION=$(DRIDOCK_VERSION) --target full -t $(IMAGE_NAME):$(TAG) .
-	@# the previous claudebox:latest is now a dangling <none> image — reclaim it
+	@# the previous $(IMAGE_NAME):latest is now a dangling <none> image — reclaim it
 	$(DOCKER_INFRA) image prune -f
 	@# also prune UNREFERENCED BuildKit cache (non-`-a`, so recently-used layers survive).
 	@# Without this, cb-infra's BuildKit cache grows unbounded over many rebuilds — Alan

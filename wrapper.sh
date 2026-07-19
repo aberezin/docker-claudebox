@@ -872,8 +872,11 @@ cb_vm_gc() {
 # "" for a missing label but nonzero for a missing image, so the two don't conflate.
 cb_image_status() {
     local out
+    # Read org.dridock.version (3.0+); fall back to org.claudebox.version (2.x) so
+    # `checkversion` on a 3.0 wrapper against a 2.x image shows the version instead of
+    # "unstamped". Backward-compat for one deprecation cycle. See 3.0-migration.md.
     if ! out="$(docker --context "$1" image inspect "$CLAUDE_IMAGE" \
-                 --format '{{index .Config.Labels "org.claudebox.version"}}' 2>/dev/null)"; then
+                 --format '{{ or (index .Config.Labels "org.dridock.version") (index .Config.Labels "org.claudebox.version") }}' 2>/dev/null)"; then
         printf 'unavailable'; return
     fi
     case "$out" in ''|'<no value>') printf 'unstamped' ;; *) printf '%s' "$out" ;; esac
@@ -1654,7 +1657,7 @@ cb_caffeinate() {
 # prefix, so Docker never tries to pull it — a missing image is a hard error,
 # which is what we want (build it locally first). Override with DRIDOCK_IMAGE.
 CLAUDE_IMAGE="${DRIDOCK_IMAGE:-${CLAUDE_IMAGE:-}}"
-CLAUDE_IMAGE_NAME="${DRIDOCK_IMAGE_NAME:-claudebox}"
+CLAUDE_IMAGE_NAME="${DRIDOCK_IMAGE_NAME:-dridock}"
 _minimal="${DRIDOCK_MINIMAL:-${CLAUDE_MINIMAL:-}}"
 if [ -z "$CLAUDE_IMAGE" ]; then
     if [ -n "$_minimal" ]; then

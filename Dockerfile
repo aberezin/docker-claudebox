@@ -116,7 +116,7 @@ COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/profiles/ /usr/local/lib/claudebox/profiles/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
-LABEL org.claudebox.version=$DRIDOCK_VERSION
+LABEL org.dridock.version=$DRIDOCK_VERSION
 ENTRYPOINT ["/home/claude/entrypoint.sh"]
 
 # ── full ───────────────────────────────────────────────────────────────────────
@@ -238,5 +238,5 @@ COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/profiles/ /usr/local/lib/claudebox/profiles/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
-LABEL org.claudebox.version=$DRIDOCK_VERSION
+LABEL org.dridock.version=$DRIDOCK_VERSION
 ENTRYPOINT ["/home/claude/entrypoint.sh"]
