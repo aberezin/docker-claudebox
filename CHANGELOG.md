@@ -26,6 +26,35 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.23.0] — 2026-07-19 _(fork)_
+
+### Added
+- **`cb-consult post <id> --author <name> [--status <state>]`** — the missing framework-
+  Claude authoring verb. Replaces the direct-Write-tool + `sed`-edit-meta workaround the
+  `framework-consult` skill has been using for framework replies. Body on stdin; adds a
+  turn as the named author (so replies land as `NNN-framework.md` instead of
+  `NNN-claudebot.md`); optionally flips `meta.status` in one call. Mirrors the host
+  `claudebox consult post` verb name for consistency. SKILL.md updated with both
+  in-container and host recipes. Closes #2.
+- **`claudebox checkversion --all`** — cross-project image inventory. Existing
+  `checkversion` shows wrapper vs cb-infra vs the current project's image; `--all`
+  additionally enumerates every other `cb-*` project VM's image version, so drift is
+  visible across the whole install. Read-only, same "never boots a VM" semantic as
+  bare `checkversion`. Closes #6.
+
+### Fixed
+- **`browser-bridge up`: fresh window hash per bridge session** (not stable across
+  reboot). Previously the 8-hex `window-hash` file was persisted across `down` /
+  restart, so a Mac reboot → new Chrome launch reused the same hash. Now the hash is
+  regenerated whenever the pids file is missing or points at dead processes (Mac
+  reboot, VM restart, Chrome closed) — i.e. whenever we're actually launching a new
+  Chrome. A second `up` while the bridge is still running reuses the current hash (so
+  the printed identity matches the window that's actually open). Closes #3.
+
+Host-only (wrapper.sh) + baked helper (cb-consult). **cb-consult change needs
+`make build`**; the wrapper changes take effect on the next `install.sh` reinstall
+without a rebuild.
+
 ## [2.22.0] — 2026-07-17 _(fork)_
 
 ### Added

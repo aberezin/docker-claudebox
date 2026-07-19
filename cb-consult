@@ -35,6 +35,11 @@ usage() {
 usage:
   cb-consult open "<title>" [--layer wrapper|entrypoint|image|networking|tooling|other]   (body on stdin)
   cb-consult say <id>          add a turn (body on stdin)
+  cb-consult post <id> --author <name> [--status <state>]
+                               add a turn with an explicit author + optional status change
+                               (body on stdin). Framework-dev: replaces the direct-file-write
+                               + sed-meta pattern for framework-Claude replies. Same as
+                               \`claudebox consult post\` on the host.
   cb-consult read <id>         print the thread (framework-Claude's reply shows here once the human approves it)
   cb-consult list [--all]      this project's consults + status; --all = every project (framework-dev)
   cb-consult watch [secs]      block until a reply lands / a thread changes, print it, exit
@@ -110,6 +115,26 @@ case "$cmd" in
     id="${1:-}"; [ -n "$id" ] || usage; td="$DIR/$id"; [ -d "$td" ] || { echo "no such consult: $id" >&2; exit 1; }
     _body | _post "$td" claudebot; _meta_set "$td" status awaiting-framework
     echo "cb-consult: added a turn to $id (awaiting framework)." ;;
+  post)
+    # Framework-Claude authoring path (#2, 2.23.0). Same shape as `say` but accepts an
+    # explicit --author (so replies land as `NNN-framework.md` instead of `NNN-claudebot.md`)
+    # and an optional --status to flip meta. Body on stdin. Replaces the direct-Write +
+    # sed-meta pattern the framework-consult skill used before this verb existed.
+    id="${1:-}"; [ -n "$id" ] || usage; shift
+    author=""; status=""
+    while [ $# -gt 0 ]; do case "$1" in
+        --author) author="${2:-}"; shift ;;
+        --status) status="${2:-}"; shift ;;
+        -h|--help) usage 0 ;;
+        *) echo "cb-consult post: unknown flag '$1'" >&2; usage ;;
+    esac; shift; done
+    [ -n "$author" ] || { echo "cb-consult post: --author is required" >&2; usage; }
+    # sanitize author for filename (allow letters/digits/-/_)
+    case "$author" in *[!A-Za-z0-9_-]*) echo "cb-consult post: --author must match [A-Za-z0-9_-]+ (got '$author')" >&2; exit 1 ;; esac
+    td="$DIR/$id"; [ -d "$td" ] || { echo "no such consult: $id" >&2; exit 1; }
+    _body | _post "$td" "$author"
+    [ -n "$status" ] && _meta_set "$td" status "$status"
+    echo "cb-consult: posted turn to $id as author=$author${status:+ (status=$status)}." ;;
   read|show)
     id="${1:-}"; [ -n "$id" ] || usage; td="$DIR/$id"; [ -d "$td" ] || { echo "no such consult: $id" >&2; exit 1; }
     echo "=== consult $id ==="; cat "$td/meta"; echo ""

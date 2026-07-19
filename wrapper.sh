@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.22.0"
+CLAUDEBOX_VERSION="2.23.0"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -830,8 +830,15 @@ cb_image_version() { cb_real_ver "$(cb_image_status "$1")"; }
 # `claudebox checkversion` — report the host wrapper's semver alongside the version
 # baked into the claudebot image (cb-infra source + this project's VM), and warn on
 # drift. Read-only: never boots a VM; reports down/unstamped distinctly.
+# `checkversion --all` (#6, 2.23.0) also scans EVERY cb-* project VM's image, so drift
+# is visible across the whole install (not just the current project).
 cb_checkversion() {
-    local wv="$CLAUDEBOX_VERSION" civ pv cid ctx cmp
+    local wv="$CLAUDEBOX_VERSION" civ pv cid ctx cmp all=0
+    while [ $# -gt 0 ]; do case "$1" in
+        --all|-a) all=1 ;;
+        -h|--help) echo "usage: claudebox checkversion [--all]  (--all = scan every cb-* project VM in addition to cb-infra + this project)" >&2; return 0 ;;
+        *) echo "checkversion: unknown arg '$1'" >&2; return 1 ;;
+    esac; shift; done
     echo "claudebox versions:"
     echo "  wrapper (host):        $wv"
     civ="$(cb_image_status "$(cb_infra_context)")"
@@ -844,6 +851,23 @@ cb_checkversion() {
     else
         pv=""
         echo "  image (this project):  <no .claudebox project in $PWD>"
+    fi
+    if [ "$all" = 1 ]; then
+        echo ""
+        echo "  all cb-* project VMs (--all):"
+        local rows other_vms this_profile="" p pver
+        [ -n "$cid" ] && this_profile="$(cb_project_profile "$cid")"
+        rows="$(_cb_vm_list_json | cb_parse_vm_lines)"
+        other_vms="$(printf '%s\n' "$rows" | awk -F'\t' -v self="$this_profile" '$1 ~ /^cb-/ && $1 != "cb-infra" && $1 != self { print $1 }')"
+        if [ -z "$other_vms" ]; then
+            echo "    (none besides this project)"
+        else
+            while IFS= read -r p; do
+                [ -z "$p" ] && continue
+                pver="$(cb_image_status "colima-$p")"
+                printf '    %-24s %s\n' "$p" "$pver"
+            done <<<"$other_vms"
+        fi
     fi
     echo ""
     local pver cver; pver="$(cb_real_ver "$pv")"; cver="$(cb_real_ver "$civ")"
@@ -1210,7 +1234,14 @@ PYEOF
     # title mirrors the active tab's <title>, so this makes the debug window
     # identifiable in Mission Control / Cmd+Tab / Dock tooltip. The hash lives in a
     # file so a second `browser-bridge up` (without an intervening `down`) reuses it.
+    # Refresh policy (#3): fresh identity per bridge SESSION, not stable-across-reboot —
+    # if `pids` is missing or points at dead processes (Mac reboot, Chrome closed, VM
+    # restart), we're launching a new Chrome, so regenerate the hash. Reuse only if the
+    # bridge is still live (a second `up` while running).
     local hash_file="$home/window-hash" hash window_title welcome_url
+    if ! { [ -f "$home/pids" ] && kill -0 $(cat "$home/pids") 2>/dev/null; }; then
+        od -An -N4 -tx1 /dev/urandom | tr -d ' \n' > "$hash_file"
+    fi
     [ -s "$hash_file" ] || od -An -N4 -tx1 /dev/urandom | tr -d ' \n' > "$hash_file"
     hash="$(cat "$hash_file")"
     window_title="Claudebox Chrome -- $hash"
@@ -1600,7 +1631,7 @@ VM / DISK
 
 VERSION
   version                          print this wrapper's semver
-  checkversion                     compare wrapper vs image; warn on drift (must/should/optional)
+  checkversion [--all]             compare wrapper vs image; warn on drift (must/should/optional). --all = every cb-* project VM
 
 OTHER
   browser-bridge up|down           opt-in: let claudebot drive your real Chrome via CDP
@@ -1640,7 +1671,8 @@ HELP
         ;;
     checkversion)
         # host wrapper vs claudebot image semver + drift warning (read-only).
-        cb_checkversion; exit $?
+        # `--all` scans every cb-* project VM (2.23.0, #6).
+        shift; cb_checkversion "$@"; exit $?
         ;;
     info|status)
         # human-facing at-a-glance: versions, paths, VM + network (read-only, fast).

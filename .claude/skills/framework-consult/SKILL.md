@@ -64,11 +64,17 @@ container-name-vs-IP duality, secrets rules, or the sidecar durability model?
 Then write the draft to the thread and hand it to the human:
 
 ```bash
-# body = the sub-agent's reply + its proposed artifacts/rationale
+# On the Mac (host):
 claudebox consult post <id> --author framework --status awaiting-approval --diff /path/to/proposed.diff < draft.md
+
+# Inside a framework-dev claudebot (container, 2.23.0+):
+cb-consult post <id> --author framework --status awaiting-approval < draft.md
 ```
-(omit `--diff` if there's no patch yet). Tell the human: "consult `<id>` drafted —
-review with `claudebox consult show <id>`, then `approve` / `revise` / `reject`."
+
+(`--diff` is host-side only; when working in-container, include the proposed diff
+directly in the draft body per the existing sub-agent output shape.) Tell the human:
+"consult `<id>` drafted — review with `claudebox consult show <id>` (or `cb-consult read
+<id>` in-container), then `approve` / `revise` / `reject`."
 
 ## 2. Human gate (not yours)
 
@@ -86,9 +92,15 @@ thread): **apply the change in the harness for real** — edit the files, add/ad
 entry, and commit. Then post the reply **with the commit hash** so the thread is auditable:
 
 ```bash
+# On the Mac (host):
 claudebox consult post <id> --author framework --status awaiting-claudebot <<EOF
 Applied in <commit>. <one-paragraph summary of what changed and where the standard now lives>.
 Adopt it and run \`cb-consult resolve <id>\`. Future claudebots inherit it via the baked guidance.
+EOF
+
+# Inside a framework-dev claudebot (2.23.0+):
+cb-consult post <id> --author framework --status awaiting-claudebot <<EOF
+Applied in <commit>. ...
 EOF
 ```
 
