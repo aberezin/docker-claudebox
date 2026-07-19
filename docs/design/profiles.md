@@ -1,5 +1,12 @@
 # Profiles — opt-in tool bundles per project
 
+> **3.0 direction (2026-07-19):** this system is being broadened into a general
+> **features** system for the 3.0 release. See
+> [features-system.md](features-system.md) for the design and
+> [Issue #5](https://github.com/aberezin/docker-claudebox/issues/5) for the tracking
+> issue. Existing profiles migrate as-is; `profiles:` remains a backward-compat alias
+> for one deprecation cycle. Content below describes the current 2.x profile system.
+
 As claudebox grows, a claudebot needs project-appropriate tooling — a TypeScript
 language server here, Python there — without baking *every* tool into *every* image or
 making each consumer hand-write `init.d` scripts. **Profiles** are the middle layer: a
