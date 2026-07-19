@@ -48,6 +48,21 @@ bundle. Entries below are appended per phase / per issue as they land.
   (`CLAUDEBOX_*` env accepted, `.claudebox/` dir read as fallback, both wrapper.sh
   fingerprint patterns honored).
 
+## [2.24.1] — 2026-07-19 _(fork)_
+
+### Fixed
+- **`claudebox start --any-flag` no longer errors with "❌ Unknown flag".** Regression
+  from 2.24.0's `start` verb: after `start` shifted off, the `$@` reached the strict
+  `-p` programmatic-mode arg validator, which enforces a fixed allowlist
+  (`-p`/`--print`/`--output-format`/`--model`/…). Any flag outside that list — e.g.
+  `claudebox start --remote-control` — got rejected before the code even decided
+  whether we were in programmatic mode.
+  Fix: pre-scan `$@` for `-p`/`--print`; if absent, skip the strict validator
+  entirely and let every arg pass through to interactive `claude` unchanged. The
+  validator still applies to genuine `-p` invocations. Reported by Alan; affected
+  `claudebox start --remote-control` and `claudebox start -- --remote-control`.
+  Host-only (wrapper.sh); no image rebuild.
+
 ## [2.24.0] — 2026-07-19 _(fork)_
 
 ### Changed (user-visible CLI break)

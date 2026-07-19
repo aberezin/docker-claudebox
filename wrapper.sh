@@ -9,7 +9,7 @@
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
 # so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.24.0"
+CLAUDEBOX_VERSION="2.24.1"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -2371,8 +2371,18 @@ case "${1:-}" in
         ;;
 esac
 
-# Parse and validate args
-if [ $# -gt 0 ]; then
+# Parse and validate args.
+# The strict allowlist below applies to `-p` PROGRAMMATIC mode (which pipes through
+# jsonpipe.py and needs a fixed flag set). It must NOT reject flags in INTERACTIVE
+# mode — `claudebox start --any-flag` should pass every flag straight to `claude`
+# inside the container. Pre-scan for -p/--print; if absent, skip the validator
+# entirely and let $@ reach the interactive claude invocation unmodified. Fix for
+# the "❌ Unknown flag: --remote-control" regression that surfaced when `start`
+# became an explicit verb in 2.24.0.
+_has_p_flag=0
+for _arg in "$@"; do case "$_arg" in -p|--print) _has_p_flag=1; break ;; esac; done
+
+if [ $# -gt 0 ] && [ "$_has_p_flag" = "1" ]; then
     NEEDS_VERBOSE=0
     HAS_OUTPUT_FORMAT=0
     HAS_PROMPT=0
