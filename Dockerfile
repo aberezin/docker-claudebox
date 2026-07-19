@@ -110,18 +110,18 @@ RUN chmod +x /h/home/entrypoint.sh /h/bin/* /h/profiles/*.sh \
 
 # ── minimal ────────────────────────────────────────────────────────────────────
 FROM base AS minimal
-ENV CLAUDEBOX_IMAGE_VARIANT=minimal
+ENV DRIDOCK_IMAGE_VARIANT=minimal
 COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/profiles/ /usr/local/lib/claudebox/profiles/
-ARG CLAUDEBOX_VERSION=0.0.0
-ENV CLAUDEBOX_VERSION=$CLAUDEBOX_VERSION
-LABEL org.claudebox.version=$CLAUDEBOX_VERSION
+ARG DRIDOCK_VERSION=0.0.0
+ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
+LABEL org.claudebox.version=$DRIDOCK_VERSION
 ENTRYPOINT ["/home/claude/entrypoint.sh"]
 
 # ── full ───────────────────────────────────────────────────────────────────────
 FROM base AS full
-ENV CLAUDEBOX_IMAGE_VARIANT=full
+ENV DRIDOCK_IMAGE_VARIANT=full
 
 # build tools
 RUN apt-get update && apt-get install -y \
@@ -236,7 +236,7 @@ RUN pip install --no-cache-dir pipenv poetry
 COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/profiles/ /usr/local/lib/claudebox/profiles/
-ARG CLAUDEBOX_VERSION=0.0.0
-ENV CLAUDEBOX_VERSION=$CLAUDEBOX_VERSION
-LABEL org.claudebox.version=$CLAUDEBOX_VERSION
+ARG DRIDOCK_VERSION=0.0.0
+ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
+LABEL org.claudebox.version=$DRIDOCK_VERSION
 ENTRYPOINT ["/home/claude/entrypoint.sh"]

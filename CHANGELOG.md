@@ -47,6 +47,19 @@ bundle. Entries below are appended per phase / per issue as they land.
   wrapper binary default, skill dir. Backward-compat for one deprecation cycle
   (`CLAUDEBOX_*` env accepted, `.claudebox/` dir read as fallback, both wrapper.sh
   fingerprint patterns honored).
+- **Phase 2 (2026-07-19)**: env var rename `CLAUDEBOX_*` → `DRIDOCK_*` across
+  `wrapper.sh` + `entrypoint.sh` + `Dockerfile` + `Makefile`. Wrapper adds a
+  `_dridock_alias` compat block at the top that copies every user-supplied
+  `CLAUDEBOX_X` value into `DRIDOCK_X` if the new name isn't set — so all in-file
+  reads use `DRIDOCK_X` uniformly while legacy invocations continue to work.
+  Prefix-based iterations (`ENV_*`, `MOUNT_*`) accept both prefixes inline
+  (`DRIDOCK_ENV_*` + `CLAUDEBOX_ENV_*` + `CLAUDE_ENV_*`, similarly `MOUNT_`).
+  Framework-dev fingerprint accepts wrapper.sh containing either
+  `^DRIDOCK_VERSION=` or `^CLAUDEBOX_VERSION=` for one cycle.
+  Wrapper injects only `DRIDOCK_X` names via `-e` — the entrypoint reads only
+  `DRIDOCK_X` from container env; the CLAUDEBOX-side aliases are host-wrapper-only.
+  ~30 env vars renamed; docs at `docs/environment-variables.md` stay on old names
+  until Phase 5's docs pass.
 
 ## [2.24.1] — 2026-07-19 _(fork)_
 

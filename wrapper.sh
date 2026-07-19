@@ -1,15 +1,73 @@
 #!/usr/bin/env bash
 
-# CLAUDEBOX_* is the canonical prefix. CLAUDE_* names remain supported for backwards compat.
+# DRIDOCK_* is the canonical prefix in 3.0+. CLAUDEBOX_* names remain supported as an
+# alias for one deprecation cycle (all of 3.x); the alias-setup block just below copies
+# every user-supplied CLAUDEBOX_X into DRIDOCK_X so all in-file reads can use the new
+# name uniformly. CLAUDE_* names (from upstream v1.x) remain supported one more tier
+# back for pre-2.x muscle memory. Removed in 4.0.
 
 # Fork semver — the host wrapper and the built image share an IPC contract (sidecar
 # filenames/formats, env conventions, /out, secrets injection). Bump this in the repo
-# VERSION file AND here on any contract change; `claudebox checkversion` compares this
+# VERSION file AND here on any contract change; `dridock checkversion` compares this
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
-# runs its OWN 2.x line, deliberately above upstream's highest pre-fork tag (v1.11.0),
-# so tags/versions never collide with the inherited upstream history. See docs/versioning.md.
-CLAUDEBOX_VERSION="2.24.1"
+# runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
+DRIDOCK_VERSION="2.24.1"
+
+# ── 3.0 backward-compat alias setup ──────────────────────────────────────────
+# For each user-input env var renamed CLAUDEBOX_X → DRIDOCK_X in 3.0, copy the
+# CLAUDEBOX_X value into DRIDOCK_X if the user set only the old name. All in-file
+# reads below use the new name only. This block is the single source of truth for
+# what got renamed — grep for `_ALIAS_MAP` to find it. Removed in 4.0.
+_dridock_alias() {
+    # $1 = new (DRIDOCK_X), $2 = legacy (CLAUDEBOX_X). Copies legacy → new if new is
+    # unset AND legacy is set. Uses :- to survive `set -u` if the harness ever adopts
+    # it, and stays no-op when both are unset.
+    local new="$1" old="$2"
+    if [ -z "${!new+x}" ] && [ -n "${!old+x}" ]; then
+        eval "$new=\"\${$old}\""
+        export "$new"
+    fi
+}
+# _DRIDOCK_ALIAS_MAP — the renamed vars.
+_dridock_alias DRIDOCK_ALLOW_NEW           CLAUDEBOX_ALLOW_NEW
+_dridock_alias DRIDOCK_ALLOW_SUBDIR        CLAUDEBOX_ALLOW_SUBDIR
+_dridock_alias DRIDOCK_BIN_NAME            CLAUDEBOX_BIN_NAME
+_dridock_alias DRIDOCK_CAFFEINATE          CLAUDEBOX_CAFFEINATE
+_dridock_alias DRIDOCK_CDP_BIND            CLAUDEBOX_CDP_BIND
+_dridock_alias DRIDOCK_CDP_CHROME_PORT     CLAUDEBOX_CDP_CHROME_PORT
+_dridock_alias DRIDOCK_CDP_PORT            CLAUDEBOX_CDP_PORT
+_dridock_alias DRIDOCK_CDP_PROFILE         CLAUDEBOX_CDP_PROFILE
+_dridock_alias DRIDOCK_CHROME              CLAUDEBOX_CHROME
+_dridock_alias DRIDOCK_CONSULT_DIR         CLAUDEBOX_CONSULT_DIR
+_dridock_alias DRIDOCK_CONTAINER_NAME      CLAUDEBOX_CONTAINER_NAME
+_dridock_alias DRIDOCK_DATA_DIR            CLAUDEBOX_DATA_DIR
+_dridock_alias DRIDOCK_DEFAULT_PLUGINS     CLAUDEBOX_DEFAULT_PLUGINS
+_dridock_alias DRIDOCK_FRAMEWORK_BUGS_DIR  CLAUDEBOX_FRAMEWORK_BUGS_DIR
+_dridock_alias DRIDOCK_GIT_EMAIL           CLAUDEBOX_GIT_EMAIL
+_dridock_alias DRIDOCK_GIT_NAME            CLAUDEBOX_GIT_NAME
+_dridock_alias DRIDOCK_HARNESS_DEV         CLAUDEBOX_HARNESS_DEV
+_dridock_alias DRIDOCK_HARNESS_DEV         CLAUDEBOX_FRAMEWORK_DEV   # 2.22.0 alias-of-an-alias
+_dridock_alias DRIDOCK_HOSTNAME            CLAUDEBOX_HOSTNAME
+_dridock_alias DRIDOCK_HOST_AGENT_BIND     CLAUDEBOX_HOST_AGENT_BIND
+_dridock_alias DRIDOCK_HOST_AGENT_PORT     CLAUDEBOX_HOST_AGENT_PORT
+_dridock_alias DRIDOCK_HOST_AGENT_PY       CLAUDEBOX_HOST_AGENT_PY
+_dridock_alias DRIDOCK_HOST_CDP_URL        CLAUDEBOX_HOST_CDP_URL
+_dridock_alias DRIDOCK_IMAGE               CLAUDEBOX_IMAGE
+_dridock_alias DRIDOCK_IMAGE_NAME          CLAUDEBOX_IMAGE_NAME
+_dridock_alias DRIDOCK_MINIMAL             CLAUDEBOX_MINIMAL
+_dridock_alias DRIDOCK_MODE_CRON           CLAUDEBOX_MODE_CRON
+_dridock_alias DRIDOCK_MODE_CRON_FILE      CLAUDEBOX_MODE_CRON_FILE
+_dridock_alias DRIDOCK_NO_API_KEY          CLAUDEBOX_NO_API_KEY
+_dridock_alias DRIDOCK_NO_DRIFT_WARN       CLAUDEBOX_NO_DRIFT_WARN
+_dridock_alias DRIDOCK_PRUNE_ON_START      CLAUDEBOX_PRUNE_ON_START
+_dridock_alias DRIDOCK_SKIP_PREFLIGHT      CLAUDEBOX_SKIP_PREFLIGHT
+_dridock_alias DRIDOCK_SOCKET_VMNET        CLAUDEBOX_SOCKET_VMNET
+_dridock_alias DRIDOCK_SOURCE_ONLY         CLAUDEBOX_SOURCE_ONLY
+_dridock_alias DRIDOCK_SSH_DIR             CLAUDEBOX_SSH_DIR
+_dridock_alias DRIDOCK_TMPFS_TMP           CLAUDEBOX_TMPFS_TMP
+# CLAUDEBOX_ENV_* and CLAUDEBOX_MOUNT_* prefixes are handled inline where the wrapper
+# iterates over them (both prefixes accepted).
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Config layer — Phase 1 of docs/design/per-project-vm.md
@@ -18,7 +76,7 @@ CLAUDEBOX_VERSION="2.24.1"
 # rehome-safe via a marker file rather than a path hash), the committed sample,
 # .gitignore wiring, and the machine-wide config (~/.config/claudebox/config.yml)
 # with baked-in defaults. No docker/colima here. Source this file with
-# CLAUDEBOX_SOURCE_ONLY=1 to load just these functions (tests/test_cbconfig.sh).
+# DRIDOCK_SOURCE_ONLY=1 to load just these functions (tests/test_cbconfig.sh).
 # ─────────────────────────────────────────────────────────────────────────────
 
 cb_config_home() { printf '%s' "${XDG_CONFIG_HOME:-$HOME/.config}"; }
@@ -109,7 +167,7 @@ cb_in_dotclaudebox() { case "${1:-$PWD}" in */.claudebox|*/.claudebox/*) return 
 # `claudebox` from inside that metadata dir). The project VM is still correct (root is the
 # git toplevel), but the mounted workspace + container would be keyed to `.claudebox` — a
 # stray, almost-never-intended setup. Prompt if interactive; else abort (override:
-# CLAUDEBOX_ALLOW_SUBDIR=1). $1 = resolved project root (for the suggested cd).
+# DRIDOCK_ALLOW_SUBDIR=1). $1 = resolved project root (for the suggested cd).
 cb_guard_workspace() {
     local root="$1" ans target
     cb_in_dotclaudebox "$PWD" || return 0
@@ -122,21 +180,21 @@ cb_guard_workspace() {
         echo "   separate stray container for it. You almost certainly want the project root:"
         echo "      cd $(printf '%q' "$target") && claudebox"
     } >&2
-    case "${CLAUDEBOX_ALLOW_SUBDIR:-}" in 1|true|yes|on) echo "   (CLAUDEBOX_ALLOW_SUBDIR set — proceeding)" >&2; return 0 ;; esac
+    case "${DRIDOCK_ALLOW_SUBDIR:-}" in 1|true|yes|on) echo "   (DRIDOCK_ALLOW_SUBDIR set — proceeding)" >&2; return 0 ;; esac
     if [ -t 0 ]; then
         printf "   Continue with this dir anyway? [y/N] " >&2
         read -r ans
         case "$ans" in y|Y|yes|YES) return 0 ;; esac
         echo "   aborted — cd to the project root and re-run." >&2; return 1
     fi
-    echo "   aborting (non-interactive) — set CLAUDEBOX_ALLOW_SUBDIR=1 to override." >&2
+    echo "   aborting (non-interactive) — set DRIDOCK_ALLOW_SUBDIR=1 to override." >&2
     return 1
 }
 
 # Guard accidental "spawn a fresh project in some random dir". Silent creation of
 # .claudebox/config.yml (+ a per-project Colima VM, ~30-60s to boot, resources reserved)
 # is easy to trigger by mistake — cd'ing into a scratch dir, wrong-terminal `claudebox`,
-# etc. Prompt if interactive; else abort (override: CLAUDEBOX_ALLOW_NEW=1). Skipped by
+# etc. Prompt if interactive; else abort (override: DRIDOCK_ALLOW_NEW=1). Skipped by
 # the utility-command allowlist below (setup-token/mcp/stop/... don't create anything)
 # and by `bootstrap` (it creates the config itself, then re-execs). $1 = project root.
 cb_guard_new_project() {
@@ -150,7 +208,7 @@ cb_guard_new_project() {
         echo "   ~30-60s to boot, reserves CPU/RAM/disk). For a proper new project"
         echo "   with a mission brief, prefer:  claudebox bootstrap \"<intent>\""
     } >&2
-    case "${CLAUDEBOX_ALLOW_NEW:-}" in 1|true|yes|on) echo "   (CLAUDEBOX_ALLOW_NEW set — proceeding)" >&2; return 0 ;; esac
+    case "${DRIDOCK_ALLOW_NEW:-}" in 1|true|yes|on) echo "   (DRIDOCK_ALLOW_NEW set — proceeding)" >&2; return 0 ;; esac
     if [ -t 0 ]; then
         printf "   Create a new claudebox project at this path? [y/N] " >&2
         read -r ans
@@ -158,18 +216,18 @@ cb_guard_new_project() {
         echo "   aborted — cd to an existing project, or use 'claudebox bootstrap'." >&2
         return 1
     fi
-    echo "   aborting (non-interactive) — use 'claudebox bootstrap', or set CLAUDEBOX_ALLOW_NEW=1 to override." >&2
+    echo "   aborting (non-interactive) — use 'claudebox bootstrap', or set DRIDOCK_ALLOW_NEW=1 to override." >&2
     return 1
 }
 
 # true if $1 is a claudebox harness fork workspace (fingerprint: wrapper.sh at root with
-# CLAUDEBOX_VERSION= line), OR CLAUDEBOX_HARNESS_DEV=1 forces the mode. Used to gate
+# CLAUDEBOX_VERSION= line), OR DRIDOCK_HARNESS_DEV=1 forces the mode. Used to gate
 # framework-dev behaviors: skip the drift warning, gate `claudebox harness <verb>`
-# commands, mirror the entrypoint's fw-dev surfacing. CLAUDEBOX_FRAMEWORK_DEV kept as
+# commands, mirror the entrypoint's fw-dev surfacing. DRIDOCK_FRAMEWORK_DEV kept as
 # a backward-compat alias (renamed 2.22.0 to match the harness naming convention).
 cb_is_framework_dev() {
-    case "${CLAUDEBOX_HARNESS_DEV:-${CLAUDEBOX_FRAMEWORK_DEV:-}}" in 1|true|yes|on) return 0 ;; esac
-    [ -f "$1/wrapper.sh" ] && grep -q '^CLAUDEBOX_VERSION=' "$1/wrapper.sh" 2>/dev/null
+    case "${DRIDOCK_HARNESS_DEV:-${DRIDOCK_FRAMEWORK_DEV:-}}" in 1|true|yes|on) return 0 ;; esac
+    [ -f "$1/wrapper.sh" ] && grep -Eq '^(DRIDOCK_VERSION|CLAUDEBOX_VERSION)=' "$1/wrapper.sh" 2>/dev/null
 }
 
 # Warn (never block) when the shared cb-infra image is BEHIND the wrapper's version. On
@@ -178,25 +236,25 @@ cb_is_framework_dev() {
 # pulls the old bits. `checkversion` catches this if run explicitly, but this surfaces it
 # on every boot path so drift doesn't accumulate. Auto-skipped for the framework-dev
 # workspace (the person iterating there IS the one causing drift and doesn't need to be
-# told). Also skippable via CLAUDEBOX_NO_DRIFT_WARN=1 for scripted/CI contexts. Fast:
+# told). Also skippable via DRIDOCK_NO_DRIFT_WARN=1 for scripted/CI contexts. Fast:
 # cb_image_status returns "unavailable" without booting cb-infra if it's down.
 cb_check_infra_drift() {
     local root="$1" civ cver
-    case "${CLAUDEBOX_NO_DRIFT_WARN:-}" in 1|true|yes|on) return 0 ;; esac
+    case "${DRIDOCK_NO_DRIFT_WARN:-}" in 1|true|yes|on) return 0 ;; esac
     cb_is_framework_dev "$root" && return 0
     civ="$(cb_image_status "$(cb_infra_context)" 2>/dev/null)"
     cver="$(cb_real_ver "$civ")"
     [ -z "$cver" ] && return 0                                   # cb-infra down / unstamped — silent
-    [ "$cver" = "$CLAUDEBOX_VERSION" ] && return 0                # in sync — silent
-    case "$(cb_semver_cmp "$CLAUDEBOX_VERSION" "$cver")" in
+    [ "$cver" = "$DRIDOCK_VERSION" ] && return 0                # in sync — silent
+    case "$(cb_semver_cmp "$DRIDOCK_VERSION" "$cver")" in
         gt)
-            case "$(cb_semver_severity "$CLAUDEBOX_VERSION" "$cver")" in
-                major) echo "🔴 cb-infra image ($cver) is MAJOR behind wrapper ($CLAUDEBOX_VERSION) — rebuild REQUIRED on the Mac:  make build" >&2 ;;
-                minor) echo "🟠 cb-infra image ($cver) is MINOR behind wrapper ($CLAUDEBOX_VERSION) — SHOULD rebuild on the Mac:  make build" >&2 ;;
-                patch) echo "🟡 cb-infra image ($cver) is PATCH behind wrapper ($CLAUDEBOX_VERSION) — rebuild optional:  make build" >&2 ;;
+            case "$(cb_semver_severity "$DRIDOCK_VERSION" "$cver")" in
+                major) echo "🔴 cb-infra image ($cver) is MAJOR behind wrapper ($DRIDOCK_VERSION) — rebuild REQUIRED on the Mac:  make build" >&2 ;;
+                minor) echo "🟠 cb-infra image ($cver) is MINOR behind wrapper ($DRIDOCK_VERSION) — SHOULD rebuild on the Mac:  make build" >&2 ;;
+                patch) echo "🟡 cb-infra image ($cver) is PATCH behind wrapper ($DRIDOCK_VERSION) — rebuild optional:  make build" >&2 ;;
             esac
-            echo "   (fresh project VMs will reseed from this cb-infra; set CLAUDEBOX_NO_DRIFT_WARN=1 to silence)" >&2 ;;
-        lt) echo "⚠  cb-infra image ($cver) is AHEAD of wrapper ($CLAUDEBOX_VERSION) — update the wrapper:  ./install.sh" >&2 ;;
+            echo "   (fresh project VMs will reseed from this cb-infra; set DRIDOCK_NO_DRIFT_WARN=1 to silence)" >&2 ;;
+        lt) echo "⚠  cb-infra image ($cver) is AHEAD of wrapper ($DRIDOCK_VERSION) — update the wrapper:  ./install.sh" >&2 ;;
     esac
     return 0
 }
@@ -227,7 +285,7 @@ cb_harness_sync() {
         *)          echo "claudebox harness sync: unknown arg '$1'" >&2; return 1 ;;
     esac; shift; done
     if ! cb_is_framework_dev "$root"; then
-        echo "❌ claudebox harness sync: $root is not a claudebox harness fork (no wrapper.sh with CLAUDEBOX_VERSION= at its root)." >&2
+        echo "❌ claudebox harness sync: $root is not a claudebox harness fork (no wrapper.sh with DRIDOCK_VERSION= or CLAUDEBOX_VERSION= at its root)." >&2
         echo "   This command rebuilds the cb-infra image from a harness checkout; it's meaningful only when developing the harness itself." >&2
         return 1
     fi
@@ -625,7 +683,7 @@ cb_ensure_vm() {
     # Refresh the VM-IP env now that the VM is guaranteed up — must happen HERE, not
     # earlier in the wrapper: on a first-run cold boot the plain lookup used to race
     # `colima start --network-address` (col0 reachability lags by seconds), leaving
-    # CLAUDEBOX_VM_IP unset in the fresh container until the next invocation. See
+    # DRIDOCK_VM_IP unset in the fresh container until the next invocation. See
     # cb_inject_vm_env / cb_wait_reachable.
     cb_inject_vm_env "$id" "$root"
 }
@@ -662,13 +720,13 @@ cb_vm_destroy() {
 # --continue state, auth/secrets sidecars, settings, plugins, init.d). This is the
 # per-project shared-nothing ~/.claude; a plain `destroy` leaves it (session survives),
 # `destroy --purge` calls this for a truly clean slate. Guarded: only ever removes a
-# real <data_root>/<id> dir, and refuses when a CLAUDEBOX_DATA_DIR override is in effect
+# real <data_root>/<id> dir, and refuses when a DRIDOCK_DATA_DIR override is in effect
 # (that path is arbitrary/user-owned — the human removes it).
 cb_purge_data() {
     local id="$1" root proj
     case "$id" in ''|*[!0-9a-f]*|*/*) echo "refusing to purge — unexpected project id: '$id'" >&2; return 1 ;; esac
-    if [ -n "${CLAUDEBOX_DATA_DIR:-${CLAUDE_DATA_DIR:-}}" ]; then
-        echo "⚠ CLAUDEBOX_DATA_DIR override is set — not auto-deleting it; remove it yourself: ${CLAUDEBOX_DATA_DIR:-$CLAUDE_DATA_DIR}" >&2
+    if [ -n "${DRIDOCK_DATA_DIR:-${CLAUDE_DATA_DIR:-}}" ]; then
+        echo "⚠ DRIDOCK_DATA_DIR override is set — not auto-deleting it; remove it yourself: ${DRIDOCK_DATA_DIR:-$CLAUDE_DATA_DIR}" >&2
         return 0
     fi
     root="$(cb_data_root)"; proj="$root/$id"
@@ -833,7 +891,7 @@ cb_image_version() { cb_real_ver "$(cb_image_status "$1")"; }
 # `checkversion --all` (#6, 2.23.0) also scans EVERY cb-* project VM's image, so drift
 # is visible across the whole install (not just the current project).
 # cb_completion_bash — emit a bash completion script for the wrapper's current binary
-# name ($0's basename), so `CLAUDEBOX_BIN_NAME=dridock` reinstalls get a `_dridock`
+# name ($0's basename), so `DRIDOCK_BIN_NAME=dridock` reinstalls get a `_dridock`
 # function bound to `dridock`. Called by the `completion bash` dispatch. install.sh
 # drops the output into ~/.local/share/bash-completion/completions/<binname>. #13, 2.24.0.
 cb_completion_bash() {
@@ -883,7 +941,7 @@ COMP
 }
 
 cb_checkversion() {
-    local wv="$CLAUDEBOX_VERSION" civ pv cid ctx cmp all=0
+    local wv="$DRIDOCK_VERSION" civ pv cid ctx cmp all=0
     while [ $# -gt 0 ]; do case "$1" in
         --all|-a) all=1 ;;
         -h|--help) echo "usage: claudebox checkversion [--all]  (--all = scan every cb-* project VM in addition to cb-infra + this project)" >&2; return 0 ;;
@@ -967,7 +1025,7 @@ cb_info() {
     echo "claudebox — info"
     echo ""
     echo "versions:"
-    printf '  %-18s %s   (%s)\n' "wrapper (host):" "$CLAUDEBOX_VERSION" "$(command -v claudebox 2>/dev/null || echo "$0")"
+    printf '  %-18s %s   (%s)\n' "wrapper (host):" "$DRIDOCK_VERSION" "$(command -v claudebox 2>/dev/null || echo "$0")"
     civ="$(cb_image_status "$(cb_infra_context)")"
     printf '  %-18s %s\n' "image (cb-infra):" "$civ"
     if [ -n "$id" ]; then
@@ -1060,8 +1118,8 @@ cb_project_hostname() { _cb_yaml_get "$(cb_project_config_path "$1")" network.ho
 # cb_inject_vm_env ID ROOT — populate the VM-IP env for the claudebot container.
 # MUST be called AFTER cb_ensure_vm (needs the VM up). Writes a per-role sidecar
 # ~/.claude/.<container>{,_prog,_cron}-vmip that entrypoint.sh re-reads on every
-# `docker start` (rotation-proof self-heal) and appends -e CLAUDEBOX_VM_IP /
-# CLAUDEBOX_HOSTNAME to DOCKER_ARGS so a fresh `docker run` sees them too.
+# `docker start` (rotation-proof self-heal) and appends -e DRIDOCK_VM_IP /
+# DRIDOCK_HOSTNAME to DOCKER_ARGS so a fresh `docker run` sees them too.
 # Uses cb_wait_reachable (not the raw cb_vm_address) because col0 reachability
 # lags `colima start --network-address` by a couple of seconds — a plain lookup
 # racing a fresh boot returns empty, which was the pre-fix first-run bug. Reads
@@ -1071,11 +1129,11 @@ cb_inject_vm_env() {
     profile="$(cb_project_profile "$id")"
     ip="$(cb_wait_reachable "$profile" 2>/dev/null || true)"
     host="$(cb_project_hostname "$root" 2>/dev/null || true)"
-    [ -n "$ip" ]   && DOCKER_ARGS+=(-e "CLAUDEBOX_VM_IP=$ip")
-    [ -n "$host" ] && DOCKER_ARGS+=(-e "CLAUDEBOX_HOSTNAME=$host")
+    [ -n "$ip" ]   && DOCKER_ARGS+=(-e "DRIDOCK_VM_IP=$ip")
+    [ -n "$host" ] && DOCKER_ARGS+=(-e "DRIDOCK_HOSTNAME=$host")
     for _crole in "" _prog _cron; do
-        { printf 'CLAUDEBOX_VM_IP=%s\n' "$ip"
-          printf 'CLAUDEBOX_HOSTNAME=%s\n' "$host"; } \
+        { printf 'DRIDOCK_VM_IP=%s\n' "$ip"
+          printf 'DRIDOCK_HOSTNAME=%s\n' "$host"; } \
             > "$CLAUDE_DIR/.${container_name}${_crole}-vmip"
     done
 }
@@ -1195,17 +1253,17 @@ cb_network_info() {
 # VMs but NOT the LAN. Containers connect to it by IP (not hostname — Chrome
 # rejects non-IP Host headers). Off by default; you run `browser-bridge up`.
 # ─────────────────────────────────────────────────────────────────────────────
-CB_CDP_PORT="${CLAUDEBOX_CDP_PORT:-9223}"                 # forwarder listen (Mac side)
-CB_CDP_CHROME_PORT="${CLAUDEBOX_CDP_CHROME_PORT:-9222}"   # Chrome --remote-debugging-port
-CB_CDP_BIND="${CLAUDEBOX_CDP_BIND:-192.168.64.1}"         # Mac reachable-net gateway (colima-only, not LAN)
+CB_CDP_PORT="${DRIDOCK_CDP_PORT:-9223}"                 # forwarder listen (Mac side)
+CB_CDP_CHROME_PORT="${DRIDOCK_CDP_CHROME_PORT:-9222}"   # Chrome --remote-debugging-port
+CB_CDP_BIND="${DRIDOCK_CDP_BIND:-192.168.64.1}"         # Mac reachable-net gateway (colima-only, not LAN)
 cb_cdp_home() { printf '%s/claudebox/cdp' "$(cb_config_home)"; }
 cb_cdp_marker() { printf '%s/claudebox/projects/%s/.cdp-url' "$(cb_config_home)" "$1"; }  # $1=id
 # The dedicated debug-Chrome user-data-dir. One shared bridge (single Chrome + fixed
 # forwarder port) serves every project, so this is intentionally global, not per-id.
-# Tunable: point CLAUDEBOX_CDP_PROFILE at your own throwaway dir to relocate/rename it.
+# Tunable: point DRIDOCK_CDP_PROFILE at your own throwaway dir to relocate/rename it.
 # NOTE: never aim it at your normal Chrome profile — the bridge hands claudebot full
 # control of that instance. Default name says what it is if you spot it on disk.
-cb_cdp_profile() { printf '%s' "${CLAUDEBOX_CDP_PROFILE:-$(cb_cdp_home)/chrome-debug-profile}"; }
+cb_cdp_profile() { printf '%s' "${DRIDOCK_CDP_PROFILE:-$(cb_cdp_home)/chrome-debug-profile}"; }
 
 # Shared cross-project sink for FRAMEWORK bug reports (cb-report-bug inside the
 # container writes here; `claudebox framework-bugs` reads it). Deliberately shared
@@ -1253,8 +1311,8 @@ cb_consult_sig() {
 
 cb_bridge_up() {   # $1=id
     local id="$1" chrome home profile fwd url
-    chrome="${CLAUDEBOX_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
-    [ -x "$chrome" ] || { echo "❌ Chrome not found at: $chrome (set CLAUDEBOX_CHROME)" >&2; return 1; }
+    chrome="${DRIDOCK_CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+    [ -x "$chrome" ] || { echo "❌ Chrome not found at: $chrome (set DRIDOCK_CHROME)" >&2; return 1; }
     home="$(cb_cdp_home)"; mkdir -p "$home"; profile="$(cb_cdp_profile)"; fwd="$home/forward.py"
     cat > "$fwd" <<PYEOF
 import socket, threading
@@ -1314,10 +1372,10 @@ PYEOF
     url="http://$CB_CDP_BIND:$CB_CDP_PORT"
     local marker; marker="$(cb_cdp_marker "$id")"; mkdir -p "$(dirname "$marker")"; printf '%s' "$url" > "$marker"
     echo "🔗 CDP bridge up — dedicated debug Chrome window \"$window_title\" is open; claudebot can drive it."
-    echo "   in claudebot:  cb-browser cdp <url>   (uses CLAUDEBOX_HOST_CDP_URL=$url)"
+    echo "   in claudebot:  cb-browser cdp <url>   (uses DRIDOCK_HOST_CDP_URL=$url)"
     echo "   ⚠️  targets must be reachable FROM THIS MAC (VM IP or localhost) — the human's"
     echo "       Chrome can't resolve cb-net container names; use shot/script for those."
-    echo "   profile: $profile   (override with CLAUDEBOX_CDP_PROFILE)"
+    echo "   profile: $profile   (override with DRIDOCK_CDP_PROFILE)"
     echo "   restart claudebot (just re-run \`claudebox\`) to pick up the bridge URL."
     echo "   stop:  claudebox browser-bridge down"
     echo "   ⚠️  this hands claudebot full control of that Chrome instance (dedicated profile)."
@@ -1337,20 +1395,20 @@ cb_bridge_down() {  # $1=id
 # a TRUSTED single-operator tool (remote command exec). Gateway-bound + token-auth +
 # subcommand-allowlisted (see host-agent.py). See docs/design/backends.md.
 # ─────────────────────────────────────────────────────────────────────────────
-CB_HOST_AGENT_PORT="${CLAUDEBOX_HOST_AGENT_PORT:-9280}"
-CB_HOST_AGENT_BIND="${CLAUDEBOX_HOST_AGENT_BIND:-192.168.64.1}"   # Colima gateway only, never LAN
+CB_HOST_AGENT_PORT="${DRIDOCK_HOST_AGENT_PORT:-9280}"
+CB_HOST_AGENT_BIND="${DRIDOCK_HOST_AGENT_BIND:-192.168.64.1}"   # Colima gateway only, never LAN
 cb_host_agent_home() { printf '%s/claudebox/host-agent' "$(cb_config_home)"; }
 # resolve host-agent.py: env override → next to the wrapper → the share dir → the repo.
 cb_host_agent_py() {
     local d; d="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
-    for _p in "${CLAUDEBOX_HOST_AGENT_PY:-}" "$d/host-agent.py" "$d/../share/claudebox/host-agent.py"; do
+    for _p in "${DRIDOCK_HOST_AGENT_PY:-}" "$d/host-agent.py" "$d/../share/claudebox/host-agent.py"; do
         [ -n "$_p" ] && [ -f "$_p" ] && { printf '%s' "$_p"; return 0; }
     done
     return 1
 }
 cb_host_agent_up() {
     local home py tok; home="$(cb_host_agent_home)"; mkdir -p "$home"
-    py="$(cb_host_agent_py)" || { echo "❌ host-agent.py not found (set CLAUDEBOX_HOST_AGENT_PY, or reinstall)" >&2; return 1; }
+    py="$(cb_host_agent_py)" || { echo "❌ host-agent.py not found (set DRIDOCK_HOST_AGENT_PY, or reinstall)" >&2; return 1; }
     if [ -f "$home/pid" ] && kill -0 "$(cat "$home/pid" 2>/dev/null)" 2>/dev/null; then
         echo "🛰  host agent already up ($CB_HOST_AGENT_BIND:$CB_HOST_AGENT_PORT)"; return 0
     fi
@@ -1393,10 +1451,10 @@ cb_brief_path() { printf '%s/.claudebox/BRIEF.md' "$1"; }  # $1=root; COMMITTED 
 # cb_preflight MODE — assert the host tooling a claudebot project needs is in place
 # BEFORE we scaffold or boot. HARD requirements (colima, docker; git for full mode)
 # abort; recommended tools (python3, socket_vmnet) only warn. This is the "check the
-# ground before building on it" gate. Override with CLAUDEBOX_SKIP_PREFLIGHT=1.
+# ground before building on it" gate. Override with DRIDOCK_SKIP_PREFLIGHT=1.
 cb_preflight() {
     local mode="${1:-full}" missing=0 t
-    [ -n "${CLAUDEBOX_SKIP_PREFLIGHT:-}" ] && return 0
+    [ -n "${DRIDOCK_SKIP_PREFLIGHT:-}" ] && return 0
     echo "preflight — host tooling:"
     for t in colima docker; do
         if command -v "$t" >/dev/null 2>&1; then echo "  ✓ $t"
@@ -1408,7 +1466,7 @@ cb_preflight() {
     fi
     if command -v python3 >/dev/null 2>&1; then echo "  ✓ python3"
     else echo "  ⚠ python3 — recommended (the browser-bridge CDP forwarder uses it)"; fi
-    if [ -x "${CLAUDEBOX_SOCKET_VMNET:-/opt/local/bin/socket_vmnet}" ]; then echo "  ✓ socket_vmnet"
+    if [ -x "${DRIDOCK_SOCKET_VMNET:-/opt/local/bin/socket_vmnet}" ]; then echo "  ✓ socket_vmnet"
     else echo "  ⚠ socket_vmnet — recommended (reachable per-VM IPs: colima --network-address)"; fi
     # The claudebox image must live in cb-infra to seed project VMs. Warn (don't
     # abort): scaffolding / --brief-only / --no-start need no image, and the actual
@@ -1419,7 +1477,7 @@ cb_preflight() {
         else echo "  ⚠ image — $CLAUDE_IMAGE not built in $CB_INFRA_PROFILE; run 'make build' (or 'make build-minimal') before claudebot can start"; fi
     fi
     if [ "$missing" -gt 0 ]; then
-        echo "❌ preflight: $missing required tool(s) missing — install them, or set CLAUDEBOX_SKIP_PREFLIGHT=1 to override" >&2
+        echo "❌ preflight: $missing required tool(s) missing — install them, or set DRIDOCK_SKIP_PREFLIGHT=1 to override" >&2
         return 1
     fi
     return 0
@@ -1569,22 +1627,22 @@ cb_bootstrap() {
 }
 
 # load functions only (for tests) without running the wrapper body
-[ -n "${CLAUDEBOX_SOURCE_ONLY:-}" ] && return 0 2>/dev/null || true
+[ -n "${DRIDOCK_SOURCE_ONLY:-}" ] && return 0 2>/dev/null || true
 
-DEBUG="${CLAUDEBOX_ENV_DEBUG:-${DEBUG:-}}"
+DEBUG="${DRIDOCK_ENV_DEBUG:-${CLAUDEBOX_ENV_DEBUG:-${DEBUG:-}}}"
 
 dbg() { [ "${DEBUG:-}" = "true" ] && echo "[DEBUG $(date +%H:%M:%S.%3N)] $*" >&2; }
 
 # Keep the Mac awake for the duration of a FOREGROUND claudebox run, so a long claudebot
 # session (or a build the VM is doing) doesn't stall when the machine idles to sleep and
-# Colima suspends. Opt-in via CLAUDEBOX_CAFFEINATE=1; macOS-only; self-cleaning — the
+# Colima suspends. Opt-in via DRIDOCK_CAFFEINATE=1; macOS-only; self-cleaning — the
 # `-w $$` ties it to THIS wrapper process, so it exits when your session ends. `-dimsu`:
 # no display/idle/disk/system sleep, assert user active. (System sleep is only fully
 # held on AC power — a macOS limitation.) Idempotent within one invocation.
 _cb_caffeinated=
 cb_caffeinate() {
     [ -n "$_cb_caffeinated" ] && return 0
-    case "${CLAUDEBOX_CAFFEINATE:-${CLAUDE_CAFFEINATE:-}}" in ''|0|false|no) return 0 ;; esac
+    case "${DRIDOCK_CAFFEINATE:-${CLAUDE_CAFFEINATE:-}}" in ''|0|false|no) return 0 ;; esac
     command -v caffeinate >/dev/null 2>&1 || { dbg "caffeinate requested but not found (not macOS?)"; return 0; }
     caffeinate -dimsu -w "$$" >/dev/null 2>&1 &
     _cb_caffeinated=1
@@ -1594,10 +1652,10 @@ cb_caffeinate() {
 # This fork uses a locally-built image (see install.sh / `make build`), NOT the
 # upstream psyb0t/claudebox on Docker Hub. The bare repo name has no registry
 # prefix, so Docker never tries to pull it — a missing image is a hard error,
-# which is what we want (build it locally first). Override with CLAUDEBOX_IMAGE.
-CLAUDE_IMAGE="${CLAUDEBOX_IMAGE:-${CLAUDE_IMAGE:-}}"
-CLAUDE_IMAGE_NAME="${CLAUDEBOX_IMAGE_NAME:-claudebox}"
-_minimal="${CLAUDEBOX_MINIMAL:-${CLAUDE_MINIMAL:-}}"
+# which is what we want (build it locally first). Override with DRIDOCK_IMAGE.
+CLAUDE_IMAGE="${DRIDOCK_IMAGE:-${CLAUDE_IMAGE:-}}"
+CLAUDE_IMAGE_NAME="${DRIDOCK_IMAGE_NAME:-claudebox}"
+_minimal="${DRIDOCK_MINIMAL:-${CLAUDE_MINIMAL:-}}"
 if [ -z "$CLAUDE_IMAGE" ]; then
     if [ -n "$_minimal" ]; then
         CLAUDE_IMAGE="${CLAUDE_IMAGE_NAME}:latest-minimal"
@@ -1606,28 +1664,29 @@ if [ -z "$CLAUDE_IMAGE" ]; then
     fi
 fi
 
-CLAUDE_GIT_NAME="${CLAUDEBOX_GIT_NAME:-${CLAUDE_GIT_NAME:-}}"
-CLAUDE_GIT_EMAIL="${CLAUDEBOX_GIT_EMAIL:-${CLAUDE_GIT_EMAIL:-}}"
+CLAUDE_GIT_NAME="${DRIDOCK_GIT_NAME:-${CLAUDE_GIT_NAME:-}}"
+CLAUDE_GIT_EMAIL="${DRIDOCK_GIT_EMAIL:-${CLAUDE_GIT_EMAIL:-}}"
 # Fall back to the HOST's own git identity so a fresh claudebot can commit without the
-# human pre-setting CLAUDEBOX_GIT_*. Without an identity, git dies on the first commit
-# with "Author identity unknown". Explicit CLAUDEBOX_GIT_* still wins; the entrypoint
+# human pre-setting DRIDOCK_GIT_* (or legacy CLAUDEBOX_GIT_*). Without an identity, git
+# dies on the first commit with "Author identity unknown". Explicit DRIDOCK_GIT_* still
+# wins; the entrypoint
 # writes these to the container's ~/.gitconfig, which persists across restarts.
 [ -n "$CLAUDE_GIT_NAME" ]  || CLAUDE_GIT_NAME="$(git config --global --get user.name 2>/dev/null || true)"
 [ -n "$CLAUDE_GIT_EMAIL" ] || CLAUDE_GIT_EMAIL="$(git config --global --get user.email 2>/dev/null || true)"
 # Per-project shared-nothing data dir (Phase 3 of docs/design/per-project-vm.md).
-# An explicit CLAUDEBOX_DATA_DIR / CLAUDE_DATA_DIR override still wins; otherwise
+# An explicit DRIDOCK_DATA_DIR / CLAUDE_DATA_DIR override still wins; otherwise
 # CLAUDE_DIR is resolved per project after the VM subcommands (needs the id).
-CLAUDE_DIR="${CLAUDEBOX_DATA_DIR:-${CLAUDE_DATA_DIR:-}}"
-CLAUDE_SSH="${CLAUDEBOX_SSH_DIR:-${CLAUDE_SSH_DIR:-$HOME/.ssh/claudebox}}"
+CLAUDE_DIR="${DRIDOCK_DATA_DIR:-${CLAUDE_DATA_DIR:-}}"
+CLAUDE_SSH="${DRIDOCK_SSH_DIR:-${CLAUDE_SSH_DIR:-$HOME/.ssh/claudebox}}"
 
-# auth: prefer CLAUDEBOX_ENV_*, fall back to legacy direct vars
-ANTHROPIC_API_KEY="${CLAUDEBOX_ENV_ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY:-}}"
-CLAUDE_CODE_OAUTH_TOKEN="${CLAUDEBOX_ENV_CLAUDE_CODE_OAUTH_TOKEN:-${CLAUDE_CODE_OAUTH_TOKEN:-}}"
-# CLAUDEBOX_NO_API_KEY=1 → never send an ANTHROPIC_API_KEY into the container, even if one
+# auth: prefer DRIDOCK_ENV_* (or legacy CLAUDEBOX_ENV_*), fall back to direct env vars
+ANTHROPIC_API_KEY="${DRIDOCK_ENV_ANTHROPIC_API_KEY:-${CLAUDEBOX_ENV_ANTHROPIC_API_KEY:-${ANTHROPIC_API_KEY:-}}}"
+CLAUDE_CODE_OAUTH_TOKEN="${DRIDOCK_ENV_CLAUDE_CODE_OAUTH_TOKEN:-${CLAUDEBOX_ENV_CLAUDE_CODE_OAUTH_TOKEN:-${CLAUDE_CODE_OAUTH_TOKEN:-}}}"
+# DRIDOCK_NO_API_KEY=1 → never send an ANTHROPIC_API_KEY into the container, even if one
 # is exported on the Mac. Use the Claude subscription (browser OAuth / a setup-token) instead.
 # The empty value flows to the auth sidecar, and the entrypoint UNSETS the var so a
 # previously-created container's stale key is cleared too.
-case "${CLAUDEBOX_NO_API_KEY:-${CLAUDE_NO_API_KEY:-}}" in
+case "${DRIDOCK_NO_API_KEY:-${CLAUDE_NO_API_KEY:-}}" in
     1|true|yes|on) ANTHROPIC_API_KEY="" ;;
 esac
 
@@ -1642,7 +1701,7 @@ dbg "PWD (physical)=$PWD"
 
 # Convert PWD to a valid container name (slashes to underscores)
 sanitized_pwd=$(echo "$PWD" | sed 's/\//_/g')
-container_name="${CLAUDEBOX_CONTAINER_NAME:-${CLAUDE_CONTAINER_NAME:-claude-${sanitized_pwd}}}"
+container_name="${DRIDOCK_CONTAINER_NAME:-${CLAUDE_CONTAINER_NAME:-claude-${sanitized_pwd}}}"
 dbg "container_name=$container_name"
 dbg "CLAUDE_DIR=$CLAUDE_DIR"
 dbg "CLAUDE_SSH=$CLAUDE_SSH"
@@ -1658,7 +1717,7 @@ case "${1:-}" in
         # is now required to launch the claudebot (#12, 2.24.0). Rationale: reduces
         # accidental container starts from muscle-typing `claudebox` in the wrong dir,
         # and matches the reflex-inspection habit for most CLIs (bare = info).
-        printf 'claudebox %s\n' "$CLAUDEBOX_VERSION"
+        printf 'claudebox %s\n' "$DRIDOCK_VERSION"
         printf '\n'
         printf '  claudebox start                start/attach the claudebot for $PWD\n'
         printf '  claudebox start -p "<prompt>"  one-shot programmatic run\n'
@@ -1672,7 +1731,7 @@ case "${1:-}" in
         ;;
     -h|--help|help)
         cat <<HELP
-claudebox $CLAUDEBOX_VERSION — run Claude Code in a per-project Colima VM.
+claudebox $DRIDOCK_VERSION — run Claude Code in a per-project Colima VM.
 
 USAGE
   claudebox start [claude args...]  start/attach the interactive claudebot for \$PWD
@@ -1713,16 +1772,16 @@ OTHER
   -v | --version | doctor | auth | mcp    passthrough to the claude CLI
 
 USEFUL ENV
-  CLAUDEBOX_CAFFEINATE=1          keep the Mac awake during a foreground session (macOS)
-  CLAUDEBOX_MINIMAL=1             use the minimal image variant
-  CLAUDEBOX_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
-  CLAUDEBOX_ALLOW_NEW=1           skip the "create a new project here?" prompt (or the non-interactive abort)
-  CLAUDEBOX_HARNESS_DEV=1         force framework-dev mode (auto-detected when the workspace is a claudebox harness fork). Alias: CLAUDEBOX_FRAMEWORK_DEV.
-  CLAUDEBOX_NO_DRIFT_WARN=1       silence the "cb-infra image is behind wrapper" warning on each claudebox invocation
-  CLAUDEBOX_ENV_FOO=bar           forward FOO=bar into the container
-  CLAUDEBOX_PRUNE_ON_START=1      docker builder prune (cache) + image prune (dangling) on each start
-  CLAUDEBOX_TMPFS_TMP=2g          RAM-back /tmp so docker bloat can't ENOSPC-kill the Bash tool
-  DEBUG / CLAUDEBOX_ENV_DEBUG     verbose wrapper logging
+  DRIDOCK_CAFFEINATE=1          keep the Mac awake during a foreground session (macOS)
+  DRIDOCK_MINIMAL=1             use the minimal image variant
+  DRIDOCK_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
+  DRIDOCK_ALLOW_NEW=1           skip the "create a new project here?" prompt (or the non-interactive abort)
+  DRIDOCK_HARNESS_DEV=1         force framework-dev mode (auto-detected when the workspace is a claudebox harness fork). Alias: DRIDOCK_FRAMEWORK_DEV.
+  DRIDOCK_NO_DRIFT_WARN=1       silence the "cb-infra image is behind wrapper" warning on each claudebox invocation
+  DRIDOCK_ENV_FOO=bar             forward FOO=bar (legacy CLAUDEBOX_ENV_FOO accepted) into the container
+  DRIDOCK_PRUNE_ON_START=1      docker builder prune (cache) + image prune (dangling) on each start
+  DRIDOCK_TMPFS_TMP=2g          RAM-back /tmp so docker bloat can't ENOSPC-kill the Bash tool
+  DEBUG / DRIDOCK_ENV_DEBUG       verbose wrapper logging (legacy CLAUDEBOX_ENV_DEBUG accepted)
   See docs/environment-variables.md for the full list; docs/versioning.md for releases.
 HELP
         exit 0
@@ -1737,7 +1796,7 @@ HELP
         ;;
     version)
         # the host wrapper's own semver (cheap; no docker). See also: checkversion.
-        printf 'claudebox %s\n' "$CLAUDEBOX_VERSION"; exit 0
+        printf 'claudebox %s\n' "$DRIDOCK_VERSION"; exit 0
         ;;
     completion)
         # #13 (2.24.0): emit a shell completion script. Bash for now — zsh users with
@@ -1919,9 +1978,9 @@ HELP
         ;;
     claude-dir)
         # print the host .claude data dir for THIS project (read-only; no config init,
-        # no VM). Authoritative — respects a CLAUDEBOX_DATA_DIR override and the
+        # no VM). Authoritative — respects a DRIDOCK_DATA_DIR override and the
         # machine data_root. Used by the cbx-claude-dir shell helper.
-        _dd="${CLAUDEBOX_DATA_DIR:-${CLAUDE_DATA_DIR:-}}"
+        _dd="${DRIDOCK_DATA_DIR:-${CLAUDE_DATA_DIR:-}}"
         if [ -n "$_dd" ]; then
             printf '%s\n' "$_dd"
         else
@@ -2096,10 +2155,10 @@ mkdir -p "$CLAUDE_DIR"
 
 DOCKER_ARGS=(
     --network host
-    -e CLAUDEBOX_GIT_NAME="$CLAUDE_GIT_NAME"
-    -e CLAUDEBOX_GIT_EMAIL="$CLAUDE_GIT_EMAIL"
-    -e CLAUDEBOX_WORKSPACE="$PWD"
-    -e CLAUDEBOX_CONTAINER_NAME="$container_name"
+    -e DRIDOCK_GIT_NAME="$CLAUDE_GIT_NAME"
+    -e DRIDOCK_GIT_EMAIL="$CLAUDE_GIT_EMAIL"
+    -e DRIDOCK_WORKSPACE="$PWD"
+    -e DRIDOCK_CONTAINER_NAME="$container_name"
     -v "$CLAUDE_SSH:/home/claude/.ssh"
     -v "$CLAUDE_DIR:/home/claude/.claude"
     -v "$PWD:$PWD"
@@ -2116,14 +2175,14 @@ DOCKER_ARGS=(
 _cdp_marker="$(cb_cdp_marker "$CB_PROJECT_ID")"
 _cdp_url=""; [ -f "$_cdp_marker" ] && _cdp_url="$(cat "$_cdp_marker" 2>/dev/null)"
 if [ -n "$_cdp_url" ]; then
-    DOCKER_ARGS+=(-e "CLAUDEBOX_HOST_CDP_URL=$_cdp_url")
+    DOCKER_ARGS+=(-e "DRIDOCK_HOST_CDP_URL=$_cdp_url")
     dbg "CDP bridge URL injected: $_cdp_url"
 fi
 for _crole in "" _prog _cron; do
-    printf 'CLAUDEBOX_HOST_CDP_URL=%s\n' "$_cdp_url" > "$CLAUDE_DIR/.${container_name}${_crole}-cdp"
+    printf 'DRIDOCK_HOST_CDP_URL=%s\n' "$_cdp_url" > "$CLAUDE_DIR/.${container_name}${_crole}-cdp"
 done
 
-# Reachable VM IP -> claudebot as CLAUDEBOX_VM_IP. The claudebot container sits on the
+# Reachable VM IP -> claudebot as DRIDOCK_VM_IP. The claudebot container sits on the
 # VM's docker bridge (172.x), so it CANNOT self-discover the VM's reachable col0 IP
 # (192.168.64.x) — the only address the human's Mac (and its Chrome, for CDP) can hit a
 # published workload at. Done via cb_inject_vm_env called AFTER cb_ensure_vm at each
@@ -2140,11 +2199,11 @@ done
 _ha_home="$(cb_host_agent_home)"; _ha_url= _ha_tok=
 if [ -f "$_ha_home/pid" ] && kill -0 "$(cat "$_ha_home/pid" 2>/dev/null)" 2>/dev/null && [ -f "$_ha_home/token" ]; then
     _ha_url="$CB_HOST_AGENT_BIND:$CB_HOST_AGENT_PORT"; _ha_tok="$(cat "$_ha_home/token")"
-    DOCKER_ARGS+=(-e "CLAUDEBOX_HOST_AGENT_URL=$_ha_url" -e "CLAUDEBOX_HOST_AGENT_TOKEN=$_ha_tok")
+    DOCKER_ARGS+=(-e "DRIDOCK_HOST_AGENT_URL=$_ha_url" -e "DRIDOCK_HOST_AGENT_TOKEN=$_ha_tok")
 fi
 for _crole in "" _prog _cron; do
-    { printf 'CLAUDEBOX_HOST_AGENT_URL=%s\n' "$_ha_url"
-      printf 'CLAUDEBOX_HOST_AGENT_TOKEN=%s\n' "$_ha_tok"; } > "$CLAUDE_DIR/.${container_name}${_crole}-hostagent"
+    { printf 'DRIDOCK_HOST_AGENT_URL=%s\n' "$_ha_url"
+      printf 'DRIDOCK_HOST_AGENT_TOKEN=%s\n' "$_ha_tok"; } > "$CLAUDE_DIR/.${container_name}${_crole}-hostagent"
     chmod 600 "$CLAUDE_DIR/.${container_name}${_crole}-hostagent" 2>/dev/null || true
 done
 
@@ -2152,25 +2211,25 @@ done
 # file suspected FRAMEWORK bugs (wrapper/entrypoint/image/networking) to one place.
 _fwbugs="$(cb_fwbugs_home)"; mkdir -p "$_fwbugs" 2>/dev/null || true
 DOCKER_ARGS+=(-v "$_fwbugs:/home/claude/framework-bugs")
-DOCKER_ARGS+=(-e "CLAUDEBOX_FRAMEWORK_BUGS_DIR=/home/claude/framework-bugs")
-DOCKER_ARGS+=(-e "CLAUDEBOX_PROJECT_ID=$CB_PROJECT_ID")
+DOCKER_ARGS+=(-e "DRIDOCK_FRAMEWORK_BUGS_DIR=/home/claude/framework-bugs")
+DOCKER_ARGS+=(-e "DRIDOCK_PROJECT_ID=$CB_PROJECT_ID")
 _fwb_n=$(find "$_fwbugs" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
 [ "${_fwb_n:-0}" -gt 0 ] && echo "⚠ $_fwb_n framework bug report(s) on file — review: claudebox framework-bugs" >&2
 
 # Opt-in: RAM-back the claudebot's /tmp so docker disk bloat can't starve the Bash tool
 # (it writes /tmp/claude-501 per command; when the shared VM overlay fills, mkdir there fails
-# with ENOSPC and every command dies). CLAUDEBOX_TMPFS_TMP=<size like 2g>, or 1/on for 2g.
+# with ENOSPC and every command dies). DRIDOCK_TMPFS_TMP=<size like 2g>, or 1/on for 2g.
 # --tmpfs only applies to a fresh `docker run` (not `docker start`). See docs/design/disk-management.md.
-case "${CLAUDEBOX_TMPFS_TMP:-${CLAUDE_TMPFS_TMP:-}}" in
+case "${DRIDOCK_TMPFS_TMP:-${CLAUDE_TMPFS_TMP:-}}" in
     ''|0|false|no|off) : ;;
     1|true|yes|on)     DOCKER_ARGS+=(--tmpfs "/tmp:size=2g,exec,mode=1777") ;;
-    *)                 DOCKER_ARGS+=(--tmpfs "/tmp:size=${CLAUDEBOX_TMPFS_TMP:-${CLAUDE_TMPFS_TMP}},exec,mode=1777") ;;
+    *)                 DOCKER_ARGS+=(--tmpfs "/tmp:size=${DRIDOCK_TMPFS_TMP:-${CLAUDE_TMPFS_TMP}},exec,mode=1777") ;;
 esac
 
 # Shared consult dir — mount it so cb-consult can open/read supervised framework threads.
 _consult="$(cb_consult_home)"; mkdir -p "$_consult" 2>/dev/null || true
 DOCKER_ARGS+=(-v "$_consult:/home/claude/framework-consult")
-DOCKER_ARGS+=(-e "CLAUDEBOX_CONSULT_DIR=/home/claude/framework-consult")
+DOCKER_ARGS+=(-e "DRIDOCK_CONSULT_DIR=/home/claude/framework-consult")
 # Surface pending consults the way checkversion warns — the human is the approval gate.
 _c_appr=0; _c_draft=0
 if [ -d "$_consult" ]; then
@@ -2190,28 +2249,29 @@ fi
 [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && DOCKER_ARGS+=(-e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
 [ "$DEBUG" = "true" ] && DOCKER_ARGS+=(-e "DEBUG=true")
 # opt out of the baked default plugin set (entrypoint seeds settings.json otherwise)
-[ -n "${CLAUDEBOX_DEFAULT_PLUGINS:-}" ] && DOCKER_ARGS+=(-e "CLAUDEBOX_DEFAULT_PLUGINS=$CLAUDEBOX_DEFAULT_PLUGINS")
+[ -n "${DRIDOCK_DEFAULT_PLUGINS:-}" ] && DOCKER_ARGS+=(-e "DRIDOCK_DEFAULT_PLUGINS=$DRIDOCK_DEFAULT_PLUGINS")
 
 
-# forward CLAUDEBOX_ENV_* / CLAUDE_ENV_* vars (strip prefix: FOO=bar)
+# forward DRIDOCK_ENV_* / CLAUDEBOX_ENV_* / CLAUDE_ENV_* vars (strip prefix: FOO=bar)
 while IFS='=' read -r name value; do
     case "$name" in
+        DRIDOCK_ENV_*)   stripped="${name#DRIDOCK_ENV_}" ;;
         CLAUDEBOX_ENV_*) stripped="${name#CLAUDEBOX_ENV_}" ;;
         CLAUDE_ENV_*)    stripped="${name#CLAUDE_ENV_}" ;;
         *) continue ;;
     esac
     DOCKER_ARGS+=(-e "$stripped=$value")
     dbg "forwarding env: $stripped"
-done < <(env | grep -E "^(CLAUDEBOX_ENV_|CLAUDE_ENV_)")
+done < <(env | grep -E "^(DRIDOCK_ENV_|CLAUDEBOX_ENV_|CLAUDE_ENV_)")
 
-# mount extra volumes via CLAUDEBOX_MOUNT_* / CLAUDE_MOUNT_*
+# mount extra volumes via DRIDOCK_MOUNT_* / CLAUDEBOX_MOUNT_* / CLAUDE_MOUNT_*
 while IFS='=' read -r name value; do
     case "$value" in
         *:*) DOCKER_ARGS+=(-v "$value") ;;
         *)   DOCKER_ARGS+=(-v "$value:$value") ;;
     esac
     dbg "mounting volume: $value"
-done < <(env | grep -E "^(CLAUDEBOX_MOUNT_|CLAUDE_MOUNT_)")
+done < <(env | grep -E "^(DRIDOCK_MOUNT_|CLAUDEBOX_MOUNT_|CLAUDE_MOUNT_)")
 
 dbg "ANTHROPIC_API_KEY set: $([ -n "$ANTHROPIC_API_KEY" ] && echo yes || echo no)"
 dbg "CLAUDE_CODE_OAUTH_TOKEN set: $([ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && echo yes || echo no)"
@@ -2318,8 +2378,8 @@ if [ "${1:-}" = "net" ]; then
 fi
 
 # cron mode — long-running daemon container, named <base>_cron
-_mode_cron="${CLAUDEBOX_MODE_CRON:-${CLAUDE_MODE_CRON:-}}"
-_mode_cron_file="${CLAUDEBOX_MODE_CRON_FILE:-${CLAUDE_MODE_CRON_FILE:-}}"
+_mode_cron="${DRIDOCK_MODE_CRON:-${CLAUDE_MODE_CRON:-}}"
+_mode_cron_file="${DRIDOCK_MODE_CRON_FILE:-${CLAUDE_MODE_CRON_FILE:-}}"
 if [ -n "$_mode_cron" ]; then
     cron_name="${container_name}_cron"
     dbg "cron container: $cron_name"
@@ -2344,11 +2404,11 @@ if [ -n "$_mode_cron" ]; then
     fi
 
     CRON_ARGS=(
-        -e "CLAUDEBOX_MODE_CRON=1"
-        -e "CLAUDEBOX_WORKSPACE=$PWD"
-        -e "CLAUDEBOX_CONTAINER_NAME=$cron_name"
+        -e "DRIDOCK_MODE_CRON=1"
+        -e "DRIDOCK_WORKSPACE=$PWD"
+        -e "DRIDOCK_CONTAINER_NAME=$cron_name"
     )
-    [ -n "$_mode_cron_file" ] && CRON_ARGS+=(-e "CLAUDEBOX_MODE_CRON_FILE=$_mode_cron_file")
+    [ -n "$_mode_cron_file" ] && CRON_ARGS+=(-e "DRIDOCK_MODE_CRON_FILE=$_mode_cron_file")
     [ "$DEBUG" = "true" ]     && CRON_ARGS+=(-e "DEBUG=true")
 
     if "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${cron_name}$"; then
@@ -2493,17 +2553,17 @@ if [ $# -gt 0 ] && [ "$_has_p_flag" = "1" ]; then
         # Programmatic mode — own container, no TTY
         prog_name="${container_name}_prog"
         dbg "prog container: $prog_name"
-        cb_caffeinate   # opt-in (CLAUDEBOX_CAFFEINATE=1): keep the Mac awake for this run
+        cb_caffeinate   # opt-in (DRIDOCK_CAFFEINATE=1): keep the Mac awake for this run
         cb_refresh_container "$CB_CONTEXT" "$prog_name"   # recreate if image was reseeded
         prog_rc=0
         if ! "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${prog_name}$"; then
             dbg "prog: container does not exist, creating with docker run"
             if [ -n "$PIPE_MODE" ]; then
-                "${DOCKER[@]}" run --name "$prog_name" "${DOCKER_ARGS[@]}" -e CLAUDEBOX_CONTAINER_NAME="$prog_name" $CLAUDE_IMAGE "${PASS_ARGS[@]}" \
+                "${DOCKER[@]}" run --name "$prog_name" "${DOCKER_ARGS[@]}" -e DRIDOCK_CONTAINER_NAME="$prog_name" $CLAUDE_IMAGE "${PASS_ARGS[@]}" \
                     | "${DOCKER[@]}" run --rm -i --entrypoint python3 $CLAUDE_IMAGE /home/claude/jsonpipe.py "$PIPE_MODE"
                 prog_rc=${PIPESTATUS[0]}
             else
-                "${DOCKER[@]}" run --name "$prog_name" "${DOCKER_ARGS[@]}" -e CLAUDEBOX_CONTAINER_NAME="$prog_name" $CLAUDE_IMAGE "${PASS_ARGS[@]}"
+                "${DOCKER[@]}" run --name "$prog_name" "${DOCKER_ARGS[@]}" -e DRIDOCK_CONTAINER_NAME="$prog_name" $CLAUDE_IMAGE "${PASS_ARGS[@]}"
                 prog_rc=$?
             fi
             dbg "prog: docker run exited with $prog_rc"
@@ -2559,7 +2619,7 @@ if "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
 fi
 
 # Interactive — start existing container or create new one
-cb_caffeinate   # opt-in (CLAUDEBOX_CAFFEINATE=1): keep the Mac awake for this session
+cb_caffeinate   # opt-in (DRIDOCK_CAFFEINATE=1): keep the Mac awake for this session
 cb_refresh_container "$CB_CONTEXT" "$container_name"   # recreate if the image was reseeded (e.g. after make build)
 if "${DOCKER[@]}" ps -a --format '{{.Names}}' | grep -q "^${container_name}$"; then
     echo "🔄 Starting container '$container_name'..."

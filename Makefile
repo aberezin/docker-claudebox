@@ -5,7 +5,7 @@ IMAGE_NAME ?= claudebox
 TAG ?= latest
 
 # Fork semver stamped into the image (LABEL + ENV); read by `claudebox checkversion`.
-CLAUDEBOX_VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
+DRIDOCK_VERSION := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
 
 # The image is built into a dedicated colima profile (cb-infra), never the
 # human's `default` VM. Project VMs are seeded from cb-infra via save|load at
@@ -21,8 +21,8 @@ CB_INFRA_DISK     ?= 40
 # build on the AMBIENT daemon, no colima). Auto-selects `docker` inside a container. This does NOT
 # proxy docker to the Mac; it uses the local VM's daemon. The opt-in `claudebox host-agent` proxies
 # colima only where real VMs are genuinely needed. See docs/design/backends.md (task #15).
-CLAUDEBOX_BACKEND ?= $(shell [ -f /.dockerenv ] && echo docker || echo colima)
-ifeq ($(CLAUDEBOX_BACKEND),docker)
+DRIDOCK_BACKEND ?= $(shell [ -f /.dockerenv ] && echo docker || echo colima)
+ifeq ($(DRIDOCK_BACKEND),docker)
   DOCKER_INFRA := docker
   INFRA_DEP    :=
 else
@@ -42,7 +42,7 @@ infra-up:
 
 # Build the full image into cb-infra
 build: $(INFRA_DEP)
-	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target full -t $(IMAGE_NAME):$(TAG) .
+	$(DOCKER_INFRA) build --build-arg DRIDOCK_VERSION=$(DRIDOCK_VERSION) --target full -t $(IMAGE_NAME):$(TAG) .
 	@# the previous claudebox:latest is now a dangling <none> image — reclaim it
 	$(DOCKER_INFRA) image prune -f
 	@# also prune UNREFERENCED BuildKit cache (non-`-a`, so recently-used layers survive).
@@ -52,7 +52,7 @@ build: $(INFRA_DEP)
 
 # Build the minimal image into cb-infra
 build-minimal: $(INFRA_DEP)
-	$(DOCKER_INFRA) build --build-arg CLAUDEBOX_VERSION=$(CLAUDEBOX_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
+	$(DOCKER_INFRA) build --build-arg DRIDOCK_VERSION=$(DRIDOCK_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
 	$(DOCKER_INFRA) image prune -f
 	$(DOCKER_INFRA) builder prune -f
 

@@ -3,15 +3,15 @@
 dbg() { [ "${DEBUG:-}" = "true" ] && echo "[DEBUG $(date +%H:%M:%S.%3N)] $*" >&2; }
 
 # CLAUDEBOX_* is canonical; CLAUDE_* still accepted for backwards compat
-CLAUDE_CONTAINER_NAME="${CLAUDEBOX_CONTAINER_NAME:-${CLAUDE_CONTAINER_NAME:-}}"
-CLAUDE_WORKSPACE="${CLAUDEBOX_WORKSPACE:-${CLAUDE_WORKSPACE:-}}"
-CLAUDE_GIT_NAME="${CLAUDEBOX_GIT_NAME:-${CLAUDE_GIT_NAME:-}}"
-CLAUDE_GIT_EMAIL="${CLAUDEBOX_GIT_EMAIL:-${CLAUDE_GIT_EMAIL:-}}"
-CLAUDE_IMAGE_VARIANT="${CLAUDEBOX_IMAGE_VARIANT:-${CLAUDE_IMAGE_VARIANT:-full}}"
+CLAUDE_CONTAINER_NAME="${DRIDOCK_CONTAINER_NAME:-${CLAUDE_CONTAINER_NAME:-}}"
+CLAUDE_WORKSPACE="${DRIDOCK_WORKSPACE:-${CLAUDE_WORKSPACE:-}}"
+CLAUDE_GIT_NAME="${DRIDOCK_GIT_NAME:-${CLAUDE_GIT_NAME:-}}"
+CLAUDE_GIT_EMAIL="${DRIDOCK_GIT_EMAIL:-${CLAUDE_GIT_EMAIL:-}}"
+CLAUDE_IMAGE_VARIANT="${DRIDOCK_IMAGE_VARIANT:-${CLAUDE_IMAGE_VARIANT:-full}}"
 
 dbg "entrypoint start, args: $*"
-dbg "CLAUDEBOX_CONTAINER_NAME=$CLAUDE_CONTAINER_NAME"
-dbg "CLAUDEBOX_WORKSPACE=$CLAUDE_WORKSPACE"
+dbg "DRIDOCK_CONTAINER_NAME=$CLAUDE_CONTAINER_NAME"
+dbg "DRIDOCK_WORKSPACE=$CLAUDE_WORKSPACE"
 
 # fix docker socket permissions by matching the container's docker group GID to the socket's GID
 if [ -S /var/run/docker.sock ]; then
@@ -30,7 +30,7 @@ dbg "docker socket done"
 # one — common on harness-dev projects that `make build` often; see disk-management.md). Safe +
 # best-effort: `image prune -f` only touches untagged unreferenced images (never a tagged image
 # and never a running container's image), and both never block startup. Default off.
-case "${CLAUDEBOX_PRUNE_ON_START:-${CLAUDE_PRUNE_ON_START:-}}" in
+case "${DRIDOCK_PRUNE_ON_START:-${CLAUDE_PRUNE_ON_START:-}}" in
 	1|true|yes|on)
 		if [ -S /var/run/docker.sock ]; then
 			dbg "prune-on-start: docker builder prune -f + docker image prune -f"
@@ -134,14 +134,14 @@ your session, and the human can reach them.
 - To let the HUMAN reach a workload from their Mac's browser, publish the port and run
   it detached: `docker run -d --restart unless-stopped -p 8080:8080 <image>`. It is
   then reachable at **this project's VM IP**, e.g. `http://<vm-ip>:8080`. That IP is in
-  your env as **`$CLAUDEBOX_VM_IP`** (also `cb-browser ip`) — the container can't
+  your env as **`$DRIDOCK_VM_IP`** (also `cb-browser ip`) — the container can't
   self-discover it, so use that var; the human gets it with `claudebox ip`.
 - **The VM IP ROTATES across VM restarts** (e.g. .13 → .16). So NEVER hardcode it in
   project source or config — not in `next.config.ts` `allowedDevOrigins`, Vite
   `server.allowedHosts`, CORS allowlists, `.env`, or a test's base URL. Read
-  `$CLAUDEBOX_VM_IP` fresh each run and feed it in (or configure the framework to accept
+  `$DRIDOCK_VM_IP` fresh each run and feed it in (or configure the framework to accept
   any host in dev). A stale baked IP is a top cause of "worked yesterday, 403/blocked
-  today". `$CLAUDEBOX_VM_IP` self-heals: the harness refreshes it every launch.
+  today". `$DRIDOCK_VM_IP` self-heals: the harness refreshes it every launch.
 - `http://localhost:8080` is NOT a reliable substitute: it only works if colima happens
   to be forwarding that exact port to the Mac, and it COLLIDES when two projects publish
   the same port. Always prefer the VM IP.
@@ -152,12 +152,12 @@ straight or you'll chase phantom CORS/connection bugs:
 - **Service ↔ service** (API→db, Next SSR→API): runs inside the VM on `cb-net` → address
   by **container name** (`http://api:8080`, `postgres:5432`). Stable.
 - **Browser → service** (the human's Chrome / `cb-browser cdp`, on the Mac): reaches a
-  workload ONLY at **`http://$CLAUDEBOX_VM_IP:<port>`** (published port) — never a `cb-net`
+  workload ONLY at **`http://$DRIDOCK_VM_IP:<port>`** (published port) — never a `cb-net`
   name (Chrome can't resolve it), never `localhost`.
 Rules: bind services to **`0.0.0.0`** (not `127.0.0.1`) so they're reachable on both
 planes; the browser tier's API base URL must be the VM IP (e.g. `NEXT_PUBLIC_API_BASE=
-http://$CLAUDEBOX_VM_IP:8080`), while server-side code calls the API by container name;
-drive **CORS / `allowedDevOrigins`** from `$CLAUDEBOX_VM_IP` (and `$CLAUDEBOX_HOSTNAME` if
+http://$DRIDOCK_VM_IP:8080`), while server-side code calls the API by container name;
+drive **CORS / `allowedDevOrigins`** from `$DRIDOCK_VM_IP` (and `$DRIDOCK_HOSTNAME` if
 the human set one via `claudebox net`) at server start — do NOT hardcode a rotating IP,
 and don't paper over it with wildcard CORS. This is a claudebox STANDARD (so every project
 does it the same way): the full spec — snippets, a worked Next+API+postgres layout, and a
@@ -215,18 +215,18 @@ so they're reachable by name:
 - `cb-browser net` → the network name to attach workloads to
 This is the standard way to browser-test here; prefer it over ad-hoc setups.
 Opt-in extra: if the human ran `claudebox browser-bridge up` on their Mac, the env
-var `CLAUDEBOX_HOST_CDP_URL` is set and `cb-browser cdp <url>` drives THEIR real
+var `DRIDOCK_HOST_CDP_URL` is set and `cb-browser cdp <url>` drives THEIR real
 Chrome via CDP (dedicated debug profile). Only available when they explicitly start
 the bridge; don't rely on it — the self-contained A modes above are the default.
 CDP gotchas (these waste cycles if you rediscover them each time):
 - The browser runs **on the Mac**. `<url>` (and every websocket the page opens) must be
-  reachable FROM THE MAC = **`http://$CLAUDEBOX_VM_IP:<port>`**. NOT `localhost`/
+  reachable FROM THE MAC = **`http://$DRIDOCK_VM_IP:<port>`**. NOT `localhost`/
   `127.0.0.1` (that's the Mac's own loopback, not this VM — your app isn't there) and
   NOT a `cb-net` name like `http://api:8080` (Chrome can't resolve it). `cb-browser cdp`
   auto-rewrites a localhost URL to the VM IP for you, but pass the VM IP directly.
-- Same VM-IP-rotation rule as above: use `$CLAUDEBOX_VM_IP` fresh; don't paste a past IP.
+- Same VM-IP-rotation rule as above: use `$DRIDOCK_VM_IP` fresh; don't paste a past IP.
 - **Writing a custom CDP script? Use `cb-browser script-cdp <file.cjs>`, NOT `cb-browser script`.**
-  `script` runs on `cb-net` and does NOT forward `$CLAUDEBOX_HOST_CDP_URL` — a `connectOverCDP()`
+  `script` runs on `cb-net` and does NOT forward `$DRIDOCK_HOST_CDP_URL` — a `connectOverCDP()`
   from there won't reach the bridge. `script-cdp` forwards the URL, uses `--network host`, and
   **closes any page tabs your script opened but didn't `page.close()`** on exit (opt-out:
   `CB_BROWSER_CDP_KEEP=1`). This matters because `browser.close()` alone only detaches the CDP
@@ -350,7 +350,7 @@ outside the workspace and `~/.claude`. After a rebuild/recreate they're gone.
   `# summary: ...` header line so `cb-help` describes it.
 - ~/.claude/bin is in PATH — custom scripts placed here by the user are available to you
 - ~/.claude/init.d/*.sh scripts run once on first container create (not on subsequent starts)
-- Extra host directories may be mounted via CLAUDEBOX_MOUNT_* env vars — check what's available if you need files outside the workspace
+- Extra host directories may be mounted via DRIDOCK_MOUNT_* env vars (legacy CLAUDEBOX_MOUNT_* still accepted) — check what's available if you need files outside the workspace
 
 ## Remember
 This file is FRAMEWORK guidance (user memory), not your project's CLAUDE.md — it is rewritten
@@ -384,22 +384,22 @@ SYSHINT
 	dbg "system hint created"
 fi
 
-# Harness-update awareness: compare the image's baked semver ($CLAUDEBOX_VERSION, set
+# Harness-update awareness: compare the image's baked semver ($DRIDOCK_VERSION, set
 # as an ENV in the Dockerfile) against the last version THIS project saw. On a change
 # (i.e. the image was rebuilt to a new version), set a note that the append-system-
 # prompt assembly below injects — so claudebot is told to read the changelog after an
 # update, reaching every project regardless of the once-generated hint/template. This
 # fires once per bump (the seen-version file is then updated). Unstamped/old images
-# ($CLAUDEBOX_VERSION unset) are skipped, so no false notes.
+# ($DRIDOCK_VERSION unset) are skipped, so no false notes.
 HARNESS_VER_FILE="/home/claude/.claude/.harness-version"
 HARNESS_UPDATE_NOTE=""
-if [ -n "${CLAUDEBOX_VERSION:-}" ]; then
+if [ -n "${DRIDOCK_VERSION:-}" ]; then
 	_seen=""; [ -f "$HARNESS_VER_FILE" ] && _seen="$(cat "$HARNESS_VER_FILE" 2>/dev/null)"
-	if [ -n "$_seen" ] && [ "$_seen" != "$CLAUDEBOX_VERSION" ]; then
-		HARNESS_UPDATE_NOTE="NOTE: the claudebox harness was updated from v${_seen} to v${CLAUDEBOX_VERSION} since this project last ran. Read ~/CHANGELOG.md (top entry) for what changed before relying on prior assumptions about how the harness behaves."
-		dbg "harness update detected: $_seen -> $CLAUDEBOX_VERSION"
+	if [ -n "$_seen" ] && [ "$_seen" != "$DRIDOCK_VERSION" ]; then
+		HARNESS_UPDATE_NOTE="NOTE: the claudebox harness was updated from v${_seen} to v${DRIDOCK_VERSION} since this project last ran. Read ~/CHANGELOG.md (top entry) for what changed before relying on prior assumptions about how the harness behaves."
+		dbg "harness update detected: $_seen -> $DRIDOCK_VERSION"
 	fi
-	printf '%s' "$CLAUDEBOX_VERSION" > "$HARNESS_VER_FILE" 2>/dev/null || true
+	printf '%s' "$DRIDOCK_VERSION" > "$HARNESS_VER_FILE" 2>/dev/null || true
 	chown claude:claude "$HARNESS_VER_FILE" 2>/dev/null || true
 fi
 
@@ -408,25 +408,25 @@ fi
 # an approved answer. Mirrors the host wrapper surfacing consults to the human. Only
 # threads for this project id, only the actionable state.
 CONSULT_NOTE=""
-_cdir="${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}"
-if [ -d "$_cdir" ] && [ -n "${CLAUDEBOX_PROJECT_ID:-}" ]; then
+_cdir="${DRIDOCK_CONSULT_DIR:-/home/claude/framework-consult}"
+if [ -d "$_cdir" ] && [ -n "${DRIDOCK_PROJECT_ID:-}" ]; then
 	_cn=0; _cids=""
 	for _ctd in "$_cdir"/*/; do
 		[ -d "$_ctd" ] || continue; _ctd="${_ctd%/}"; _cm="$_ctd/meta"
 		[ -f "$_cm" ] || continue
-		[ "$(sed -n 's/^project=//p' "$_cm" | head -1)" = "$CLAUDEBOX_PROJECT_ID" ] || continue
+		[ "$(sed -n 's/^project=//p' "$_cm" | head -1)" = "$DRIDOCK_PROJECT_ID" ] || continue
 		[ "$(sed -n 's/^status=//p' "$_cm" | tail -1)" = "awaiting-claudebot" ] || continue
 		_cn=$((_cn + 1)); _cids="${_cids:+$_cids, }$(basename "$_ctd")"
 	done
 	if [ "$_cn" -gt 0 ]; then
 		CONSULT_NOTE="NOTE: ${_cn} framework consult(s) have an APPROVED reply waiting for you (${_cids}). Run \`cb-consult read <id>\`, adopt the resolution, and \`cb-consult resolve <id>\` — or \`cb-consult say <id>\` if you disagree with the framework standard. See the 'Escalating a framework BEST-PRACTICE question' section for how consults work."
-		dbg "consult surfacing: $_cn awaiting-claudebot for $CLAUDEBOX_PROJECT_ID"
+		dbg "consult surfacing: $_cn awaiting-claudebot for $DRIDOCK_PROJECT_ID"
 	fi
 fi
 
 # (A2) Framework-Claude surfacing — if THIS claudebot is developing the harness itself
-# (workspace fingerprint = a wrapper.sh containing CLAUDEBOX_VERSION= at its root, OR
-# CLAUDEBOX_HARNESS_DEV=1 opt-in, or the legacy alias CLAUDEBOX_FRAMEWORK_DEV=1), also inject a note listing cross-project consults
+# (workspace fingerprint = a wrapper.sh containing DRIDOCK_VERSION= at its root, OR
+# DRIDOCK_HARNESS_DEV=1 opt-in, or the legacy alias DRIDOCK_FRAMEWORK_DEV=1), also inject a note listing cross-project consults
 # awaiting a framework draft AND framework-bug reports not yet marked reviewed. This is
 # the review flow the host `claudebox consult list` / `claudebox framework-bugs list`
 # surfaces to a human on the Mac — mirrored here so a framework-dev claudebot working
@@ -434,13 +434,13 @@ fi
 # is no host wrapper in here). Skipped for every normal claudebot.
 FRAMEWORK_NOTE=""
 _is_fwdev=0
-case "${CLAUDEBOX_HARNESS_DEV:-${CLAUDEBOX_FRAMEWORK_DEV:-}}" in 1|true|yes|on) _is_fwdev=1 ;; esac
-if [ "$_is_fwdev" = 0 ] && [ -n "${CLAUDEBOX_WORKSPACE:-}" ] && [ -f "$CLAUDEBOX_WORKSPACE/wrapper.sh" ]; then
-	grep -q '^CLAUDEBOX_VERSION=' "$CLAUDEBOX_WORKSPACE/wrapper.sh" 2>/dev/null && _is_fwdev=1
+case "${DRIDOCK_HARNESS_DEV:-${DRIDOCK_FRAMEWORK_DEV:-}}" in 1|true|yes|on) _is_fwdev=1 ;; esac
+if [ "$_is_fwdev" = 0 ] && [ -n "${DRIDOCK_WORKSPACE:-}" ] && [ -f "$DRIDOCK_WORKSPACE/wrapper.sh" ]; then
+	grep -q '^DRIDOCK_VERSION=' "$DRIDOCK_WORKSPACE/wrapper.sh" 2>/dev/null && _is_fwdev=1
 fi
 if [ "$_is_fwdev" = 1 ]; then
-	_fwc_dir="${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}"
-	_fwb_dir="${CLAUDEBOX_FRAMEWORK_BUGS_DIR:-/home/claude/framework-bugs}"
+	_fwc_dir="${DRIDOCK_CONSULT_DIR:-/home/claude/framework-consult}"
+	_fwb_dir="${DRIDOCK_FRAMEWORK_BUGS_DIR:-/home/claude/framework-bugs}"
 	_fwc_n=0; _fwc_ids=""
 	if [ -d "$_fwc_dir" ]; then
 		for _ctd in "$_fwc_dir"/*/; do
@@ -498,12 +498,12 @@ description: Report the claudebox harness you are running inside — its version
 You run INSIDE a claudebox container. Give a quick self-report of your harness
 environment. Do NOT try to run the host `claudebox` command — it isn't in here.
 
-1. **Version** — print the harness semver you're running: `echo "$CLAUDEBOX_VERSION"`.
+1. **Version** — print the harness semver you're running: `echo "$DRIDOCK_VERSION"`.
    If a "harness was updated" note appeared this session, mention it.
 2. **Convenience commands** — run `cb-help` and show the list of available `cb-*` tools.
 3. **What changed** — the harness changelog is at `~/CHANGELOG.md` (point the user there;
    summarize the top entry if they ask).
-4. **Environment** — your workspace is `$CLAUDEBOX_WORKSPACE` (same path as on the host).
+4. **Environment** — your workspace is `$DRIDOCK_WORKSPACE` (same path as on the host).
    Sibling workloads go on the `cb-net` docker network and are reachable by container
    name; publish ports and address them by the VM IP (the human runs `claudebox ip` on
    their Mac). The full orchestration standard is in this project's `CLAUDE.md`.
@@ -572,17 +572,17 @@ if [ ! -f "$INIT_MARKER" ]; then
 fi
 
 # mode env vars — CLAUDEBOX_MODE_* canonical, CLAUDE_MODE_* legacy fallback
-_mode_api="${CLAUDEBOX_MODE_API:-${CLAUDE_MODE_API:-}}"
-_mode_api_port="${CLAUDEBOX_MODE_API_PORT:-${CLAUDE_MODE_API_PORT:-8080}}"
-_mode_telegram="${CLAUDEBOX_MODE_TELEGRAM:-${CLAUDE_MODE_TELEGRAM:-}}"
-_mode_cron="${CLAUDEBOX_MODE_CRON:-${CLAUDE_MODE_CRON:-}}"
-_mode_cron_file="${CLAUDEBOX_MODE_CRON_FILE:-${CLAUDE_MODE_CRON_FILE:-}}"
+_mode_api="${DRIDOCK_MODE_API:-${CLAUDE_MODE_API:-}}"
+_mode_api_port="${DRIDOCK_MODE_API_PORT:-${CLAUDE_MODE_API_PORT:-8080}}"
+_mode_telegram="${DRIDOCK_MODE_TELEGRAM:-${CLAUDE_MODE_TELEGRAM:-}}"
+_mode_cron="${DRIDOCK_MODE_CRON:-${CLAUDE_MODE_CRON:-}}"
+_mode_cron_file="${DRIDOCK_MODE_CRON_FILE:-${CLAUDE_MODE_CRON_FILE:-}}"
 
 # combined telegram + cron mode — run both; cron in background, telegram bot in foreground
 if [ "$_mode_telegram" = "1" ] && [ "$_mode_cron" = "1" ]; then
 	dbg "mode: telegram + cron (combined)"
 	if [ -z "$_mode_cron_file" ]; then
-		echo "❌ cron mode enabled but CLAUDEBOX_MODE_CRON_FILE is not set" >&2
+		echo "❌ cron mode enabled but DRIDOCK_MODE_CRON_FILE is not set" >&2
 		exit 1
 	fi
 	if [ ! -f "$_mode_cron_file" ]; then
@@ -600,8 +600,8 @@ if [ "$_mode_telegram" = "1" ] && [ "$_mode_cron" = "1" ]; then
 	# telegram_bot.py process, leaving HOME=/root and breaking shared file paths.
 	COMBINED_ENV="export HOME=/home/claude"
 	COMBINED_ENV="$COMBINED_ENV; export CLAUDE_CONFIG_DIR=/home/claude/.claude"
-	COMBINED_ENV="$COMBINED_ENV; export CLAUDEBOX_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file")"
-	COMBINED_ENV="$COMBINED_ENV; export CLAUDEBOX_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}")"
+	COMBINED_ENV="$COMBINED_ENV; export DRIDOCK_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file")"
+	COMBINED_ENV="$COMBINED_ENV; export DRIDOCK_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}")"
 	COMBINED_ENV="$COMBINED_ENV; export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH"
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
 		bash -c "$COMBINED_ENV; python3 /home/claude/cron.py & CRON_PID=\$!; trap 'kill \$CRON_PID 2>/dev/null' EXIT INT TERM; python3 /home/claude/telegram_bot.py"
@@ -615,7 +615,7 @@ if [ "$_mode_api" = "1" ]; then
 	CLAUDE_UID=$(id -u claude)
 	CLAUDE_GID=$(id -g claude)
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export CLAUDEBOX_MODE_API_PORT=$_mode_api_port && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec python3 /home/claude/api_server.py"
+		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_API_PORT=$_mode_api_port && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec python3 /home/claude/api_server.py"
 fi
 
 # telegram mode — run telegram bot instead of claude
@@ -633,7 +633,7 @@ fi
 if [ "$_mode_cron" = "1" ]; then
 	dbg "mode: cron (file: $_mode_cron_file)"
 	if [ -z "$_mode_cron_file" ]; then
-		echo "❌ cron mode enabled but CLAUDEBOX_MODE_CRON_FILE is not set" >&2
+		echo "❌ cron mode enabled but DRIDOCK_MODE_CRON_FILE is not set" >&2
 		exit 1
 	fi
 	if [ ! -f "$_mode_cron_file" ]; then
@@ -646,7 +646,7 @@ if [ "$_mode_cron" = "1" ]; then
 	mkdir -p /home/claude/.claude/cron/history
 	chown -R claude:claude /home/claude/.claude/cron 2>/dev/null || true
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export CLAUDEBOX_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file") && export CLAUDEBOX_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}") && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec python3 /home/claude/cron.py"
+		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file") && export DRIDOCK_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}") && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec python3 /home/claude/cron.py"
 fi
 
 # build the command to run as claude
@@ -673,7 +673,7 @@ if [ -f "$AUTH_FILE" ]; then
 			dbg "auth: loading $name from file"
 			CMD="$CMD && export $name=$(printf '%q' "$value")"
 		else
-			# empty in the sidecar = explicitly cleared (e.g. CLAUDEBOX_NO_API_KEY) — UNSET it
+			# empty in the sidecar = explicitly cleared (e.g. DRIDOCK_NO_API_KEY) — UNSET it
 			# so a value baked into this container's env at `docker run` time doesn't linger
 			# and override subscription auth.
 			dbg "auth: clearing $name (empty in file)"
@@ -830,9 +830,9 @@ _strip_no_continue() {
 # best-effort and time-bounded. Deliberately skipped for daemon modes (already exec'd
 # above), programmatic (-p) and setup-token runs, and when already installed — so it
 # never delays a daemon start or an ephemeral/test container, only real human sessions
-# where a commit helper is useful. Opt out with CLAUDEBOX_DEFAULT_PLUGINS=0.
+# where a commit helper is useful. Opt out with DRIDOCK_DEFAULT_PLUGINS=0.
 _maybe_install_default_plugin() {
-	case "${CLAUDEBOX_DEFAULT_PLUGINS:-1}" in 0|false) return 0 ;; esac
+	case "${DRIDOCK_DEFAULT_PLUGINS:-1}" in 0|false) return 0 ;; esac
 	[ "${1:-}" = "setup-token" ] && return 0
 	[ -f "$ARGS_FILE" ] && return 0                       # programmatic (subsequent) run
 	local a; for a in "$@"; do case "$a" in -p|--print) return 0 ;; esac; done
@@ -852,7 +852,7 @@ _maybe_install_default_plugin() {
 		touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
 		dbg "default plugin installed"
 	else
-		echo "note: default plugin (commit-commands) not installed (offline?) — set CLAUDEBOX_DEFAULT_PLUGINS=0 to silence" >&2
+		echo "note: default plugin (commit-commands) not installed (offline?) — set DRIDOCK_DEFAULT_PLUGINS=0 to silence" >&2
 	fi
 }
 _maybe_install_default_plugin "$@"
