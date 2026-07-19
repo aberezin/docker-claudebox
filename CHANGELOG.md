@@ -26,6 +26,40 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [2.24.0] — 2026-07-19 _(fork)_
+
+### Changed (user-visible CLI break)
+- **Bare `claudebox` (no args) no longer starts the claudebot.** Now prints the
+  wrapper version + a two-line start hint. Rationale: reduces accidental container
+  starts from muscle-typing `claudebox` in the wrong dir (a partial mitigation on
+  top of 2.15.4's new-project guard), and matches the reflex-inspection habit for
+  most CLIs (bare-name = info). Closes #12.
+- **`claudebox start`** — new verb; runs what bare `claudebox` used to do
+  (start/attach the interactive claudebot for `$PWD`; passes through `-p` + claude
+  args unchanged). Explicit-verb requirement is the whole point.
+
+  Migration for muscle-typed workflows: reflex `claudebox` → `claudebox start`.
+  Explicit-arg forms (`claudebox -p "..."` etc.) are unaffected — those DO now
+  require `start` in front (`claudebox start -p "..."`); pipelines / aliases will
+  need updating.
+
+### Added
+- **`claudebox completion bash`** — emits a bash completion script for the wrapper's
+  current binary name (`$(basename $0)` so `CLAUDEBOX_BIN_NAME=dridock` reinstalls
+  get a `_dridock_complete` bound to `dridock`). Completes top-level verbs at word 1
+  and sub-verbs / flags at word 2 (`vm ls|usage|gc`, `harness sync [--repair]`,
+  `checkversion [--all]`, `consult list|show|approve|watch|revise|reject|post`,
+  `browser-bridge up|down`, `host-agent up|down|status`, `framework-bugs list|clear`,
+  `bootstrap` flags, `destroy [--purge]`, `start` claude-args). Closes #13.
+- **`install.sh`** now runs `claudebox completion bash` and drops the output into
+  `${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions/<binname>` —
+  the XDG-standard path bash-completion auto-loads. Prints a hint if bash-completion
+  isn't detected (brew/port/system pkg paths checked). zsh users with `bashcompinit`
+  loaded pick this up too; a native zsh completion is a separate ask.
+
+Host-only (wrapper.sh + install.sh) — no image rebuild needed; reinstall the wrapper
+to pick it up.
+
 ## [2.23.0] — 2026-07-19 _(fork)_
 
 ### Added

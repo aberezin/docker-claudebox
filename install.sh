@@ -155,6 +155,23 @@ if [ -z "${CLAUDEBOX_SKIP_SHELL_HELPERS:-}" ] && [ -f "$SCRIPT_DIR/claudebox-she
 	fi
 fi
 
+# Bash completion (#13, 2.24.0). Drop the completion script into the XDG-standard
+# path where bash-completion picks it up automatically. Non-fatal: if the wrapper
+# doesn't ship `completion bash` yet (rare fresh-clone case), or the dir isn't
+# writable, we skip with a note. zsh users with `bashcompinit` loaded pick this up too.
+COMPLETION_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
+if mkdir -p "$COMPLETION_DIR" 2>/dev/null; then
+	if "$BIN_PATH" completion bash > "$COMPLETION_DIR/$BIN_NAME" 2>/dev/null; then
+		echo "🐚 Installed bash completion -> $COMPLETION_DIR/$BIN_NAME"
+		if [ -z "${BASH_COMPLETION_VERSINFO:-}" ] && ! [ -r /usr/local/etc/profile.d/bash_completion.sh ] && ! [ -r /opt/homebrew/etc/profile.d/bash_completion.sh ] && ! [ -r /opt/local/etc/bash_completion ]; then
+			echo "   ℹ️  bash-completion not detected — install it (e.g. 'brew install bash-completion') for auto-loading,"
+			echo "      or source the file yourself:  source $COMPLETION_DIR/$BIN_NAME"
+		fi
+	else
+		echo "   ⚠ '$BIN_NAME completion bash' failed; skipping shell completion."
+	fi
+fi
+
 echo "✅ Claude Code setup complete! You can now use '$BIN_NAME' command from any directory."
 
 # Nudge if the install dir isn't on PATH (common for ~/.local/bin on macOS)
