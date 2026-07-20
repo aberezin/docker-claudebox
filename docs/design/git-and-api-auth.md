@@ -125,6 +125,46 @@ start, so a running container picks up rotations without a rebuild).
   git@github.com:owner/repo.git`), or explicitly install a credential helper of their
   own choosing. The harness stays out of it.
 
+## Secret handling: never on a command line
+
+**Rule: a credential value may appear in a file or an environment variable. It may never
+appear in any process's argv** — not the container's, not the docker CLI's on the Mac.
+
+This is not a style preference. Measured on a running container:
+
+| location | mode | who can read it |
+|---|---|---|
+| `/proc/1/cmdline` (argv) | `444` | **any uid in the container**, plus every `ps` that ever gets pasted somewhere |
+| `/proc/1/environ` (env) | `400` | the owning uid only — and not even root without `CAP_SYS_PTRACE` |
+
+Argv is the leaky one, and it leaks *sideways*: into logs, `docker logs`, bug reports and
+chat transcripts, long after the process is gone. A real `GH_TOKEN` escaped exactly this
+way during #17 and had to be rotated.
+
+How the harness satisfies the rule:
+
+- **Host → container**: the wrapper writes 0600 per-role sidecars (`.<container>-auth`,
+  `-secrets`, `-hostagent`, …) under the project data dir. It does **not** pass them with
+  `docker run -e KEY=<value>`, which would put the value in the docker CLI's own argv —
+  visible in `ps aux` to every local Mac user for the entire life of an interactive
+  session — and pin it into `Config.Env` for anyone with the docker socket.
+- **Inside the container**: `entrypoint.sh` `_load_env_sidecar()` re-reads those sidecars
+  on **every** start (this is also what makes them survive `docker start`, which cannot
+  take new env) and performs real `export`s in its own shell. It must stay **above** the
+  mode dispatch, because the API/telegram/cron daemons `exec` before the interactive
+  command string is built and would otherwise never see the values.
+- **Never** build `export KEY=<value>` into a string that later runs as `bash -c` — that
+  is precisely how values land in PID 1's argv.
+- The one path that legitimately still needs env on the command line is the
+  entrypoint-*bypassing* passthrough (`dridock auth`/`mcp` run `--entrypoint claude`, so
+  no entrypoint, so no sidecar read). It uses a 0600 temp **`--env-file`**: a path in
+  argv, never a value.
+- Values are exported with `export "$name=$value"` — no `printf %q`, no `eval` — so a
+  secret containing shell metacharacters is treated as data.
+
+Tests in `tests/test_cbvm.sh` guard both halves; if you add a new credential, route it
+through a sidecar and it inherits all of this for free.
+
 ## Claude Code auth (distinct from git/API auth above)
 
 This doc's original scope was **git-vs-third-party-API auth** (GitHub, GitLab, etc.).
@@ -219,7 +259,7 @@ notes on the dridock side: [Issue #16](https://github.com/aberezin/docker-claude
 
 - Issue [#10](https://github.com/aberezin/docker-claudebox/issues/10) — the git-vs-API split (top of this doc).
 - Issue [#16](https://github.com/aberezin/docker-claudebox/issues/16) — the Claude-Code Remote Control auth section above.
-- Issue [#17](https://github.com/aberezin/docker-claudebox/issues/17) — the baked-CLI-version prerequisite; why RC stayed inactive on a valid full-scope login.
+- Issue [#17](https://github.com/aberezin/docker-claudebox/issues/17) — the baked-CLI-version prerequisite; why RC stayed inactive on a valid full-scope login, and the argv secret leak it exposed (see [Secret handling](#secret-handling-never-on-a-command-line)).
 - [bootstrap.md](bootstrap.md) — the `dridock bootstrap` verb and its secrets flags.
 - [../environment-variables.md](../environment-variables.md) — the `.dridock/secrets.env` reference and `DRIDOCK_NO_*_TOKEN`/`_KEY` envs.
 - [3.0-migration.md](3.0-migration.md) — where this split lands in the 3.0 bundle.

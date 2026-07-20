@@ -106,9 +106,36 @@ echo "--- CDP bridge sidecar contract (wrapper writes -cdp, entrypoint re-reads 
 # halves agree so they can't silently drift apart.
 ENTRYP="$SCRIPT_DIR/../entrypoint.sh"
 if grep -q 'container_name}${_crole}-cdp' "$WRAPPER"; then ok "wrapper writes -cdp sidecar (all roles)"; else bad "wrapper no longer writes the -cdp sidecar"; fi
-if grep -q '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP"; then ok "entrypoint re-reads the -cdp sidecar"; else bad "entrypoint no longer reads the -cdp sidecar"; fi
-# empty sidecar must UNSET (bridge-down must clear a stale URL, not leave it exported)
-if grep -A12 '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP" | grep -q 'unset \$name'; then ok "entrypoint unsets CDP url when sidecar empty"; else bad "entrypoint does not unset on empty -cdp (stale bridge url would linger)"; fi
+if grep -q '_load_env_sidecar cdp' "$ENTRYP"; then ok "entrypoint re-reads the -cdp sidecar"; else bad "entrypoint no longer reads the -cdp sidecar"; fi
+
+# All sidecars are read by one shared loader now, so assert its contract once: it must
+# build the `.<container>-<suffix>` name the wrapper writes, and an EMPTY value must UNSET
+# (bridge-down / agent-down / cleared auth must clear a stale value, not leave it exported).
+if grep -q 'f="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-\$1"' "$ENTRYP"; then
+    ok "sidecar loader builds the .<container>-<suffix> name"
+else bad "sidecar loader no longer builds the wrapper's sidecar name (cross-file contract broken)"; fi
+if grep -A16 '^_load_env_sidecar()' "$ENTRYP" | grep -q 'unset "\$name"'; then
+    ok "sidecar loader unsets on empty value"
+else bad "sidecar loader does not unset on empty (stale url/ip/token would linger)"; fi
+# SECURITY (#17 follow-up): secret VALUES must never enter the CMD string — it becomes
+# PID 1's argv, and /proc/1/cmdline is mode 444 (world-readable by any uid, and scraped
+# into logs/bug reports by any stray `ps`). Only HOME/CLAUDE_CONFIG_DIR/PATH may be there.
+if grep 'CMD.*&& export' "$ENTRYP" | grep -qvE 'export (HOME|CLAUDE_CONFIG_DIR|PATH)='; then
+    bad "a non-HOME/PATH export is being baked into the CMD string (possible secret in argv)"
+else ok "no secret values baked into the CMD string (argv stays clean)"; fi
+# ...and the host half: `docker run -e KEY=<value>` puts the value in the docker CLI's own
+# argv, which `ps aux` on the Mac exposes to every local user for the whole session, and
+# pins it into Config.Env for `docker inspect`. Credentials must travel by sidecar only.
+if grep -qE 'DOCKER_ARGS\+=\(-e "(ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|DRIDOCK_HOST_AGENT_TOKEN)=' "$WRAPPER"; then
+    bad "wrapper puts a credential on the docker command line (visible in host 'ps')"
+else ok "wrapper never puts credentials on the docker command line"; fi
+if grep -qE 'DOCKER_ARGS\+=\(-e "\$_sname=' "$WRAPPER"; then
+    bad "wrapper forwards secrets.env values via -e (visible in host 'ps')"
+else ok "wrapper forwards project secrets by sidecar only"; fi
+# the entrypoint-BYPASSING passthrough can't read sidecars, so it may use --env-file (a
+# path in argv is fine) but still never -e with a value.
+if grep -q 'cb_mktemp_envfile' "$WRAPPER"; then ok "passthrough uses --env-file (path, not value, in argv)"
+else bad "passthrough lost its --env-file credential channel"; fi
 # wrapper writes the sidecar unconditionally (mirror), so bridge-down -> empty on next run
 if grep -qE "printf '(DRIDOCK|CLAUDEBOX)_HOST_CDP_URL=%s\\\\n' \"\\\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
 
@@ -178,7 +205,7 @@ grep -q 'ALLOW = {' "$HAPY" && grep -q '"colima"' "$HAPY" && grep -q '"limactl"'
 grep -q 'CLAUDEBOX_HOST_AGENT_URL' "$HASH" && grep -q 'CLAUDEBOX_HOST_AGENT_TOKEN' "$HASH" && ok "shim reads the injected URL+token" || bad "shim env contract missing"
 # wrapper injects the durable -hostagent sidecar; entrypoint re-reads it
 grep -q 'container_name}${_crole}-hostagent' "$WRAPPER" && ok "wrapper writes -hostagent sidecar" || bad "wrapper -hostagent sidecar missing"
-grep -q '${CLAUDE_CONTAINER_NAME}-hostagent' "$ENTRYP" && ok "entrypoint re-reads -hostagent sidecar" || bad "entrypoint -hostagent reader missing"
+grep -q '_load_env_sidecar hostagent' "$ENTRYP" && ok "entrypoint re-reads -hostagent sidecar" || bad "entrypoint -hostagent reader missing"
 if declare -f cb_host_agent_up >/dev/null && declare -f cb_host_agent_down >/dev/null; then ok "cb_host_agent_up/down defined"; else bad "host-agent wrapper functions missing"; fi
 # phase 3: Makefile + tests are backend-aware (docker backend builds/tests locally, no colima)
 MK="$SCRIPT_DIR/../Makefile"; CMN="$SCRIPT_DIR/common.sh"
@@ -249,9 +276,9 @@ echo "--- VM-IP sidecar contract (wrapper injects CLAUDEBOX_VM_IP, entrypoint re
 # a durable `.<container>-vmip` sidecar every run and the entrypoint re-reads it. Assert
 # both halves of this cross-file contract agree.
 if grep -q 'container_name}${_crole}-vmip' "$WRAPPER"; then ok "wrapper writes -vmip sidecar (all roles)"; else bad "wrapper no longer writes the -vmip sidecar"; fi
-if grep -q '${CLAUDE_CONTAINER_NAME}-vmip' "$ENTRYP"; then ok "entrypoint re-reads the -vmip sidecar"; else bad "entrypoint no longer reads the -vmip sidecar"; fi
+if grep -q '_load_env_sidecar vmip' "$ENTRYP"; then ok "entrypoint re-reads the -vmip sidecar"; else bad "entrypoint no longer reads the -vmip sidecar"; fi
 if grep -qE '(DRIDOCK|CLAUDEBOX)_VM_IP=%s' "$WRAPPER"; then ok "wrapper mirrors current IP -> sidecar (tracks rotation)"; else bad "wrapper -vmip write is not the current-IP mirror"; fi
-if grep -A12 '${CLAUDE_CONTAINER_NAME}-vmip' "$ENTRYP" | grep -q 'unset \$name'; then ok "entrypoint unsets VM IP when sidecar empty"; else bad "entrypoint does not unset on empty -vmip"; fi
+# (unset-on-empty is asserted once against the shared loader, above)
 
 echo "--- cb_project_profiles (config 'profiles:' — flow + block + none) ---"
 PT="$(mktemp -d)"; mkdir -p "$PT/f/.dridock" "$PT/b/.dridock" "$PT/n/.dridock"

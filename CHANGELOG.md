@@ -26,6 +26,54 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.1.0] — 2026-07-20 _(fork)_
+
+### Security
+
+- **Credentials no longer travel on any command line.** Surfaced during #17, when a live
+  `GH_TOKEN` appeared in ordinary `ps` output and from there in a pasted transcript. The
+  harness kept secrets in 0600 files host-side — correctly — and then undid that at the
+  last hop, in three places:
+
+  | surface | who could read it | status |
+  |---|---|---|
+  | container argv (`/proc/1/cmdline`, mode **444**) | **any uid** in the container | fixed |
+  | host argv (Mac `ps aux`, `docker run -e K=V`) | any local user, whole session | fixed |
+  | `docker inspect` `Config.Env` | anything holding the docker socket | fixed |
+
+  For contrast, `/proc/1/environ` is mode **400** (and not even root-readable in-container
+  without `CAP_SYS_PTRACE`). Secrets belong in the environment, never in argv — the same
+  rule `CLAUDE.md` already stated for host-side flags, now actually enforced end to end.
+
+  - **entrypoint**: the five sidecar readers (`-auth`, `-secrets`, `-cdp`, `-vmip`,
+    `-hostagent`) collapse into one `_load_env_sidecar()` that performs **real `export`s
+    in the entrypoint's own shell**, instead of appending `export K=<value>` to the string
+    later run as `bash -c` (which published every value in PID 1's argv). It uses
+    `export "$name=$value"` with no `printf %q` and no `eval`, so a value containing shell
+    metacharacters is data, never code.
+  - **coverage fix, found on the way**: the loader is hoisted **above** the mode dispatch.
+    The API / telegram / cron daemons `exec` before the CMD string is ever built, so the
+    old CMD-string exports never reached them — those modes worked *only* because the
+    wrapper also passed `-e`. Dropping `-e` without this would have silently broken
+    daemon auth.
+  - **wrapper**: stops passing `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`,
+    `DRIDOCK_HOST_AGENT_TOKEN` and every `secrets.env` value via `-e`. The durable
+    sidecars are now the sole channel — which they already had to be, since `docker start`
+    cannot take new env. The one entrypoint-bypassing path (`dridock auth`/`mcp`, which
+    runs `--entrypoint claude` and so never reads sidecars) uses a 0600 temp
+    `--env-file`, putting only a *path* in argv. Empty entries are filtered out, because
+    `--env-file` would turn a bare `KEY=` into a set-but-empty var that claude reads as a
+    present, broken credential.
+  - **tests**: guards on both halves — no non-`HOME`/`PATH` export may enter the CMD
+    string, and the wrapper may not put a credential on a docker command line.
+
+  Verified end to end on a real container: the secret still reaches the app, a value
+  containing `$ ; &` and spaces arrives verbatim, an empty sidecar entry still unsets, and
+  the canary is absent from `/proc/1/cmdline` read as an unprivileged `nobody`.
+
+  **Rotate any credential used with an earlier version** — assume prior `secrets.env`
+  values were exposed to anything that ran `ps` on the Mac or in the container.
+
 ## [3.0.3] — 2026-07-20 _(fork)_
 
 ### Fixed

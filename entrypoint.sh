@@ -582,6 +582,56 @@ if [ ! -f "$INIT_MARKER" ]; then
 	dbg "init marker created"
 fi
 
+# ── durable env sidecars → THIS shell's environment ──────────────────────────
+# The wrapper mirrors host-side state into per-role sidecar files under the ~/.claude
+# mount — auth, project secrets, the CDP bridge URL, the reachable VM IP, the host-agent
+# token — because `docker start` cannot pass new env to an existing container. We re-read
+# them on every start so they self-heal (IP rotation, bridge/agent up or down).
+#
+# These MUST be real `export`s in this shell, NOT `export K=V` appended to the CMD string
+# that later runs under `bash -c`. Two independent reasons:
+#
+#   1. SECURITY. A CMD-string export puts every secret VALUE into PID 1's argv, and
+#      /proc/1/cmdline is mode 444 — world-readable by ANY uid in the container, not just
+#      the claude user, and trivially scraped by a stray `ps` into logs, bug reports and
+#      pasted transcripts. That is exactly how a live GH_TOKEN escaped during #17. The
+#      process environment (/proc/1/environ) is mode 400 — owner-only. Both verified on a
+#      running container. Secrets belong in the environment, never in a command line;
+#      this is the same rule the project CLAUDE.md states for host-side flags.
+#
+#   2. COVERAGE. The API / telegram / cron daemons `exec` further down, BEFORE the CMD
+#      string is ever built, so CMD-string exports never reached them at all — those modes
+#      only ever worked because the wrapper ALSO passed the values via `docker run -e`.
+#      Exporting here, above the mode dispatch, covers every mode through ordinary env
+#      inheritance (no setpriv call uses --reset-env; verified), which is what lets the
+#      wrapper stop putting secrets on the docker command line too.
+#
+# Read with plain `export "$name=$value"` — no printf %q, no eval — so a value containing
+# shell metacharacters is data, never code.
+_load_env_sidecar() {   # $1 = sidecar suffix, $2 = debug label
+	local f="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-$1" name value
+	[ -f "$f" ] || return 0
+	dbg "$2 sidecar: $f"
+	while IFS='=' read -r name value; do
+		case "$name" in ''|\#*) continue ;; esac
+		if [ -n "$value" ]; then
+			dbg "$2: loading $name"
+			export "$name=$value"
+		else
+			# Empty = explicitly cleared host-side (DRIDOCK_NO_API_KEY, bridge down,
+			# agent down). UNSET it, so a value baked into an older container at
+			# `docker run` time can't linger and override the intended state.
+			dbg "$2: clearing $name"
+			unset "$name"
+		fi
+	done < "$f"
+}
+_load_env_sidecar auth      auth
+_load_env_sidecar secrets   secret
+_load_env_sidecar cdp       cdp
+_load_env_sidecar vmip      vmip
+_load_env_sidecar hostagent hostagent
+
 # mode env vars — CLAUDEBOX_MODE_* canonical, CLAUDE_MODE_* legacy fallback
 _mode_api="${DRIDOCK_MODE_API:-${CLAUDE_MODE_API:-}}"
 _mode_api_port="${DRIDOCK_MODE_API_PORT:-${CLAUDE_MODE_API_PORT:-8080}}"
@@ -675,43 +725,14 @@ if [ -n "$CLAUDE_GIT_EMAIL" ]; then
 	CMD="$CMD && git config --global user.email $(printf '%q' "$CLAUDE_GIT_EMAIL")"
 fi
 
-# load auth env vars from file (for existing containers that can't get new env vars)
-AUTH_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-auth"
-dbg "auth file: $AUTH_FILE (exists: $([ -f "$AUTH_FILE" ] && echo yes || echo no))"
-if [ -f "$AUTH_FILE" ]; then
-	while IFS='=' read -r name value; do
-		if [ -n "$value" ]; then
-			dbg "auth: loading $name from file"
-			CMD="$CMD && export $name=$(printf '%q' "$value")"
-		else
-			# empty in the sidecar = explicitly cleared (e.g. DRIDOCK_NO_API_KEY) — UNSET it
-			# so a value baked into this container's env at `docker run` time doesn't linger
-			# and override subscription auth.
-			dbg "auth: clearing $name (empty in file)"
-			CMD="$CMD && unset $name"
-		fi
-	done < "$AUTH_FILE"
-fi
-
-# load machine-local project secrets the same way (see wrapper.sh: .dridock/secrets.env
-# -> this sidecar). Read from the mount, not `docker run -e`, so they survive restarts.
-# GH_TOKEN / GITLAB_TOKEN / BITBUCKET_TOKEN / etc. get picked up by their respective
-# provider CLIs (gh, glab, …) automatically from the env. The harness deliberately
-# does NOT install a git credential helper — git-over-HTTPS falls through to
-# SSH via ~/.ssh/claudebox/id_ed25519 (path kept from 2.x for one deprecation
-# cycle), which is the provider-agnostic path for git ops (#10). See
+# NOTE: auth and project secrets (GH_TOKEN / GITLAB_TOKEN / … , consumed from the env by
+# gh / glab / etc.) are loaded by _load_env_sidecar() ABOVE the mode dispatch — as real
+# exports in this shell, never as `export K=V` inside the CMD string, which would publish
+# every value in world-readable /proc/1/cmdline. See the block comment there before moving
+# this. The harness deliberately does NOT install a git credential helper — git-over-HTTPS
+# falls through to SSH via ~/.ssh/claudebox/id_ed25519 (path kept from 2.x for one
+# deprecation cycle), the provider-agnostic path for git ops (#10). See
 # docs/design/git-and-api-auth.md.
-SECRETS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-secrets"
-dbg "secrets file: $SECRETS_FILE (exists: $([ -f "$SECRETS_FILE" ] && echo yes || echo no))"
-if [ -f "$SECRETS_FILE" ]; then
-	while IFS='=' read -r name value; do
-		case "$name" in ''|\#*) continue ;; esac
-		if [ -n "$value" ]; then
-			dbg "secret: loading $name from file"
-			CMD="$CMD && export $name=$(printf '%q' "$value")"
-		fi
-	done < "$SECRETS_FILE"
-fi
 
 # ── SSH host-key seeding for git-over-SSH (#10) ───────────────────────────────
 # 3.0 removed `gh auth setup-git`, so first-connect `git pull|push` via SSH
@@ -753,54 +774,11 @@ _ssh_seed_hosts() {
 }
 _ssh_seed_hosts
 
-# load the host CDP bridge URL the same durable way (see wrapper.sh: browser-bridge up
-# writes a marker -> this sidecar). Read from the mount, not `docker run -e`, so an
-# already-created container picks up `browser-bridge up` on restart. Empty = bridge
-# down: UNSET so a stale URL baked in at `docker run` time doesn't linger.
-CDP_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-cdp"
-dbg "cdp file: $CDP_FILE (exists: $([ -f "$CDP_FILE" ] && echo yes || echo no))"
-if [ -f "$CDP_FILE" ]; then
-	while IFS='=' read -r name value; do
-		case "$name" in ''|\#*) continue ;; esac
-		if [ -n "$value" ]; then
-			dbg "cdp: loading $name from file"
-			CMD="$CMD && export $name=$(printf '%q' "$value")"
-		else
-			dbg "cdp: clearing $name (empty in file)"
-			CMD="$CMD && unset $name"
-		fi
-	done < "$CDP_FILE"
-fi
-
-# load the reachable VM IP the same durable way (wrapper mirrors the CURRENT col0 IP
-# here each run). The container can't see the VM's 192.168.64.x itself, so this env is
-# claudebot's ONLY reliable source — and it self-heals when the IP rotates. Empty =
-# not up yet: UNSET so a stale value can't linger.
-VMIP_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-vmip"
-dbg "vmip file: $VMIP_FILE (exists: $([ -f "$VMIP_FILE" ] && echo yes || echo no))"
-if [ -f "$VMIP_FILE" ]; then
-	while IFS='=' read -r name value; do
-		case "$name" in ''|\#*) continue ;; esac
-		if [ -n "$value" ]; then
-			dbg "vmip: loading $name from file"
-			CMD="$CMD && export $name=$(printf '%q' "$value")"
-		else
-			dbg "vmip: clearing $name (empty in file)"
-			CMD="$CMD && unset $name"
-		fi
-	done < "$VMIP_FILE"
-fi
-
-# Host agent (Approach 2) — the opt-in colima/limactl proxy URL+token, re-read every
-# start (empty when the agent is down -> unset). Same durable pattern as the vmip sidecar.
-HOSTAGENT_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-hostagent"
-if [ -f "$HOSTAGENT_FILE" ]; then
-	while IFS='=' read -r name value; do
-		case "$name" in ''|\#*) continue ;; esac
-		if [ -n "$value" ]; then CMD="$CMD && export $name=$(printf '%q' "$value")"
-		else CMD="$CMD && unset $name"; fi
-	done < "$HOSTAGENT_FILE"
-fi
+# NOTE: the CDP bridge URL (browser-bridge up/down), the reachable VM IP (self-heals when
+# colima rotates it — the container cannot see 192.168.64.x itself, so this env is
+# claudebot's only reliable source), and the host-agent URL+token are all loaded by
+# _load_env_sidecar() above, alongside auth and secrets. Empty value = cleared host-side,
+# which unsets rather than lingering.
 
 ARGS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-args"
 UPDATE_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-update"

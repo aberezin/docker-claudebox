@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.0.3"
+DRIDOCK_VERSION="3.1.0"
 
 # Minimum Claude Code CLI the harness expects in the image. NOT the pin (that lives in
 # `Dockerfile` ARG CLAUDE_VERSION) — this is the floor `checkversion` warns below, set
@@ -936,6 +936,25 @@ cb_image_claude_version() {
     local out
     out="$(docker --context "$1" run --rm --entrypoint claude "$CLAUDE_IMAGE" --version 2>/dev/null | head -1)"
     case "$out" in ''|*[![:print:]]*) printf 'unavailable' ;; *) printf '%s' "${out%% (Claude Code)}" ;; esac
+}
+
+# Build a 0600 temp `--env-file` from a sidecar, keeping only KEY=VALUE lines that have a
+# value. For the entrypoint-BYPASSING passthroughs (`--entrypoint claude`), which never get
+# to read the sidecars themselves. Prints the temp path, or nothing if there's nothing to
+# pass — caller is responsible for rm'ing it. Never `-e`: a value on the docker command
+# line is world-readable via `ps` for as long as the process lives. $1 = sidecar path.
+cb_mktemp_envfile() {
+    local src="$1" tmp name value wrote=0
+    [ -f "$src" ] || return 0
+    tmp="$(mktemp "${TMPDIR:-/tmp}/dridock-env-XXXXXX")" || return 0
+    chmod 600 "$tmp"
+    while IFS='=' read -r name value; do
+        case "$name" in ''|\#*) continue ;; esac
+        [ -n "$value" ] || continue      # bare KEY= would become set-but-empty; skip it
+        printf '%s=%s\n' "$name" "$value" >> "$tmp"; wrote=1
+    done < "$src"
+    if [ "$wrote" = 0 ]; then rm -f "$tmp"; return 0; fi
+    printf '%s' "$tmp"
 }
 
 cb_image_status() {
@@ -2607,7 +2626,8 @@ done
 _ha_home="$(cb_host_agent_home)"; _ha_url= _ha_tok=
 if [ -f "$_ha_home/pid" ] && kill -0 "$(cat "$_ha_home/pid" 2>/dev/null)" 2>/dev/null && [ -f "$_ha_home/token" ]; then
     _ha_url="$CB_HOST_AGENT_BIND:$CB_HOST_AGENT_PORT"; _ha_tok="$(cat "$_ha_home/token")"
-    DOCKER_ARGS+=(-e "DRIDOCK_HOST_AGENT_URL=$_ha_url" -e "DRIDOCK_HOST_AGENT_TOKEN=$_ha_tok")
+    # The token rides the sidecar below only — never `-e`, which would expose it in the
+    # Mac's `ps` output for the whole session. See the auth comment further down.
 fi
 for _crole in "" _prog _cron; do
     { printf 'DRIDOCK_HOST_AGENT_URL=%s\n' "$_ha_url"
@@ -2653,8 +2673,13 @@ fi
 [ "$_c_draft" -gt 0 ] && echo "🗣  $_c_draft framework consult(s) awaiting a framework draft — see: claudebox consult list" >&2
 
 # forward env vars to the container
-[ -n "$ANTHROPIC_API_KEY" ] && DOCKER_ARGS+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
-[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && DOCKER_ARGS+=(-e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN")
+# Auth deliberately does NOT ride `-e`. `docker run -e KEY=<value>` puts the secret in
+# the docker CLI's OWN argv, which `ps aux` on the Mac exposes to every local user for
+# the entire life of an interactive session, and pins it into the container's Config.Env
+# where `docker inspect` hands it to anything holding the socket. The `.<container>-auth`
+# sidecar written just below is the only channel: the entrypoint re-reads it on EVERY
+# start and exports it there, which also covers `docker start` (can't take new env).
+# Same rule as secrets — see docs/design/git-and-api-auth.md § Secret handling.
 [ "$DEBUG" = "true" ] && DOCKER_ARGS+=(-e "DEBUG=true")
 # opt out of the baked default plugin set (entrypoint seeds settings.json otherwise)
 [ -n "${DRIDOCK_DEFAULT_PLUGINS:-}" ] && DOCKER_ARGS+=(-e "DRIDOCK_DEFAULT_PLUGINS=$DRIDOCK_DEFAULT_PLUGINS")
@@ -2698,11 +2723,9 @@ dbg "wrote auth files"
 # start` (which can't take new env). Same durable pattern as the auth files above.
 SECRETS_SRC="$(cb_secrets_path "$CB_PROJECT_ROOT")"
 if [ -f "$SECRETS_SRC" ]; then
-    while IFS='=' read -r _sname _sval; do
-        case "$_sname" in ''|\#*) continue ;; esac
-        DOCKER_ARGS+=(-e "$_sname=$_sval")
-        dbg "forwarding secret: $_sname"
-    done < "$SECRETS_SRC"
+    # No `-e` here — see the auth comment above. The sidecars below are the sole channel;
+    # the entrypoint exports them on every start, so this covers first run AND restart.
+    dbg "secrets -> sidecars only (never the docker command line)"
     for _srole in "" _prog _cron; do
         cp "$SECRETS_SRC" "$CLAUDE_DIR/.${container_name}${_srole}-secrets"
         chmod 600 "$CLAUDE_DIR/.${container_name}${_srole}-secrets"
@@ -2841,8 +2864,19 @@ case "${1:-}" in
         # requires TTY to print the URL + wait for callback) and `mcp` (interactive
         # picker in some paths). Read-only verbs like `-v`/`--version`/`doctor` don't
         # need TTY but tolerate it fine. Same-shape addition covers all of them; #16.
-        "${DOCKER[@]}" run --rm -it --entrypoint claude "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE "$@"
-        exit 0
+        #
+        # This is the ONE path that still needs env on the docker command line: it runs
+        # `--entrypoint claude`, so the entrypoint never runs and never reads the sidecars.
+        # Use `--env-file` rather than `-e` so only a PATH lands in argv, never a value.
+        # Only non-empty entries are written, because `--env-file` turns a bare `KEY=` into
+        # a set-but-empty var, which claude treats as a present (broken) credential.
+        _pt_env="$(cb_mktemp_envfile "$CLAUDE_DIR/.${container_name}-auth")"
+        [ -n "$_pt_env" ] && trap 'rm -f "$_pt_env"' EXIT
+        "${DOCKER[@]}" run --rm -it --entrypoint claude \
+            ${_pt_env:+--env-file "$_pt_env"} "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE "$@"
+        _pt_rc=$?
+        [ -n "$_pt_env" ] && rm -f "$_pt_env"
+        exit $_pt_rc
         ;;
 esac
 
