@@ -272,6 +272,20 @@ if cb_in_dotclaudebox /Users/x/proj/apps;  then bad "false positive: normal subd
 echo "--- versioning (host wrapper must match the VERSION file) ---"
 VFILE="$(cat "$SCRIPT_DIR/../VERSION" 2>/dev/null | tr -d '[:space:]')"
 eq "wrapper DRIDOCK_VERSION == VERSION file" "$DRIDOCK_VERSION" "$VFILE"
+echo "--- baked claude CLI pin must satisfy the harness floor (#17) ---"
+# The Dockerfile pin is a HARD floor: auto-update is disabled in the image, so whatever
+# is baked is what every claudebot runs until someone rebuilds. Claude Code ignores
+# unknown flags silently, so a stale pin makes feature flags dridock forwards (today:
+# --remote-control) vanish with no error. Fail the build rather than ship that again.
+DOCKER_PIN="$(grep -oE '^ARG CLAUDE_VERSION=[0-9.]+' "$SCRIPT_DIR/../Dockerfile" | head -1 | cut -d= -f2)"
+if [ -z "$DOCKER_PIN" ]; then
+    bad "could not read ARG CLAUDE_VERSION from Dockerfile"
+elif [ "$(cb_semver_cmp "$DOCKER_PIN" "$CB_CLAUDE_CLI_FLOOR")" = lt ]; then
+    bad "Dockerfile claude pin $DOCKER_PIN is BELOW CB_CLAUDE_CLI_FLOOR $CB_CLAUDE_CLI_FLOOR"
+else
+    ok "Dockerfile claude pin $DOCKER_PIN >= floor $CB_CLAUDE_CLI_FLOOR"
+fi
+
 echo "--- cb_semver_cmp ---"
 eq "equal"          "$(cb_semver_cmp 0.1.0 0.1.0)" "eq"
 eq "patch greater"  "$(cb_semver_cmp 0.1.2 0.1.0)" "gt"

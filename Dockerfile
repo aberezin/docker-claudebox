@@ -52,7 +52,17 @@ RUN chmod 440 /etc/sudoers.d/claude-nopass
 
 # claude CLI native install (can self-update)
 USER claude
-ARG CLAUDE_VERSION=2.1.123
+# ⚠️  FLOOR, not decoration. `DISABLE_AUTOUPDATER=1` below + the entrypoint's
+# `.autoUpdates = false` patch mean the container NEVER moves off this pin — whatever
+# is baked here is what every claudebot runs, forever, until someone bumps this line.
+# Consequence (#17): Claude Code SILENTLY IGNORES unknown flags (exit 0, no warning),
+# so any feature-gating flag dridock forwards to a too-old CLI is accepted and dropped
+# with zero diagnostics. 2.1.123 predated Remote Control entirely — no `--remote-control`
+# flag, no `remote-control` subcommand — so `dridock start --remote-control` "worked"
+# and RC was never activated. Remote Control needs >= 2.1.206 (its full error surface;
+# see https://code.claude.com/docs/en/remote-control). Keep this reasonably current, and
+# when raising it, re-check the entrypoint's `--remote-control` capability probe.
+ARG CLAUDE_VERSION=2.1.215
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- $CLAUDE_VERSION && \
     echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile && \
     ~/.local/bin/claude install --yes 2>/dev/null || true

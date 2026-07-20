@@ -12,7 +12,14 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.0.2"
+DRIDOCK_VERSION="3.0.3"
+
+# Minimum Claude Code CLI the harness expects in the image. NOT the pin (that lives in
+# `Dockerfile` ARG CLAUDE_VERSION) — this is the floor `checkversion` warns below, set
+# by the newest claude feature dridock forwards a flag for. Currently 2.1.206: the first
+# release whose Remote Control surface is complete. Raise it when dridock starts
+# depending on a newer claude capability. See #17.
+CB_CLAUDE_CLI_FLOOR="2.1.206"
 
 # ── 3.0 backward-compat alias setup ──────────────────────────────────────────
 # For each user-input env var renamed CLAUDEBOX_X → DRIDOCK_X in 3.0, copy the
@@ -919,6 +926,18 @@ cb_vm_gc() {
 # states: the semver, "unstamped" (image present but built pre-versioning = empty
 # label), or "unavailable" (image absent / VM or context down). image inspect returns
 # "" for a missing label but nonzero for a missing image, so the two don't conflate.
+# The Claude Code CLI version actually installed in the image (#17). Deliberately a
+# runtime probe rather than a build-time LABEL: the pin in `Dockerfile` ARG
+# CLAUDE_VERSION is what we *asked* for, this is what the image *has* — and it's the
+# latter that decides whether a feature-gating flag like `--remote-control` is real or
+# gets silently eaten. Costs one throwaway container, so it's only used by the explicit
+# `checkversion` verb, never on the hot path. $1 = docker context.
+cb_image_claude_version() {
+    local out
+    out="$(docker --context "$1" run --rm --entrypoint claude "$CLAUDE_IMAGE" --version 2>/dev/null | head -1)"
+    case "$out" in ''|*[![:print:]]*) printf 'unavailable' ;; *) printf '%s' "${out%% (Claude Code)}" ;; esac
+}
+
 cb_image_status() {
     local out
     # Read org.dridock.version (3.0+); fall back to org.claudebox.version (2.x) so
@@ -995,7 +1014,7 @@ COMP
 }
 
 cb_checkversion() {
-    local wv="$DRIDOCK_VERSION" civ pv cid ctx cmp all=0
+    local wv="$DRIDOCK_VERSION" civ pv cid ctx cmp ccv all=0
     while [ $# -gt 0 ]; do case "$1" in
         --all|-a) all=1 ;;
         -h|--help) echo "usage: dridock checkversion [--all]  (--all = scan every cb-* project VM in addition to cb-infra + this project)" >&2; return 0 ;;
@@ -1010,6 +1029,18 @@ cb_checkversion() {
         ctx="$(cb_project_context "$cid")"
         pv="$(cb_image_status "$ctx")"
         echo "  image (this project):  $pv   (VM $(cb_project_profile "$cid"))"
+        # The baked Claude Code CLI — a separate axis from the harness semver, and the
+        # one that decides which `claude` flags are real (#17). Auto-update is disabled
+        # in the image on purpose, so this only moves on a rebuild.
+        ccv="$(cb_image_claude_version "$ctx")"
+        echo "  claude CLI (in image): $ccv"
+        case "$ccv" in
+            unavailable) : ;;
+            *) if [ "$(cb_semver_cmp "$ccv" "$CB_CLAUDE_CLI_FLOOR")" = lt ]; then
+                   echo "     ⚠️  older than $CB_CLAUDE_CLI_FLOOR — Remote Control (--remote-control) does not exist in" >&2
+                   echo "        this CLI and claude IGNORES unknown flags silently. Rebuild: make build" >&2
+               fi ;;
+        esac
     else
         pv=""
         echo "  image (this project):  <no dridock project in $PWD>"

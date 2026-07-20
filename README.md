@@ -286,6 +286,8 @@ model-request-only token that `dridock setup-token` produces. One-time setup per
 project:
 
 ```bash
+dridock checkversion  # first: the image's claude CLI must be >= 2.1.206 (see below)
+
 dridock            # enter the session
 claude auth login  # browser OAuth flow (opens on your Mac); Ctrl+C when done
 exit
@@ -294,8 +296,16 @@ exit
 DRIDOCK_NO_OAUTH_TOKEN=1 dridock start --remote-control
 ```
 
+It also needs a **claude CLI new enough to have the flag**. Remote Control landed
+around `2.1.206`, and claude **ignores unknown flags without erroring** — so on an
+older image the session starts fine and RC just never activates, with no error to
+go on (this was #17). The CLI version is baked into the image and cannot self-update,
+so `dridock checkversion` reports it and warns when it's too old; the fix is to bump
+`ARG CLAUDE_VERSION` in the `Dockerfile` and `make build`.
+
 See [design/git-and-api-auth.md § Claude Code auth](docs/design/git-and-api-auth.md#claude-code-auth-distinct-from-gitapi-auth-above)
-for the full table (API key / setup-token / auth login) and why RC needs the third.
+for the full table (API key / setup-token / auth login), the CLI-version prerequisite,
+and why RC needs the third auth kind.
 
 ## Modes
 

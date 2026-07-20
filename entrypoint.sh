@@ -999,13 +999,43 @@ else
 		rm -f "$INTERACTIVE_ARGS_FILE"
 		dbg "interactive: extra claude args: $INTERACTIVE_EXTRA"
 	fi
-	# #16: --remote-control needs a full-scope claude.ai OAuth login, not a
-	# setup-token-style CLAUDE_CODE_OAUTH_TOKEN (model-request scope only —
-	# Anthropic rejects RC on those). If both are present, RC starts and then
-	# silently fails to activate. Detect and hint at the exact fix.
+	# --remote-control has two silent-failure modes. Claude Code ignores unknown
+	# flags (exit 0, no warning), so neither one produces a diagnostic on its own —
+	# the session starts, looks healthy, and RC is simply never active.
 	case "$INTERACTIVE_EXTRA" in
 		*--remote-control*|*--rc*)
-			if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+			# (#17) FIRST: is the flag real in THIS image's CLI? The baked
+			# CLAUDE_VERSION is a hard floor (DISABLE_AUTOUPDATER=1 + autoUpdates
+			# false — the container never self-updates), and RC did not exist
+			# before ~2.1.206. A too-old CLI eats the flag silently. This is the
+			# blocker Alan actually hit; check it before blaming credentials.
+			# `timeout` on both probes: this runs on the path to starting the
+			# user's session, so a hung claude must degrade to "no warning",
+			# never to "session won't start". Match on the flag followed by a
+			# boundary — 2.1.123 carries a decoy `--remote-control-session-name-prefix`
+			# that a bare substring test would match.
+			_probe='export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:$PATH;'
+			_help="$(timeout 20 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
+				bash -c "$_probe claude --help 2>/dev/null")"
+			# Only judge the CLI when the probe actually produced help text. If it
+			# timed out or errored, stay silent — a false "your CLI is too old" would
+			# send the user rebuilding for nothing.
+			if [ -n "$_help" ] && ! printf '%s' "$_help" | grep -qE -- '--remote-control([[:space:]]|,|$)'
+			then
+				_cv="$(timeout 20 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
+					bash -c "$_probe claude --version 2>/dev/null" | head -1)"
+				echo "⚠ dridock: this image's Claude Code (${_cv:-unknown}) has NO --remote-control flag." >&2
+				echo "  Claude Code silently ignores unknown flags, so the session will start and" >&2
+				echo "  Remote Control will just never activate — with no error from claude." >&2
+				echo "  Remote Control needs Claude Code >= 2.1.206. The CLI version is BAKED into" >&2
+				echo "  the image (auto-update is disabled on purpose) so it cannot fix itself." >&2
+				echo "  Fix: rebuild the image with a newer pin, then relaunch:" >&2
+				echo "    make build   # bump Dockerfile ARG CLAUDE_VERSION first if it is still old" >&2
+				echo "  Check what you have:  dridock checkversion   (reports the baked CLI version)" >&2
+			# SECOND (#16): the CLI supports RC, but a setup-token-style
+			# CLAUDE_CODE_OAUTH_TOKEN is set. Those are model-request scope only, so
+			# Anthropic rejects the RC registration.
+			elif [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
 				echo "⚠ dridock: --remote-control needs a FULL-SCOPE claude.ai OAuth login," >&2
 				echo "  but CLAUDE_CODE_OAUTH_TOKEN (setup-token style) is set — that token is" >&2
 				echo "  model-request-only, so Anthropic rejects the RC registration silently." >&2

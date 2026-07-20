@@ -138,9 +138,46 @@ Claude Code accepts three auth kinds, with different capabilities:
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` | API billing, model requests only | You pay per-token; no subscription features. |
 | `dridock setup-token` | `CLAUDE_CODE_OAUTH_TOKEN` | Subscription, model requests only | You have a Claude subscription; long-lived token; simple flow. |
-| `claude auth login` (inside the container) | Stored in `~/.claude/.claude.json` (bind-mounted, persists) | Subscription, **full-scope** (Remote Control, mobile push, etc.) | You want claude.ai features that need a full OAuth login — the biggest one being **`--remote-control`** and mobile push notifications. |
+| `claude auth login` (inside the container) | Stored in `~/.claude/.credentials.json`, mode `0600` (bind-mounted, persists) | Subscription, **full-scope** (Remote Control, mobile push, etc.) | You want claude.ai features that need a full OAuth login — the biggest one being **`--remote-control`** and mobile push notifications. |
 
-The gotcha: **when both `CLAUDE_CODE_OAUTH_TOKEN` and a stored full-scope login
+### Remote Control prerequisite: the baked CLI version (#17)
+
+**Check this before you debug credentials.** Remote Control did not exist in Claude
+Code before ~`2.1.206`, and **claude silently ignores unknown flags** — it exits 0
+with no warning. So passing `--remote-control` to an older CLI starts a perfectly
+healthy session in which RC is simply never active, with no error anywhere. That
+looks identical to an auth failure, which is what made #17 hard to see: the account
+was a Max plan with a valid full-scope login the whole time.
+
+The CLI version is **baked into the image** (`Dockerfile` `ARG CLAUDE_VERSION`) and
+the container cannot self-update out of it — `DISABLE_AUTOUPDATER=1` plus the
+entrypoint's `.autoUpdates = false` patch are both deliberate. An image built long
+ago keeps its old claude forever.
+
+```bash
+dridock checkversion     # reports "claude CLI (in image): X.Y.Z" and warns below the floor
+```
+
+If it's below the floor, bump `ARG CLAUDE_VERSION` in the `Dockerfile` and
+`make build`. The entrypoint also probes `claude --help` on any `--remote-control`
+start and prints this explanation when the flag isn't real — so a stale image
+announces itself instead of failing silently.
+
+To verify by hand what kind of credential you actually have (this is ground truth,
+not `.claude.json`):
+
+```bash
+# on the Mac — ~/.claude is bind-mounted, no container needed
+python3 -c 'import json;d=json.load(open("PATH/TO/claude/.credentials.json"));
+print(d["claudeAiOauth"]["subscriptionType"], d["claudeAiOauth"]["scopes"])'
+# full-scope login includes: user:sessions:claude_code   <- the Remote Control scope
+```
+
+`dridock info` prints the per-project data dir that `PATH/TO` refers to.
+
+### The env-var precedence gotcha (#16)
+
+**When both `CLAUDE_CODE_OAUTH_TOKEN` and a stored full-scope login
 exist, the env var wins.** Anthropic's model-request-only token gets picked up and
 Remote Control quietly refuses to activate ("RC inactive" — no loud error, session
 runs fine without RC). Fix: opt out of the env forwarding for that project.
@@ -148,11 +185,17 @@ runs fine without RC). Fix: opt out of the env forwarding for that project.
 Recipe:
 
 ```bash
+# 0. Confirm the image's claude is new enough to HAVE the flag (see above).
+dridock checkversion
+
 # 1. One time per project: full-scope OAuth. Run INSIDE the container.
 dridock            # boot a session
 claude auth login  # browser flow — opens on your Mac, complete + Ctrl+C back
-                   # (credentials land in ~/.claude/.claude.json, bind-mounted, so
-                   #  they persist across container recreate)
+                   # (credentials land in ~/.claude/.credentials.json, bind-mounted,
+                   #  so they persist across container recreate)
+                   # If the browser shows a CODE instead of redirecting, paste it at
+                   # the "Paste code here if prompted" prompt — expected in containers,
+                   # where the browser can't reach claude's local callback server.
 exit               # leave the session
 
 # 2. From then on, launch with the env-var forwarding OFF so the stored login wins:
@@ -176,6 +219,7 @@ notes on the dridock side: [Issue #16](https://github.com/aberezin/docker-claude
 
 - Issue [#10](https://github.com/aberezin/docker-claudebox/issues/10) — the git-vs-API split (top of this doc).
 - Issue [#16](https://github.com/aberezin/docker-claudebox/issues/16) — the Claude-Code Remote Control auth section above.
+- Issue [#17](https://github.com/aberezin/docker-claudebox/issues/17) — the baked-CLI-version prerequisite; why RC stayed inactive on a valid full-scope login.
 - [bootstrap.md](bootstrap.md) — the `dridock bootstrap` verb and its secrets flags.
 - [../environment-variables.md](../environment-variables.md) — the `.dridock/secrets.env` reference and `DRIDOCK_NO_*_TOKEN`/`_KEY` envs.
 - [3.0-migration.md](3.0-migration.md) — where this split lands in the 3.0 bundle.

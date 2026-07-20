@@ -26,6 +26,46 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.0.3] — 2026-07-20 _(fork)_
+
+### Fixed
+
+- **`--remote-control` was silently dropped: the image's Claude Code was too old**
+  (#17). This is the actual root cause behind the "RC inactive" symptom that #16
+  chased into the auth layer. The image pinned `ARG CLAUDE_VERSION=2.1.123`, which
+  **predates Remote Control entirely** — no `--remote-control` flag, no
+  `remote-control` subcommand, and a `claude doctor` that only checks the
+  auto-updater. Claude Code **ignores unknown flags without erroring** (verified:
+  `claude --remote-control --version` exits 0 on 2.1.123), so dridock passed the
+  flag, claude discarded it, the session started clean, and RC never activated —
+  with no diagnostic from any layer.
+
+  The auth work in #16 was sound but was not what blocked Alan's case: his stored
+  credential was already a full-scope claude.ai OAuth login (Max plan, including the
+  `user:sessions:claude_code` scope), with both auth env vars correctly cleared.
+
+  - **Pin bumped to `2.1.215`** (Remote Control needs `>= 2.1.206`). The pin is a
+    hard floor: `DISABLE_AUTOUPDATER=1` plus the entrypoint's `.autoUpdates = false`
+    patch mean a container can never update itself off it.
+  - **Entrypoint capability probe** — an interactive start with `--remote-control`
+    now greps the real `claude --help`. If the flag doesn't exist, it explains that
+    claude eats unknown flags silently and that a rebuild is the fix, instead of
+    letting RC fail invisibly. The #16 token-scope hint is kept as the second check,
+    now correctly ordered behind this one.
+  - **`dridock checkversion` reports the baked Claude Code CLI version** and warns
+    when it is below `CB_CLAUDE_CLI_FLOOR` (2.1.206). The CLI version is a second
+    version axis, independent of the harness semver, and nothing surfaced it before —
+    which is why a 92-release-stale CLI went unnoticed.
+
+### Docs
+
+- `docs/design/git-and-api-auth.md` — new "Remote Control prerequisite: the baked CLI
+  version" section, placed **before** the auth troubleshooting so the cheap check comes
+  first. Corrected the credential path: full-scope logins land in
+  `~/.claude/.credentials.json` (mode 0600), **not** `.claude.json`. Documented the
+  container-specific "paste the code" OAuth fallback (the browser can't reach claude's
+  local callback server from inside a container).
+
 ## [3.0.2] — 2026-07-20 _(fork)_
 
 ### Fixed
