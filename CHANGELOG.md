@@ -26,17 +26,39 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
-## [Unreleased — 3.0.0-dev] _(fork)_
+## [3.0.0] — 2026-07-20 _(fork)_
 
-The `3.0-bundle` (issues [#11](https://github.com/aberezin/docker-claudebox/issues/11)
-dridock rebrand, [#1](https://github.com/aberezin/docker-claudebox/issues/1) unify
-command surfaces, [#5](https://github.com/aberezin/docker-claudebox/issues/5) features
-system, [#10](https://github.com/aberezin/docker-claudebox/issues/10) auth split) is
-in-flight as of 2026-07-19. See [`docs/design/3.0-migration.md`](docs/design/3.0-migration.md)
-for the migration guide + decision record.
+The coordinated `3.0-bundle` — four breaking-ish issues bundled as one
+migration so users pay the reindex cost once. All four shipped in-master
+between 2026-07-19 and 2026-07-20; see the per-issue subsections below and
+the full [3.0 migration guide](docs/design/3.0-migration.md).
 
-VERSION file stays at 2.24.0 during 3.0-dev; bumps to 3.0.0 at the final commit of the
-bundle. Entries below are appended per phase / per issue as they land.
+**Breaking / behavioral (all have backward-compat aliases for one deprecation
+cycle — removed in 4.0):**
+- Fork renamed `claudebox` → `dridock`. Wrapper binary, image tag/label
+  (`dridock:latest`, `org.dridock.version`), env-var prefix (`DRIDOCK_*`),
+  project dir (`.dridock/`), per-project data dir
+  (`~/.config/dridock/projects/`), skill dir (`~/.claude/skills/dridock/`,
+  slash-command `/dridock`), profiles dir (`/usr/local/lib/dridock/…`), etc.
+  2.x names accepted throughout for one cycle. The `cb-*` container helper
+  prefix is KEPT (descriptive "container binary," not the brand).
+- `.dridock/config.yml` `features: [...]` replaces `profiles: [...]`.
+- Entrypoint no longer runs `gh auth setup-git` — the credential-helper
+  hijack root cause is gone. Git-over-HTTPS falls through to SSH; users
+  whose `origin` was HTTPS-only must switch it to SSH or install their own
+  helper.
+- `bootstrap --gh-token` deprecated in favor of provider-agnostic
+  `bootstrap --seed-secret KEY=CMD`.
+- Baked in-container `/usr/local/bin/dridock` shim unifies the command
+  surface — routes container-side verbs to `cb-*`, prints a targeted
+  "run on the Mac" for host-only ones.
+- Auto-migration: first `dridock` in a `.claudebox/`-only workspace
+  migrates it silently (opt out with `DRIDOCK_NO_AUTO_MIGRATE=1`).
+  `dridock migrate [--all]` verb for supervised / bulk migration.
+
+**Upgrade path:** `git pull && ./install.sh` on the Mac. First `dridock` in
+each existing project auto-migrates. `dridock migrate --all` pre-sweeps
+every legacy project data dir under `~/.config/claudebox/projects/`.
 
 ### [#5 — features system (MVP)]
 
