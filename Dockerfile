@@ -223,7 +223,12 @@ RUN curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm
 # and pyright (Python; provides pyright-langserver). Heavy/niche servers stay per-profile.
 RUN npm install -g eslint prettier typescript typescript-language-server pyright ts-node @typescript-eslint/parser @typescript-eslint/eslint-plugin
 RUN npm install -g nodemon pm2 yarn pnpm
-RUN npm install -g create-react-app @vue/cli @angular/cli express-generator
+# Framework scaffolders moved to opt-in `web-scaffolders` feature in 3.2.0 (#14):
+# `create-react-app` was deprecated by React in early 2023; `@vue/cli` / `@angular/cli`
+# / `express-generator` are niche enough that most projects don't need them baked.
+# Enable per-project with `dridock features enable web-scaffolders`. See
+# features/web-scaffolders/manifest.yml for the current tool list (includes
+# create-vite + create-next-app as the modern CRA replacements).
 RUN npm install -g newman http-server serve lighthouse @storybook/cli
 
 # pyenv + python 3.12.11 (system-wide)

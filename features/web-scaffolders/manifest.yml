@@ -1,0 +1,7 @@
+name: web-scaffolders
+description: framework-scaffolder CLIs for JS/TS web projects — `create-vite` and `create-next-app` (the modern replacements for the deprecated `create-react-app`), plus `@vue/cli`, `@angular/cli`, and `express-generator`. These were baked in every image in 2.x/3.0/3.1 (upstream heritage); moved to this opt-in feature in 3.2.0 (#14) because most projects don't touch them.
+requires-bake: false
+# Runtime-installed via npm — a few seconds per package on first enable. Setting
+# `requires-bake: true` would preserve the old baked-in behavior for these tools,
+# but the 3.0 MVP doesn't iterate bake.sh yet, and every-project payload is exactly
+# what #14 was arguing against.

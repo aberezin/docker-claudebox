@@ -26,6 +26,38 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.2.0] — 2026-07-20 _(fork)_
+
+### Changed
+
+- **`create-react-app` is no longer baked into the `full` image, and the other
+  framework scaffolders (`@vue/cli`, `@angular/cli`, `express-generator`) moved
+  to a new opt-in `web-scaffolders` feature** (#14). CRA was deprecated by
+  React in early 2023; keeping it baked shipped obsolete tooling to every
+  claudebot. The other framework CLIs are niche enough that most projects
+  don't need them baked. Anyone who wants them:
+
+  ```bash
+  dridock features enable web-scaffolders
+  ```
+
+  installs `create-vite`, `create-next-app` (the modern CRA replacements),
+  `@vue/cli`, `@angular/cli`, and `express-generator` on the next boot.
+  Off with `dridock features disable web-scaffolders`.
+
+  **Not moved** (still baked, broadly useful across JS/TS projects): `eslint`,
+  `prettier`, `typescript`, `typescript-language-server`, `pyright`, `ts-node`,
+  `@typescript-eslint/parser`, `@typescript-eslint/eslint-plugin`, `nodemon`,
+  `pm2`, `yarn`, `pnpm`, `newman`, `http-server`, `serve`, `lighthouse`,
+  `@storybook/cli`. Second non-LSP feature to ship under 3.0's features
+  system (`modeguard` was the first).
+
+  **User-visible break**: if a project's `~/.claude/init.d/` hook or claudebot
+  workflow assumes any of the moved tools are on PATH, either enable
+  `web-scaffolders` in that project's `.dridock/config.yml` or `npm install -g`
+  the specific tool in the hook. CRA specifically has no baked replacement —
+  use `npx create-vite` or `npx create-next-app` instead (recommended by React).
+
 ## [3.1.0] — 2026-07-20 _(fork)_
 
 ### Security
