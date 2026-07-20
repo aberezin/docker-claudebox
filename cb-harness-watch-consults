@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # summary: framework-dev: watch cross-project awaiting-framework consults + new unreviewed bugs
-# cb-harness-watch-consults — the in-container mirror of host `claudebox consult watch`,
+# cb-harness-watch-consults — the in-container mirror of host `dridock consult watch`,
 # but scoped to framework-dev needs: wake on any cross-project consult entering
 # awaiting-framework, or any new framework-bug report landing in the drop dir. Run as a
 # BACKGROUND task from a framework-dev claudebot; the harness re-invokes you on exit

@@ -46,6 +46,31 @@ orchestrator that manages VMs/containers). Inside the container the claudebot ha
 `claude`, the docker socket, and these `cb-*` commands. So container-side convenience
 belongs in `cb-*`, and host-side convenience belongs in `dridock <subcommand>`.
 
+## Unified surface (`dridock <verb>` alias, #1)
+
+3.0 bakes a **`/usr/local/bin/dridock`** shim in the container that unifies the
+command surface across the host↔container boundary. From either side, the user types
+`dridock <verb>` and gets the right behavior:
+
+- **Container-side verbs** (`consult`, `report-bug`, `browser`, `df`, `help`) route to
+  their `cb-*` implementation — `dridock consult read <id>` runs the same code as
+  `cb-consult read <id>`. Both names work; `cb-*` remains canonical (referenced in
+  header comments, help text, and docs). The alias is for reflex-consistency: the
+  same verb the user types on the Mac works here.
+- **Host-only verbs** (`start`, `stop`, `vm`, `ip`, `net`, `bootstrap`, `migrate`,
+  `checkversion`, …) print a targeted "run this on your Mac" message with the exact
+  incantation (`cd <DRIDOCK_WORKSPACE> && dridock <verb>`) rather than a generic
+  "unknown command" — so the claudebot immediately knows WHY it didn't work and
+  WHERE to run it. Exit status 2.
+- **Unknown verbs** exit 1 with a hint to run `dridock help`.
+
+The container also carries a **`/usr/local/bin/claudebox`** symlink pointing at
+`dridock`, so 2.x muscle memory still works for one deprecation cycle.
+
+`cb-help` lists the `cb-*` set (unchanged); `dridock help` inside the container adds
+the host-side verbs with a "run on Mac" marker, giving a single reference for the
+full surface. Full split rationale: issue [#1](https://github.com/aberezin/docker-claudebox/issues/1).
+
 ## Surfacing it to the claudebot
 
 - The baked `CLAUDE.md` tells the claudebot that `cb-*` commands exist and to run

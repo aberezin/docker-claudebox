@@ -28,7 +28,7 @@ case "$use" in
     ''|*[!0-9]*) : ;;
     *) if [ "$use" -ge 85 ]; then
            echo "⚠️  / is ${use}% full — reclaim now: docker builder prune -f ; docker image prune -af"
-           echo "    host-side, the human can run: claudebox vm gc"
+           echo "    host-side, the human can run: dridock vm gc"
        else
            echo "reclaim: docker builder prune -f (cache) · docker image prune -af (unused images)"
        fi ;;

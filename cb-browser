@@ -43,7 +43,7 @@ usage:
                                           from your Mac at http://<project-vm-ip>:<port> (default $WATCH_PORT)
   cb-browser watch-stop                   stop the watch browser
   cb-browser cdp <url> [out-dir]          drive the HUMAN's real Chrome (opt-in) to <url> via the CDP bridge
-                                          — requires 'claudebox browser-bridge up' on the Mac first.
+                                          — requires 'dridock browser-bridge up' on the Mac first.
                                           <url> must be reachable FROM THE MAC (VM IP / localhost), NOT a
                                           cb-net container name — the Mac's Chrome can't resolve those.
                                           For cb-net / in-VM targets (incl. their websockets) use shot/script.
@@ -87,7 +87,7 @@ _cdp_ensure_page() {
        || curl -sf --max-time 3      "$_base/json/new?about:blank" >/dev/null 2>&1; then
         echo "cb-browser: warmed empty debug Chrome with about:blank (Playwright connectOverCDP requires a page target)" >&2
     else
-        echo "cb-browser: WARNING debug Chrome has 0 page targets and warm-up (/json/new) failed — connectOverCDP will likely fail with 'Browser.setDownloadBehavior: not supported'. Check 'claudebox browser-bridge up' on the Mac." >&2
+        echo "cb-browser: WARNING debug Chrome has 0 page targets and warm-up (/json/new) failed — connectOverCDP will likely fail with 'Browser.setDownloadBehavior: not supported'. Check 'dridock browser-bridge up' on the Mac." >&2
     fi
 }
 
@@ -99,7 +99,7 @@ case "$cmd" in
   ip)
     ip="$(_vm_ip)"
     if [ -n "$ip" ]; then echo "$ip"; else
-      echo "cb-browser: VM IP unknown (CLAUDEBOX_VM_IP unset). Restart this session so the wrapper re-injects it; on the Mac 'claudebox ip' prints it." >&2; exit 1
+      echo "cb-browser: VM IP unknown (CLAUDEBOX_VM_IP unset). Restart this session so the wrapper re-injects it; on the Mac 'dridock ip' prints it." >&2; exit 1
     fi ;;
 
   shot)
@@ -154,7 +154,7 @@ RUNNER
   script-cdp)
     script="${1:-}"; [ -f "$script" ] || _usage; shift
     [ -n "${CLAUDEBOX_HOST_CDP_URL:-}" ] || {
-        echo "cb-browser script-cdp: no host CDP bridge. On the Mac run 'claudebox browser-bridge up', then restart this session." >&2; exit 1; }
+        echo "cb-browser script-cdp: no host CDP bridge. On the Mac run 'dridock browser-bridge up', then restart this session." >&2; exit 1; }
     sdir="$(cd "$(dirname "$script")" && pwd)"; sfile="$(basename "$script")"
     outdir="${CB_BROWSER_OUT:-$PWD/cb-browser-out}"; mkdir -p "$outdir"
     # Snapshot page-target ids BEFORE the script runs; on exit, close any page targets
@@ -177,7 +177,7 @@ RUNNER
       _post="$(curl -sf --max-time 3 "$_cdp_base/json/list" 2>/dev/null \
           | (jq -r '.[] | select(.type=="page") | .id' 2>/dev/null || true))"
       if [ -z "${_post:-}" ]; then
-        echo "cb-browser script-cdp: cleanup skipped (CDP bridge unreachable — check 'claudebox browser-bridge up' on the Mac)" >&2
+        echo "cb-browser script-cdp: cleanup skipped (CDP bridge unreachable — check 'dridock browser-bridge up' on the Mac)" >&2
         return 0
       fi
       _new="$(comm -23 <(printf '%s\n' "$_post" | sort -u) <(printf '%s\n' "$_pre" | sort -u))"
@@ -232,7 +232,7 @@ RUNNER
   cdp)
     url="${1:-}"; [ -n "$url" ] || _usage
     [ -n "${CLAUDEBOX_HOST_CDP_URL:-}" ] || {
-        echo "cb-browser: no host CDP bridge. On the Mac run 'claudebox browser-bridge up', then restart this session." >&2; exit 1; }
+        echo "cb-browser: no host CDP bridge. On the Mac run 'dridock browser-bridge up', then restart this session." >&2; exit 1; }
     # The browser is the human's Chrome, ON THE MAC. It cannot reach your workload via
     # localhost/127.0.0.1 (that's the Mac's own loopback, not this VM) — only via the
     # VM's reachable IP. Auto-rewrite so the claudebot doesn't burn cycles rediscovering

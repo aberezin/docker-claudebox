@@ -348,6 +348,11 @@ outside the workspace and `~/.claude`. After a rebuild/recreate they're gone.
   one-line summaries (e.g. `cb-browser`, `cb-report-bug`). Baked ones live in
   /usr/local/bin; you can add your own as `~/.claude/bin/cb-<name>` (in PATH) — give it a
   `# summary: ...` header line so `cb-help` describes it.
+- The same surface is available as **`dridock <verb>`** — a baked shim aliases
+  `dridock consult|report-bug|browser|df` to their `cb-*` implementations, and
+  prints a targeted "run this on your Mac" message for host-only verbs
+  (start/stop/vm/ip/net/bootstrap/…). `dridock help` in-container shows both sides;
+  `cb-*` remains canonical. Type whichever feels natural.
 - ~/.claude/bin is in PATH — custom scripts placed here by the user are available to you
 - ~/.claude/init.d/*.sh scripts run once on first container create (not on subsequent starts)
 - Extra host directories may be mounted via DRIDOCK_MOUNT_* env vars (legacy CLAUDEBOX_MOUNT_* still accepted) — check what's available if you need files outside the workspace

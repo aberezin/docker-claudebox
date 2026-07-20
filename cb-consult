@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # summary: open/continue a supervised consult with framework-Claude about a FRAMEWORK best practice
-# cb-consult — escalate a claudebox FRAMEWORK / environment problem to framework-Claude
+# cb-consult — escalate a dridock FRAMEWORK / environment problem to framework-Claude
 # (the Claude working on the harness on the Mac), under the human's supervision. Use this
 # when a problem is (a) about the harness/environment — wrapper, entrypoint, image,
 # Colima/Docker networking, the cb-* tooling — NOT your app's own logic, AND (b) would
-# recur in ANY claudebox project (a general engineering concern), AND (c) isn't already
+# recur in ANY dridock project (a general engineering concern), AND (c) isn't already
 # covered by your baked CLAUDE.md guidance/docs. For a concrete DEFECT (vs a "what's the
 # right pattern" question), use cb-report-bug instead. See docs/design/framework-consult.md.
 #
@@ -14,7 +14,7 @@
 #   ## Problem
 #   My browser tier is blocked by CORS/allowed-origins whenever the VM IP rotates.
 #   ## Why it's general
-#   Any N-tier claudebox app has a browser tier addressing services by the (rotating) VM IP.
+#   Any N-tier dridock app has a browser tier addressing services by the (rotating) VM IP.
 #   ## What I tried
 #   Hardcoded the IP in next.config.ts allowedDevOrigins; broke on the next restart.
 #   EOF
@@ -39,7 +39,7 @@ usage:
                                add a turn with an explicit author + optional status change
                                (body on stdin). Framework-dev: replaces the direct-file-write
                                + sed-meta pattern for framework-Claude replies. Same as
-                               \`claudebox consult post\` on the host.
+                               \`dridock consult post\` on the host.
   cb-consult read <id>         print the thread (framework-Claude's reply shows here once the human approves it)
   cb-consult list [--all]      this project's consults + status; --all = every project (framework-dev)
   cb-consult watch [secs]      block until a reply lands / a thread changes, print it, exit
@@ -101,7 +101,7 @@ case "$cmd" in
     esac; shift; done
     [ -n "$title" ] || usage
     if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then
-        echo "cb-consult: consult dir unavailable ($DIR). Is this an up-to-date claudebox? Falling back to cb-report-bug is an option." >&2; exit 1; fi
+        echo "cb-consult: consult dir unavailable ($DIR). Is this an up-to-date dridock harness? Falling back to cb-report-bug is an option." >&2; exit 1; fi
     slug="$(printf '%s' "$title" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' | cut -c1-40)"
     id="$(_ts)-${PID}"; td="$DIR/$id"
     mkdir -p "$td"

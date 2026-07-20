@@ -38,6 +38,20 @@ for the migration guide + decision record.
 VERSION file stays at 2.24.0 during 3.0-dev; bumps to 3.0.0 at the final commit of the
 bundle. Entries below are appended per phase / per issue as they land.
 
+### [#1 — unify host↔container command surface]
+
+- **Landed (2026-07-20)**: baked `/usr/local/bin/dridock` shim in the
+  image (route: `dridock consult|report-bug|browser|df|help` → the same
+  `cb-*` implementation; host-only verbs like `start|stop|vm|ip|net|
+  bootstrap|migrate|checkversion|…` exit 2 with a targeted "run this on
+  your Mac: `cd $DRIDOCK_WORKSPACE && dridock <verb>`" message instead
+  of a generic "unknown command"). Both names work everywhere; `cb-*`
+  stays canonical (referenced in help/docs/headers), `dridock <verb>` is
+  the reflex-consistent alias with the host CLI. Also bakes a
+  `/usr/local/bin/claudebox → dridock` symlink for one deprecation cycle
+  (2.x binary-name muscle memory). `cb-help` mentions the unified alias;
+  docs/design/convenience-scripts.md updated with the split rationale.
+
 ### [#10 — split git-vs-API auth]
 
 - **Follow-up (2026-07-20)**: fresh-container SSH host-key verification.

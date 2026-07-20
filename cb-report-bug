@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# summary: file a bug report about the claudebox FRAMEWORK (not your project) to the host
+# summary: file a bug report about the dridock FRAMEWORK (not your project) to the host
 # cb-report-bug — file a report about a suspected bug in the CLAUDEBOX FRAMEWORK
 # (the wrapper / entrypoint / image / networking that runs you), NOT a bug in the
 # project you are building. Reports are written to a shared, host-visible drop dir
 # mounted into every container, so the maintainer collects them across all projects
-# with `claudebox framework-bugs` on the Mac.
+# with `dridock framework-bugs` on the Mac.
 #
 # The detailed body is read from --body-file or stdin (a heredoc is ideal). Use the
 # template the baked CLAUDE.md describes: what you were doing, expected vs actual,
@@ -106,8 +106,8 @@ fi
 # mount isn't present (older host wrapper, or the mount failed).
 APPEND=""
 if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then
-    echo "cb-report-bug: shared report dir unavailable ($DIR); falling back to ./.claudebox/FRAMEWORK-BUGS.md" >&2
-    DIR="$(pwd)/.claudebox"; mkdir -p "$DIR"
+    echo "cb-report-bug: shared report dir unavailable ($DIR); falling back to ./.dridock/FRAMEWORK-BUGS.md" >&2
+    DIR="$(pwd)/.dridock"; mkdir -p "$DIR"
     OUT="$DIR/FRAMEWORK-BUGS.md"; APPEND=1
 fi
 

@@ -95,12 +95,18 @@ COPY entrypoint.sh api_server.py telegram_bot.py telegram_utils.py cron.py jsonp
 COPY CHANGELOG.md /h/home/
 COPY cb-browser cb-report-bug cb-consult cb-df cb-help cb-harness-watch-consults /h/bin/
 COPY cb-host-shim /h/bin/colima
+# Unified command surface (#1, 3.0): baked in-container `dridock` shim that
+# routes container-side verbs to their cb-* implementation and prints a
+# targeted "run on the Mac" message for host-only verbs. `claudebox` stays
+# as a symlink for one deprecation cycle (2.x binary name).
+COPY dridock /h/bin/dridock
 # Profile installers: named tool bundles a project opts into (.dridock config
 # `profiles:`); the entrypoint runs the matching one on first enable. See
 # docs/design/profiles.md.
 COPY profiles/ /h/profiles/
 RUN chmod +x /h/home/entrypoint.sh /h/bin/* /h/profiles/*.sh \
-    && ln -sf colima /h/bin/limactl   # host-agent shim proxies both (Approach 2 / #15)
+    && ln -sf colima /h/bin/limactl \
+    && ln -sf dridock /h/bin/claudebox  # 2.x binary-name compat (one deprecation cycle)
 
 # ── harness install (shared tail) ────────────────────────────────────────────────
 # Applied identically at the end of BOTH variants (minimal + full). Dockerfile has no

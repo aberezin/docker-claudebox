@@ -2,16 +2,16 @@
 # summary: (internal) proxy a host-only command (colima/limactl) to the Mac host agent
 # cb-host-shim — baked onto the container PATH as `colima` and `limactl`. When a claudebot is
 # developing THIS harness inside a container, the framework's `colima …`/`limactl …` calls land
-# here and are proxied to the Mac's `claudebox host-agent` (Approach 2, task #15). Off unless the
-# human ran `claudebox host-agent up` (opt-in, trusted dev only). See docs/design/backends.md.
+# here and are proxied to the Mac's `dridock host-agent` (Approach 2, task #15). Off unless the
+# human ran `dridock host-agent up` (opt-in, trusted dev only). See docs/design/backends.md.
 set -uo pipefail
 
 _cmd="$(basename "$0")"
 url="${CLAUDEBOX_HOST_AGENT_URL:-}"
 tok="${CLAUDEBOX_HOST_AGENT_TOKEN:-}"
 if [ -z "$url" ] || [ -z "$tok" ]; then
-    echo "$_cmd: claudebox host agent not available — this is a shim that proxies to the Mac." >&2
-    echo "  Enable it on the Mac (opt-in, trusted harness-dev only):  claudebox host-agent up" >&2
+    echo "$_cmd: dridock host agent not available — this is a shim that proxies to the Mac." >&2
+    echo "  Enable it on the Mac (opt-in, trusted harness-dev only):  dridock host-agent up" >&2
     echo "  then restart this session so the agent URL/token are injected." >&2
     exit 70
 fi

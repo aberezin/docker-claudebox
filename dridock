@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# summary: the same `dridock <verb>` surface as the host wrapper — routes container-side verbs to cb-*, errors clearly for host-only ones
+#
+# Baked in-container shim (#1). Lets a claudebot use ONE command name — `dridock` —
+# regardless of whether it's typing verbs the container can serve (consult, report-bug,
+# browser, df) or verbs only the host wrapper handles (start, stop, vm, ip, net,
+# bootstrap, migrate, checkversion, …). Container-side verbs delegate to their existing
+# `cb-*` implementations. Host-side verbs print a specific "run on the Mac" message
+# rather than a generic "unknown command" — so a claudebot immediately knows WHY it
+# didn't work and WHERE to run it.
+#
+# The `cb-*` names remain the canonical implementations (see
+# docs/design/convenience-scripts.md); `dridock <verb>` is a THIN ALIAS that unifies
+# the command surface across the host↔container boundary.
+
+set -uo pipefail
+
+_die()  { printf '%s\n' "$*" >&2; exit 1; }
+_host() {
+    # Called for verbs the host wrapper handles. Prints a targeted message; does not
+    # attempt to forward to the host (docker socket exists, but we deliberately don't
+    # cross-run the wrapper — same reasoning as `cb-host-shim`'s allowlisted scope).
+    local verb="$1" ws="${DRIDOCK_WORKSPACE:-<your project dir>}"
+    printf '❌ dridock %s: this is a HOST command — run it on your Mac, not inside the container.\n' "$verb" >&2
+    printf '   From your Mac terminal:  cd %s && dridock %s\n' "$ws" "$verb" >&2
+    printf "   (Inside the container, use 'dridock help' to see what IS runnable here.)\\n" >&2
+    exit 2
+}
+
+_help() {
+    cat <<'HELP'
+dridock — the harness's unified command surface (this is the in-container `dridock`).
+
+CONTAINER-SIDE (runnable here; these delegate to their `cb-*` implementation):
+  dridock consult <verb>          open/read/say/list/watch/resolve a framework consult (cb-consult)
+  dridock report-bug "<title>"    file a framework bug report from claudebot (cb-report-bug)
+  dridock browser <sub>           browser-test a workload (cb-browser: shot|script|watch|cdp)
+  dridock df                      VM disk snapshot (cb-df)
+  dridock help | --help | -h      this help
+
+HOST-SIDE (run these on your Mac; not runnable here — the wrapper needs Colima/docker-context):
+  dridock start | stop | down | destroy   claudebot lifecycle for a project
+  dridock bootstrap [...]                 scaffold a new project + mission brief
+  dridock migrate [--all]                 3.0 workspace/data-dir migration
+  dridock info | status                   project versions/paths/VM/network
+  dridock vm ls | usage | gc              inventory / disk / reclaim across all project VMs
+  dridock ip | net [<hostname>]           the project VM's reachable IP + /etc/hosts helper
+  dridock profiles                        list this project's enabled + available profiles
+  dridock checkversion [--all]            wrapper↔image drift check
+  dridock browser-bridge up|down          opt-in CDP bridge to your real Chrome
+  dridock host-agent up|down|status       opt-in colima/limactl proxy for framework-dev
+  dridock harness <verb>                  framework-dev only (sync [--repair])
+  dridock framework-bugs [list|clear]     review bugs claudebots filed with cb-report-bug
+  dridock consult <verb> (host role)      approve/reject/post — supervised threads (also container-visible)
+  dridock version                         wrapper semver
+  dridock -v | --version | doctor | auth | mcp    passthrough to the Claude CLI
+
+The `cb-*` names remain the canonical implementations — `dridock <verb>` is a thin
+alias. Either works; the alias is for reflex-consistency with the host command surface.
+Full list of `cb-*` helpers: run `cb-help`.
+HELP
+}
+
+case "${1:-}" in
+    # ── container-side verbs: delegate to their cb-* implementation ───────────
+    consult)          shift; exec cb-consult "$@" ;;
+    report-bug)       shift; exec cb-report-bug "$@" ;;
+    browser)          shift; exec cb-browser "$@" ;;
+    df)               shift; exec cb-df "$@" ;;
+    help|--help|-h)   _help ;;
+    "")               _help ;;
+
+    # ── host-side verbs: not runnable here, print a targeted message ──────────
+    start|stop|down|destroy|bootstrap|migrate|info|status|vm|ip|net|profiles|\
+    checkversion|browser-bridge|host-agent|harness|framework-bugs|version|\
+    setup-token|clear-session|claude-dir|completion|-v|--version|doctor|auth|mcp)
+        _host "$1" ;;
+
+    # ── unknown ───────────────────────────────────────────────────────────────
+    *) _die "dridock: unknown verb '$1' (try: dridock help)" ;;
+esac

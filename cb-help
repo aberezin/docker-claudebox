@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# summary: list the claudebox convenience commands (cb-*) available in this container
+# summary: list the dridock convenience commands (cb-*) available in this container
 #
-# Convention (see docs/design/convenience-scripts.md): every claudebox convenience
+# Convention (see docs/design/convenience-scripts.md): every dridock convenience
 # command is an executable named `cb-<name>` on PATH, carrying a one-line
 # `# summary: ...` header. Baked/shipped ones live in /usr/local/bin; per-project or
 # ad-hoc ones go in ~/.claude/bin (also on PATH, and it survives across rebuilds).
 # `cb-help` just discovers and lists them, so the set is self-describing as it grows.
+#
+# 3.0 (#1) also bakes a `dridock` shim in the container that unifies the command
+# surface across host↔container: `dridock consult ...` = `cb-consult ...` (and same
+# for report-bug, browser, df). Either name works; cb-* stay canonical.
 set -uo pipefail
 
-echo "claudebox convenience commands (cb-*):"
+echo "dridock convenience commands (cb-*):"
 {
     IFS=: read -ra _dirs <<<"$PATH"
     for _d in "${_dirs[@]}"; do
@@ -25,3 +29,5 @@ echo "claudebox convenience commands (cb-*):"
 echo ""
 echo "  details: '<cmd> --help' or read its header comment."
 echo "  add your own: put an executable ~/.claude/bin/cb-<name> with a '# summary:' line (it's on PATH)."
+echo ""
+echo "  same surface via 'dridock <verb>' (unified with the host CLI): try 'dridock help'."
