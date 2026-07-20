@@ -609,11 +609,33 @@ fi
 # Read with plain `export "$name=$value"` — no printf %q, no eval — so a value containing
 # shell metacharacters is data, never code.
 _load_env_sidecar() {   # $1 = sidecar suffix, $2 = debug label
-	local f="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-$1" name value
+	local f="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-$1" line name value
 	[ -f "$f" ] || return 0
 	dbg "$2 sidecar: $f"
-	while IFS='=' read -r name value; do
-		case "$name" in ''|\#*) continue ;; esac
+	# Parse KEY=VALUE tolerantly. These files are copied verbatim from a HAND-EDITABLE
+	# host file (.dridock/secrets.env), so they pick up human formatting: `KEY = value`,
+	# a stray space after `=`, CRLF from an editor, a trailing newline-less last line.
+	# The naive `IFS='=' read -r name value` kept every one of those characters, so
+	# `GH_TOKEN= ghp_x` exported a token with a LEADING SPACE — every API call rejected,
+	# with nothing anywhere saying why. Found in the wild during #17. Surrounding
+	# whitespace is never meaningful in a credential, so strip it on both halves.
+	while IFS= read -r line || [ -n "$line" ]; do
+		line="${line%$'\r'}"                              # tolerate CRLF-saved files
+		case "$line" in ''|'#'*) continue ;; esac
+		case "$line" in *=*) ;; *) continue ;; esac       # not a KEY=VALUE line
+		name="${line%%=*}"; value="${line#*=}"            # split on the FIRST = only
+		name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"
+		value="${value#"${value%%[![:space:]]*}"}"; value="${value%"${value##*[![:space:]]}"}"
+		# A name that isn't a shell identifier would make `export` fail (or worse, be
+		# reinterpreted). Skip it loudly rather than half-applying the file.
+		# NB: validate by EXCLUSION. `[A-Za-z_][A-Za-z0-9_]*` looks right but is a glob,
+		# not a regex — `[...]` matches exactly one character and the trailing `*` is
+		# "anything", so it demands a name of length >= 2 (rejecting `A`) while happily
+		# accepting `A-B`. Wrong in both directions.
+		case "$name" in
+			''|[0-9]*)        echo "dridock: ignoring malformed entry in $(basename "$f"): '${name}'" >&2; continue ;;
+			*[!A-Za-z0-9_]*)  echo "dridock: ignoring malformed entry in $(basename "$f"): '${name}'" >&2; continue ;;
+		esac
 		if [ -n "$value" ]; then
 			dbg "$2: loading $name"
 			export "$name=$value"

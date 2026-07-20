@@ -71,6 +71,25 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   containing `$ ; &` and spaces arrives verbatim, an empty sidecar entry still unsets, and
   the canary is absent from `/proc/1/cmdline` read as an unprivileged `nobody`.
 
+### Fixed
+
+- **`KEY= value` in a sidecar exported a value with a leading space.** The loader split on
+  `=` and kept every surrounding character, so one stray space after the `=` in a
+  hand-edited `secrets.env` produced `GH_TOKEN=" ghp_…"` — every GitHub API call from that
+  claudebot rejected, with nothing in any log explaining why. Found in the wild while
+  cleaning up after the leak above: one project had been silently failing this way.
+  `_load_env_sidecar()` now trims whitespace around both name and value, tolerates CRLF
+  files and a final line with no newline, still splits on the FIRST `=` only (so
+  `URL=https://u:p@h/x?a=b&c=d` survives intact), and skips names that aren't valid shell
+  identifiers with a visible warning instead of letting `export` fail obscurely. Covered by
+  executable tests that lift the real function out of `entrypoint.sh` and run it.
+
+- **`dridock bootstrap` printed "▶ starting claudebot…" and then started nothing.** It
+  re-entered the wrapper as `exec "$0"`, and bare `dridock` has printed a banner and exited
+  since #12 / 2.24.0. Now `exec "$0" start`; the companion "enter later with" hint was
+  wrong the same way. A test forbids verb-less self re-entry. (Seventh site of this class,
+  after the six corrected in 3.0.3.)
+
   **Rotate any credential used with an earlier version** — assume prior `secrets.env`
   values were exposed to anything that ran `ps` on the Mac or in the container.
 

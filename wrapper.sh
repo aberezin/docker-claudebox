@@ -2534,9 +2534,12 @@ HELP
         fi
         if [ -n "$_bs_start" ]; then
             echo "  ▶ starting claudebot…"
-            exec "$0"   # re-enter the wrapper normally → boots the VM + claudebot with the brief
+            # `start` is REQUIRED: bare `$0` has printed a version banner and exited since
+            # #12 / 2.24.0, so this re-entry silently started nothing while announcing that
+            # it had. Any self re-entry that means "launch" must name the verb.
+            exec "$0" start   # re-enter the wrapper → boots the VM + claudebot with the brief
         fi
-        echo "  (not started) enter later with:  cd $(printf '%q' "$PWD") && dridock"
+        echo "  (not started) enter later with:  cd $(printf '%q' "$PWD") && dridock start"
         exit 0
         ;;
 esac

@@ -114,7 +114,9 @@ if grep -q '_load_env_sidecar cdp' "$ENTRYP"; then ok "entrypoint re-reads the -
 if grep -q 'f="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-\$1"' "$ENTRYP"; then
     ok "sidecar loader builds the .<container>-<suffix> name"
 else bad "sidecar loader no longer builds the wrapper's sidecar name (cross-file contract broken)"; fi
-if grep -A16 '^_load_env_sidecar()' "$ENTRYP" | grep -q 'unset "\$name"'; then
+# extract the whole function body by range — a fixed `grep -A<n>` window silently stops
+# asserting as soon as the function grows past it
+if sed -n '/^_load_env_sidecar()/,/^}/p' "$ENTRYP" | grep -q 'unset "\$name"'; then
     ok "sidecar loader unsets on empty value"
 else bad "sidecar loader does not unset on empty (stale url/ip/token would linger)"; fi
 # SECURITY (#17 follow-up): secret VALUES must never enter the CMD string — it becomes
@@ -136,6 +138,43 @@ else ok "wrapper forwards project secrets by sidecar only"; fi
 # path in argv is fine) but still never -e with a value.
 if grep -q 'cb_mktemp_envfile' "$WRAPPER"; then ok "passthrough uses --env-file (path, not value, in argv)"
 else bad "passthrough lost its --env-file credential channel"; fi
+
+# `dridock bootstrap` re-enters the wrapper to launch. Bare `$0` has printed a banner and
+# exited since #12 / 2.24.0, so a bare re-entry announces "starting claudebot" and starts
+# nothing. Any self re-entry must name the verb.
+if grep -qE 'exec "\$0"[[:space:]]*($|#)' "$WRAPPER"; then
+    bad "wrapper re-enters itself with no verb (bare \$0 just prints a banner and exits)"
+else ok "self re-entry names a verb (bootstrap actually launches)"; fi
+
+echo "--- _load_env_sidecar parsing (sidecars are copied from a HAND-EDITED file) ---"
+# Executed, not grepped: lift the real function out of entrypoint.sh, point it at a temp
+# dir and run it. Regression for the wild bug found in #17 — `GH_TOKEN= <value>` (one
+# stray space after '=') exported a token with a LEADING SPACE, so every GitHub API call
+# from that claudebot failed with nothing anywhere explaining why.
+LOADER="$TMP/loader.sh"
+sed -n '/^_load_env_sidecar()/,/^}/p' "$ENTRYP" \
+  | sed 's|/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-\$1|${SIDEDIR}/.${CLAUDE_CONTAINER_NAME}-$1|' > "$LOADER"
+if [ ! -s "$LOADER" ]; then bad "could not extract _load_env_sidecar from entrypoint.sh"; else
+    SIDEDIR="$TMP/side"; mkdir -p "$SIDEDIR"
+    printf 'GH_TOKEN= ghp_lead\nA = both \nB=plain\nEMPTY=\nCRLF=crlfval\r\n# c\n\nNOEQ\nBAD-NAME=x\n9LEAD=y\nURL=https://u:p@h/x?a=b&c=d\nLAST=noeol' > "$SIDEDIR/.t-secrets"
+    _out="$(SIDEDIR="$SIDEDIR" bash -c '
+        dbg() { :; }; CLAUDE_CONTAINER_NAME=t
+        source "'"$LOADER"'"
+        export EMPTY=was_set
+        _load_env_sidecar secrets sec 2>/dev/null
+        printf "%s|%s|%s|%s|%s|%s|%s\n" "$GH_TOKEN" "$A" "$B" "$CRLF" "$LAST" "$URL" "${EMPTY-UNSET}"')"
+    eq "strips a stray space after '=' (the #17 bug)" "${_out%%|*}" "ghp_lead"
+    eq "trims both sides, and accepts 1-char names"  "$(echo "$_out" | cut -d'|' -f2)" "both"
+    eq "plain KEY=VALUE untouched"                   "$(echo "$_out" | cut -d'|' -f3)" "plain"
+    eq "tolerates CRLF line endings"                 "$(echo "$_out" | cut -d'|' -f4)" "crlfval"
+    eq "reads a final line with no newline"          "$(echo "$_out" | cut -d'|' -f5)" "noeol"
+    eq "splits on FIRST '=' only (url/query safe)"   "$(echo "$_out" | cut -d'|' -f6)" "https://u:p@h/x?a=b&c=d"
+    eq "empty value UNSETS (not set-to-empty)"       "$(echo "$_out" | cut -d'|' -f7)" "UNSET"
+    _warn="$(SIDEDIR="$SIDEDIR" bash -c '
+        dbg() { :; }; CLAUDE_CONTAINER_NAME=t
+        source "'"$LOADER"'"; _load_env_sidecar secrets sec 2>&1 >/dev/null' | grep -c 'malformed')"
+    eq "rejects invalid names (BAD-NAME, 9LEAD)" "$_warn" "2"
+fi
 # wrapper writes the sidecar unconditionally (mirror), so bridge-down -> empty on next run
 if grep -qE "printf '(DRIDOCK|CLAUDEBOX)_HOST_CDP_URL=%s\\\\n' \"\\\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
 
