@@ -38,6 +38,34 @@ for the migration guide + decision record.
 VERSION file stays at 2.24.0 during 3.0-dev; bumps to 3.0.0 at the final commit of the
 bundle. Entries below are appended per phase / per issue as they land.
 
+### [#5 — features system (MVP)]
+
+- **Landed (2026-07-20)**: `profiles:` → `features:` mechanism ship, backward-
+  compat preserved, no behavior changes. New file layout
+  `features/<name>/{manifest.yml, on.sh, off.sh}` (replaces flat
+  `profiles/<name>.sh`) baked at `/usr/local/lib/dridock/features/`. Existing
+  LSP bundles migrated: `go` / `python` / `typescript` — each declares
+  `requires-bake: true` in its manifest (metadata for now; language servers
+  are already baked as part of the toolchain install), gets an `off.sh` that
+  uninstalls the Claude plugin. Config key rename `profiles:` → `features:` in
+  `.dridock/config.yml`; both keys accepted for one deprecation cycle. New
+  host CLI `dridock features [list | enable <name> | disable <name> | info
+  <name>]` — `enable` rewrites the config's `features:` block (portable
+  temp-file rewrite, not sed -i); `disable` also clears the enable marker in
+  the project's data dir and best-effort runs `off.sh` in the running
+  container. `dridock profiles` remains as a legacy alias with a one-line
+  deprecation notice. Entrypoint reads new `~/.claude/.features` sidecar
+  first, `~/.claude/.profiles` as fallback; recognizes both `.feature-<name>`
+  and `.profile-<name>` enable markers so 2.x projects don't re-run
+  installers on 3.0's first boot. Container-side `dridock` shim (#1) knows
+  about the new `features` verb. Old `profiles/` source dir removed (replaced
+  by `features/`). CLI + config exercised end-to-end (enable, enable-again
+  idempotent, disable, legacy `profiles:` key read). Full design ADR in
+  [docs/design/features-system.md](docs/design/features-system.md); deferred
+  items listed there (machine-wide `default_features:`, project-local
+  `.dridock/features/`, converting SSH-git / browser-bridge / host-agent to
+  features).
+
 ### [#1 — unify host↔container command surface]
 
 - **Landed (2026-07-20)**: baked `/usr/local/bin/dridock` shim in the

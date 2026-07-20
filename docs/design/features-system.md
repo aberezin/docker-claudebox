@@ -1,8 +1,24 @@
-# Features system (design)
+# Features system
 
-**Status:** Draft / accepted direction for 3.0. Broadens the existing `profiles:` system.
-**Tracked in:** [Issue #5](https://github.com/aberezin/docker-claudebox/issues/5).
-**Written:** 2026-07-19. **Target:** 3.0 breaking migration (`3.0-bundle`).
+**Status:** **Shipped (MVP)** in 3.0-dev, 2026-07-20.
+**Tracked in:** [Issue #5](https://github.com/aberezin/docker-claudebox/issues/5) (closed).
+**Design written:** 2026-07-19. **Shipped in:** the `3.0-bundle`.
+
+> **What shipped:** the mechanism + backward-compat + the LSP migration. The
+> `features:` config key + `features/<name>/{manifest.yml, on.sh, off.sh}` layout
+> replaces `profiles:` (accepted as an alias for one deprecation cycle). Existing
+> LSP profiles (`go`, `python`, `typescript`) migrated with `off.sh` uninstalls added.
+> CLI: `dridock features [list | enable <n> | disable <n> | info <n>]`, with
+> `dridock profiles` as a legacy alias.
+>
+> **Deferred to 3.x follow-ups** (each will get its own issue): machine-wide
+> `default_features:`, project-local `.dridock/features/<name>/`, converting
+> `install.sh` SSH-key generation into an opt-out `ssh-git` feature, converting
+> `browser-bridge` / `host-agent` / `harness-dev` into features, `bake.sh` iteration
+> in the Dockerfile (`requires-bake: true` is currently a *declaration* — the 3 LSP
+> servers were already baked as part of the language toolchain install; no dedicated
+> bake step invoked). Each deferred item is a real design/behavior change that
+> deserves independent review rather than being bundled into the mechanism ship.
 
 ## Context
 

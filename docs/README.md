@@ -34,7 +34,8 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [per-project-vm.md](design/per-project-vm.md) | The core: one isolated Colima VM per project, identity, image seeding, VM lifecycle. |
 | [bootstrap.md](design/bootstrap.md) | `dridock bootstrap` — scaffolding a project + the durable `BRIEF.md`; secrets. |
 | [multi-repo-projects.md](design/multi-repo-projects.md) | One project/VM spanning several repos. |
-| [profiles.md](design/profiles.md) | Opt-in tool bundles (`profiles: [...]`) and the bake-vs-install policy. |
+| [features-system.md](design/features-system.md) | 3.0 (#5): opt-in bundles via `features: [...]` — manifest, on/off scripts, CLI. Supersedes profiles. |
+| [profiles.md](design/profiles.md) | Legacy 2.x profile system (superseded by features; kept for backward-compat read). |
 | [convenience-scripts.md](design/convenience-scripts.md) | The container-side `cb-*` command convention + `cb-help`. |
 | [browser-testing.md](design/browser-testing.md) | `cb-browser` (headless/noVNC) and the opt-in CDP bridge to your real Chrome. |
 | [n-tier-networking.md](design/n-tier-networking.md) | The standard for addressing/binding/CORS in multi-tier apps (service-name vs rotating VM IP). |

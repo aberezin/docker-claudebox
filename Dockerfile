@@ -86,9 +86,9 @@ WORKDIR /workspace
 # The staging layout mirrors the install destinations:
 #   /h/home     → /home/claude          (entrypoint, daemons, CHANGELOG)
 #   /h/bin      → /usr/local/bin         (cb-* helpers + the host-agent shim colima/limactl)
-#   /h/profiles → /usr/local/lib/dridock/profiles
+#   /h/features → /usr/local/lib/dridock/features   (3.0: superset of the 2.x /h/profiles)
 FROM ubuntu:24.04 AS harness
-RUN mkdir -p /h/home /h/bin /h/profiles
+RUN mkdir -p /h/home /h/bin /h/features
 COPY entrypoint.sh api_server.py telegram_bot.py telegram_utils.py cron.py jsonpipe.py /h/home/
 # Bake the harness changelog OUTSIDE the mount (/home/claude/.claude is shadowed) so
 # claudebot can read it; the entrypoint points claudebot here and flags version bumps.
@@ -100,11 +100,13 @@ COPY cb-host-shim /h/bin/colima
 # targeted "run on the Mac" message for host-only verbs. `claudebox` stays
 # as a symlink for one deprecation cycle (2.x binary name).
 COPY dridock /h/bin/dridock
-# Profile installers: named tool bundles a project opts into (.dridock config
-# `profiles:`); the entrypoint runs the matching one on first enable. See
-# docs/design/profiles.md.
-COPY profiles/ /h/profiles/
-RUN chmod +x /h/home/entrypoint.sh /h/bin/* /h/profiles/*.sh \
+# Features (3.0, #5, supersedes 2.x profiles/): named opt-in bundles a project enables
+# via .dridock/config.yml `features: [...]`. Each `features/<name>/` has manifest.yml,
+# on.sh (first-enable install), off.sh (disable teardown). The entrypoint runs on.sh
+# marker-guarded. `profiles:` is accepted as a config-key alias for one cycle. See
+# docs/design/features-system.md.
+COPY features/ /h/features/
+RUN chmod +x /h/home/entrypoint.sh /h/bin/* /h/features/*/on.sh /h/features/*/off.sh \
     && ln -sf colima /h/bin/limactl \
     && ln -sf dridock /h/bin/claudebox  # 2.x binary-name compat (one deprecation cycle)
 
@@ -119,7 +121,7 @@ FROM base AS minimal
 ENV DRIDOCK_IMAGE_VARIANT=minimal
 COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
-COPY --from=harness /h/profiles/ /usr/local/lib/dridock/profiles/
+COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION
@@ -241,7 +243,7 @@ RUN pip install --no-cache-dir pipenv poetry
 # harness install (shared tail — keep in sync with the minimal variant above)
 COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
-COPY --from=harness /h/profiles/ /usr/local/lib/dridock/profiles/
+COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION

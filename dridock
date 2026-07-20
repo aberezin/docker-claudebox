@@ -45,7 +45,8 @@ HOST-SIDE (run these on your Mac; not runnable here — the wrapper needs Colima
   dridock info | status                   project versions/paths/VM/network
   dridock vm ls | usage | gc              inventory / disk / reclaim across all project VMs
   dridock ip | net [<hostname>]           the project VM's reachable IP + /etc/hosts helper
-  dridock profiles                        list this project's enabled + available profiles
+  dridock features [enable|disable|info]  list/enable/disable/info opt-in features (3.0, #5)
+  dridock profiles                        legacy alias for `features` (one deprecation cycle)
   dridock checkversion [--all]            wrapper↔image drift check
   dridock browser-bridge up|down          opt-in CDP bridge to your real Chrome
   dridock host-agent up|down|status       opt-in colima/limactl proxy for framework-dev
@@ -71,7 +72,7 @@ case "${1:-}" in
     "")               _help ;;
 
     # ── host-side verbs: not runnable here, print a targeted message ──────────
-    start|stop|down|destroy|bootstrap|migrate|info|status|vm|ip|net|profiles|\
+    start|stop|down|destroy|bootstrap|migrate|info|status|vm|ip|net|features|profiles|\
     checkversion|browser-bridge|host-agent|harness|framework-bugs|version|\
     setup-token|clear-session|claude-dir|completion|-v|--version|doctor|auth|mcp)
         _host "$1" ;;

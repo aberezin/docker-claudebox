@@ -1,11 +1,12 @@
 # Profiles — opt-in tool bundles per project
 
-> **3.0 direction (2026-07-19):** this system is being broadened into a general
-> **features** system for the 3.0 release. See
-> [features-system.md](features-system.md) for the design and
-> [Issue #5](https://github.com/aberezin/docker-claudebox/issues/5) for the tracking
-> issue. Existing profiles migrate as-is; `profiles:` remains a backward-compat alias
-> for one deprecation cycle. Content below describes the current 2.x profile system.
+> **Superseded (2026-07-20):** the `profiles:` system was broadened into the general
+> **features** system in 3.0 (issue #5). Config key: `profiles:` → `features:` (both
+> accepted for one deprecation cycle, removed in 4.0). File layout: `profiles/<name>.sh`
+> → `features/<name>/{manifest.yml, on.sh, off.sh}`. CLI: `dridock features` supersedes
+> `dridock profiles`. See [features-system.md](features-system.md) for the shipped
+> design. Content below describes the pre-3.0 system — kept for historical reference
+> and because 2.x images still ship it (the 3.0 wrapper reads either layout).
 
 > **Rebrand note (3.0):** the project dir moves from `.claudebox/` to `.dridock/`; the
 > profile installer path moves from `/usr/local/lib/claudebox/profiles/` to

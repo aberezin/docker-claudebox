@@ -1,0 +1,4 @@
+name: typescript
+description: TypeScript/JavaScript code intelligence — the typescript-lsp Claude plugin (typescript-language-server baked).
+requires-bake: true
+# See features/go/manifest.yml for the requires-bake semantics.

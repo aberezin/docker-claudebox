@@ -104,6 +104,25 @@ eq "profile name" "$(cb_project_profile "$pid")"  "cb-$pid"
 eq "context name" "$(cb_project_context "$pid")"  "colima-cb-$pid"
 eq "data dir"     "$(cb_project_data_dir "$pid")" "$(cb_data_root)/$pid/claude"
 
+# ── features system (#5) ────────────────────────────────────────────────────
+# cb_project_features must read features:/profiles: (both), flow + block style, and
+# ignore malformed names. cb_features_write must rewrite the block portable-style.
+echo "--- features: cb_project_features read ---"
+FT="$TMP/ft" ; mkdir -p "$FT/.dridock"
+printf 'id: xyz00001\nfeatures: [typescript, go]\n' > "$FT/.dridock/config.yml"
+eq "features: flow read"     "$(cb_project_features "$FT")" "go typescript"
+printf 'id: xyz00001\nprofiles:\n  - typescript\n  - python\n' > "$FT/.dridock/config.yml"
+eq "profiles: block read (legacy)" "$(cb_project_features "$FT")" "python typescript"
+eq "cb_project_profiles alias" "$(cb_project_profiles "$FT")" "python typescript"
+
+echo "--- features: cb_features_write rewrite ---"
+printf 'id: xyz00001\nvm:\n  cpu: 4\nfeatures: [typescript]\n' > "$FT/.dridock/config.yml"
+cb_features_write "$FT" "python go" >/dev/null
+match "features rewritten in place"  "$(cat "$FT/.dridock/config.yml")" '^features: \[python, go\]$'
+match "unrelated lines preserved"    "$(cat "$FT/.dridock/config.yml")" '^  cpu: 4$'
+cb_features_write "$FT" "" >/dev/null
+if ! grep -q '^features:' "$FT/.dridock/config.yml" 2>/dev/null; then ok "empty names removes the block"; else bad "empty names left a features: line"; fi
+
 # ── 3.0 migration helpers (#11 phase 4b) ────────────────────────────────────
 # cb_migrate_workspace: workspace state (.claudebox/ → .dridock/ + gitignore rewrite).
 # cb_migrate_data_dir:  per-project session state (~/.config/claudebox/projects/<id> → dridock).

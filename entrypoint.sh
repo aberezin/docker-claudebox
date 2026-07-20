@@ -911,33 +911,48 @@ _maybe_install_default_plugin() {
 }
 _maybe_install_default_plugin "$@"
 
-# Install the project's enabled profiles (wrapper writes the list to ~/.claude/.profiles
-# from the .dridock config `profiles:` field). Each is a baked installer at
-# /usr/local/lib/dridock/profiles/<name>.sh; run once per profile, marker set only on
-# success (so an offline failure retries next start), as the `claude` user, best-effort.
-# See docs/design/profiles.md.
-_install_profiles() {
+# Install the project's enabled features (wrapper writes the list to ~/.claude/.features
+# — with legacy ~/.claude/.profiles read as fallback — from the .dridock config
+# `features:` field / `profiles:` alias). Each is a baked bundle at
+# /usr/local/lib/dridock/features/<name>/on.sh; run once per feature, marker set only
+# on success (so an offline failure retries next start), as the `claude` user,
+# best-effort. Backward-compat for 2.x: falls back to /usr/local/lib/dridock/profiles/
+# <name>.sh AND recognizes the legacy `.profile-<name>` marker so a project that had
+# `profiles: [typescript]` in 2.x doesn't re-run the installer on 3.0's first boot.
+# See docs/design/features-system.md.
+_install_features() {
 	[ "${1:-}" = "setup-token" ] && return 0
-	local pf="$CLAUDE_CONFIG_DIR/.profiles" lib="/usr/local/lib/dridock/profiles" prof marker
+	local pf="$CLAUDE_CONFIG_DIR/.features" lib_new="/usr/local/lib/dridock/features"
+	local pf_legacy="$CLAUDE_CONFIG_DIR/.profiles" lib_legacy="/usr/local/lib/dridock/profiles"
+	local feat marker on_script
+	# Prefer the new sidecar; fall back to legacy `.profiles` if only that's present.
+	if [ ! -f "$pf" ] && [ -f "$pf_legacy" ]; then pf="$pf_legacy"; fi
 	[ -f "$pf" ] || return 0
-	for prof in $(cat "$pf" 2>/dev/null); do
-		case "$prof" in ''|*[!A-Za-z0-9_-]*) continue ;; esac
-		marker="$CLAUDE_CONFIG_DIR/.profile-$prof"
-		[ -f "$marker" ] && continue
-		if [ ! -x "$lib/$prof.sh" ]; then echo "dridock: unknown profile '$prof' (no $lib/$prof.sh)" >&2; continue; fi
-		dbg "installing profile: $prof"
+	for feat in $(cat "$pf" 2>/dev/null); do
+		case "$feat" in ''|*[!A-Za-z0-9_-]*) continue ;; esac
+		# Either marker suffices — 2.x set `.profile-$feat`, 3.0 sets `.feature-$feat`.
+		[ -f "$CLAUDE_CONFIG_DIR/.feature-$feat" ] && continue
+		[ -f "$CLAUDE_CONFIG_DIR/.profile-$feat" ] && continue
+		marker="$CLAUDE_CONFIG_DIR/.feature-$feat"
+		# Prefer the 3.0 features/ layout; fall back to legacy profiles/<name>.sh for one cycle.
+		if   [ -x "$lib_new/$feat/on.sh" ];    then on_script="$lib_new/$feat/on.sh"
+		elif [ -x "$lib_legacy/$feat.sh" ]; then on_script="$lib_legacy/$feat.sh"
+		else echo "dridock: unknown feature '$feat' (no $lib_new/$feat/on.sh)" >&2; continue; fi
+		dbg "installing feature: $feat (via $on_script)"
 		if timeout 120 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
-			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:/home/claude/.claude/bin:\$PATH; exec '$lib/$prof.sh'" \
+			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:/home/claude/.claude/bin:\$PATH; exec '$on_script'" \
 			>/dev/null 2>&1
 		then
 			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
-			echo "dridock: enabled profile '$prof'" >&2
+			echo "dridock: enabled feature '$feat'" >&2
 		else
-			echo "dridock: profile '$prof' install failed (offline?) — retries next start" >&2
+			echo "dridock: feature '$feat' install failed (offline?) — retries next start" >&2
 		fi
 	done
 }
-_install_profiles "$@"
+# Alias for one deprecation cycle (any external caller that grepped for the old name).
+_install_profiles() { _install_features "$@"; }
+_install_features "$@"
 
 if [ "${1:-}" = "setup-token" ]; then
 	dbg "mode: setup-token"

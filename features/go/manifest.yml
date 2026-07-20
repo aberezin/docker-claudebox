@@ -1,0 +1,8 @@
+name: go
+description: Go code intelligence — the gopls-lsp Claude plugin (gopls server baked into the image).
+requires-bake: true
+# `requires-bake` here is metadata: it declares that this feature assumes a heavy
+# dependency (gopls) has been installed at image build. For the MVP shipped in 3.0,
+# the base image already installs gopls as part of its Go toolchain setup, so no
+# dedicated bake.sh is invoked. (A follow-up will iterate over `bake.sh` for
+# maintainer-blessed features whose deps AREN'T in the base image.)

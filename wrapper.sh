@@ -440,7 +440,7 @@ vm:
   autostop: false         # stop the VM when the harness container exits
 network:
   hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'dridock net'); blank = raw IP
-# profiles: []            # tool bundles to enable, e.g. [typescript, python] — list them: 'dridock profiles'
+# features: []            # opt-in tool bundles, e.g. [typescript, python] — list them: 'dridock features'
 CBSAMPLE
 }
 
@@ -466,7 +466,7 @@ vm:
   autostop: false         # stop the VM when the harness container exits
 network:
   hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'dridock net'); blank = raw IP
-# profiles: []            # tool bundles to enable, e.g. [typescript, python] — list them: 'dridock profiles'
+# features: []            # opt-in tool bundles, e.g. [typescript, python] — list them: 'dridock features'
 CBCONF
     fi
     cb_write_sample "$root"
@@ -959,7 +959,7 @@ _${prog}_complete() {
 
     local top_verbs="start help version checkversion info status stop down destroy \\
 clear-session bootstrap migrate setup-token completion browser-bridge host-agent \\
-harness framework-bugs consult profiles ip net vm mcp auth doctor \\
+harness framework-bugs consult features profiles ip net vm mcp auth doctor \\
 -h --help -v --version"
 
     if [ "\$cword" -le 1 ]; then
@@ -983,6 +983,7 @@ harness framework-bugs consult profiles ip net vm mcp auth doctor \\
         completion)      COMPREPLY=( \$(compgen -W "bash" -- "\$cur") ) ;;
         checkversion)    COMPREPLY=( \$(compgen -W "--all" -- "\$cur") ) ;;
         migrate)         COMPREPLY=( \$(compgen -W "--all" -- "\$cur") ) ;;
+        features|profiles) COMPREPLY=( \$(compgen -W "list enable disable info" -- "\$cur") ) ;;
         bootstrap)       COMPREPLY=( \$(compgen -W "--seed-secret --gh-token --secrets-file --brief-file --force --no-start --brief-only --adopt --workspace --multi-repo --repo" -- "\$cur") ) ;;
         destroy)         COMPREPLY=( \$(compgen -W "--purge" -- "\$cur") ) ;;
         start)           COMPREPLY=( \$(compgen -W "-p --output-format --model --system-prompt --append-system-prompt --json-schema --effort --resume --no-continue --update" -- "\$cur") ) ;;
@@ -1191,45 +1192,173 @@ cb_inject_vm_env() {
     done
 }
 
-# read the `profiles:` list from .dridock/config.yml -> space-separated names. Supports
-# flow style (`profiles: [typescript, go]`) and block style (`profiles:` then `- name`).
-# Names are validated to profile-name chars; the entrypoint maps each to a baked installer.
-cb_project_profiles() {
+# read the `features:` list from .dridock/config.yml -> space-separated names. Also
+# reads `profiles:` for one deprecation cycle (2.x → 3.0) — either key means the
+# same thing. Supports flow style (`features: [typescript, go]`) and block style
+# (`features:` then `- name`). Names are validated; the entrypoint maps each to a
+# baked on.sh under /usr/local/lib/dridock/features/<name>/.
+cb_project_features() {
     local cfg; cfg="$(cb_project_config_path "$1")"
     [ -f "$cfg" ] || return 0
     awk '
-        /^[[:space:]]*profiles:[[:space:]]*\[/ {
+        /^[[:space:]]*(features|profiles):[[:space:]]*\[/ {
             s=$0; sub(/^[^[]*\[/,"",s); sub(/\].*/,"",s);
             n=split(s,a,","); for(i=1;i<=n;i++){ gsub(/[^A-Za-z0-9_-]/,"",a[i]); if(a[i]!="") print a[i] }
             inblock=0; next
         }
-        /^[[:space:]]*profiles:[[:space:]]*(#.*)?$/ { inblock=1; next }
+        /^[[:space:]]*(features|profiles):[[:space:]]*(#.*)?$/ { inblock=1; next }
         inblock && /^[[:space:]]*-[[:space:]]*/ { s=$0; sub(/^[[:space:]]*-[[:space:]]*/,"",s); sub(/[[:space:]]*#.*/,"",s); gsub(/[^A-Za-z0-9_-]/,"",s); if(s!="") print s; next }
         inblock && /^[[:space:]]*(#.*)?$/ { next }
         inblock { inblock=0 }
     ' "$cfg" | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//'
 }
+# One-deprecation-cycle alias for external callers / tests that still read the old name.
+cb_project_profiles() { cb_project_features "$@"; }
 
-# `claudebox profiles` — show this project's enabled profiles and the ones available in
-# the image (queried from cb-infra's image, best-effort). Read-only.
-cb_profiles_cmd() {
-    local root="$1" enabled avail
-    enabled="$(cb_project_profiles "$root")"
-    local _dotname; _dotname="$(cb_project_dot_basename "$root")"
-    echo "enabled for this project (${_dotname}/config.yml → profiles:):"
+# cb_features_list ROOT — `dridock features list` (default action). Enabled + available.
+# Available is queried from the image (features/<name>/manifest.yml description); falls
+# back to a 2.x profiles/*.sh scan for one deprecation cycle.
+cb_features_list() {
+    local root="$1" enabled avail _dotname
+    enabled="$(cb_project_features "$root")"
+    _dotname="$(cb_project_dot_basename "$root")"
+    echo "enabled for this project (${_dotname}/config.yml → features:):"
     if [ -n "$enabled" ]; then printf '  %s\n' $enabled
-    else echo "  (none — add e.g.  profiles: [typescript, python]  to ${_dotname}/config.yml)"; fi
+    else echo "  (none — add e.g.  features: [typescript, python]  to ${_dotname}/config.yml, or run 'dridock features enable typescript')"; fi
     echo ""
+    # `awk` reads each manifest.yml one-liner description; legacy profiles/*.sh with a
+    # `# summary:` header is read as fallback so images built before this feature-system
+    # change still list something useful.
     avail="$(docker --context "$(cb_infra_context)" run --rm --entrypoint sh "$CLAUDE_IMAGE" -c \
-        'for f in /usr/local/lib/dridock/profiles/*.sh /usr/local/lib/claudebox/profiles/*.sh; do [ -f "$f" ] || continue; printf "%s\t%s\n" "$(basename "$f" .sh)" "$(sed -n "s/^# summary: //p" "$f" | head -1)"; done | sort -u -k1,1' 2>/dev/null)"
+        'for d in /usr/local/lib/dridock/features/*/; do [ -d "$d" ] || continue; n="$(basename "$d")"; dsc="$(awk -F: "/^description:/{sub(/^[^:]*:[[:space:]]*/,\"\"); print; exit}" "$d/manifest.yml" 2>/dev/null)"; printf "%s\t%s\n" "$n" "${dsc:-—}"; done
+         for f in /usr/local/lib/dridock/profiles/*.sh /usr/local/lib/claudebox/profiles/*.sh; do [ -f "$f" ] || continue; printf "%s\t%s\n" "$(basename "$f" .sh)" "(legacy 2.x profile) $(sed -n "s/^# summary: //p" "$f" | head -1)"; done' 2>/dev/null | sort -u -k1,1)"
     if [ -n "$avail" ]; then
         echo "available (baked in the image):"
         printf '%s\n' "$avail" | awk -F'\t' '{printf "  %-14s %s\n", $1, $2}'
     else
-        echo "available: (build the image to list — see docs/design/profiles.md)"
+        echo "available: (build the image to list — see docs/design/features-system.md)"
     fi
     echo ""
-    echo "enable: edit ${_dotname}/config.yml, then run 'dridock' (installed once, on first enable)."
+    echo "enable / disable: 'dridock features enable <name>' / 'dridock features disable <name>'"
+}
+
+# cb_features_info ROOT NAME — print the manifest for a baked feature. Runs in a
+# throwaway container against the image; best-effort.
+cb_features_info() {
+    local root="$1" name="$2"
+    case "$name" in ''|*[!A-Za-z0-9_-]*) echo "features info: bad name '$name'" >&2; return 1 ;; esac
+    docker --context "$(cb_infra_context)" run --rm --entrypoint sh "$CLAUDE_IMAGE" -c \
+        "d=/usr/local/lib/dridock/features/$name; if [ -f \"\$d/manifest.yml\" ]; then echo '--- manifest.yml ---'; cat \"\$d/manifest.yml\"; for s in on.sh off.sh bake.sh; do [ -f \"\$d/\$s\" ] && echo \"--- \$s ---\" && head -20 \"\$d/\$s\"; done; else legacy=/usr/local/lib/dridock/profiles/$name.sh; [ -f \"\$legacy\" ] && { echo '(legacy 2.x profile — has no manifest)'; head -20 \"\$legacy\"; } || { echo \"features info: unknown feature '$name' (no /usr/local/lib/dridock/features/$name/manifest.yml or legacy profile)\" >&2; exit 1; }; fi" 2>&1
+}
+
+# cb_features_write ROOT NAMES — rewrite the `features:` block in .dridock/config.yml
+# to NAMES (space-separated). Removes both `features:` and `profiles:` blocks first
+# (either flow or block style), then appends a single `features: [n1, n2, …]` flow
+# entry. Empty NAMES removes the block entirely. Portable rewrite via temp file.
+cb_features_write() {
+    local root="$1" names="$2" cfg tmp
+    cfg="$(cb_project_config_path "$root")"
+    [ -f "$cfg" ] || { echo "no config.yml at $cfg — run 'dridock' first to initialize" >&2; return 1; }
+    tmp="$(mktemp)"
+    # Strip existing features:/profiles: (flow OR block form) — preserve everything else.
+    awk '
+        /^[[:space:]]*(features|profiles):[[:space:]]*\[/ { next }
+        /^[[:space:]]*(features|profiles):[[:space:]]*(#.*)?$/ { skip=1; next }
+        skip && /^[[:space:]]*-[[:space:]]*/ { next }
+        skip && /^[[:space:]]*(#.*)?$/ { next }
+        skip { skip=0 }
+        { print }
+    ' "$cfg" > "$tmp"
+    if [ -n "$names" ]; then
+        # Trim trailing blanks; append a single flow-style features: line.
+        awk 'NF{p=1} p{buf=buf$0"\n"} END{sub(/\n+$/,"",buf); print buf}' "$tmp" > "$tmp.trim"
+        mv "$tmp.trim" "$tmp"
+        # names come space-separated; render as [a, b, c]
+        set -- $names
+        local flow=""
+        while [ $# -gt 0 ]; do flow="$flow, $1"; shift; done
+        flow="${flow#, }"
+        printf '\nfeatures: [%s]\n' "$flow" >> "$tmp"
+    fi
+    cat "$tmp" > "$cfg"
+    rm -f "$tmp"
+}
+
+# cb_features_enable ROOT NAME — add NAME to features: in .dridock/config.yml.
+# Idempotent; validates NAME. Runs on.sh immediately if the project's container is up.
+cb_features_enable() {
+    local root="$1" name="$2" existing new
+    case "$name" in ''|*[!A-Za-z0-9_-]*) echo "features enable: bad name '$name'" >&2; return 1 ;; esac
+    existing="$(cb_project_features "$root")"
+    # Already enabled? no-op.
+    case " $existing " in *" $name "*) echo "  ✓ $name already enabled"; return 0 ;; esac
+    new="$(printf '%s %s' "$existing" "$name" | awk '{$1=$1; print}')"
+    cb_features_write "$root" "$new" || return 1
+    echo "  ✓ enabled feature '$name' (${new// /, }). On next 'dridock' run, on.sh installs it."
+}
+
+# cb_features_disable ROOT NAME — remove NAME from features:, drop the enable marker
+# in the project's data dir, and run off.sh immediately in the container if it's up.
+cb_features_disable() {
+    local root="$1" name="$2" existing new id data_dir marker off_script rc
+    case "$name" in ''|*[!A-Za-z0-9_-]*) echo "features disable: bad name '$name'" >&2; return 1 ;; esac
+    existing="$(cb_project_features "$root")"
+    case " $existing " in *" $name "*) : ;;
+        *) echo "  ℹ $name isn't in features: — nothing to disable"; return 0 ;;
+    esac
+    # Rebuild list without NAME.
+    new=""; for f in $existing; do [ "$f" = "$name" ] || new="$new $f"; done
+    new="${new# }"
+    cb_features_write "$root" "$new" || return 1
+    # Clear the enable marker (both 3.0 and legacy 2.x names) so re-enabling replays on.sh.
+    id="$(cb_project_id_ro "$root")"
+    if [ -n "$id" ]; then
+        data_dir="$(cb_project_data_dir "$id")"
+        rm -f "$data_dir/.feature-$name" "$data_dir/.profile-$name" 2>/dev/null || true
+    fi
+    # Best-effort: run off.sh in the running container. Silent on failure — the
+    # config change + marker removal alone is enough to disable on the next start.
+    off_script="/usr/local/lib/dridock/features/$name/off.sh"
+    local off_note="off.sh will run on next container start"
+    if [ -n "$id" ]; then
+        local cname="claude-$(printf '%s' "$root" | sed 's#/#_#g')"
+        if docker --context "$(cb_project_context "$id")" exec "$cname" bash -c "[ -x '$off_script' ] && '$off_script'" >/dev/null 2>&1; then
+            off_note="off.sh ran in the container"
+        fi
+    fi
+    echo "  ✓ disabled feature '$name'${new:+ (remaining: ${new// /, })}. $off_note."
+}
+
+# cb_features_cmd — top-level dispatch for `dridock features [list|enable|disable|info]`.
+# `list` is the default action if no sub-verb is passed.
+cb_features_cmd() {
+    local root="$1"; shift
+    case "${1:-list}" in
+        ""|list)   cb_features_list "$root" ;;
+        enable)    shift; [ -n "${1:-}" ] || { echo "usage: dridock features enable <name>" >&2; return 1; }
+                   cb_features_enable "$root" "$1" ;;
+        disable)   shift; [ -n "${1:-}" ] || { echo "usage: dridock features disable <name>" >&2; return 1; }
+                   cb_features_disable "$root" "$1" ;;
+        info)      shift; [ -n "${1:-}" ] || { echo "usage: dridock features info <name>" >&2; return 1; }
+                   cb_features_info "$root" "$1" ;;
+        -h|--help)
+            echo "usage: dridock features [list | enable <name> | disable <name> | info <name>]"
+            echo "  list                    show enabled + available features (default)"
+            echo "  enable <name>           add <name> to features: in .dridock/config.yml"
+            echo "  disable <name>          remove <name> from features: (runs the feature's off.sh)"
+            echo "  info <name>             print the feature's manifest.yml"
+            echo ""
+            echo "  'dridock profiles' is an alias for one deprecation cycle (2.x → 3.0)."
+            echo "  Full design: docs/design/features-system.md" ;;
+        *) echo "features: unknown sub-verb '$1' (try: dridock features --help)" >&2; return 1 ;;
+    esac
+}
+
+# Legacy alias kept for one deprecation cycle. Prints a one-line deprecation notice
+# on stderr the first time it's used per session — non-fatal, easy to silence.
+cb_profiles_cmd() {
+    echo "ℹ 'dridock profiles' is a legacy alias — use 'dridock features' (removed in 4.0)." >&2
+    cb_features_cmd "$@"
 }
 
 # cb_set_hostname ROOT NAME — set network.hostname in .dridock/config.yml (so
@@ -1897,7 +2026,8 @@ USAGE
 PROJECT
   bootstrap [--seed-secret KEY=CMD] [...]  scaffold a project + mission brief (see --help on it)
   info | status                    at-a-glance: versions, paths, VM, network
-  profiles                         list enabled (config \`profiles:\`) + available tool bundles
+  features [list|enable|disable|info <n>]  3.0 (#5): manage this project's opt-in bundles
+                                   ('profiles' is a legacy alias for one deprecation cycle)
   ip                               the project VM's reachable IP + how to browse
   net [<hostname>]                 same as ip; with a name, sets network.hostname + prints
                                    the /etc/hosts line so you can browse http://<name>:<port>
@@ -1974,9 +2104,15 @@ HELP
         # human-facing at-a-glance: versions, paths, VM + network (read-only, fast).
         cb_info "$CB_PROJECT_ROOT"; exit $?
         ;;
+    features)
+        # 3.0 (#5): list | enable <name> | disable <name> | info <name>. Manages
+        # the .dridock/config.yml `features:` block + the per-project enable markers.
+        shift; cb_features_cmd "$CB_PROJECT_ROOT" "$@"; exit $?
+        ;;
     profiles)
-        # list this project's enabled profiles + the ones available in the image.
-        cb_profiles_cmd "$CB_PROJECT_ROOT"; exit $?
+        # legacy alias for `features` (one deprecation cycle; removed in 4.0). Prints
+        # a one-line deprecation notice, then dispatches to the same handler.
+        shift; cb_profiles_cmd "$CB_PROJECT_ROOT" "$@"; exit $?
         ;;
     migrate)
         # 3.0 migration (#11 phase 4b). No-arg: migrate THIS project's workspace + data dir
@@ -2534,16 +2670,19 @@ if [ -f "$SECRETS_SRC" ]; then
     dbg "wrote secrets sidecars from $SECRETS_SRC"
 fi
 
-# ── profiles: enabled tool bundles the entrypoint installs on first enable ────
-# Write the project's `profiles:` list to a sidecar the entrypoint reads each start and
-# installs from (once per profile, marker-guarded — see docs/design/profiles.md). Read
-# from the mount so adding a profile takes effect on the next run without recreating.
-_profiles="$(cb_project_profiles "$CB_PROJECT_ROOT")"
-if [ -n "$_profiles" ]; then
-    printf '%s\n' "$_profiles" > "$CLAUDE_DIR/.profiles"
-    dbg "enabled profiles: $_profiles"
-else
+# ── features: enabled bundles the entrypoint installs on first enable ────────
+# Write the project's `features:` (or legacy `profiles:`) list to a sidecar the
+# entrypoint reads each start and installs from (once per feature, marker-guarded —
+# see docs/design/features-system.md). Read from the mount so adding a feature takes
+# effect on the next run without recreating. The legacy `.profiles` sidecar is
+# removed here on 3.0 upgrade so a running container doesn't see stale data.
+_features="$(cb_project_features "$CB_PROJECT_ROOT")"
+if [ -n "$_features" ]; then
+    printf '%s\n' "$_features" > "$CLAUDE_DIR/.features"
     rm -f "$CLAUDE_DIR/.profiles" 2>/dev/null || true
+    dbg "enabled features: $_features"
+else
+    rm -f "$CLAUDE_DIR/.features" "$CLAUDE_DIR/.profiles" 2>/dev/null || true
 fi
 
 # updates are disabled by default; pass --update to opt in
