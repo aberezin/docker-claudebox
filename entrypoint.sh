@@ -986,13 +986,26 @@ else
 		dbg "running claude update"
 		CMD="$CMD && claude update"
 	fi
+	# 3.0.1: user-supplied flags to `dridock start <flags...>` reach here via a
+	# durable sidecar the wrapper writes on each invocation. Needed because the
+	# interactive path can't use $@ — a) new-container `docker run -it` doesn't
+	# forward "$@" past the image (would flip the entrypoint into programmatic
+	# mode), and b) re-attach `docker start -ai` can't take new args at all. The
+	# sidecar covers both. Consumed once per start; wrapper re-writes it next run.
+	INTERACTIVE_ARGS_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-interactive-args"
+	INTERACTIVE_EXTRA=""
+	if [ -f "$INTERACTIVE_ARGS_FILE" ]; then
+		INTERACTIVE_EXTRA="$(cat "$INTERACTIVE_ARGS_FILE")"
+		rm -f "$INTERACTIVE_ARGS_FILE"
+		dbg "interactive: extra claude args: $INTERACTIVE_EXTRA"
+	fi
 	NO_CONTINUE_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-no-continue"
 	if [ -f "$NO_CONTINUE_FILE" ]; then
 		rm -f "$NO_CONTINUE_FILE"
 		dbg "no-continue flag set, skipping --continue"
-		CMD="$CMD && exec claude --dangerously-skip-permissions $SYSTEM_HINT_FLAG"
+		CMD="$CMD && exec claude --dangerously-skip-permissions $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA"
 	else
-		CMD="$CMD && (claude --dangerously-skip-permissions --continue $SYSTEM_HINT_FLAG || exec claude --dangerously-skip-permissions $SYSTEM_HINT_FLAG)"
+		CMD="$CMD && (claude --dangerously-skip-permissions --continue $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA || exec claude --dangerously-skip-permissions $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA)"
 	fi
 fi
 

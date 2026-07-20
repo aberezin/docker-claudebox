@@ -26,7 +26,25 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
-## [Unreleased — 3.0.x] _(fork)_
+## [3.0.1] — 2026-07-20 _(fork)_
+
+### Fixed
+
+- **`dridock start <flag>` now actually forwards `<flag>` to `claude`.** 2.24.1's
+  fix for `❌ Unknown flag: --remote-control` cleared the strict validator's
+  rejection but left the forwarding half-done — the interactive-start path
+  (both new `docker run -it` and re-attach `docker start -ai`) never passed
+  user-supplied claude flags through to the entrypoint, so `dridock start
+  --remote-control` (or any other flag) was silently dropped. Wrapper now
+  writes remaining `$@` to a durable `.<container>-interactive-args` sidecar
+  before start/create; the entrypoint's interactive branch reads it, splices
+  the contents into the `claude` command line, and removes the sidecar (same
+  pattern as `_prog-args` / `-no-continue` / `-update`). Covers both
+  first-run `docker run` (fresh container) and `docker start -ai` (existing).
+  Sidecar cleared each run so a subsequent argless `dridock start` doesn't
+  inherit stale flags. Fix reported by Alan the morning after the 3.0.0 ship
+  (bot in gammaray showed `claude --dangerously-skip-permissions --continue …`
+  with no `--remote-control` even though the wrapper accepted the flag).
 
 ### Features
 

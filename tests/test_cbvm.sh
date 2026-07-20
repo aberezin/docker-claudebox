@@ -112,6 +112,23 @@ if grep -A12 '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP" | grep -q 'unset \$name'; 
 # wrapper writes the sidecar unconditionally (mirror), so bridge-down -> empty on next run
 if grep -qE "printf '(DRIDOCK|CLAUDEBOX)_HOST_CDP_URL=%s\\\\n' \"\\\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
 
+echo "--- interactive-args sidecar (3.0.1): dridock start <flag> reaches claude ---"
+# Regression for the 3.0.0-and-earlier bug: `dridock start --remote-control` was
+# accepted by the wrapper (2.24.1 fixed the validator rejection) but the flag
+# never reached the entrypoint — the interactive `docker run -it` didn't forward
+# "$@" past the image, and `docker start -ai` can't take new args at all. 3.0.1
+# routes them through a durable .-interactive-args sidecar the entrypoint reads.
+# Assert both halves so they can't silently drift.
+if grep -q "container_name}-interactive-args" "$WRAPPER"; then ok "wrapper writes -interactive-args sidecar"; else bad "wrapper no longer writes the -interactive-args sidecar (dridock start <flag> would be silently dropped)"; fi
+if grep -q '${CLAUDE_CONTAINER_NAME}-interactive-args' "$ENTRYP"; then ok "entrypoint re-reads the -interactive-args sidecar"; else bad "entrypoint no longer reads the -interactive-args sidecar"; fi
+# entrypoint must splice sidecar contents into the interactive claude exec line
+if grep -q 'INTERACTIVE_EXTRA' "$ENTRYP" && grep -q 'exec claude.*\$INTERACTIVE_EXTRA' "$ENTRYP"; then ok "entrypoint splices \$INTERACTIVE_EXTRA into interactive exec"; else bad "entrypoint reads sidecar but doesn't splice it into exec"; fi
+# entrypoint must consume the sidecar (rm after read) — otherwise a subsequent
+# argless `dridock start` inherits stale flags
+if grep -q 'rm -f "$INTERACTIVE_ARGS_FILE"' "$ENTRYP"; then ok "entrypoint consumes the sidecar after read"; else bad "entrypoint leaves stale interactive-args sidecar"; fi
+# wrapper must clear the sidecar when no extras this run, else stale flags leak forward
+if grep -q 'rm -f "$INTERACTIVE_ARGS_FILE"' "$WRAPPER"; then ok "wrapper clears sidecar when \$@ is empty"; else bad "wrapper leaves stale interactive-args sidecar across runs"; fi
+
 echo "--- cb_vm_gc orphan detection must be profile-based, NOT the dangerous IN-USE-BY heuristic ---"
 # Regression for a data-loss bug: the orphan test used `limactl disk ls | awk NF<5`, but
 # IN-USE-BY is blank for every STOPPED VM, so gc deleted valid stopped VMs' disks (incl. the

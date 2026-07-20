@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.0.0"
+DRIDOCK_VERSION="3.0.1"
 
 # ── 3.0 backward-compat alias setup ──────────────────────────────────────────
 # For each user-input env var renamed CLAUDEBOX_X → DRIDOCK_X in 3.0, copy the
@@ -2966,6 +2966,19 @@ if [ "$DO_UPDATE" = "1" ]; then
     touch "$UPDATE_FILE"
 else
     rm -f "$UPDATE_FILE"
+fi
+
+# 3.0.1: forward user-supplied flags to `dridock start <flags...>` via a durable
+# sidecar the entrypoint re-reads on each start. Fixes the silent-drop bug where
+# `docker run -it` doesn't pass "$@" and `docker start -ai` can't accept new args.
+# At this point _has_p_flag == 0 (else we'd have exited via the programmatic
+# branch above), so any remaining $@ is intended for the interactive claude.
+INTERACTIVE_ARGS_FILE="$CLAUDE_DIR/.${container_name}-interactive-args"
+if [ $# -gt 0 ]; then
+    printf '%q ' "$@" > "$INTERACTIVE_ARGS_FILE"
+    dbg "interactive extras -> $INTERACTIVE_ARGS_FILE: $*"
+else
+    rm -f "$INTERACTIVE_ARGS_FILE" 2>/dev/null || true
 fi
 
 # Interactive — ensure the project VM (+ image) is up first
