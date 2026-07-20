@@ -708,6 +708,46 @@ if [ -f "$SECRETS_FILE" ]; then
 	done < "$SECRETS_FILE"
 fi
 
+# ── SSH host-key seeding for git-over-SSH (#10) ───────────────────────────────
+# 3.0 removed `gh auth setup-git`, so first-connect `git pull|push` via SSH
+# hits StrictHostKeyChecking against an empty known_hosts and fails with
+# "Host key verification failed". Two-part fix, both landing in the bind-
+# mounted ~/.ssh/ (so they persist across container restarts):
+#   (1) pre-seed known_hosts with the major providers (real host keys via
+#       ssh-keyscan); done once per stamp version so future entrypoint bumps
+#       can re-seed by rev'ing the stamp filename.
+#   (2) set StrictHostKeyChecking=accept-new as a catch-all in ~/.ssh/config —
+#       covers self-hosted / less common providers by accepting on first
+#       connect (recording the key in known_hosts for future verification).
+# Best-effort throughout: a failed keyscan (offline) is silent — accept-new
+# still handles it on the next attempt.
+_ssh_seed_hosts() {
+	local ssh_dir=/home/claude/.ssh
+	local kh="$ssh_dir/known_hosts" cfg="$ssh_dir/config"
+	local stamp="$ssh_dir/.dridock-known-hosts-seeded-v1"
+	local marker="# dridock: accept-new for first-connect git SSH (#10)"
+	[ -d "$ssh_dir" ] || return 0
+	if [ ! -f "$stamp" ] && command -v ssh-keyscan >/dev/null 2>&1; then
+		touch "$kh" 2>/dev/null || true
+		( ssh-keyscan -T 5 github.com gitlab.com bitbucket.org codeberg.org 2>/dev/null; cat "$kh" 2>/dev/null ) \
+			| sort -u > "$kh.tmp" 2>/dev/null && mv "$kh.tmp" "$kh" && chmod 644 "$kh"
+		touch "$stamp" 2>/dev/null
+		chown claude:claude "$stamp" "$kh" 2>/dev/null || true
+		dbg "ssh: seeded known_hosts (github/gitlab/bitbucket/codeberg)"
+	fi
+	if [ ! -f "$cfg" ] || ! grep -qF "$marker" "$cfg" 2>/dev/null; then
+		{
+			[ -f "$cfg" ] && { cat "$cfg"; echo ""; }
+			echo "$marker"
+			echo "Host *"
+			echo "    StrictHostKeyChecking accept-new"
+		} > "$cfg.tmp" 2>/dev/null && mv "$cfg.tmp" "$cfg" && chmod 600 "$cfg"
+		chown claude:claude "$cfg" 2>/dev/null || true
+		dbg "ssh: appended accept-new fallback to ~/.ssh/config"
+	fi
+}
+_ssh_seed_hosts
+
 # load the host CDP bridge URL the same durable way (see wrapper.sh: browser-bridge up
 # writes a marker -> this sidecar). Read from the mount, not `docker run -e`, so an
 # already-created container picks up `browser-bridge up` on restart. Empty = bridge

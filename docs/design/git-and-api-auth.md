@@ -68,6 +68,20 @@ persists it to a per-container sidecar that the entrypoint re-reads on each star
   cause. `git-over-HTTPS` now falls through to SSH the same way it does on the Mac.
 - **Does NOT set `credential.https://<host>.helper`.** No harness-owned credential
   helper anywhere — one less thing to get wrong.
+- **Pre-seeds `~/.ssh/known_hosts`** with `github.com`, `gitlab.com`, `bitbucket.org`,
+  `codeberg.org` via `ssh-keyscan` on the first container start (versioned stamp
+  `~/.ssh/.dridock-known-hosts-seeded-v1`). Best-effort — a network failure at boot
+  is silent, and the next fallback (below) will still cover the connection.
+- **Appends `Host *` / `StrictHostKeyChecking accept-new`** to `~/.ssh/config` as a
+  fallback for self-hosted / less common providers: first connect is trusted and
+  recorded in `known_hosts`; any subsequent key change fails loudly (MITM detection
+  preserved). Placed *after* any existing config so specific `Host <name>` blocks
+  the user configured take precedence.
+
+Both writes land in the bind-mounted `~/.ssh/` (mapped from the host's
+`~/.ssh/claudebox/`) so they persist across container restarts and rebuilds. To
+opt out of accept-new: hand-edit `~/.ssh/config` to remove the block and restart the
+container.
 
 ## The SSH key
 

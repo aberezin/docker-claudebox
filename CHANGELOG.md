@@ -40,6 +40,17 @@ bundle. Entries below are appended per phase / per issue as they land.
 
 ### [#10 — split git-vs-API auth]
 
+- **Follow-up (2026-07-20)**: fresh-container SSH host-key verification.
+  With the credential-helper gone, first-connect `git pull|push` against a
+  git host hit `StrictHostKeyChecking` on an empty `known_hosts` and
+  failed with "Host key verification failed" — the exact symptom Alan hit
+  on the first restart. Entrypoint now pre-seeds `~/.ssh/known_hosts` with
+  the majors (github.com, gitlab.com, bitbucket.org, codeberg.org) via
+  `ssh-keyscan` once per container (versioned stamp), and appends
+  `Host * / StrictHostKeyChecking accept-new` to `~/.ssh/config` as the
+  catch-all for self-hosted / less common providers. Both writes land in
+  the bind-mounted `~/.ssh/` so they persist across restarts. Idempotent:
+  re-runs don't duplicate the config block or re-scan the majors.
 - **Landed (2026-07-19)**: SSH-for-git, tokens-for-API-only. Entrypoint no
   longer runs `gh auth setup-git` on start — the credential-helper hijack
   root cause is gone. Git-over-HTTPS falls through to SSH via
