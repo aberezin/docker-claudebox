@@ -199,9 +199,13 @@ dridock checkversion     # reports "claude CLI (in image): X.Y.Z" and warns belo
 ```
 
 If it's below the floor, bump `ARG CLAUDE_VERSION` in the `Dockerfile` and
-`make build`. The entrypoint also probes `claude --help` on any `--remote-control`
-start and prints this explanation when the flag isn't real — so a stale image
-announces itself instead of failing silently.
+`make build`. `dridock start` also probes the image's `claude --version` HOST-SIDE
+(in `wrapper.sh`) whenever `--remote-control` or `--rc` is on the command line, and
+prints this explanation when the CLI is too old — so a stale image announces itself
+instead of failing silently. The probe deliberately lives host-side, NOT in the
+entrypoint: running `claude --help` from PID 1 in the container deadlocks on the
+tty (SIGTTOU/SIGTTIN → process stops → `timeout` can't reap it), so the entrypoint
+carries a comment forbidding reintroduction.
 
 To verify by hand what kind of credential you actually have (this is ground truth,
 not `.claude.json`):
@@ -217,10 +221,17 @@ print(d["claudeAiOauth"]["subscriptionType"], d["claudeAiOauth"]["scopes"])'
 
 ### The env-var precedence gotcha (#16)
 
-**When both `CLAUDE_CODE_OAUTH_TOKEN` and a stored full-scope login
-exist, the env var wins.** Anthropic's model-request-only token gets picked up and
-Remote Control quietly refuses to activate ("RC inactive" — no loud error, session
-runs fine without RC). Fix: opt out of the env forwarding for that project.
+**Order of operations for Remote Control debugging:** first rule out the image floor
+(#17 above) — a stale image is silent and far more common; the auth-precedence issue
+below only bites projects that have BOTH a `dridock setup-token`-produced token AND
+a `claude auth login` full-scope login stored. Alan's actual case in #17 turned out
+to be the image, not the env var; the fix below is real, but not the first thing to
+suspect.
+
+**When both `CLAUDE_CODE_OAUTH_TOKEN` (from setup-token) and a stored full-scope
+login exist, the env var wins.** Anthropic's model-request-only token gets picked
+up and Remote Control quietly refuses to activate ("RC inactive" — no loud error,
+session runs fine without RC). Fix: opt out of the env forwarding for that project.
 
 Recipe:
 
