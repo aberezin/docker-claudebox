@@ -92,8 +92,8 @@ eq "1 GiB"        "$(cb_h 1073741824)" "1G"
 eq "empty -> 0B"  "$(cb_h)"            "0B"
 
 echo "--- cb_cdp_profile (tunable debug-Chrome profile dir) ---"
-eq "CLAUDEBOX_CDP_PROFILE override" "$(CLAUDEBOX_CDP_PROFILE=/tmp/my-cdp cb_cdp_profile)" "/tmp/my-cdp"
-case "$(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" in
+eq "DRIDOCK_CDP_PROFILE override" "$(DRIDOCK_CDP_PROFILE=/tmp/my-cdp cb_cdp_profile)" "/tmp/my-cdp"
+case "$(DRIDOCK_CDP_PROFILE= cb_cdp_profile)" in
     */claudebox/cdp/chrome-debug-profile) ok "default is clearly-named under cdp home" ;;
     *) bad "default profile path unexpected: $(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" ;;
 esac
@@ -110,7 +110,7 @@ if grep -q '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP"; then ok "entrypoint re-read
 # empty sidecar must UNSET (bridge-down must clear a stale URL, not leave it exported)
 if grep -A12 '${CLAUDE_CONTAINER_NAME}-cdp' "$ENTRYP" | grep -q 'unset \$name'; then ok "entrypoint unsets CDP url when sidecar empty"; else bad "entrypoint does not unset on empty -cdp (stale bridge url would linger)"; fi
 # wrapper writes the sidecar unconditionally (mirror), so bridge-down -> empty on next run
-if grep -q "printf 'CLAUDEBOX_HOST_CDP_URL=%s\\\\n' \"\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
+if grep -qE "printf '(DRIDOCK|CLAUDEBOX)_HOST_CDP_URL=%s\\\\n' \"\\\$_cdp_url\"" "$WRAPPER"; then ok "wrapper mirrors marker->sidecar unconditionally (self-heals to empty)"; else bad "wrapper -cdp write is not the unconditional mirror"; fi
 
 echo "--- cb_vm_gc orphan detection must be profile-based, NOT the dangerous IN-USE-BY heuristic ---"
 # Regression for a data-loss bug: the orphan test used `limactl disk ls | awk NF<5`, but
@@ -165,7 +165,7 @@ grep -q '${CLAUDE_CONTAINER_NAME}-hostagent' "$ENTRYP" && ok "entrypoint re-read
 if declare -f cb_host_agent_up >/dev/null && declare -f cb_host_agent_down >/dev/null; then ok "cb_host_agent_up/down defined"; else bad "host-agent wrapper functions missing"; fi
 # phase 3: Makefile + tests are backend-aware (docker backend builds/tests locally, no colima)
 MK="$SCRIPT_DIR/../Makefile"; CMN="$SCRIPT_DIR/common.sh"
-grep -q 'CLAUDEBOX_BACKEND' "$MK" && grep -q 'ifeq ($(CLAUDEBOX_BACKEND),docker)' "$MK" && ok "Makefile is backend-aware (colima|docker)" || bad "Makefile backend branch missing"
+grep -qE '(DRIDOCK|CLAUDEBOX)_BACKEND' "$MK" && grep -qE 'ifeq \(\$\((DRIDOCK|CLAUDEBOX)_BACKEND\),docker\)' "$MK" && ok "Makefile is backend-aware (colima|docker)" || bad "Makefile backend branch missing"
 grep -q 'CBX_BACKEND' "$CMN" && grep -q '/.dockerenv' "$CMN" && ok "test harness auto-selects docker backend in a container" || bad "common.sh backend detection missing"
 
 echo "--- bootstrap --adopt (existing repos, no nesting) ---"
@@ -193,8 +193,8 @@ rm -rf "$BT"; eval "$_orig_pf"   # restore the real cb_preflight
 
 echo "--- disk nice-to-haves (2.11.0): vm.disk default, prune-on-start, tmpfs, disk MOTD ---"
 eq "vm.disk default is 100GiB" "$(cb_machine_get vm.default_disk)" "100GiB"
-if grep -q 'CLAUDEBOX_PRUNE_ON_START' "$ENTRYP"; then ok "entrypoint honors CLAUDEBOX_PRUNE_ON_START"; else bad "prune-on-start missing"; fi
-if grep -q 'CLAUDEBOX_TMPFS_TMP' "$WRAPPER" && grep -q 'tmpfs "/tmp' "$WRAPPER"; then ok "wrapper supports CLAUDEBOX_TMPFS_TMP (--tmpfs /tmp)"; else bad "tmpfs /tmp opt-in missing"; fi
+if grep -qE '(DRIDOCK|CLAUDEBOX)_PRUNE_ON_START' "$ENTRYP"; then ok "entrypoint honors PRUNE_ON_START"; else bad "prune-on-start missing"; fi
+if grep -qE '(DRIDOCK|CLAUDEBOX)_TMPFS_TMP' "$WRAPPER" && grep -q 'tmpfs "/tmp' "$WRAPPER"; then ok "wrapper supports TMPFS_TMP (--tmpfs /tmp)"; else bad "tmpfs /tmp opt-in missing"; fi
 if grep -q 'DISK_NOTE=' "$ENTRYP" && grep -q '85' "$ENTRYP"; then ok "entrypoint has the startup disk MOTD (>=85%)"; else bad "disk MOTD missing"; fi
 # guidance trim: the exhaustive per-language tool lists are gone
 if grep -q '^## Go Tools' "$ENTRYP"; then bad "guidance still carries the exhaustive tool inventory"; else ok "guidance tool inventory trimmed"; fi
@@ -233,7 +233,7 @@ echo "--- VM-IP sidecar contract (wrapper injects CLAUDEBOX_VM_IP, entrypoint re
 # both halves of this cross-file contract agree.
 if grep -q 'container_name}${_crole}-vmip' "$WRAPPER"; then ok "wrapper writes -vmip sidecar (all roles)"; else bad "wrapper no longer writes the -vmip sidecar"; fi
 if grep -q '${CLAUDE_CONTAINER_NAME}-vmip' "$ENTRYP"; then ok "entrypoint re-reads the -vmip sidecar"; else bad "entrypoint no longer reads the -vmip sidecar"; fi
-if grep -q 'CLAUDEBOX_VM_IP=%s' "$WRAPPER"; then ok "wrapper mirrors current IP -> sidecar (tracks rotation)"; else bad "wrapper -vmip write is not the current-IP mirror"; fi
+if grep -qE '(DRIDOCK|CLAUDEBOX)_VM_IP=%s' "$WRAPPER"; then ok "wrapper mirrors current IP -> sidecar (tracks rotation)"; else bad "wrapper -vmip write is not the current-IP mirror"; fi
 if grep -A12 '${CLAUDE_CONTAINER_NAME}-vmip' "$ENTRYP" | grep -q 'unset \$name'; then ok "entrypoint unsets VM IP when sidecar empty"; else bad "entrypoint does not unset on empty -vmip"; fi
 
 echo "--- cb_project_profiles (config 'profiles:' — flow + block + none) ---"
