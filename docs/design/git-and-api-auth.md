@@ -125,9 +125,57 @@ start, so a running container picks up rotations without a rebuild).
   git@github.com:owner/repo.git`), or explicitly install a credential helper of their
   own choosing. The harness stays out of it.
 
+## Claude Code auth (distinct from git/API auth above)
+
+This doc's original scope was **git-vs-third-party-API auth** (GitHub, GitLab, etc.).
+Claude Code's OWN auth is a separate story with its own two-tier split — kept here
+because it's the same shape (two mechanisms, different scopes) and users ask about it
+in the same breath.
+
+Claude Code accepts three auth kinds, with different capabilities:
+
+| Set up with | Env var forwarded | Scope | Use when |
+|---|---|---|---|
+| `ANTHROPIC_API_KEY` | `ANTHROPIC_API_KEY` | API billing, model requests only | You pay per-token; no subscription features. |
+| `dridock setup-token` | `CLAUDE_CODE_OAUTH_TOKEN` | Subscription, model requests only | You have a Claude subscription; long-lived token; simple flow. |
+| `claude auth login` (inside the container) | Stored in `~/.claude/.claude.json` (bind-mounted, persists) | Subscription, **full-scope** (Remote Control, mobile push, etc.) | You want claude.ai features that need a full OAuth login — the biggest one being **`--remote-control`** and mobile push notifications. |
+
+The gotcha: **when both `CLAUDE_CODE_OAUTH_TOKEN` and a stored full-scope login
+exist, the env var wins.** Anthropic's model-request-only token gets picked up and
+Remote Control quietly refuses to activate ("RC inactive" — no loud error, session
+runs fine without RC). Fix: opt out of the env forwarding for that project.
+
+Recipe:
+
+```bash
+# 1. One time per project: full-scope OAuth. Run INSIDE the container.
+dridock            # boot a session
+claude auth login  # browser flow — opens on your Mac, complete + Ctrl+C back
+                   # (credentials land in ~/.claude/.claude.json, bind-mounted, so
+                   #  they persist across container recreate)
+exit               # leave the session
+
+# 2. From then on, launch with the env-var forwarding OFF so the stored login wins:
+DRIDOCK_NO_OAUTH_TOKEN=1 dridock start --remote-control
+```
+
+`DRIDOCK_NO_OAUTH_TOKEN=1` mirrors the existing `DRIDOCK_NO_API_KEY=1` (which does
+the same thing for `ANTHROPIC_API_KEY`). Set it once in `~/.zshrc` if you want RC
+by default across sessions.
+
+The entrypoint prints a hint on any interactive start where `--remote-control` is
+present AND `CLAUDE_CODE_OAUTH_TOKEN` is set — so if you set up RC without setting
+`DRIDOCK_NO_OAUTH_TOKEN=1`, the container tells you what to fix, not you having to
+find the "RC inactive" needle in claude's UI.
+
+Reference: [Anthropic's Remote Control docs](https://code.claude.com/docs/en/remote-control)
+(look for "Remote Control requires a full-scope login token"). Full ADR + design
+notes on the dridock side: [Issue #16](https://github.com/aberezin/docker-claudebox/issues/16).
+
 ## See also
 
-- Issue [#10](https://github.com/aberezin/docker-claudebox/issues/10) — this doc's tracking issue.
+- Issue [#10](https://github.com/aberezin/docker-claudebox/issues/10) — the git-vs-API split (top of this doc).
+- Issue [#16](https://github.com/aberezin/docker-claudebox/issues/16) — the Claude-Code Remote Control auth section above.
 - [bootstrap.md](bootstrap.md) — the `dridock bootstrap` verb and its secrets flags.
-- [../environment-variables.md](../environment-variables.md) — the `.dridock/secrets.env` reference.
+- [../environment-variables.md](../environment-variables.md) — the `.dridock/secrets.env` reference and `DRIDOCK_NO_*_TOKEN`/`_KEY` envs.
 - [3.0-migration.md](3.0-migration.md) — where this split lands in the 3.0 bundle.

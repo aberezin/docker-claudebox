@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.0.1"
+DRIDOCK_VERSION="3.0.2"
 
 # ── 3.0 backward-compat alias setup ──────────────────────────────────────────
 # For each user-input env var renamed CLAUDEBOX_X → DRIDOCK_X in 3.0, copy the
@@ -1971,6 +1971,14 @@ CLAUDE_CODE_OAUTH_TOKEN="${DRIDOCK_ENV_CLAUDE_CODE_OAUTH_TOKEN:-${CLAUDEBOX_ENV_
 case "${DRIDOCK_NO_API_KEY:-${CLAUDE_NO_API_KEY:-}}" in
     1|true|yes|on) ANTHROPIC_API_KEY="" ;;
 esac
+# DRIDOCK_NO_OAUTH_TOKEN=1 → mirror above but for the model-scope setup-token. Set when
+# a user has done `claude auth login` inside the container (full-scope OAuth) and needs
+# the stored credentials to take effect for Remote Control — otherwise the env var from
+# `dridock setup-token` overrides the full login and RC stays inactive. Same mechanism:
+# empty value flows to the sidecar, entrypoint UNSETS the stale env. See #16.
+case "${DRIDOCK_NO_OAUTH_TOKEN:-${CLAUDE_NO_OAUTH_TOKEN:-}}" in
+    1|true|yes|on) CLAUDE_CODE_OAUTH_TOKEN="" ;;
+esac
 
 # Normalize to the PHYSICAL workspace path, resolving symlinks (notably macOS
 # /tmp -> /private/tmp). Lima shares the resolved path into the VM (it uses the git
@@ -2060,6 +2068,7 @@ USEFUL ENV
   DRIDOCK_CAFFEINATE=1          keep the Mac awake during a foreground session (macOS)
   DRIDOCK_MINIMAL=1             use the minimal image variant
   DRIDOCK_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
+  DRIDOCK_NO_OAUTH_TOKEN=1      never forward CLAUDE_CODE_OAUTH_TOKEN — needed for --remote-control (use 'claude auth login' inside the container first; see #16)
   DRIDOCK_ALLOW_NEW=1           skip the "create a new project here?" prompt (or the non-interactive abort)
   DRIDOCK_HARNESS_DEV=1         force framework-dev mode (auto-detected when the workspace is a claudebox harness fork). Alias: DRIDOCK_FRAMEWORK_DEV.
   DRIDOCK_NO_DRIFT_WARN=1       silence the "cb-infra image is behind wrapper" warning on each dridock invocation
@@ -2797,7 +2806,11 @@ fi
 case "${1:-}" in
     -v|--version|doctor|auth|mcp)
         cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
-        "${DOCKER[@]}" run --rm --entrypoint claude "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE "$@"
+        # `-it` is needed by interactive passthroughs — `auth login` (browser OAuth,
+        # requires TTY to print the URL + wait for callback) and `mcp` (interactive
+        # picker in some paths). Read-only verbs like `-v`/`--version`/`doctor` don't
+        # need TTY but tolerate it fine. Same-shape addition covers all of them; #16.
+        "${DOCKER[@]}" run --rm -it --entrypoint claude "${DOCKER_ARGS[@]}" $CLAUDE_IMAGE "$@"
         exit 0
         ;;
 esac

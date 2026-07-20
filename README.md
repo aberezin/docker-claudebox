@@ -280,6 +280,23 @@ export DRIDOCK_NO_API_KEY=1   # put in ~/.zshrc to make it the default
 This drops the API key even if one is exported on your Mac (and clears one already
 baked into an existing container), so claudebot falls through to the subscription.
 
+**Using `--remote-control` (mobile / claude.ai/code tethering):** Claude Code's
+Remote Control feature needs a **full-scope claude.ai OAuth login**, not the
+model-request-only token that `dridock setup-token` produces. One-time setup per
+project:
+
+```bash
+dridock            # enter the session
+claude auth login  # browser OAuth flow (opens on your Mac); Ctrl+C when done
+exit
+
+# from then on, launch with the token forwarding off so the stored login wins:
+DRIDOCK_NO_OAUTH_TOKEN=1 dridock start --remote-control
+```
+
+See [design/git-and-api-auth.md § Claude Code auth](docs/design/git-and-api-auth.md#claude-code-auth-distinct-from-gitapi-auth-above)
+for the full table (API key / setup-token / auth login) and why RC needs the third.
+
 ## Modes
 
 dridock can run in several modes — pick the one that matches how you want to use Claude Code. Each has its own page with full setup, env vars, and examples.

@@ -26,6 +26,34 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.0.2] — 2026-07-20 _(fork)_
+
+### Fixed
+
+- **`--remote-control` now activatable in dridock** (#16). Anthropic gates
+  Remote Control behind a full-scope claude.ai OAuth login and explicitly
+  rejects setup-token-style `CLAUDE_CODE_OAUTH_TOKEN` (model-request scope
+  only). Dridock defaulted to setup-token throughout, so RC silently
+  refused to register even when the flag reached claude (fixed in 3.0.1).
+  Three changes make RC usable:
+  - **`dridock auth` passthrough now uses `-it`** — so `dridock auth login`
+    (Anthropic's browser OAuth flow) can print the URL and wait for callback.
+    Without a TTY, the flow couldn't complete.
+  - **New env `DRIDOCK_NO_OAUTH_TOKEN=1`** — mirrors `DRIDOCK_NO_API_KEY`;
+    suppresses forwarding of `CLAUDE_CODE_OAUTH_TOKEN` so a user who did
+    `claude auth login` inside the container can have the stored full-scope
+    credentials win over the env var (which otherwise takes precedence).
+  - **Entrypoint hint**: on any interactive start where `--remote-control`
+    (or `--rc`) is in the sidecar AND `CLAUDE_CODE_OAUTH_TOKEN` is set,
+    print a one-liner explaining the exact fix (`claude auth login` + set
+    `DRIDOCK_NO_OAUTH_TOKEN=1`). Better than "RC inactive" going unnoticed.
+
+  Docs: new "Claude Code auth" section in `docs/design/git-and-api-auth.md`
+  covering the API-key / setup-token / full-OAuth trichotomy. README's
+  Authentication section adds the `--remote-control` recipe. Not needed:
+  the host-agent proxy I initially feared — Anthropic's RC works fine over
+  outbound HTTPS + polling, so no networking design surface here.
+
 ## [3.0.1] — 2026-07-20 _(fork)_
 
 ### Fixed

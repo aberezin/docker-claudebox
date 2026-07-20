@@ -999,6 +999,22 @@ else
 		rm -f "$INTERACTIVE_ARGS_FILE"
 		dbg "interactive: extra claude args: $INTERACTIVE_EXTRA"
 	fi
+	# #16: --remote-control needs a full-scope claude.ai OAuth login, not a
+	# setup-token-style CLAUDE_CODE_OAUTH_TOKEN (model-request scope only —
+	# Anthropic rejects RC on those). If both are present, RC starts and then
+	# silently fails to activate. Detect and hint at the exact fix.
+	case "$INTERACTIVE_EXTRA" in
+		*--remote-control*|*--rc*)
+			if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+				echo "⚠ dridock: --remote-control needs a FULL-SCOPE claude.ai OAuth login," >&2
+				echo "  but CLAUDE_CODE_OAUTH_TOKEN (setup-token style) is set — that token is" >&2
+				echo "  model-request-only, so Anthropic rejects the RC registration silently." >&2
+				echo "  Fix (one-time per project): inside this session, run 'claude auth login'" >&2
+				echo "  and complete the browser OAuth flow; then next launch use:" >&2
+				echo "    DRIDOCK_NO_OAUTH_TOKEN=1 dridock start --remote-control" >&2
+				echo "  See docs/design/git-and-api-auth.md and https://code.claude.com/docs/en/remote-control" >&2
+			fi ;;
+	esac
 	NO_CONTINUE_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-no-continue"
 	if [ -f "$NO_CONTINUE_FILE" ]; then
 		rm -f "$NO_CONTINUE_FILE"
