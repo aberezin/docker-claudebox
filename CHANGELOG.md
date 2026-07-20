@@ -57,6 +57,13 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     version axis, independent of the harness semver, and nothing surfaced it before —
     which is why a 92-release-stale CLI went unnoticed.
 
+- **Stale "run `dridock`" advice corrected to `dridock start`** (6 sites). Bare
+  `dridock` became info-only in #12 / 2.24.0 (prints version + hint, exits 0) but
+  several messages still told users to run it to reseed a drifted project image or
+  to initialize a new project — advice that silently does nothing. Includes the
+  `checkversion` drift hint, which is exactly the message this release adds output
+  next to.
+
 ### Docs
 
 - `docs/design/git-and-api-auth.md` — new "Remote Control prerequisite: the baked CLI

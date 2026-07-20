@@ -156,7 +156,7 @@ Opt out entirely with `DRIDOCK_DEFAULT_PLUGINS=0`. Remove it from a project with
 
 To add a plugin, put its marketplace under `extraKnownMarketplaces` and enable it under `enabledPlugins` with the key `"<plugin-name>@<marketplace-key>"`. Make the marketplace **key match the marketplace's manifest `name`** to avoid resolution ambiguity (that's why the default uses `claude-plugins-official` for both). Plugins auto-load on the next run — their commands/agents/hooks/MCP servers/skills become available with no further steps.
 
-**Interactive alternative:** run `dridock` and use `/plugin marketplace add <repo>` / `/plugin install <name>@<marketplace>`; it writes to the project's mounted `.claude`, so it persists.
+**Interactive alternative:** run `dridock start` and use `/plugin marketplace add <repo>` / `/plugin install <name>@<marketplace>`; it writes to the project's mounted `.claude`, so it persists.
 
 **Note:** the plugin cache (`~/.claude/plugins/cache/`) is per-project, so the same plugin enabled across N projects is fetched N times. For a single shared standard, prefer the baked default (scope #3).
 

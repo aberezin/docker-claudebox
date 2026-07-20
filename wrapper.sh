@@ -1066,11 +1066,11 @@ cb_checkversion() {
     local pver cver; pver="$(cb_real_ver "$pv")"; cver="$(cb_real_ver "$civ")"
     # Case: the image is already BUILT current (cb-infra == wrapper) but this project's
     # VM still runs an older/unstamped image — it just needs a reseed, NOT a rebuild.
-    # Say exactly that (running `claudebox` here auto-reseeds + recreates) and stop, so
+    # Say exactly that (running `dridock start` here auto-reseeds + recreates) and stop, so
     # we don't also print misleading "make build" advice.
     if [ -n "$cid" ] && [ -n "$cver" ] && [ "$cver" = "$wv" ] && [ "$pver" != "$cver" ]; then
         echo "ℹ️  cb-infra is current ($cver); this project's VM still runs ${pver:-$pv}."
-        echo "   → run 'dridock' in this project — it auto-reseeds $cver and recreates the container"
+        echo "   → run 'dridock start' in this project — it auto-reseeds $cver and recreates the container"
         echo "     (session preserved). No rebuild needed."
         return 0
     fi
@@ -1121,7 +1121,7 @@ cb_info() {
     echo "project:"
     printf '  %-18s %s\n' "workspace:" "$root"
     if [ -z "$id" ]; then
-        echo "  (not a dridock project yet — run 'dridock' here to initialize)"
+        echo "  (not a dridock project yet — run 'dridock start' here to initialize)"
     else
         status="$(cb_vm_status "$profile")"
         printf '  %-18s %s\n' "project id:" "$id"
@@ -1289,7 +1289,7 @@ cb_features_info() {
 cb_features_write() {
     local root="$1" names="$2" cfg tmp
     cfg="$(cb_project_config_path "$root")"
-    [ -f "$cfg" ] || { echo "no config.yml at $cfg — run 'dridock' first to initialize" >&2; return 1; }
+    [ -f "$cfg" ] || { echo "no config.yml at $cfg — run 'dridock start' first to initialize" >&2; return 1; }
     tmp="$(mktemp)"
     # Strip existing features:/profiles: (flow OR block form) — preserve everything else.
     awk '
@@ -1400,7 +1400,7 @@ cb_set_hostname() {
     case "$name" in ''|*[!a-zA-Z0-9._-]*) echo "invalid hostname '$name' (letters, digits, '.', '-', '_' only)" >&2; return 1 ;; esac
     cfg="$(cb_project_config_path "$root")"
     _dotname="$(cb_project_dot_basename "$root")"
-    [ -f "$cfg" ] || { echo "no ${_dotname}/config.yml here — run 'dridock' first to initialize" >&2; return 1; }
+    [ -f "$cfg" ] || { echo "no ${_dotname}/config.yml here — run 'dridock start' first to initialize" >&2; return 1; }
     tmp="$(mktemp)"
     if grep -qE '^[[:space:]]*hostname:' "$cfg"; then
         sed -E "s|^([[:space:]]*)hostname:.*|\\1hostname: $name|" "$cfg" > "$tmp" && cat "$tmp" > "$cfg"
