@@ -19,6 +19,17 @@
 > servers were already baked as part of the language toolchain install; no dedicated
 > bake step invoked). Each deferred item is a real design/behavior change that
 > deserves independent review rather than being bundled into the mechanism ship.
+>
+> **Added post-3.0 (2026-07-20)**: `modeguard` — first non-LSP feature. Installs
+> a `.git/hooks/pre-commit` in the project workspace that refuses commits
+> which drop the executable bit (`100755` → `100644`) — the failure mode where
+> Edit/Write tool paths silently strip `+x` from scripts. Escape:
+> `DRIDOCK_MODEGUARD_ALLOW_MODE_STRIP=1 git commit …` or `--no-verify`. `on.sh`
+> refuses to clobber a user-authored `pre-commit` hook (detected via marker);
+> `off.sh` only removes the hook it installed. Opt in with
+> `dridock features enable modeguard`. Validates the feature mechanism for
+> workspace-file-touching features (the shipped LSP features only touch Claude
+> Code plugin state, never the workspace).
 
 ## Context
 

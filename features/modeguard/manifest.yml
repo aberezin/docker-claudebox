@@ -1,0 +1,4 @@
+name: modeguard
+description: install a git pre-commit hook in the project workspace that refuses commits which drop the executable bit (100755 → 100644) — the failure mode where Edit/Write tools silently strip +x from scripts. Escape hatch DRIDOCK_MODEGUARD_ALLOW_MODE_STRIP=1 or `git commit --no-verify`.
+requires-bake: false
+# No baked binary dep — pure shell + git. Runtime-installed.

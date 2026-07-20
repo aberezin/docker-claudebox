@@ -26,6 +26,22 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [Unreleased — 3.0.x] _(fork)_
+
+### Features
+
+- **`modeguard` feature** (2026-07-20) — first non-LSP entry in the 3.0 features
+  system. Opt-in via `dridock features enable modeguard`. Installs a
+  `.git/hooks/pre-commit` in the project workspace that refuses commits which
+  drop the executable bit (`100755` → `100644`) — the exact failure mode where
+  Edit/Write tool paths sometimes silently strip `+x` from scripts and it lands
+  in a commit unnoticed. Escape hatch:
+  `DRIDOCK_MODEGUARD_ALLOW_MODE_STRIP=1 git commit …` or `--no-verify`. `on.sh`
+  refuses to clobber a user-authored `pre-commit` hook (marker-detected);
+  `off.sh` only removes the hook it installed. Validates the feature mechanism
+  end-to-end for workspace-file-touching features (the shipped LSP features
+  only touch Claude Code plugin state).
+
 ## [3.0.0] — 2026-07-20 _(fork)_
 
 The coordinated `3.0-bundle` — four breaking-ish issues bundled as one
