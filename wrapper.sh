@@ -1574,7 +1574,7 @@ cb_bridge_down() {  # $1=id
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Host agent (Approach 2 / task #15, phase 1) — proxy the framework's host-only commands
+# Host agent (Approach 2, phase 1) — proxy the framework's host-only commands
 # (colima/limactl) from a harness-DEV claudebot back to the Mac. OPT-IN, off by default, and
 # a TRUSTED single-operator tool (remote command exec). Gateway-bound + token-auth +
 # subcommand-allowlisted (see host-agent.py). See docs/design/backends.md.
@@ -2049,7 +2049,7 @@ OTHER
   migrate [--all]                  3.0: move .claudebox/ → .dridock/ (workspace + data dir + machine config); --all sweeps every legacy data dir
   completion bash                  emit a bash completion script (installed by install.sh)
   browser-bridge up|down           opt-in: let claudebot drive your real Chrome via CDP
-  host-agent up|down|status        opt-in (TRUSTED): let a HARNESS-DEV claudebot run allowlisted colima/limactl on the Mac (#15)
+  host-agent up|down|status        opt-in (TRUSTED): let a HARNESS-DEV claudebot run allowlisted colima/limactl on the Mac
   harness <verb>                   framework-dev: harness-dev-only ops. Verbs: sync [--repair] (rebuild cb-infra; --repair auto-prunes on BuildKit corruption)
   framework-bugs [list|clear]      review bugs claudebot filed with cb-report-bug
   consult list|show|approve|watch  supervised claudebot<->framework-Claude threads (watch=block-until-change)
@@ -2187,7 +2187,7 @@ HELP
         esac
         ;;
     host-agent)
-        # Approach 2 / #15: proxy colima/limactl from a harness-dev claudebot to the Mac.
+        # Approach 2: proxy colima/limactl from a harness-dev claudebot to the Mac.
         case "${2:-status}" in
             up)     cb_host_agent_up; exit $? ;;
             down)   cb_host_agent_down; exit $? ;;
@@ -2561,7 +2561,7 @@ done
 # self-heals. HOSTNAME (network.hostname from config.yml) rides the same sidecar as the
 # rotation-proof escape hatch.
 
-# Host agent (Approach 2 / #15) — if the OPT-IN agent is up, inject its URL + token so the
+# Host agent (Approach 2) — if the OPT-IN agent is up, inject its URL + token so the
 # baked colima/limactl shims can proxy to the Mac. Durable sidecar (empty when the agent is
 # down → entrypoint unsets it), same self-healing pattern as the CDP/VM-IP sidecars.
 _ha_home="$(cb_host_agent_home)"; _ha_url= _ha_tok=

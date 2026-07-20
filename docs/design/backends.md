@@ -1,4 +1,4 @@
-# Backends — developing/testing the framework off the Mac (task #15)
+# Backends — developing/testing the framework off the Mac
 
 **Status:** Approach 2 **phases 1 + 3 shipped**. Phase 1 (v2.14.0): the host agent + `colima`/
 `limactl` shims, proven end-to-end (a bridge-network container drives real `colima list` on the

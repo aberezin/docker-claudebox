@@ -16,7 +16,7 @@ CBX_TEST_ID="cbxtest"
 CBX_TEST_PROFILE="cb-${CBX_TEST_ID}"
 # Backend: colima (build/run in a throwaway VM) or docker (CI / in-container harness dev — use
 # the AMBIENT daemon, no colima). Auto-selects docker inside a container. docker mode leaves
-# CBX_TEST_CTX empty so `docker` targets the local daemon. See docs/design/backends.md (#15).
+# CBX_TEST_CTX empty so `docker` targets the local daemon. See docs/design/backends.md.
 CBX_BACKEND="${CLAUDEBOX_BACKEND:-$([ -f /.dockerenv ] && echo docker || echo colima)}"
 if [ "$CBX_BACKEND" = docker ]; then CBX_TEST_CTX=""; DCTX=(); else CBX_TEST_CTX="colima-${CBX_TEST_PROFILE}"; DCTX=(--context "$CBX_TEST_CTX"); fi
 # workspace lives OUTSIDE the repo git tree (under $HOME so colima auto-mounts it),

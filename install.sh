@@ -118,7 +118,7 @@ fi
 rm -f "$WRAPPER_TMP"
 
 # Install host-agent.py next to the wrapper (the wrapper resolves it there) — the opt-in
-# Mac agent for `dridock host-agent up` (Approach 2 / #15). Best-effort; skip if absent.
+# Mac agent for `dridock host-agent up` (Approach 2). Best-effort; skip if absent.
 if [ -f "$SCRIPT_DIR/host-agent.py" ]; then
 	if [ -w "$INSTALL_DIR" ]; then install -m 755 "$SCRIPT_DIR/host-agent.py" "$INSTALL_DIR/host-agent.py"
 	elif command -v sudo >/dev/null 2>&1; then sudo install -m 755 "$SCRIPT_DIR/host-agent.py" "$INSTALL_DIR/host-agent.py"; fi

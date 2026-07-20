@@ -71,7 +71,7 @@ That's by design, and it's fine:
 
 - **In here, `make build` auto-uses the docker backend and builds into your own VM's daemon** — so you
   build + test your changes **locally**, no cb-infra and no colima. That's the whole point of the
-  docker backend (#15).
+  docker backend.
 - **The canonical "build into cb-infra so every project reseeds the new image" is a MAC step** — Alan
   (or a Mac `make build`) does it once your change is validated. *You validate here; the propagating
   release build happens on the Mac.*

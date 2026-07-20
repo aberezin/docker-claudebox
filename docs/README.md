@@ -43,7 +43,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [git-and-api-auth.md](design/git-and-api-auth.md) | The SSH-for-git / tokens-for-API-only split (#10) — provider-agnostic, no credential-helper hijack. |
 | [framework-guidance.md](design/framework-guidance.md) | How framework guidance reaches every claudebot — `~/.claude/CLAUDE.md` (user memory), rewritten each start. |
 | [framework-consult.md](design/framework-consult.md) | Supervised claudebot ↔ framework-Claude threads that turn recurring problems into baked standards. |
-| [backends.md](design/backends.md) | Developing/testing the harness off the Mac (#15) — the docker backend + the host-agent proxy, and the security model. |
+| [backends.md](design/backends.md) | Developing/testing the harness off the Mac — the docker backend + the host-agent proxy, and the security model. |
 | [developing-in-a-claudebox.md](design/developing-in-a-claudebox.md) | Runbook: the dev loop for editing/building/testing the harness *inside* a dridock container (dogfooding). |
 | [framework-bug-reporting.md](design/framework-bug-reporting.md) | `cb-report-bug` — claudebot flags harness bugs to the host. |
 

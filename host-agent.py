@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""claudebox host agent (Approach 2, task #15) — runs an ALLOWLISTED host command
+"""claudebox host agent (Approach 2) — runs an ALLOWLISTED host command
 (colima/limactl) on behalf of a claudebot developing the harness *inside* a container.
 
 SECURITY: this is remote command execution against the Mac. It is deliberately narrow:
