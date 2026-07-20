@@ -3029,6 +3029,30 @@ fi
 cb_ensure_vm "$CB_PROJECT_ROOT" "$CB_PROJECT_ID" || exit 1
 cb_network_info "$CB_PROJECT_ROOT" "$CB_PROJECT_ID"
 
+# (#17) --remote-control against an image whose claude predates the flag. Claude Code
+# ignores unknown flags silently (exit 0), so this otherwise fails invisibly: the
+# session starts, looks healthy, RC never activates, nothing anywhere says why.
+#
+# This check MUST stay host-side. The obvious place is the entrypoint, but probing
+# `claude --help` there deadlocks PID 1: claude touches the container tty from a
+# non-foreground process group, stops on SIGTTOU/SIGTTIN, and `timeout` cannot reap a
+# STOPPED process. Out here it's a plain `docker run --rm` with no tty — nothing to
+# stop on. Runs only when the flag is actually present, after the VM is guaranteed up.
+# Match the flag with a trailing boundary: a bare `*--remote-control*` would also fire
+# on `--remote-control-session-name-prefix`, the decoy option old CLIs carry.
+case " $* " in
+    *" --remote-control "*|*" --remote-control="*|*" --rc "*|*" --rc="*)
+        _rc_cli="$(cb_image_claude_version "$CB_CONTEXT")"
+        if [ "$_rc_cli" != unavailable ] && [ "$(cb_semver_cmp "$_rc_cli" "$CB_CLAUDE_CLI_FLOOR")" = lt ]; then
+            echo "⚠️  --remote-control: this project's image ships Claude Code $_rc_cli, which has no" >&2
+            echo "    --remote-control flag (needs >= $CB_CLAUDE_CLI_FLOOR). claude IGNORES unknown flags" >&2
+            echo "    silently, so the session will start and Remote Control just won't activate." >&2
+            echo "    The CLI is baked into the image and can't self-update. Fix:" >&2
+            echo "      make build     # bump Dockerfile ARG CLAUDE_VERSION first if it's still old" >&2
+            echo "    Continuing anyway — everything except Remote Control works normally." >&2
+        fi ;;
+esac
+
 # Wait for container to not be running (another session might be using it)
 if "${DOCKER[@]}" ps --format '{{.Names}}' | grep -q "^${container_name}$"; then
     echo "⏳ Container '$container_name' is busy. Waiting for it to finish..."

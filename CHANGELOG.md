@@ -47,15 +47,28 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - **Pin bumped to `2.1.215`** (Remote Control needs `>= 2.1.206`). The pin is a
     hard floor: `DISABLE_AUTOUPDATER=1` plus the entrypoint's `.autoUpdates = false`
     patch mean a container can never update itself off it.
-  - **Entrypoint capability probe** — an interactive start with `--remote-control`
-    now greps the real `claude --help`. If the flag doesn't exist, it explains that
-    claude eats unknown flags silently and that a rebuild is the fix, instead of
-    letting RC fail invisibly. The #16 token-scope hint is kept as the second check,
-    now correctly ordered behind this one.
+  - **Host-side capability check** — `dridock start --remote-control` compares the
+    image's actual Claude Code version against the floor before launching and explains
+    the silent-flag-drop if it's too old, instead of letting RC fail invisibly. This
+    lives in `wrapper.sh`, **not** the entrypoint: probing `claude` from the entrypoint
+    deadlocks PID 1 (see the tty fix below), so the entrypoint carries a comment
+    warning against reintroducing it.
   - **`dridock checkversion` reports the baked Claude Code CLI version** and warns
     when it is below `CB_CLAUDE_CLI_FLOOR` (2.1.206). The CLI version is a second
     version axis, independent of the harness semver, and nothing surfaced it before —
     which is why a 92-release-stale CLI went unnoticed.
+
+- **First container start no longer stalls 90s and then lies about it.** The default
+  plugin installer (and the feature installer) ran `claude` from the entrypoint without
+  redirecting stdin. PID 1 owns the container's tty, so the helper sat in a
+  non-foreground process group, took SIGTTOU/SIGTTIN on first terminal access and
+  stopped (ps state `T`) — `timeout` can't cleanly rescue a STOPPED process, so every
+  tty-attached first start burned the full timeout and then reported
+  `not installed (offline?)`, which was never true. Both call sites now pass
+  `</dev/null`; measured on a tty-attached start: exit 124 (timeout) before, exit 0
+  after, and time-to-session 90s+ -> 9s. The misleading "(offline?)" wording now also
+  admits the timeout case. This is a **pre-existing bug**, not a 3.0.3 regression — it
+  surfaced because the #17 work put a second claude invocation on the same path.
 
 - **Stale "run `dridock`" advice corrected to `dridock start`** (6 sites). Bare
   `dridock` became info-only in #12 / 2.24.0 (prints version + hint, exits 0) but

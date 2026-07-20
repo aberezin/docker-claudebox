@@ -899,14 +899,22 @@ _maybe_install_default_plugin() {
 	# Two steps: register the marketplace (clones it), then install the plugin by
 	# name@marketplace. `plugin install` alone fails ("not found in marketplace") if
 	# the marketplace was never added.
+	# `</dev/null` is LOAD-BEARING (#17). PID 1 here owns the container's tty, so a
+	# helper claude started on this path sits in a non-foreground process group; the
+	# moment it touches the terminal it takes SIGTTOU/SIGTTIN and stops (ps state T).
+	# `timeout` can't rescue that cleanly and the whole start stalls for the full 90s
+	# before falsely reporting "offline". Handing it /dev/null for stdin means there is
+	# no terminal to stop on. Measured: without it this call times out (exit 124) every
+	# time on a tty-attached start; with it, exit 0. Keep it on every claude/helper
+	# invocation the entrypoint makes.
 	if timeout 90 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
 		bash -c 'export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:$PATH; claude plugin marketplace add anthropics/claude-plugins-official && exec claude plugin install commit-commands@claude-plugins-official --scope user' \
-		>/dev/null 2>&1
+		</dev/null >/dev/null 2>&1
 	then
 		touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
 		dbg "default plugin installed"
 	else
-		echo "note: default plugin (commit-commands) not installed (offline?) — set DRIDOCK_DEFAULT_PLUGINS=0 to silence" >&2
+		echo "note: default plugin (commit-commands) not installed (offline, or the install timed out) — set DRIDOCK_DEFAULT_PLUGINS=0 to silence" >&2
 	fi
 }
 _maybe_install_default_plugin "$@"
@@ -939,14 +947,17 @@ _install_features() {
 		elif [ -x "$lib_legacy/$feat.sh" ]; then on_script="$lib_legacy/$feat.sh"
 		else echo "dridock: unknown feature '$feat' (no $lib_new/$feat/on.sh)" >&2; continue; fi
 		dbg "installing feature: $feat (via $on_script)"
+		# `</dev/null` for the same reason as the plugin installer above — a feature
+		# script that shells out to claude would otherwise stop on the tty and burn
+		# the full 120s timeout. See the comment there.
 		if timeout 120 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
 			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:/home/claude/.claude/bin:\$PATH; exec '$on_script'" \
-			>/dev/null 2>&1
+			</dev/null >/dev/null 2>&1
 		then
 			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
 			echo "dridock: enabled feature '$feat'" >&2
 		else
-			echo "dridock: feature '$feat' install failed (offline?) — retries next start" >&2
+			echo "dridock: feature '$feat' install failed (offline, or the install timed out) — retries next start" >&2
 		fi
 	done
 }
@@ -999,43 +1010,20 @@ else
 		rm -f "$INTERACTIVE_ARGS_FILE"
 		dbg "interactive: extra claude args: $INTERACTIVE_EXTRA"
 	fi
-	# --remote-control has two silent-failure modes. Claude Code ignores unknown
-	# flags (exit 0, no warning), so neither one produces a diagnostic on its own —
-	# the session starts, looks healthy, and RC is simply never active.
+	# (#16) --remote-control + a setup-token-style CLAUDE_CODE_OAUTH_TOKEN: those
+	# tokens are model-request scope only, so Anthropic rejects the RC registration
+	# and claude reports no error — the session looks healthy with RC never active.
+	#
+	# NOTE: the companion check — "does this image's claude even HAVE the flag?"
+	# (#17) — deliberately lives HOST-SIDE in wrapper.sh, NOT here. Running
+	# `claude --help` from the entrypoint deadlocks: claude touches the container's
+	# tty from a non-foreground process group, takes SIGTTOU/SIGTTIN and stops (state
+	# T), and `timeout` can't reap a STOPPED process (SIGTERM just stays pending) —
+	# so the probe hangs PID 1 forever and no session ever starts. Do not reintroduce
+	# a claude invocation on this path.
 	case "$INTERACTIVE_EXTRA" in
 		*--remote-control*|*--rc*)
-			# (#17) FIRST: is the flag real in THIS image's CLI? The baked
-			# CLAUDE_VERSION is a hard floor (DISABLE_AUTOUPDATER=1 + autoUpdates
-			# false — the container never self-updates), and RC did not exist
-			# before ~2.1.206. A too-old CLI eats the flag silently. This is the
-			# blocker Alan actually hit; check it before blaming credentials.
-			# `timeout` on both probes: this runs on the path to starting the
-			# user's session, so a hung claude must degrade to "no warning",
-			# never to "session won't start". Match on the flag followed by a
-			# boundary — 2.1.123 carries a decoy `--remote-control-session-name-prefix`
-			# that a bare substring test would match.
-			_probe='export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:$PATH;'
-			_help="$(timeout 20 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
-				bash -c "$_probe claude --help 2>/dev/null")"
-			# Only judge the CLI when the probe actually produced help text. If it
-			# timed out or errored, stay silent — a false "your CLI is too old" would
-			# send the user rebuilding for nothing.
-			if [ -n "$_help" ] && ! printf '%s' "$_help" | grep -qE -- '--remote-control([[:space:]]|,|$)'
-			then
-				_cv="$(timeout 20 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
-					bash -c "$_probe claude --version 2>/dev/null" | head -1)"
-				echo "⚠ dridock: this image's Claude Code (${_cv:-unknown}) has NO --remote-control flag." >&2
-				echo "  Claude Code silently ignores unknown flags, so the session will start and" >&2
-				echo "  Remote Control will just never activate — with no error from claude." >&2
-				echo "  Remote Control needs Claude Code >= 2.1.206. The CLI version is BAKED into" >&2
-				echo "  the image (auto-update is disabled on purpose) so it cannot fix itself." >&2
-				echo "  Fix: rebuild the image with a newer pin, then relaunch:" >&2
-				echo "    make build   # bump Dockerfile ARG CLAUDE_VERSION first if it is still old" >&2
-				echo "  Check what you have:  dridock checkversion   (reports the baked CLI version)" >&2
-			# SECOND (#16): the CLI supports RC, but a setup-token-style
-			# CLAUDE_CODE_OAUTH_TOKEN is set. Those are model-request scope only, so
-			# Anthropic rejects the RC registration.
-			elif [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+			if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
 				echo "⚠ dridock: --remote-control needs a FULL-SCOPE claude.ai OAuth login," >&2
 				echo "  but CLAUDE_CODE_OAUTH_TOKEN (setup-token style) is set — that token is" >&2
 				echo "  model-request-only, so Anthropic rejects the RC registration silently." >&2
