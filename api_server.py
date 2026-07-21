@@ -116,12 +116,12 @@ if os.path.isfile(SYSTEM_HINT_FILE):
     with open(SYSTEM_HINT_FILE) as _f:
         SYSTEM_HINT = _f.read().strip()
 
-API_TOKEN = os.environ.get("CLAUDEBOX_MODE_API_TOKEN") or os.environ.get("CLAUDE_MODE_API_TOKEN", "")
-_port_raw = os.environ.get("CLAUDEBOX_MODE_API_PORT") or os.environ.get("CLAUDE_MODE_API_PORT", "8080")
+API_TOKEN = os.environ.get("DRIDOCK_MODE_API_TOKEN") or os.environ.get("CLAUDEBOX_MODE_API_TOKEN") or os.environ.get("CLAUDE_MODE_API_TOKEN", "")
+_port_raw = os.environ.get("DRIDOCK_MODE_API_PORT") or os.environ.get("CLAUDEBOX_MODE_API_PORT") or os.environ.get("CLAUDE_MODE_API_PORT", "8080")
 try:
     PORT = int(_port_raw)
 except ValueError:
-    log.error("CLAUDEBOX_MODE_API_PORT must be a number, got: %s", _port_raw)
+    log.error("DRIDOCK_MODE_API_PORT must be a number, got: %s", _port_raw)
     raise SystemExit(1)
 
 ALWAYS_SKILLS_DIR = "/home/claude/.claude/.always-skills"

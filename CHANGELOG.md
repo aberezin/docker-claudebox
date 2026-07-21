@@ -26,6 +26,62 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.2.4] — 2026-07-21 _(fork)_
+
+### Fixed — defect sweep from #18 QA (bear + arfy)
+
+Three 3.0-rebrand blind spots (each a different syntactic shape than the
+prior sweeps caught) plus two test-fixture defects, all surfaced during the
+mode-verification pass on issues #18–#23:
+
+- **#26** — the four Python daemons (`api_server.py`, `cron.py`,
+  `telegram_bot.py`, `telegram_utils.py`) were reading their config env
+  via `os.environ.get("CLAUDEBOX_X")` on the legacy name only (10 sites).
+  The container-side aliaser masked it today; 4.0 would silently break
+  auth/config for any user who set the `DRIDOCK_X` name. Migrated all 10
+  sites to `os.environ.get("DRIDOCK_X") or os.environ.get("CLAUDEBOX_X") or
+  os.environ.get("CLAUDE_X", default)` — three-tier fallback matching the
+  cb-* helper migration in 3.2.2. Also fixed `api_server.py` error message
+  and `cron.py` docstring to reference `DRIDOCK_MODE_CRON_FILE` etc.
+- **#29** — four host-side state subdirs (`cdp`, `consult`,
+  `framework-bugs`, `host-agent`) still hardcoded `~/.config/claudebox/`
+  and `dridock migrate` did not relocate them, silently splitting durable
+  state across two roots indefinitely — the "3 framework bug report(s)
+  on file" warning was reading from the legacy path in current 3.2.3
+  output. `wrapper.sh` now uses a `_cb_state_home <subname>` helper with
+  the per-subdir dridock/-preferred, claudebox/-fallback pattern (same
+  shape as `cb_xdg_dir`), and `cb_migrate_state_dirs` moves the four
+  subdirs when `dridock migrate` (or auto-migrate) runs.
+- **`test_cron.sh:77`** stale assertion — `cron.py:423` was updated during
+  3.0 to say `DRIDOCK_MODE_CRON_FILE not set` but the test still asserted
+  the legacy string. Fixed the assertion.
+- **`test_programmatic_bad_auth`** false-pass — asserted `exit != 0` only,
+  which the "cb-infra colima profile not found" wrapper-startup error
+  also produces. Now additionally requires stderr to mention
+  auth/credential/token/oauth/401 so wrapper-startup failures don't
+  masquerade as "auth was checked and rejected".
+
+### Added
+
+- **`test_programmatic_auto_continue`** — durable regression check for the
+  auto-continue behavior, using **sessionId** in the JSON output rather
+  than model recall. The recall-based approach in #18's manual batch
+  produced a false-negative from Claude Code's persistent memory writing
+  "remember the number N" to a memory file that a fresh session read back;
+  sessionId is the direct semantic invariant. House rule for future test
+  authoring: never assert on model recall of an arbitrary value.
+- **`test_programmatic_json_schema`** — durable regression check for
+  `--json-schema`, using inline JSON as the flag actually accepts (a
+  path-argument fixture at #18 verify hit a JSON parse error).
+
+### Migration
+
+`dridock migrate` (and the auto-migrate hook) now relocates the four
+`~/.config/claudebox/{cdp,consult,framework-bugs,host-agent}` directories
+to `~/.config/dridock/`. Users who already ran `dridock migrate` before
+3.2.4 should run it again to pick up the new subdirs. Read-fallback
+means unmigrated legacy subdirs remain readable for one deprecation cycle.
+
 ## [3.2.3] — 2026-07-21 _(fork)_
 
 ### Fixed

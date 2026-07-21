@@ -94,8 +94,9 @@ eq "empty -> 0B"  "$(cb_h)"            "0B"
 echo "--- cb_cdp_profile (tunable debug-Chrome profile dir) ---"
 eq "DRIDOCK_CDP_PROFILE override" "$(DRIDOCK_CDP_PROFILE=/tmp/my-cdp cb_cdp_profile)" "/tmp/my-cdp"
 case "$(DRIDOCK_CDP_PROFILE= cb_cdp_profile)" in
-    */claudebox/cdp/chrome-debug-profile) ok "default is clearly-named under cdp home" ;;
-    *) bad "default profile path unexpected: $(CLAUDEBOX_CDP_PROFILE= cb_cdp_profile)" ;;
+    */dridock/cdp/chrome-debug-profile) ok "default is clearly-named under cdp home (3.2.4+ dridock/ path)" ;;
+    */claudebox/cdp/chrome-debug-profile) ok "default is clearly-named under cdp home (legacy claudebox/ path — fallback)" ;;
+    *) bad "default profile path unexpected: $(DRIDOCK_CDP_PROFILE= cb_cdp_profile)" ;;
 esac
 
 echo "--- CDP bridge sidecar contract (wrapper writes -cdp, entrypoint re-reads it) ---"

@@ -119,7 +119,8 @@ test_programmatic_bad_auth() {
     # use a completely separate container name to avoid reusing a container with valid auth.
     # ANTHROPIC_API_KEY is cleared so only the invalid OAuth token is presented.
     local bad_name="${CONTAINER_PREFIX}-badauth-$$-$RANDOM"
-    ( cd "$CBX_TEST_WS" && \
+    local out rc
+    out=$( cd "$CBX_TEST_WS" && \
     CLAUDE_IMAGE="$IMAGE" \
     CLAUDE_DATA_DIR="$_prog_data_dir" \
     CLAUDE_SSH_DIR="$_prog_ssh_dir" \
@@ -127,17 +128,26 @@ test_programmatic_bad_auth() {
     CLAUDE_CODE_OAUTH_TOKEN="sk-ant-oat01-INVALID" \
     CLAUDE_CONTAINER_NAME="$bad_name" \
     bash "$WORKDIR/wrapper.sh" \
-        -p "hello" --output-format text --model "$TEST_MODEL" --no-continue >/dev/null 2>&1 )
-    local rc=$?
+        -p "hello" --output-format text --model "$TEST_MODEL" --no-continue 2>&1 )
+    rc=$?
     docker rm -f "$bad_name" "${bad_name}_prog" >/dev/null 2>&1 || true
 
-    if [ "$rc" -ne 0 ]; then
-        echo "  OK: bad auth exits non-zero ($rc)"
-    else
-        echo "  FAIL: bad auth should exit non-zero"
+    # Non-zero exit is necessary but not sufficient: the wrapper's own pre-flight
+    # (missing cb-infra profile in docker backend, invalid config, etc.) also exits
+    # non-zero. Assert the failure specifically mentions auth/credential/token/OAuth
+    # so we're proving "auth was checked and rejected", not "wrapper couldn't start".
+    if [ "$rc" -eq 0 ]; then
+        echo "  FAIL: bad auth should exit non-zero (rc=0)"
         _prog_cleanup
         return 1
     fi
+    if ! printf '%s' "$out" | grep -qiE 'auth|credential|token|oauth|401|unauthorized|invalid.*api|api.*invalid'; then
+        echo "  FAIL: bad auth exited $rc but stderr doesn't mention auth/credential/token — likely a wrapper-startup failure, not real auth rejection"
+        echo "  actual: ${out:0:400}"
+        _prog_cleanup
+        return 1
+    fi
+    echo "  OK: bad auth exits non-zero ($rc) with auth-related error"
 
     _prog_cleanup
 }
@@ -216,6 +226,71 @@ test_programmatic_always_skills() {
     rm -rf "$skills_dir"
 }
 
+# ── auto-continue: sessionId invariant (NOT recall) ─────────────────────────
+# House rule surfaced during #18 verification (see coordination issue #24):
+# NEVER assert on model recall of an arbitrary value. Two confounds fail the
+# test the wrong way: (1) Claude Code has persistent memory that a "remember
+# the number N" prompt writes to disk — a fresh session with --no-continue
+# reads it back, looking exactly like a session-continuity bug; (2) numeric
+# recall test values (42 specifically) are canonical context-free answers a
+# model will emit spontaneously. The sessionId in --output-format json is
+# the direct semantic invariant: same id → continuation; different id → fresh.
+test_programmatic_auto_continue() {
+    _prog_setup
+
+    # 1) fresh session with --no-continue — record its sessionId
+    local out1 sid1
+    out1=$(_prog_run -p "reply with exactly OK1" --output-format json --model "$TEST_MODEL" --no-continue 2>&1)
+    sid1=$(printf '%s' "$out1" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("sessionId",""))' 2>/dev/null)
+    assert_not_empty "$sid1" "run 1 has a sessionId" || { _prog_cleanup; return 1; }
+
+    # 2) continue (no flag) — should reuse the same sessionId
+    local out2 sid2
+    out2=$(_prog_run -p "reply with exactly OK2" --output-format json --model "$TEST_MODEL" 2>&1)
+    sid2=$(printf '%s' "$out2" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("sessionId",""))' 2>/dev/null)
+    assert_eq "$sid2" "$sid1" "run 2 (no flag) reuses sessionId" || { _prog_cleanup; return 1; }
+
+    # 3) fresh again with --no-continue — should get a NEW sessionId
+    local out3 sid3
+    out3=$(_prog_run -p "reply with exactly OK3" --output-format json --model "$TEST_MODEL" --no-continue 2>&1)
+    sid3=$(printf '%s' "$out3" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("sessionId",""))' 2>/dev/null)
+    assert_not_empty "$sid3" "run 3 has a sessionId" || { _prog_cleanup; return 1; }
+    if [ "$sid3" = "$sid1" ]; then
+        echo "  FAIL: run 3 (--no-continue) reused sessionId $sid1 — --no-continue is broken"
+        _prog_cleanup; return 1
+    fi
+    echo "  OK: run 3 (--no-continue) gets fresh sessionId ($sid3 != $sid1)"
+
+    _prog_cleanup
+}
+
+# ── --json-schema takes INLINE JSON, not a path ─────────────────────────────
+# Confirmed in docs/modes/programmatic.md and `claude --help`. A prior
+# attempt at #18 passed a path and got a JSON-parse error — the test below
+# uses inline JSON as intended.
+test_programmatic_json_schema() {
+    _prog_setup
+    local schema out answer
+    schema='{"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"]}'
+    out=$(_prog_run -p 'reply with JSON only: {"answer": 7}' \
+        --output-format json --model "$TEST_MODEL" --no-continue \
+        --json-schema "$schema" 2>&1)
+    assert_no_snake_keys "$out" "json-schema output no snake_case keys" || { _prog_cleanup; return 1; }
+    # .result is a JSON-encoded string of the schema-conforming payload; parse twice.
+    answer=$(printf '%s' "$out" | python3 -c '
+import json, sys
+d = json.loads(sys.stdin.read())
+inner = d.get("result", "")
+try:
+    print(json.loads(inner).get("answer", ""))
+except Exception:
+    print("")
+' 2>/dev/null)
+    assert_eq "$answer" "7" "json-schema constrains output to schema" || { _prog_cleanup; return 1; }
+    echo "  OK: programmatic_json_schema"
+    _prog_cleanup
+}
+
 ALL_TESTS+=(
     test_programmatic_prompts
     test_programmatic_models
@@ -225,4 +300,6 @@ ALL_TESTS+=(
     test_programmatic_json_verbose_camelcase
     test_programmatic_stream_json_camelcase
     test_programmatic_always_skills
+    test_programmatic_auto_continue
+    test_programmatic_json_schema
 )

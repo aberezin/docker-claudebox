@@ -57,7 +57,8 @@ def _save_overrides() -> None:
 
 # BOT_TOKEN imported from telegram_utils
 CONFIG_PATH = (
-    os.environ.get("CLAUDEBOX_TELEGRAM_CONFIG")
+    os.environ.get("DRIDOCK_TELEGRAM_CONFIG")
+    or os.environ.get("CLAUDEBOX_TELEGRAM_CONFIG")
     or os.environ.get("CLAUDE_TELEGRAM_CONFIG")
     or "/home/claude/.claude/telegram.yml"
 )
@@ -71,8 +72,8 @@ if os.path.isfile(SYSTEM_HINT_FILE):
 
 _HOME = os.environ.get("HOME", "/home/claude")
 _CLAUDE_CONFIG_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path(_HOME) / ".claude"))
-IS_CRON_MODE = os.environ.get("CLAUDEBOX_MODE_CRON", "") == "1"
-CRON_FILE_PATH = os.environ.get("CLAUDEBOX_MODE_CRON_FILE", "")
+IS_CRON_MODE = (os.environ.get("DRIDOCK_MODE_CRON") or os.environ.get("CLAUDEBOX_MODE_CRON", "")) == "1"
+CRON_FILE_PATH = os.environ.get("DRIDOCK_MODE_CRON_FILE") or os.environ.get("CLAUDEBOX_MODE_CRON_FILE", "")
 CRON_MESSAGES_FILE = _CLAUDE_CONFIG_DIR / "cron" / "telegram_messages.json"
 
 
@@ -81,7 +82,7 @@ def _slugify(path: str) -> str:
     return s or "workspace"
 
 
-_CRON_WORKSPACE = os.environ.get("CLAUDEBOX_WORKSPACE", "/workspace")
+_CRON_WORKSPACE = os.environ.get("DRIDOCK_WORKSPACE") or os.environ.get("CLAUDEBOX_WORKSPACE", "/workspace")
 _CRON_HISTORY_ROOT = str(_CLAUDE_CONFIG_DIR / "cron" / "history" / _slugify(_CRON_WORKSPACE))
 
 CRON_SYSTEM_HINT = ""

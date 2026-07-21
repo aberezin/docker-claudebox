@@ -74,7 +74,7 @@ test_cron_missing_file_env_fails() {
         echo "  FAIL: missing cron file env should have failed"
         return 1
     fi
-    assert_contains "$out" "CLAUDEBOX_MODE_CRON_FILE" "error mentions missing env var" || return 1
+    assert_contains "$out" "DRIDOCK_MODE_CRON_FILE" "error mentions missing env var" || return 1
 }
 
 # ── valid yaml loads, jobs listed, debug logs ────────────────────────────────

@@ -4,7 +4,7 @@
 Reads a yaml of jobs (cron schedule + multiline instruction) and fires
 `claude -p ...` per match. Streams output to ~/.claude/cron/history/<workspace-slug>/<timestamp>-<job>/.
 
-Activated when CLAUDEBOX_MODE_CRON=1. Yaml path from CLAUDEBOX_MODE_CRON_FILE.
+Activated when DRIDOCK_MODE_CRON=1. Yaml path from DRIDOCK_MODE_CRON_FILE.
 Workspace from CLAUDEBOX_WORKSPACE (legacy CLAUDE_WORKSPACE still accepted).
 
 Template variables (expanded at fire time in instruction, system_prompt, append_system_prompt):
@@ -41,14 +41,14 @@ logging.basicConfig(
 )
 log = logging.getLogger("claudebox-cron")
 
-CRON_FILE = os.environ.get("CLAUDEBOX_MODE_CRON_FILE") or os.environ.get("CLAUDE_MODE_CRON_FILE", "")
-WORKSPACE = os.environ.get("CLAUDEBOX_WORKSPACE") or os.environ.get("CLAUDE_WORKSPACE") or "/workspace"
+CRON_FILE = os.environ.get("DRIDOCK_MODE_CRON_FILE") or os.environ.get("CLAUDEBOX_MODE_CRON_FILE") or os.environ.get("CLAUDE_MODE_CRON_FILE", "")
+WORKSPACE = os.environ.get("DRIDOCK_WORKSPACE") or os.environ.get("CLAUDEBOX_WORKSPACE") or os.environ.get("CLAUDE_WORKSPACE") or "/workspace"
 HOME = os.environ.get("HOME", "/home/claude")
 CLAUDE_CONFIG_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path(HOME) / ".claude"))
 CRON_DIR = CLAUDE_CONFIG_DIR / "cron"
 HISTORY_ROOT = CRON_DIR / "history"
 TELEGRAM_MESSAGES_FILE = CRON_DIR / "telegram_messages.json"
-TELEGRAM_MODE = os.environ.get("CLAUDEBOX_MODE_TELEGRAM", "") == "1"
+TELEGRAM_MODE = (os.environ.get("DRIDOCK_MODE_TELEGRAM") or os.environ.get("CLAUDEBOX_MODE_TELEGRAM", "")) == "1"
 
 from telegram_utils import TELEGRAM_HTML_HINT  # noqa: E402  (after env reads)
 

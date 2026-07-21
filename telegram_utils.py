@@ -10,7 +10,7 @@ from telegram.constants import MessageLimit
 
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("CLAUDEBOX_TELEGRAM_BOT_TOKEN") or os.environ.get("CLAUDE_TELEGRAM_BOT_TOKEN", "")
+BOT_TOKEN = os.environ.get("DRIDOCK_TELEGRAM_BOT_TOKEN") or os.environ.get("CLAUDEBOX_TELEGRAM_BOT_TOKEN") or os.environ.get("CLAUDE_TELEGRAM_BOT_TOKEN", "")
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 

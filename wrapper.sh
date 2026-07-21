@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.2.3"
+DRIDOCK_VERSION="3.2.4"
 
 # The name the user actually typed to invoke us. Both `dridock` and legacy
 # `claudebox` symlink to this wrapper (install.sh's --bin-name), so help
@@ -90,6 +90,24 @@ cb_xdg_dir() {
     local xdg new old
     xdg="$(cb_config_home)"
     new="$xdg/dridock"; old="$xdg/claudebox"
+    if [ -d "$new" ]; then printf '%s' "$new"
+    elif [ -d "$old" ]; then printf '%s' "$old"
+    else printf '%s' "$new"; fi
+}
+
+# _cb_state_home SUBNAME — same shape as cb_xdg_dir but for a specific sub-tree
+# under ~/.config/{dridock,claudebox}/<SUBNAME>. Prefers the dridock/ path (3.0+),
+# transparently falls back to the legacy claudebox/ path if only that exists (so
+# a user who hasn't run `dridock migrate` doesn't lose access to their consults /
+# framework-bug reports / cdp state), otherwise returns the dridock/ path as
+# canonical for a fresh mkdir. Callers still need to `mkdir -p` before writing.
+# `dridock migrate` (cb_migrate_data_dir) relocates each legacy subdir to the
+# dridock/ one so this fallback becomes a no-op post-migrate; kept for one
+# deprecation cycle (removed in 4.0 with the legacy root).
+_cb_state_home() {
+    local base new old
+    base="$(cb_config_home)"
+    new="$base/dridock/$1"; old="$base/claudebox/$1"
     if [ -d "$new" ]; then printf '%s' "$new"
     elif [ -d "$old" ]; then printf '%s' "$old"
     else printf '%s' "$new"; fi
@@ -1485,7 +1503,7 @@ cb_network_info() {
 CB_CDP_PORT="${DRIDOCK_CDP_PORT:-9223}"                 # forwarder listen (Mac side)
 CB_CDP_CHROME_PORT="${DRIDOCK_CDP_CHROME_PORT:-9222}"   # Chrome --remote-debugging-port
 CB_CDP_BIND="${DRIDOCK_CDP_BIND:-192.168.64.1}"         # Mac reachable-net gateway (colima-only, not LAN)
-cb_cdp_home() { printf '%s/claudebox/cdp' "$(cb_config_home)"; }
+cb_cdp_home() { _cb_state_home cdp; }
 cb_cdp_marker() { printf '%s/projects/%s/.cdp-url' "$(cb_xdg_dir)" "$1"; }  # $1=id
 # The dedicated debug-Chrome user-data-dir. One shared bridge (single Chrome + fixed
 # forwarder port) serves every project, so this is intentionally global, not per-id.
@@ -1497,12 +1515,12 @@ cb_cdp_profile() { printf '%s' "${DRIDOCK_CDP_PROFILE:-$(cb_cdp_home)/chrome-deb
 # Shared cross-project sink for FRAMEWORK bug reports (cb-report-bug inside the
 # container writes here; `claudebox framework-bugs` reads it). Deliberately shared
 # across all projects — framework feedback spans projects, unlike per-project data.
-cb_fwbugs_home() { printf '%s/claudebox/framework-bugs' "$(cb_config_home)"; }
+cb_fwbugs_home() { _cb_state_home framework-bugs; }
 
 # Shared cross-project sink for CONSULTS — supervised claudebot<->framework-Claude
 # threads (cb-consult in the container + `claudebox consult` on the host both read/write
 # here). See docs/design/framework-consult.md. Shared like framework-bugs; all files.
-cb_consult_home() { printf '%s/claudebox/consult' "$(cb_config_home)"; }
+cb_consult_home() { _cb_state_home consult; }
 
 # cb_consult_status DIR/<id> — echo a thread's status (from its meta), or "" if none.
 cb_consult_status() { local m="$1/meta"; [ -f "$m" ] && sed -n 's/^status=//p' "$m" | tail -1; }
@@ -1626,7 +1644,7 @@ cb_bridge_down() {  # $1=id
 # ─────────────────────────────────────────────────────────────────────────────
 CB_HOST_AGENT_PORT="${DRIDOCK_HOST_AGENT_PORT:-9280}"
 CB_HOST_AGENT_BIND="${DRIDOCK_HOST_AGENT_BIND:-192.168.64.1}"   # Colima gateway only, never LAN
-cb_host_agent_home() { printf '%s/claudebox/host-agent' "$(cb_config_home)"; }
+cb_host_agent_home() { _cb_state_home host-agent; }
 # resolve host-agent.py: env override → next to the wrapper → the share dir → the repo.
 cb_host_agent_py() {
     local d; d="$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")"
@@ -1937,6 +1955,31 @@ cb_migrate_machine_config() {
     return 0
 }
 
+# cb_migrate_state_dirs — move the four cross-project state subdirs
+# (cdp / consult / framework-bugs / host-agent) from ~/.config/claudebox/<name>
+# to ~/.config/dridock/<name>. Idempotent per subdir. Only moves subdirs the
+# 3.0 rebrand missed — the per-project data dir + machine config each have
+# their own migrator above. #29 fix.
+cb_migrate_state_dirs() {
+    local xdg name old new
+    xdg="$(cb_config_home)"
+    for name in cdp consult framework-bugs host-agent; do
+        old="$xdg/claudebox/$name"
+        new="$xdg/dridock/$name"
+        [ -d "$old" ] || continue
+        if [ -e "$new" ]; then
+            echo "  ⚠ state dir $name: both claudebox/ and dridock/ have it — leaving both" >&2
+            continue
+        fi
+        mkdir -p "$xdg/dridock"
+        mv "$old" "$new"
+        echo "  ✓ state dir: claudebox/$name → dridock/$name"
+    done
+    # remove the now-empty legacy root if it's empty (cheap, silent on failure)
+    rmdir "$xdg/claudebox" 2>/dev/null || true
+    return 0
+}
+
 # cb_auto_migrate ROOT — silently migrate a legacy `.claudebox/`-only workspace on
 # first `dridock` run. Opt out with DRIDOCK_NO_AUTO_MIGRATE=1. No-op when the
 # project is already on `.dridock/`, or when the wrapper is running a management
@@ -1951,6 +1994,7 @@ cb_auto_migrate() {
     id="$(cb_project_id_ro "$root")"
     [ -n "$id" ] && cb_migrate_data_dir "$id"
     cb_migrate_machine_config
+    cb_migrate_state_dirs
 }
 
 # load functions only (for tests) without running the wrapper body
@@ -2181,7 +2225,8 @@ HELP
                 -h|--help)
                     echo "usage: dridock migrate [--all]"
                     echo "  migrate this project's .claudebox/ → .dridock/ (workspace + its data dir),"
-                    echo "  plus the machine config (~/.config/claudebox/config.yml)."
+                    echo "  plus the machine config (~/.config/claudebox/config.yml) and the four"
+                    echo "  cross-project state dirs (cdp, consult, framework-bugs, host-agent)."
                     echo "  --all also migrates every legacy project data dir under"
                     echo "        ~/.config/claudebox/projects/ (workspace paths are unknown to the"
                     echo "        wrapper — those migrate on their next 'dridock' auto-migrate)."
@@ -2197,6 +2242,7 @@ HELP
         _mig_id="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
         [ -n "$_mig_id" ] && cb_migrate_data_dir "$_mig_id"
         cb_migrate_machine_config
+        cb_migrate_state_dirs
         if [ "$_mig_all" = 1 ]; then
             echo "migrate --all: sweeping legacy project data dirs…"
             _mig_old_root="$(cb_config_home)/claudebox/projects"
