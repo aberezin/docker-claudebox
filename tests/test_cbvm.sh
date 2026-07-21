@@ -436,6 +436,30 @@ printf '%s' "$out" | grep -q "SPLIT-BRAIN merged"                   && ok "colli
 ls "$XDG_CONFIG_HOME/dridock/framework-bugs/" | grep -qE '^same-name\.md\.legacy-[0-9]+$' && ok "collision: legacy kept with .legacy-<ts> suffix" || bad "collision: legacy suffix-renamed copy missing"
 rm -rf "$MTMP"
 
+# #32 f/u (3.3.2) — live-Chrome guard EXIT CONTRACT.
+# 3.3.1 shipped the pgrep-based data-safety guard but the branch forgot
+# `split=1`, so `cb_migrate_state_dirs` returned 0 and `dridock migrate`
+# printed `✅ done.` when cdp was silently skipped. Arfy caught it against
+# real state. Bear-side we can't launch Chrome, but Arfy's `exec -a` trick
+# spawns a process whose argv matches the exact pgrep pattern — enough to
+# exercise both branches of the guard.
+MTMP=$(mktemp -d)
+export XDG_CONFIG_HOME="$MTMP"
+mkdir -p "$XDG_CONFIG_HOME/claudebox/cdp/chrome-debug-profile"
+echo canary > "$XDG_CONFIG_HOME/claudebox/cdp/chrome-debug-profile/marker"
+# spawn a stub whose argv[0] is a full chrome-like command line. exec -a
+# rewrites argv[0]; sleep runs but ps/pgrep -f sees the fake command.
+bash -c "exec -a 'chrome --user-data-dir=$XDG_CONFIG_HOME/claudebox/cdp' sleep 30" &
+_stub_pid=$!
+sleep 0.3
+out=$(cb_migrate_state_dirs 2>&1); rc=$?
+kill "$_stub_pid" 2>/dev/null; wait "$_stub_pid" 2>/dev/null
+[ "$rc" -ne 0 ]                                                              && ok "live-cdp guard: returns non-zero when skipped" || bad "live-cdp guard: rc=$rc (expected non-zero — the 3.3.1 exit-contract bug)"
+printf '%s' "$out" | grep -q "SKIPPING"                                      && ok "live-cdp guard: SKIPPING message present"     || bad "live-cdp guard: missing SKIPPING message"
+[ -f "$XDG_CONFIG_HOME/claudebox/cdp/chrome-debug-profile/marker" ]          && ok "live-cdp guard: data-safety preserved (canary intact)" || bad "live-cdp guard: canary moved — data-unsafe"
+[ ! -d "$XDG_CONFIG_HOME/dridock/cdp" ]                                       && ok "live-cdp guard: nothing leaked into dridock/"  || bad "live-cdp guard: dridock/cdp appeared unexpectedly"
+rm -rf "$MTMP"
+
 # cdp split-brain — Chrome profile explicitly refused (no auto-merge)
 MTMP=$(mktemp -d)
 export XDG_CONFIG_HOME="$MTMP"

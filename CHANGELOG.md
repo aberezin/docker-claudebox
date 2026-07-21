@@ -26,6 +26,39 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.3.2] — 2026-07-21 _(fork)_
+
+### Fixed — 3.3.1 exit-contract bug in the live-Chrome guard
+
+**#32 f/u** — Arfy verified 3.3.1 against real state and closed #29
+(three durable stores migrated cleanly), but caught a follow-on bug in
+the live-Chrome guard itself: it correctly protected the Chrome debug
+profile from `mv`, but forgot `split=1` before its `continue`. So
+`cb_migrate_state_dirs` returned 0, and `dridock migrate` printed
+`✅ done.` when it had silently skipped cdp — exactly the
+silent-success-over-discarded-work pattern the guard exists to prevent
+(#17 / #30 / #31 / #32 originals), reproduced inside the fix for it.
+
+One-line source change: `split=1` before the guard's `continue`. Now the
+verb takes the `⚠ done, resolve and re-run` branch and the user sees
+that cdp needs a re-migrate after they close Chrome.
+
+Data safety was **never** compromised — the guard did skip the `mv`; only
+the SIGNAL that it skipped was lost.
+
+### Added — pgrep-stub coverage for the live-cdp guard
+
+`tests/test_cbvm.sh` gains a live-cdp assertion block using Arfy's
+`exec -a` trick: bash spawns a stub whose argv[0] is the exact Chrome
+command line, `pgrep -f` matches it, and the guard fires as if a real
+Chrome were running. Four assertions:
+- exit contract: `cb_migrate_state_dirs` returns non-zero when skipped
+- SKIPPING message present
+- canary marker in the legacy cdp preserved (data-safety)
+- nothing leaked into `dridock/cdp`
+
+Bear-side: 153/0 (was 149/0 — 4 new assertions).
+
 ## [3.3.1] — 2026-07-21 _(fork)_
 
 ### Fixed — 3.2.4 regression in `cb_migrate_state_dirs`

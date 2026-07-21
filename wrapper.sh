@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.3.1"
+DRIDOCK_VERSION="3.3.2"
 
 # The name the user actually typed to invoke us. Both `dridock` and legacy
 # `claudebox` symlink to this wrapper (install.sh's --bin-name), so help
@@ -2016,6 +2016,13 @@ cb_migrate_state_dirs() {
             echo "  ⚠ state dir cdp: SKIPPING — Chrome is running against $old" >&2
             echo "     Close it (or run 'dridock browser-bridge down'), then 'dridock migrate' again." >&2
             echo "     The bridge keeps working from the legacy path until then." >&2
+            # #32 f/u — data-safety was correct (skip preserves the profile) but
+            # 3.3.1 forgot to signal the skip via the same channel split-brain
+            # uses, so `dridock migrate` reported `✅ done.` when cdp was silently
+            # left behind. Set split=1 so the verb takes the `⚠ done, resolve
+            # and re-run` branch — same silent-success class the whole guard is
+            # here to prevent, one level up.
+            split=1
             continue
         fi
 
