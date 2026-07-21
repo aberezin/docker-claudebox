@@ -40,6 +40,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [convenience-scripts.md](design/convenience-scripts.md) | The container-side `cb-*` command convention + `cb-help`. |
 | [browser-testing.md](design/browser-testing.md) | `cb-browser` (headless/noVNC) and the opt-in CDP bridge to your real Chrome. |
 | [n-tier-networking.md](design/n-tier-networking.md) | The standard for addressing/binding/CORS in multi-tier apps (service-name vs rotating VM IP). |
+| [agent-to-agent.md](design/agent-to-agent.md) | The standard for agent↔agent comms — why **A2A** (not MCP, not ACP), and the waker problem it doesn't solve. |
 | [disk-management.md](design/disk-management.md) | The standard for docker-disk under the per-project VM — prune discipline, `cb-df`, the ENOSPC/Write-tool escape. |
 | [git-and-api-auth.md](design/git-and-api-auth.md) | The SSH-for-git / tokens-for-API-only split (#10) — provider-agnostic, no credential-helper hijack. |
 | [env-var-rename.md](design/env-var-rename.md) | 3.x compat standard for CLAUDEBOX_* ↔ DRIDOCK_* env vars — the shared `env-rename.map` + symmetric aliaser on both sides (host wrapper + container entrypoint). Removed in 4.0. |
