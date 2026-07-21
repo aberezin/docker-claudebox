@@ -26,6 +26,65 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.2.3] — 2026-07-21 _(fork)_
+
+### Fixed
+
+- **Systematic post-3.0-rebrand audit closed 15 more legacy-only reads**
+  (#16 f/u2). `tests/test_rename_completeness.sh` (new — 7-sweep diagnostic
+  covering bare `${CLAUDEBOX_X:-}` reads, hardcoded `.claudebox/` paths,
+  `claudebox:latest` image tag, XDG `.config/claudebox/` +
+  `.local/share/claudebox/`, `skills/claudebox/`, `claudebox <verb>` in
+  user-facing strings, and `env-rename.map` completeness) surfaced them.
+  All in code that Phase 5's ad-hoc sweep missed:
+
+  - `install.sh` — 6 env vars gained `${DRIDOCK_X:-${CLAUDEBOX_X:-…}}`
+    fallbacks: `INSTALL_DIR`, `MINIMAL`, `INFRA_PROFILE`, `INFRA_CPU`,
+    `INFRA_MEMORY`, `INFRA_DISK`, `SKIP_SHELL_HELPERS`, `SHARE_DIR`.
+  - `tests/common.sh` — `CLAUDEBOX_BACKEND` → `DRIDOCK_BACKEND`-first
+    (backend selection in the test harness).
+  - `run-e2e-cron-telegram.sh` + `tests/test_e2e_telegram.sh` — 3 sites
+    reading `CLAUDEBOX_TELEGRAM_BOT_TOKEN` bare now prefer
+    `DRIDOCK_TELEGRAM_BOT_TOKEN` with the legacy as fallback.
+
+- **`~/.local/share/{dridock,claudebox}/` collision handling** (install.sh
+  post-2.x-upgrade case). Mirrors the existing `cb_xdg_dir` pattern for
+  `~/.config/…`: install writes to `~/.local/share/dridock/` (new
+  default), the wrapper reads from `dridock/` first with `claudebox/` as
+  fallback (so a 2.x user whose `~/.zshrc` still sources the legacy path
+  isn't stranded), and if both dirs co-exist post-upgrade install.sh
+  prints a one-liner note recommending `rm -rf` of the legacy dir.
+  Never auto-moves — user might have their own files there.
+
+### Added
+
+- **`env-rename.map` gained 14 pairs** the ad-hoc renaming missed —
+  `DRIDOCK_INSTALL_DIR`, `DRIDOCK_INFRA_{PROFILE,CPU,MEMORY,DISK}`,
+  `DRIDOCK_SKIP_{SHELL_HELPERS,SKILL}`, `DRIDOCK_SHARE_DIR`,
+  `DRIDOCK_BACKEND`, `DRIDOCK_NO_{OAUTH_TOKEN,AUTO_MIGRATE}`,
+  `DRIDOCK_MODE_{API,API_PORT,API_TOKEN,TELEGRAM}`,
+  `DRIDOCK_TELEGRAM_BOT_TOKEN`. The container-side aliaser and host-side
+  wrapper alias both pick these up automatically now — the whole point
+  of the shared-map design in 3.2.1.
+
+- **`tests/test_rename_completeness.sh`** (new, 7 sweeps, diagnostic
+  runnable as `bash tests/test_rename_completeness.sh -v` for detail).
+  Exit 1 on any FAIL (real bug); WARN-only is exit 0. Sweep types:
+  bare CLAUDEBOX_X reads outside cb-*, hardcoded `.claudebox/` paths,
+  `claudebox:latest` image tag, XDG paths, `skills/claudebox/`,
+  `claudebox <verb>` in user-facing strings, `env-rename.map`
+  completeness (every used `${DRIDOCK_X}` has a map entry or an
+  explicit exemption for prefixes / test fixtures / internal names).
+  OK-detection is smart: recognizes elif/case legacy branches, paired
+  gitignore lines, migration string literals in legacy-aware files,
+  and same-line fallback shapes. Down from 26 FAILs on first run to
+  0 after the ~15 real bugs were fixed.
+
+- **`~/.local/share/claudebox/env-rename.map`** added to the wrapper's
+  map-lookup fallback list — so a 2.x user who happens to have that
+  path populated (unlikely, but zero-cost defensive) still finds the
+  aliases. New installs always write to `dridock/`.
+
 ## [3.2.2] — 2026-07-21 _(fork)_
 
 ### Changed

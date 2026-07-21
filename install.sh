@@ -2,8 +2,9 @@
 
 BIN_NAME="${1:-${DRIDOCK_BIN_NAME:-${CLAUDEBOX_BIN_NAME:-${CLAUDE_BIN_NAME:-dridock}}}}"
 # Default to a user-writable dir so install needs no sudo (this fork avoids macOS
-# sudo). Override with CLAUDEBOX_INSTALL_DIR (e.g. /usr/local/bin) if you prefer.
-INSTALL_DIR="${CLAUDEBOX_INSTALL_DIR:-${CLAUDE_INSTALL_DIR:-$HOME/.local/bin}}"
+# sudo). Override with DRIDOCK_INSTALL_DIR (legacy CLAUDEBOX_INSTALL_DIR / CLAUDE_INSTALL_DIR
+# still accepted for one deprecation cycle).
+INSTALL_DIR="${DRIDOCK_INSTALL_DIR:-${CLAUDEBOX_INSTALL_DIR:-${CLAUDE_INSTALL_DIR:-$HOME/.local/bin}}}"
 BIN_PATH="$INSTALL_DIR/$BIN_NAME"
 
 echo "🚀 Starting dridock setup (binary: $BIN_NAME)..."
@@ -46,7 +47,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/null}")" 2>/dev/null && pwd)
 IMAGE_NAME="${DRIDOCK_IMAGE_NAME:-${CLAUDEBOX_IMAGE_NAME:-dridock}}"
 CLAUDE_TAG="latest"
 BUILD_TARGET="full"
-_minimal="${CLAUDEBOX_MINIMAL:-${CLAUDE_MINIMAL:-}}"
+_minimal="${DRIDOCK_MINIMAL:-${CLAUDEBOX_MINIMAL:-${CLAUDE_MINIMAL:-}}}"
 if [ -n "$_minimal" ]; then
 	CLAUDE_TAG="latest-minimal"
 	BUILD_TARGET="minimal"
@@ -62,15 +63,16 @@ fi
 # Build into a dedicated cb-infra colima profile (never the human's default VM).
 # Project VMs are seeded from it via save|load at run time. See
 # docs/design/per-project-vm.md.
-CB_INFRA_PROFILE="${CLAUDEBOX_INFRA_PROFILE:-cb-infra}"
+CB_INFRA_PROFILE="${DRIDOCK_INFRA_PROFILE:-${CLAUDEBOX_INFRA_PROFILE:-cb-infra}}"
 CB_INFRA_CTX="colima-$CB_INFRA_PROFILE"
 if ! colima status -p "$CB_INFRA_PROFILE" >/dev/null 2>&1; then
 	echo "🟢 Starting '$CB_INFRA_PROFILE' colima VM (image store, one-time)..."
 	# cb-infra only builds + serves the image (via save|load); it runs no workloads,
-	# so it stays light. Idle use is ~430MB. Bump CLAUDEBOX_INFRA_MEMORY (e.g. 6) if
-	# building the heavier `full` image ever runs short on memory.
+	# so it stays light. Idle use is ~430MB. Bump DRIDOCK_INFRA_MEMORY (e.g. 6) if
+	# building the heavier `full` image ever runs short on memory. Legacy
+	# CLAUDEBOX_INFRA_* names accepted for one deprecation cycle.
 	if ! colima start -p "$CB_INFRA_PROFILE" \
-		--cpu "${CLAUDEBOX_INFRA_CPU:-2}" --memory "${CLAUDEBOX_INFRA_MEMORY:-4}" --disk "${CLAUDEBOX_INFRA_DISK:-40}"; then
+		--cpu "${DRIDOCK_INFRA_CPU:-${CLAUDEBOX_INFRA_CPU:-2}}" --memory "${DRIDOCK_INFRA_MEMORY:-${CLAUDEBOX_INFRA_MEMORY:-4}}" --disk "${DRIDOCK_INFRA_DISK:-${CLAUDEBOX_INFRA_DISK:-40}}"; then
 		echo "❌ Failed to start the $CB_INFRA_PROFILE colima VM."
 		exit 1
 	fi
@@ -149,11 +151,23 @@ if [ -z "${DRIDOCK_SKIP_SKILL:-${CLAUDEBOX_SKIP_SKILL:-}}" ] && [ -d "$SCRIPT_DI
 fi
 
 # Install the shell helpers (cbx-ps / cbx-sh / cbx-vm / cbx-claude + tab-completion)
-# and source them from your rc. Skip with CLAUDEBOX_SKIP_SHELL_HELPERS=1.
-if [ -z "${CLAUDEBOX_SKIP_SHELL_HELPERS:-}" ] && [ -f "$SCRIPT_DIR/claudebox-shell.sh" ]; then
-	SHARE_DIR="${CLAUDEBOX_SHARE_DIR:-$HOME/.local/share/claudebox}"
+# and source them from your rc. Skip with DRIDOCK_SKIP_SHELL_HELPERS=1 (legacy
+# CLAUDEBOX_SKIP_SHELL_HELPERS accepted for one deprecation cycle).
+if [ -z "${DRIDOCK_SKIP_SHELL_HELPERS:-${CLAUDEBOX_SKIP_SHELL_HELPERS:-}}" ] && [ -f "$SCRIPT_DIR/claudebox-shell.sh" ]; then
+	# SHARE_DIR resolution mirrors wrapper.sh's cb_xdg_dir pattern for the .config/
+	# sibling: prefer the DRIDOCK_ override, then the legacy CLAUDEBOX_ override, then
+	# the ~/.local/share/dridock/ default (3.0+). Legacy ~/.local/share/claudebox/ is
+	# NEVER auto-migrated — user might have their own files there. If both dirs
+	# co-exist post-upgrade, we install to dridock/ and print a one-liner recommending
+	# cleanup.
+	_LEGACY_SHARE="$HOME/.local/share/claudebox"
+	SHARE_DIR="${DRIDOCK_SHARE_DIR:-${CLAUDEBOX_SHARE_DIR:-$HOME/.local/share/dridock}}"
 	mkdir -p "$SHARE_DIR"
 	install -m 644 "$SCRIPT_DIR/claudebox-shell.sh" "$SHARE_DIR/claudebox-shell.sh"
+	if [ "$SHARE_DIR" != "$_LEGACY_SHARE" ] && [ -e "$_LEGACY_SHARE/claudebox-shell.sh" ]; then
+		echo "🧹 note: legacy $_LEGACY_SHARE/claudebox-shell.sh still present. Safe to remove"
+		echo "   after confirming your ~/.zshrc / ~/.bashrc \`source\` line points at $SHARE_DIR."
+	fi
 	MARKER="# claudebox-shell helpers"
 	case "${SHELL##*/}" in
 		zsh) RC="$HOME/.zshrc" ;;

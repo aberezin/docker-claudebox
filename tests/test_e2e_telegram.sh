@@ -129,7 +129,7 @@ _e2e_teardown_containers() {
 #   - via MTProto as U   → chat by @username or B's user_id (what telethon uses)
 # Telethon refuses bare numeric IDs it hasn't cached, so we resolve the bot's
 # @username once from the Bot API getMe call and reuse it.
-TG_BOT_USER_ID() { echo "${CLAUDEBOX_TELEGRAM_BOT_TOKEN%%:*}"; }
+TG_BOT_USER_ID() { local _t="${DRIDOCK_TELEGRAM_BOT_TOKEN:-${CLAUDEBOX_TELEGRAM_BOT_TOKEN:-}}"; echo "${_t%%:*}"; }
 
 # Cached bot identifier in the form telethon accepts (@username).
 # Set lazily by _e2e_resolve_bot.
@@ -138,7 +138,7 @@ TG_BOT_REF=""
 _e2e_resolve_bot() {
     [ -n "$TG_BOT_REF" ] && return 0
     local resp username
-    resp=$(curl -sf "https://api.telegram.org/bot${CLAUDEBOX_TELEGRAM_BOT_TOKEN}/getMe")
+    resp=$(curl -sf "https://api.telegram.org/bot${DRIDOCK_TELEGRAM_BOT_TOKEN:-${CLAUDEBOX_TELEGRAM_BOT_TOKEN:-}}/getMe")
     username=$(echo "$resp" | python3 -c 'import json,sys
 print((json.load(sys.stdin).get("result") or {}).get("username", ""))')
     if [ -z "$username" ]; then
