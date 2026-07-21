@@ -83,7 +83,8 @@ full surface. Full split rationale: issue [#1](https://github.com/aberezin/docke
 The 3.0 rebrand renamed the env-var prefix `CLAUDEBOX_*` → `DRIDOCK_*`. During
 3.x, the entrypoint's `_dridock_alias_env` shim symmetrically mirrors every pair
 in `env-rename.map` after sidecar load, so **an existing `cb-*` helper reading
-`${CLAUDEBOX_VM_IP:-}` still works** (the shim exports that from `DRIDOCK_VM_IP`).
+either `${DRIDOCK_VM_IP:-}` or the legacy `${CLAUDEBOX_VM_IP:-}` still works**
+(the shim exports both from the same value).
 DO NOT roll a per-helper compat check for legacy env names — the shim covers it,
 and per-helper checks were the exact pattern that let the `cb-browser` bug in
 #16 slip past every review.

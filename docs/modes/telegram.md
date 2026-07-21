@@ -49,11 +49,11 @@ Per-chat configuration options: `workspace`, `model`, `effort`, `continue`, `sys
 ```yaml
 # docker-compose.yml
 services:
-  claudebox-telegram:
-    image: claudebox:latest    # build locally first: make build
+  dridock-telegram:
+    image: dridock:latest    # build locally first: make build
     environment:
-      - CLAUDEBOX_MODE_TELEGRAM=1
-      - CLAUDEBOX_TELEGRAM_BOT_TOKEN=123456:ABC-DEF
+      - DRIDOCK_MODE_TELEGRAM=1
+      - DRIDOCK_TELEGRAM_BOT_TOKEN=123456:ABC-DEF
       - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxx
     volumes:
       - ~/.claude:/home/claude/.claude

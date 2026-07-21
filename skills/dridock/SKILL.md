@@ -21,12 +21,11 @@ directory and relay it. It's fast and safe (reads state; never boots a VM or pol
    as-is or lightly summarize; don't re-derive the values yourself.
 
 3. Handle the common cases:
-   - **"not a dridock project yet"** → this directory has no `.dridock/config.yml`
-     (or legacy `.claudebox/config.yml`). Tell the user to `cd` into a dridock
-     project, or run `dridock` here to initialize one.
+   - **"not a dridock project yet"** → this directory has no `.dridock/config.yml` (or its legacy 2.x sibling `.claudebox/config.yml`). Tell the user to `cd` into a dridock project, or run `dridock` here to initialize one.
    - **`dridock: command not found`** → the wrapper isn't installed/on PATH; point
      them at `./install.sh` in the harness repo. (A pre-3.0 install shipped the
-     binary as `claudebox`; `claudebox info` still works there.)
+     binary as `claudebox`; `dridock info` / `claudebox info` both work — the second
+     name is the legacy symlink.)
 
 ## Follow-ups (only if the user asks)
 
@@ -35,6 +34,6 @@ directory and relay it. It's fast and safe (reads state; never boots a VM or pol
 - Disk usage across VMs → `dridock vm usage`; reclaim → `dridock vm gc`.
 - The reachable IP + `/etc/hosts` line for a friendly hostname → `dridock net`.
 - Upgrading a 2.x project to 3.0 → `dridock migrate` (or `--all` to sweep every
-  legacy project data dir under `~/.config/claudebox/projects/`).
+  legacy project data dir under `~/.config/claudebox/projects/` into `~/.config/dridock/`).
 
 Keep it a quick glance — this is a human status check, not a deep dive.

@@ -88,7 +88,7 @@ to **travel with the project** and be readable by any future session.
 
 ### 2. `dridock bootstrap` — the host-side scaffolder
 
-> In 2.x this was `claudebox bootstrap`. Same semantics; the wrapper is renamed in 3.0.
+> In 2.x this was `claudebox bootstrap` → `dridock bootstrap` in 3.0+. Same semantics; the wrapper is renamed but the legacy verb keeps working via the `claudebox`→`dridock` symlink.
 
 A standard command host-Claude (or Alan) runs to create the brief the same way
 every time. Non-interactive so host-Claude can drive it in one shot:

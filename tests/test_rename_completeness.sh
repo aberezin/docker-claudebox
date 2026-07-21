@@ -76,6 +76,7 @@ is_historical_doc() {
         docs/design/framework-dev-mode.md) return 0 ;;
         docs/design/git-and-api-auth.md) return 0 ;;
         env-rename.map) return 0 ;;
+        tests/test_rename_completeness.sh) return 0 ;;   # this script — its own grep patterns look like legacy hits
     esac
     return 1
 }
@@ -251,14 +252,30 @@ done < <(list_files)
 header "sweep 6: user-facing strings mentioning only 'claudebox <verb>' (docs debt)"
 while IFS= read -r f; do
     [ -f "$REPO/$f" ] || continue
+    # Same "legacy-touching file" pattern as sweep 2/4: files whose PURPOSE is to
+    # handle the legacy name (elif branches, `command -v claudebox` fallbacks,
+    # migration prose) can mention `claudebox <verb>` in a legacy arm without
+    # needing a same-line new counterpart.
+    file_has_dridock_ref=$(grep -qE 'dridock (bootstrap|start|migrate|features|checkversion|consult|net|ip|vm|info|profiles|auth|browser-bridge|host-agent|harness|framework-bugs|version|help|stop|down|destroy|setup-token|completion|clear-session|doctor|mcp|claude-dir|report-bug|df)|command -v dridock' "$REPO/$f" 2>/dev/null && echo yes || echo no)
+    case "$f" in
+        .claude/hooks/*|claudebox-shell.sh)            legacy_touching=yes ;;   # explicit if-dridock-elif-claudebox fallbacks
+        docs/design/3.0-migration.md|docs/design/env-var-rename.md) legacy_touching=yes ;;   # migration standards
+        *)                                             legacy_touching=no ;;
+    esac
     while IFS= read -r hit_line; do
         lineno="${hit_line%%:*}"
         content="${hit_line#*:}"
         has_new=$(printf '%s' "$content" | grep -qE 'dridock (bootstrap|start|migrate|features|checkversion|consult|net|ip|vm|info|profiles|auth|browser-bridge|host-agent|harness|framework-bugs|version|help|stop|down|destroy|setup-token|completion|clear-session|--help|--version|-v|-h|doctor|mcp|claude-dir|report-bug|df)' && echo yes || echo no)
         stripped="$(printf '%s' "$content" | sed -e 's/^\s*//')"
         is_comment=$([ "${stripped:0:1}" = "#" ] && echo yes || echo no)
+        # elif / case arm — the "legacy branch" of a pair whose "if" already checked the new name
+        is_elif_or_case=$(printf '%s' "$content" | grep -qE '^\s*(elif |[^"]*\)\s*)' && echo yes || echo no)
+        # Migration prose that explicitly names both eras
+        is_migration_string=$(printf '%s' "$content" | grep -qE 'In 2\.x|legacy|LEGACY|pre-3\.0|renamed|Rename|migrate|(→|->)\s*dridock' && echo yes || echo no)
         if [ "$has_new" = yes ] || [ "$is_comment" = yes ] || is_historical_doc "$f"; then
             hit OK "$f:$lineno" "backward-compat mention/comment/historical"
+        elif [ "$legacy_touching" = yes ] && { [ "$is_elif_or_case" = yes ] || [ "$is_migration_string" = yes ] || [ "$file_has_dridock_ref" = yes ]; }; then
+            hit OK "$f:$lineno" "legacy branch / migration string in legacy-aware file"
         else
             hit WARN "$f:$lineno" "mentions 'claudebox <verb>' only — should also mention 'dridock <verb>'" "$content"
         fi

@@ -1,8 +1,9 @@
 # dridock documentation
 
 Documentation for this fork of claudebox — Claude Code in a per-project Colima VM.
-(The fork was rebranded from `claudebox` to `dridock` in 3.0; the wrapper still
-reads legacy `CLAUDEBOX_*` env vars + `.claudebox/` project dirs for one cycle.
+(The fork was rebranded from `claudebox` to `dridock` in 3.0; canonical layout is
+`.dridock/` project dirs and `DRIDOCK_*` env vars, with legacy `.dridock/` ← `.claudebox/`
+project dirs + `CLAUDEBOX_*` env vars still read for one deprecation cycle.
 See [design/3.0-migration.md](design/3.0-migration.md) for the migration.)
 New here? Start with the top-level [README](../README.md) for install + quick start,
 and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.

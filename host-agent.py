@@ -6,8 +6,8 @@ SECURITY: this is remote command execution against the Mac. It is deliberately n
   - binds ONLY the Colima gateway (192.168.64.1), never 0.0.0.0/LAN;
   - requires a per-session bearer token (CB_HOST_AGENT_TOKEN);
   - allowlists the binary AND subcommand (the fixed set the framework actually uses);
-  - opt-in / off by default (only runs while `claudebox host-agent up`).
-It is a TRUSTED, single-operator tool — for you driving your own harness dev claudebox, not a
+  - opt-in / off by default (only runs while `dridock host-agent up`).
+It is a TRUSTED, single-operator tool — for you driving your own harness dev dridock, not a
 general claudebot capability. See docs/design/backends.md.
 
 Line protocol (one connection = one command):

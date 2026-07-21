@@ -85,11 +85,14 @@ cbx-claude() {
 # respects any data_root / CLAUDEBOX_DATA_DIR override). `-o` opens it (macOS Finder).
 cbx-claude-dir() {
     local d
-    if command -v claudebox >/dev/null 2>&1; then
+    if command -v dridock >/dev/null 2>&1; then
+        d="$(dridock claude-dir)" || return 1
+    elif command -v claudebox >/dev/null 2>&1; then
         d="$(claudebox claude-dir)" || return 1
     else
         local id; id="$(_cbx_id)" || return 1
-        d="${XDG_CONFIG_HOME:-$HOME/.config}/claudebox/projects/$id/claude"
+        d="${XDG_CONFIG_HOME:-$HOME/.config}/dridock/projects/$id/claude"
+        [ -d "$d" ] || d="${XDG_CONFIG_HOME:-$HOME/.config}/claudebox/projects/$id/claude"
     fi
     if [ "${1:-}" = "-o" ]; then command open "$d" 2>/dev/null || printf '%s\n' "$d"
     else printf '%s\n' "$d"; fi

@@ -2,7 +2,7 @@
 
 [![License: WTFPL](https://img.shields.io/badge/License-WTFPL-brightgreen.svg?style=flat-square)](http://www.wtfpl.net/)
 
-> **This is a fork, rebranded in 3.0.** The upstream project is [psyb0t/docker-claudebox](https://github.com/psyb0t/docker-claudebox) (`claudebox`). This fork keeps the same interfaces but was renamed to **`dridock`** at 3.0 and re-targets the harness to run under **[Colima](https://github.com/abiosoft/colima) with an isolated per-project VM**, adding **docker-out-of-docker orchestration** (claudebot spins up and wires sibling workload containers), a **no-sudo local-build install**, and per-project bootstrapping, browser testing, and plugins. It builds the image **locally** and pulls nothing from Docker Hub. Legacy 2.x env vars (`CLAUDEBOX_*`) and project dirs (`.claudebox/`) are still accepted for one deprecation cycle — see [3.0 migration guide](docs/design/3.0-migration.md). For the fork's rationale see [What's different in this fork](#whats-different-in-this-fork).
+> **This is a fork, rebranded in 3.0.** The upstream project is [psyb0t/docker-claudebox](https://github.com/psyb0t/docker-claudebox) (`claudebox`). This fork keeps the same interfaces but was renamed to **`dridock`** at 3.0 and re-targets the harness to run under **[Colima](https://github.com/abiosoft/colima) with an isolated per-project VM**, adding **docker-out-of-docker orchestration** (claudebot spins up and wires sibling workload containers), a **no-sudo local-build install**, and per-project bootstrapping, browser testing, and plugins. It builds the image **locally** and pulls nothing from Docker Hub. Canonical 3.0+ names are `DRIDOCK_*` env vars and `.dridock/` project dirs; the legacy 2.x `CLAUDEBOX_*` env vars and `.claudebox/` project dirs are still accepted for one deprecation cycle — see [3.0 migration guide](docs/design/3.0-migration.md). For the fork's rationale see [What's different in this fork](#whats-different-in-this-fork).
 
 A runtime harness for [Claude Code](https://claude.com/product/claude-code) — the agentic coding CLI from Anthropic — running in a fully isolated Docker container with every dev tool pre-installed, passwordless sudo, docker-in-docker support, and `--dangerously-skip-permissions` enabled by default.
 
@@ -141,8 +141,9 @@ catches up from one file. See [docs/design/bootstrap.md](docs/design/bootstrap.m
 
 `install.sh` also installs `claudebox-shell.sh` and sources it from your rc, adding
 convenience functions (with tab-completion) for getting a shell into the layers of a
-project — all scoped to that project's Colima VM (resolved from `.dridock/config.yml`,
-falling back to legacy `.claudebox/config.yml`, so they work from any subdirectory):
+project — all scoped to that project's Colima VM (resolved from the project's
+`.dridock/config.yml` — or the legacy 2.x `.claudebox/config.yml` in that same tree —
+so they work from any subdirectory):
 
 ```bash
 cbx-ps                 # list containers running in this project's VM
@@ -162,11 +163,11 @@ the daemon, and any stopped workload containers without one are started too (the
 ephemeral `claude-*` harness containers are skipped). `cbx-up` does the same for just
 the current project.
 
-Each project's claudebot config/session/auth lives in its own host dir
-(`~/.config/dridock/projects/<id>/claude`, mounted at `/home/claude/.claude`; legacy
-2.x projects are under `~/.config/claudebox/projects/…` until `dridock migrate`
-moves them) — this fork is shared-nothing, so there's no global `~/.claude`.
-`dridock claude-dir` prints that path for the current project.
+Each project's claudebot config/session/auth lives in its own host dir (canonical
+`~/.config/dridock/projects/<id>/claude` or legacy 2.x `~/.config/claudebox/projects/<id>/claude`,
+mounted at `/home/claude/.claude`; `dridock migrate` moves the legacy tree to the
+`~/.config/dridock/` one) — this fork is shared-nothing, so there's no global
+`~/.claude`. `dridock claude-dir` prints that path for the current project.
 
 **Init hooks.** Drop executable `*.sh` scripts in that dir's `init.d/` (i.e.
 `$(dridock claude-dir)/init.d/`) and the entrypoint runs them **once**, on first

@@ -24,5 +24,5 @@ human can test it from their Mac's Chrome.
 - Work FULLY AUTONOMOUSLY. Do not ask any questions. You have yolo
   (--dangerously-skip-permissions).
 - When finished, update the "## Progress / handoff log" section of
-  .claudebox/BRIEF.md with what you built, the container name (todo-app), the port
+  .dridock/BRIEF.md with what you built, the container name (todo-app), the port
   (3000), and how to hit it. Then print a final line starting "DONE:" summarizing it.

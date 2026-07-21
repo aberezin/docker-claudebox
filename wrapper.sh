@@ -14,6 +14,11 @@
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
 DRIDOCK_VERSION="3.2.3"
 
+# The name the user actually typed to invoke us. Both `dridock` and legacy
+# `claudebox` symlink to this wrapper (install.sh's --bin-name), so help
+# text and error messages echo back whichever binary the user has installed.
+CB_SELF="${0##*/}"
+
 # Minimum Claude Code CLI the harness expects in the image. NOT the pin (that lives in
 # `Dockerfile` ARG CLAUDE_VERSION) — this is the floor `checkversion` warns below, set
 # by the newest claude feature dridock forwards a flag for. Currently 2.1.206: the first
@@ -1733,7 +1738,7 @@ This project is a MULTI-REPO workspace: each sibling directory is its OWN git re
 sibling repo dirs so git never tracks them as gitlinks. Build a **self-contained image per
 service** (\`COPY\` the code in — don't bind-mount), run them on the shared **\`cb-net\`** network
 (address each other by container name, e.g. \`http://backend:8080\`), and publish ports the human
-reaches at the VM IP (\`claudebox ip\`). Record each repo's role + wiring below:
+reaches at the VM IP (\`dridock ip\`). Record each repo's role + wiring below:
 
 - _<dir>/_ — _role · port · how it's reached_
 " ;;
@@ -2110,7 +2115,7 @@ USEFUL ENV
   DRIDOCK_NO_API_KEY=1          never forward ANTHROPIC_API_KEY — use Claude subscription (setup-token) instead of API billing
   DRIDOCK_NO_OAUTH_TOKEN=1      never forward CLAUDE_CODE_OAUTH_TOKEN — needed for --remote-control (use 'claude auth login' inside the container first; see #16)
   DRIDOCK_ALLOW_NEW=1           skip the "create a new project here?" prompt (or the non-interactive abort)
-  DRIDOCK_HARNESS_DEV=1         force framework-dev mode (auto-detected when the workspace is a claudebox harness fork). Alias: DRIDOCK_FRAMEWORK_DEV.
+  DRIDOCK_HARNESS_DEV=1         force framework-dev mode (auto-detected when the workspace is a dridock harness fork, including the legacy claudebox one). Alias: DRIDOCK_FRAMEWORK_DEV.
   DRIDOCK_NO_DRIFT_WARN=1       silence the "cb-infra image is behind wrapper" warning on each dridock invocation
   DRIDOCK_NO_AUTO_MIGRATE=1     skip the 3.0 auto-migration of a legacy .claudebox/ workspace on first run (run 'dridock migrate' by hand)
   DRIDOCK_ENV_FOO=bar             forward FOO=bar (legacy CLAUDEBOX_ENV_FOO accepted) into the container
@@ -2219,7 +2224,7 @@ HELP
         case "${2:-}" in
             --purge|--purge-data) _purge=1 ;;
             "") : ;;
-            *) echo "usage: claudebox destroy [--purge]   (--purge also deletes this project's session/data dir)" >&2; exit 1 ;;
+            *) echo "usage: $CB_SELF destroy [--purge]   (--purge also deletes this project's session/data dir)" >&2; exit 1 ;;
         esac
         _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
         if [ -z "$_cbid" ]; then echo "no dridock project here (.dridock/config.yml missing)"; exit 0; fi
@@ -2232,7 +2237,7 @@ HELP
         case "${2:-}" in
             up)   cb_bridge_up "$_cbid"; exit $? ;;
             down) cb_bridge_down "$_cbid"; exit $? ;;
-            *)    echo "usage: claudebox browser-bridge up|down  (opt-in: let claudebot drive your real Chrome via CDP)" >&2; exit 1 ;;
+            *)    echo "usage: $CB_SELF browser-bridge up|down  (opt-in: let claudebot drive your real Chrome via CDP)" >&2; exit 1 ;;
         esac
         ;;
     host-agent)
@@ -2241,7 +2246,7 @@ HELP
             up)     cb_host_agent_up; exit $? ;;
             down)   cb_host_agent_down; exit $? ;;
             status) cb_host_agent_status; exit $? ;;
-            *)      echo "usage: claudebox host-agent up|down|status  (opt-in: let a HARNESS-DEV claudebot run allowlisted colima/limactl on your Mac — trusted use only; see docs/design/backends.md)" >&2; exit 1 ;;
+            *)      echo "usage: $CB_SELF host-agent up|down|status  (opt-in: let a HARNESS-DEV claudebot run allowlisted colima/limactl on your Mac — trusted use only; see docs/design/backends.md)" >&2; exit 1 ;;
         esac
         ;;
     harness)
@@ -2251,8 +2256,8 @@ HELP
         shift 2 2>/dev/null || shift $# 2>/dev/null || true   # drop `harness` + verb; $@ = flags for the verb
         case "$_harness_verb" in
             sync) cb_harness_sync "$@"; exit $? ;;
-            "")   echo "usage: claudebox harness <verb>  (framework-dev only; verbs: sync [--repair])" >&2; exit 1 ;;
-            *)    echo "claudebox harness: unknown verb '$_harness_verb'  (verbs: sync)" >&2; exit 1 ;;
+            "")   echo "usage: $CB_SELF harness <verb>  (framework-dev only; verbs: sync [--repair])" >&2; exit 1 ;;
+            *)    echo "$CB_SELF harness: unknown verb '$_harness_verb'  (verbs: sync)" >&2; exit 1 ;;
         esac
         ;;
     framework-bugs)
@@ -2268,10 +2273,10 @@ HELP
                     for _r in "${_reports[@]}"; do
                         printf '  - %s\n      %s\n' "$(basename "$_r")" "$(grep -m1 '^# ' "$_r" | sed 's/^# //')"
                     done
-                    echo ""; echo "view one:  cat \"$_fwb\"/<file>     clear all:  claudebox framework-bugs clear"
+                    echo ""; echo "view one:  cat \"$_fwb\"/<file>     clear all:  $CB_SELF framework-bugs clear"
                 fi ;;
             clear) rm -f "$_fwb"/*.md 2>/dev/null; echo "cleared framework bug reports in $_fwb" ;;
-            *)     echo "usage: claudebox framework-bugs [list|clear]" >&2; exit 1 ;;
+            *)     echo "usage: $CB_SELF framework-bugs [list|clear]" >&2; exit 1 ;;
         esac
         exit 0
         ;;
@@ -2289,30 +2294,30 @@ HELP
                         _t="${_t%/}"; _id="$(basename "$_t")"
                         printf '  %-28s [%s]  %s\n' "$_id" "$(cb_consult_status "$_t")" "$(sed -n 's/^title=//p' "$_t/meta" | head -1)"
                     done
-                    echo ""; echo "show:  claudebox consult show <id>     approve/revise/reject: claudebox consult <verb> <id>"
+                    echo ""; echo "show:  $CB_SELF consult show <id>     approve/revise/reject: $CB_SELF consult <verb> <id>"
                 fi ;;
             show)
-                [ -n "$_cid" ] || { echo "usage: claudebox consult show <id>" >&2; exit 1; }
+                [ -n "$_cid" ] || { echo "usage: $CB_SELF consult show <id>" >&2; exit 1; }
                 _t="$_ch/$_cid"; [ -d "$_t" ] || { echo "no such consult: $_cid" >&2; exit 1; }
                 echo "=== consult $_cid ==="; cat "$_t/meta"; echo ""
                 for _m in "$_t"/[0-9][0-9][0-9]-*.md; do [ -f "$_m" ] || continue; echo "── $(basename "$_m") ──"; cat "$_m"; echo ""; done
                 [ -f "$_t/proposed.diff" ] && { echo "── proposed.diff ──"; cat "$_t/proposed.diff"; } ;;
             approve)
-                [ -n "$_cid" ] || { echo "usage: claudebox consult approve <id>" >&2; exit 1; }
+                [ -n "$_cid" ] || { echo "usage: $CB_SELF consult approve <id>" >&2; exit 1; }
                 _t="$_ch/$_cid"; [ -d "$_t" ] || { echo "no such consult: $_cid" >&2; exit 1; }
                 [ "$(cb_consult_status "$_t")" = "awaiting-approval" ] || echo "note: status is '$(cb_consult_status "$_t")' (expected awaiting-approval)" >&2
                 cb_consult_meta_set "$_t" status awaiting-claudebot
                 printf 'Approved by the human. Framework-Claude: apply the proposed change, commit, and post the reply with the commit hash.\n' | cb_consult_post "$_t" human
                 echo "✅ approved $_cid — framework-Claude will now apply + reply." ;;
             revise)
-                [ -n "$_cid" ] || { echo "usage: claudebox consult revise <id> [note]" >&2; exit 1; }
+                [ -n "$_cid" ] || { echo "usage: $CB_SELF consult revise <id> [note]" >&2; exit 1; }
                 _t="$_ch/$_cid"; [ -d "$_t" ] || { echo "no such consult: $_cid" >&2; exit 1; }
                 cb_consult_meta_set "$_t" status awaiting-framework
                 _note="${*:4}"; [ -n "$_note" ] || _note="please revise the draft"
                 printf '%s\n' "$_note" | cb_consult_post "$_t" human
                 echo "↩️  bounced $_cid back for revision." ;;
             reject)
-                [ -n "$_cid" ] || { echo "usage: claudebox consult reject <id> [reason]" >&2; exit 1; }
+                [ -n "$_cid" ] || { echo "usage: $CB_SELF consult reject <id> [reason]" >&2; exit 1; }
                 _t="$_ch/$_cid"; [ -d "$_t" ] || { echo "no such consult: $_cid" >&2; exit 1; }
                 cb_consult_meta_set "$_t" status rejected
                 _note="${*:4}"; [ -n "$_note" ] || _note="rejected"
@@ -2321,7 +2326,7 @@ HELP
             post)
                 # low-level append used by framework-Claude (the skill) and you:
                 #   claudebox consult post <id> --author framework --status awaiting-approval [--diff F] < body
-                [ -n "$_cid" ] || { echo "usage: claudebox consult post <id> [--author A] [--status S] [--diff F] < body" >&2; exit 1; }
+                [ -n "$_cid" ] || { echo "usage: $CB_SELF consult post <id> [--author A] [--status S] [--diff F] < body" >&2; exit 1; }
                 _t="$_ch/$_cid"; mkdir -p "$_t"
                 _author=framework; _status=""; _diff=""
                 shift 3 2>/dev/null || true
@@ -2353,13 +2358,13 @@ HELP
                     if [ -n "$_new" ]; then
                         echo "🗣  consult(s) awaiting a framework draft:"
                         printf '%s\n' "$_new" | while IFS='|' read -r _id _n; do
-                            [ -n "$_id" ] && printf '  %-28s  (claudebox consult show %s)\n' "$_id" "$_id"
+                            [ -n "$_id" ] && printf '  %-28s  (%s consult show %s)\n' "$_id" "$CB_SELF" "$_id"
                         done
                         exit 0
                     fi
                     _base="$_cur"   # absorb removals / framework's own posts silently
                 done ;;
-            *) echo "usage: claudebox consult list|show|approve|revise|reject|post|watch <id>" >&2; exit 1 ;;
+            *) echo "usage: $CB_SELF consult list|show|approve|revise|reject|post|watch <id>" >&2; exit 1 ;;
         esac
         exit 0
         ;;
@@ -2635,7 +2640,7 @@ DOCKER_ARGS+=(-v "$_fwbugs:/home/claude/framework-bugs")
 DOCKER_ARGS+=(-e "DRIDOCK_FRAMEWORK_BUGS_DIR=/home/claude/framework-bugs")
 DOCKER_ARGS+=(-e "DRIDOCK_PROJECT_ID=$CB_PROJECT_ID")
 _fwb_n=$(find "$_fwbugs" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
-[ "${_fwb_n:-0}" -gt 0 ] && echo "⚠ $_fwb_n framework bug report(s) on file — review: claudebox framework-bugs" >&2
+[ "${_fwb_n:-0}" -gt 0 ] && echo "⚠ $_fwb_n framework bug report(s) on file — review: $CB_SELF framework-bugs" >&2
 
 # Opt-in: RAM-back the claudebot's /tmp so docker disk bloat can't starve the Bash tool
 # (it writes /tmp/claude-501 per command; when the shared VM overlay fills, mkdir there fails
@@ -2662,8 +2667,8 @@ if [ -d "$_consult" ]; then
         esac
     done
 fi
-[ "$_c_appr" -gt 0 ] && echo "🗣  $_c_appr framework consult(s) awaiting YOUR approval — review: claudebox consult list" >&2
-[ "$_c_draft" -gt 0 ] && echo "🗣  $_c_draft framework consult(s) awaiting a framework draft — see: claudebox consult list" >&2
+[ "$_c_appr" -gt 0 ] && echo "🗣  $_c_appr framework consult(s) awaiting YOUR approval — review: $CB_SELF consult list" >&2
+[ "$_c_draft" -gt 0 ] && echo "🗣  $_c_draft framework consult(s) awaiting a framework draft — see: $CB_SELF consult list" >&2
 
 # forward env vars to the container
 # Auth deliberately does NOT ride `-e`. `docker run -e KEY=<value>` puts the secret in

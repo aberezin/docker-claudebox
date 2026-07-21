@@ -1,6 +1,6 @@
 ---
 name: framework-consult
-description: Work a claudebot's framework consult — draft a reply + proposed harness change with an Agent sub-agent, gated by the human's approval, then apply it and reply. Use when the human says "work consult <id>", or a `claudebox` run reports consults awaiting a framework draft.
+description: Work a claudebot's framework consult — draft a reply + proposed harness change with an Agent sub-agent, gated by the human's approval, then apply it and reply. Use when the human says "work consult <id>", or a `dridock` (or legacy `claudebox`) run reports consults awaiting a framework draft.
 ---
 
 # framework-consult — the framework-Claude side of a consult
@@ -10,14 +10,14 @@ asking framework-Claude (you, in *this* harness repo) to resolve a **general
 claudebox best-practice** problem. Full design: `docs/design/framework-consult.md`.
 You are a **peer** of the claudebot, not its parent; the only sub-agent you spawn here is
 the **drafting sub-agent** below. The human is the approval gate — nothing you draft
-reaches the claudebot until they run `claudebox consult approve`.
+reaches the claudebot until they run `dridock consult approve`.
 
 ## 0. Find the work
 
 ```bash
-claudebox consult list                 # all threads + status
-claudebox consult show <id>            # full thread + any proposed.diff
-claudebox consult watch                # block until a thread changes, then exit (see below)
+dridock consult list                 # all threads + status
+dridock consult show <id>            # full thread + any proposed.diff
+dridock consult watch                # block until a thread changes, then exit (see below)
 ```
 - `awaiting-framework` → it needs your draft (step 1).
 - `awaiting-claudebot` → the human approved; **apply + reply** (step 3).
@@ -26,14 +26,14 @@ claudebox consult watch                # block until a thread changes, then exit
 **To stay alerted without babysitting**, run a watcher as a **background task**
 (`run_in_background: true`). Which watcher depends on where you're running:
 
-- **On the Mac (host session)**: `claudebox consult watch` — blocks until any thread
+- **On the Mac (host session)**: `dridock consult watch` — blocks until any thread
   changes, prints what changed, exits.
 - **Inside a framework-dev claudebot (container session)**: `cb-harness-watch-consults`
   (2.22.0+) — the in-container mirror; blocks until a cross-project consult enters
   `awaiting-framework` OR a new unreviewed framework-bug appears; prints what changed,
   exits. This is the right one when you're working the harness itself from inside a
-  container (per `docs/design/framework-dev-mode.md`); the host `claudebox` binary
-  isn't reachable from in here.
+  container (per `docs/design/framework-dev-mode.md`); the host `dridock` binary
+  (or its legacy `claudebox` symlink) isn't reachable from in here.
 
 Both are token-free. Both exit on change — the harness re-invokes you, you handle the
 change (usually: draft an `awaiting-framework` thread), then **relaunch the watcher**.
@@ -65,7 +65,7 @@ Then write the draft to the thread and hand it to the human:
 
 ```bash
 # On the Mac (host):
-claudebox consult post <id> --author framework --status awaiting-approval --diff /path/to/proposed.diff < draft.md
+dridock consult post <id> --author framework --status awaiting-approval --diff /path/to/proposed.diff < draft.md
 
 # Inside a framework-dev claudebot (container, 2.23.0+):
 cb-consult post <id> --author framework --status awaiting-approval < draft.md
@@ -73,12 +73,12 @@ cb-consult post <id> --author framework --status awaiting-approval < draft.md
 
 (`--diff` is host-side only; when working in-container, include the proposed diff
 directly in the draft body per the existing sub-agent output shape.) Tell the human:
-"consult `<id>` drafted — review with `claudebox consult show <id>` (or `cb-consult read
+"consult `<id>` drafted — review with `dridock consult show <id>` (or `cb-consult read
 <id>` in-container), then `approve` / `revise` / `reject`."
 
 ## 2. Human gate (not yours)
 
-The human runs `claudebox consult approve|revise|reject <id>`. `revise` bounces it back to
+The human runs `dridock consult approve|revise|reject <id>`. `revise` bounces it back to
 `awaiting-framework` with a note — re-draft addressing it. Do not proceed to apply until
 the status is `awaiting-claudebot`.
 
@@ -93,7 +93,7 @@ entry, and commit. Then post the reply **with the commit hash** so the thread is
 
 ```bash
 # On the Mac (host):
-claudebox consult post <id> --author framework --status awaiting-claudebot <<EOF
+dridock consult post <id> --author framework --status awaiting-claudebot <<EOF
 Applied in <commit>. <one-paragraph summary of what changed and where the standard now lives>.
 Adopt it and run \`cb-consult resolve <id>\`. Future claudebots inherit it via the baked guidance.
 EOF

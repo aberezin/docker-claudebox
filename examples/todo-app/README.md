@@ -1,4 +1,4 @@
-# Example: claudebot builds a todo app end-to-end
+# Example: claudebot builds a todo app end-to-end (via `dridock`)
 
 This is the canonical end-to-end demo. One command bootstraps a project and hands
 claudebot a mission brief; claudebot then **autonomously** builds a small Node +
@@ -9,7 +9,7 @@ It exercises every layer:
 
 | Layer | What it shows |
 |-------|---------------|
-| `claudebox bootstrap` | intent handoff — the committed `.claudebox/BRIEF.md` tells claudebot *why* it exists |
+| `dridock bootstrap` | intent handoff — the committed `.dridock/BRIEF.md` tells claudebot *why* it exists |
 | per-project VM | a dedicated `cb-<id>` Colima VM with a host-reachable IP (`--network-address`) |
 | per-project plugin | a TypeScript LSP plugin installed for this project via an init.d hook, giving claudebot TS code intelligence |
 | autonomous build | claudebot writes the app (TS + Express, in-memory store) with `--dangerously-skip-permissions` (yolo) |
@@ -18,8 +18,9 @@ It exercises every layer:
 
 ## Prerequisites
 
-- `claudebox` on your PATH — run the repo's `./install.sh`, or
-  `install -m755 wrapper.sh ~/.local/bin/claudebox` (ensure `~/.local/bin` is on PATH).
+- `dridock` on your PATH — run the repo's `./install.sh`, or
+  `install -m755 wrapper.sh ~/.local/bin/dridock` (ensure `~/.local/bin` is on PATH).
+  (A pre-3.0 install shipped the binary as `claudebox` — that name still works.)
 - The image built locally: `make build-minimal` (this example uses the minimal image).
 - Auth exported: `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN`.
 - Colima + `socket_vmnet` set up for reachable VM IPs (see the repo README's
@@ -37,7 +38,7 @@ subsequent runs against the same project reuse the warm VM.
 
 ## What you should see
 
-- `claudebox bootstrap` scaffolds the project (preflight ✓, git init, committed
+- `dridock bootstrap` scaffolds the project (preflight ✓, git init, committed
   `BRIEF.md`).
 - claudebot works autonomously and ends with a line like:
   `DONE: Container todo-app running detached on port 3000 …`
@@ -47,10 +48,10 @@ subsequent runs against the same project reuse the warm VM.
 ## Talk to claudebot / inspect
 
 ```bash
-cd /tmp/todo-app && CLAUDEBOX_MINIMAL=1 claudebox     # interactive session in the same project/VM
+cd /tmp/todo-app && DRIDOCK_MINIMAL=1 dridock     # interactive session in the same project/VM
 ```
 It can see everything it built (`src/server.ts`, `Dockerfile`, …) and the running
-`todo-app` container. The `.claudebox/BRIEF.md` *Progress / handoff log* records what
+`todo-app` container. The `.dridock/BRIEF.md` *Progress / handoff log* records what
 it did.
 
 ## Plugins
@@ -67,7 +68,7 @@ see `docs/customization.md`.)
 ## Tear down
 
 ```bash
-cd /tmp/todo-app && claudebox destroy    # removes the project VM (and the workload with it)
+cd /tmp/todo-app && dridock destroy    # removes the project VM (and the workload with it)
 rm -rf /tmp/todo-app
 ```
 
