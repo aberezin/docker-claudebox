@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.2.4"
+DRIDOCK_VERSION="3.2.5"
 
 # The name the user actually typed to invoke us. Both `dridock` and legacy
 # `claudebox` symlink to this wrapper (install.sh's --bin-name), so help
@@ -2956,7 +2956,18 @@ if [ $# -gt 0 ] && [ "$_has_p_flag" = "1" ]; then
                         *) echo "❌ Invalid output format: $arg (allowed: text, json, json-verbose, stream-json)"; exit 1 ;;
                     esac
                     ;;
-                --model|--system-prompt|--append-system-prompt|--json-schema|--effort|--resume) ;;
+                --effort)
+                    # #31 — claude silently ignores unrecognized effort values, so a
+                    # typo like `--effort hihg` runs at default effort with no signal.
+                    # Validate against the closed set the CLI supports. --model
+                    # deliberately stays unvalidated (model names rot; an allowlist
+                    # would start rejecting valid models).
+                    case "$arg" in
+                        low|medium|high|xhigh|max) ;;
+                        *) echo "❌ Invalid effort: $arg (allowed: low, medium, high, xhigh, max)"; exit 1 ;;
+                    esac
+                    ;;
+                --model|--system-prompt|--append-system-prompt|--json-schema|--resume) ;;
             esac
             PASS_ARGS+=("$EXPECT_VALUE" "$arg")
             EXPECT_VALUE=""
@@ -2985,7 +2996,16 @@ if [ $# -gt 0 ] && [ "$_has_p_flag" = "1" ]; then
                 esac
                 PASS_ARGS+=("$arg")
                 ;;
-            --model=*|--system-prompt=*|--append-system-prompt=*|--json-schema=*|--effort=*|--resume=*)
+            --effort=*)
+                # #31 — same validation as the split --effort X form above.
+                eff="${arg#--effort=}"
+                case "$eff" in
+                    low|medium|high|xhigh|max) ;;
+                    *) echo "❌ Invalid effort: $eff (allowed: low, medium, high, xhigh, max)"; exit 1 ;;
+                esac
+                PASS_ARGS+=("$arg")
+                ;;
+            --model=*|--system-prompt=*|--append-system-prompt=*|--json-schema=*|--resume=*)
                 PASS_ARGS+=("$arg")
                 ;;
             -*)

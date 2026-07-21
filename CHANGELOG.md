@@ -26,6 +26,30 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.2.5] — 2026-07-21 _(fork)_
+
+### Fixed
+
+- **#31** — `wrapper.sh` now validates the value of `--effort` against the
+  closed set `low|medium|high|xhigh|max`, matching the `--output-format`
+  pattern already in the same `case` block. Prior behavior: `--effort bogus`
+  (or a plausible typo like `--effort hihg`) was accepted, exit 0, run
+  completed at default effort with no signal anywhere — the same silent-
+  drop family as #17 (claude CLI silently ignores unrecognized input rather
+  than erroring) and #30 (DRIDOCK_ENV_* on restarted containers). Both
+  `--effort X` and `--effort=X` spellings are validated. `--model` is
+  deliberately excluded — model names rot with each release and an
+  allowlist would start rejecting valid models. Filed by Arfy during #18
+  coverage-gap verification.
+
+### Added
+
+- **`test_programmatic_effort_invalid`** and
+  **`test_programmatic_effort_valid_pass_validation`** in
+  `tests/test_programmatic.sh` — durable regression checks for #31. Both
+  work on the docker backend (validation fires before `cb_ensure_infra`),
+  so bear-side in-container CI verifies them without a colima VM.
+
 ## [3.2.4] — 2026-07-21 _(fork)_
 
 ### Fixed — defect sweep from #18 QA (bear + arfy)

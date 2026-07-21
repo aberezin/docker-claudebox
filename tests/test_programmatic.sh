@@ -291,6 +291,50 @@ except Exception:
     _prog_cleanup
 }
 
+# ── --effort value validation (#31) ─────────────────────────────────────────
+# claude silently ignores unrecognized effort values, so `--effort hihg` (typo)
+# runs at default effort with no diagnostic — same silent-drop family as #17.
+# The wrapper's validation fires BEFORE cb_ensure_vm/cb_ensure_infra, so this
+# test works on the docker backend too (no colima needed for the reject case).
+test_programmatic_effort_invalid() {
+    local out rc
+    # split form: --effort bogus
+    out=$( cd "$CBX_TEST_WS" && CLAUDE_IMAGE="$IMAGE" bash "$WORKDIR/wrapper.sh" \
+        -p "hi" --model "$TEST_MODEL" --no-continue --effort bogus 2>&1 )
+    rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: --effort bogus should have exited non-zero"; return 1; }
+    printf '%s' "$out" | grep -q "Invalid effort: bogus" || { echo "  FAIL: --effort bogus message missing 'Invalid effort: bogus' (got: $out)"; return 1; }
+    printf '%s' "$out" | grep -q "low, medium, high, xhigh, max" || { echo "  FAIL: message doesn't list allowed values (got: $out)"; return 1; }
+    echo "  OK: --effort bogus (split form) rejected"
+
+    # combined form: --effort=bogus
+    out=$( cd "$CBX_TEST_WS" && CLAUDE_IMAGE="$IMAGE" bash "$WORKDIR/wrapper.sh" \
+        -p "hi" --model "$TEST_MODEL" --no-continue --effort=bogus 2>&1 )
+    rc=$?
+    [ "$rc" -ne 0 ] || { echo "  FAIL: --effort=bogus should have exited non-zero"; return 1; }
+    printf '%s' "$out" | grep -q "Invalid effort: bogus" || { echo "  FAIL: --effort=bogus message missing 'Invalid effort: bogus'"; return 1; }
+    echo "  OK: --effort=bogus (combined form) rejected"
+}
+
+# valid effort values should pass validation. They still need a live wrapper run
+# to fully round-trip, so this test only asserts they PASS the wrapper's own
+# argument validation — a real haiku call is covered separately (won't run in
+# docker backend, that's fine — the validation itself is the point here).
+test_programmatic_effort_valid_pass_validation() {
+    local out rc eff
+    for eff in low medium high xhigh max; do
+        out=$( cd "$CBX_TEST_WS" && CLAUDE_IMAGE="$IMAGE" bash "$WORKDIR/wrapper.sh" \
+            -p "hi" --model "$TEST_MODEL" --no-continue --effort "$eff" 2>&1 )
+        # Whether it succeeds or fails downstream (docker/cb-infra), the
+        # important invariant is it must NOT print "Invalid effort".
+        if printf '%s' "$out" | grep -q "Invalid effort:"; then
+            echo "  FAIL: --effort $eff wrongly rejected as invalid (got: $out)"
+            return 1
+        fi
+    done
+    echo "  OK: all 5 valid effort values pass wrapper validation (low, medium, high, xhigh, max)"
+}
+
 ALL_TESTS+=(
     test_programmatic_prompts
     test_programmatic_models
@@ -302,4 +346,6 @@ ALL_TESTS+=(
     test_programmatic_always_skills
     test_programmatic_auto_continue
     test_programmatic_json_schema
+    test_programmatic_effort_invalid
+    test_programmatic_effort_valid_pass_validation
 )
