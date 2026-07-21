@@ -11,8 +11,8 @@
 # See docs/design/framework-dev-mode.md.
 set -euo pipefail
 
-CDIR="${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}"
-BDIR="${CLAUDEBOX_FRAMEWORK_BUGS_DIR:-/home/claude/framework-bugs}"
+CDIR="${DRIDOCK_CONSULT_DIR:-${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}}"
+BDIR="${DRIDOCK_FRAMEWORK_BUGS_DIR:-${CLAUDEBOX_FRAMEWORK_BUGS_DIR:-/home/claude/framework-bugs}}"
 
 _usage() {
     cat >&2 <<EOF
@@ -32,7 +32,7 @@ EOF
 
 case "${1:-}" in -h|--help) _usage 0 ;; esac
 
-iv="${1:-${CLAUDEBOX_HARNESS_WATCH_INTERVAL:-20}}"
+iv="${1:-${DRIDOCK_HARNESS_WATCH_INTERVAL:-${CLAUDEBOX_HARNESS_WATCH_INTERVAL:-20}}}"
 case "$iv" in ''|*[!0-9]*) iv=20 ;; esac
 
 # Consult signature: `CONSULT|<id>|<turn-count>` for every thread whose status is

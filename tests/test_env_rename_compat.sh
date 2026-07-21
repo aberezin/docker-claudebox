@@ -108,6 +108,43 @@ bash -c "source '$TMP/fn.sh'; export DRIDOCK_TEST_A=xyz; _dridock_alias_env; pri
 eq "missing map -> no aliasing, no error" "$(cat "$TMP/out")" "<unset>"
 eq "missing map -> no stderr noise" "$(wc -c < "$TMP/err" | tr -d ' ')" "0"
 
+# ── LINT: cb-* helpers must not read a bare ${CLAUDEBOX_X:-…} without a sibling
+# ${DRIDOCK_X:-${CLAUDEBOX_X:-…}} fallback. The entrypoint shim covers this at
+# runtime during 3.x, but every helper edited between now and 4.0 must migrate
+# so the shim's removal in 4.0 doesn't strand it. This lint is the forcing
+# function: any new bare-legacy read fails the build immediately.
+#
+# Positive shape:  ${DRIDOCK_X:-${CLAUDEBOX_X:-…}}
+# Positive shape:  -e CLAUDEBOX_X=…       (docker -e passing to sub-container — legit)
+# Rejected shape:  ${CLAUDEBOX_X:-…}      (bare legacy read; migrate to DRIDOCK_-first)
+echo "--- lint: cb-* helpers must not have bare \${CLAUDEBOX_X:-…} reads ---"
+_lint_offenders=0
+for _cb in "$REPO"/cb-*; do
+    # Skip if not a regular file (e.g. broken symlink)
+    [ -f "$_cb" ] || continue
+    # Find every ${CLAUDEBOX_X read, then filter: the preceding context on the
+    # same line must be either ${DRIDOCK_X:- (sibling fallback) or -e (docker env
+    # passthrough). Anything else is a bare read that needs migration.
+    while IFS= read -r _hit; do
+        # grep -n on a single file emits "LINENO:CONTENT" — strip once for each.
+        _lineno="${_hit%%:*}"
+        _line="${_hit#*:}"
+        # Positive: a ${DRIDOCK_ appears on the same line BEFORE the ${CLAUDEBOX_
+        # (the fallback shape). Awk splits and compares indices.
+        _has_sibling=$(printf '%s' "$_line" | awk '
+            { d = index($0, "${DRIDOCK_"); c = index($0, "${CLAUDEBOX_");
+              print (d > 0 && d < c) ? "yes" : "no" }')
+        # Positive: `-e CLAUDEBOX_X=…` docker env passthrough (legit — sub-container's
+        # own scripts might read the legacy name; we pass both in cb-browser).
+        _is_docker_e=$(printf '%s' "$_line" | grep -qE -- '-e CLAUDEBOX_' && echo yes || echo no)
+        if [ "$_has_sibling" != yes ] && [ "$_is_docker_e" != yes ]; then
+            echo "    $(basename "$_cb"):${_lineno}: bare \${CLAUDEBOX_ read — migrate to \${DRIDOCK_X:-\${CLAUDEBOX_X:-…}}" >&2
+            _lint_offenders=$((_lint_offenders + 1))
+        fi
+    done < <(grep -nE '\$\{CLAUDEBOX_[A-Z_]+' "$_cb")
+done
+eq "no bare \${CLAUDEBOX_X:-} reads in cb-* helpers" "$_lint_offenders" "0"
+
 echo ""
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.2.1"
+DRIDOCK_VERSION="3.2.2"
 
 # Minimum Claude Code CLI the harness expects in the image. NOT the pin (that lives in
 # `Dockerfile` ARG CLAUDE_VERSION) — this is the floor `checkversion` warns below, set

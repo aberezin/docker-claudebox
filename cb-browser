@@ -48,12 +48,12 @@ usage:
                                           cb-net container name — the Mac's Chrome can't resolve those.
                                           For cb-net / in-VM targets (incl. their websockets) use shot/script.
   cb-browser script-cdp <file.cjs> [args...]  run a custom Playwright script against the HUMAN's real Chrome
-                                          over the CDP bridge. Sets \$CDP_URL + \$CLAUDEBOX_HOST_CDP_URL,
+                                          over the CDP bridge. Sets \$CDP_URL + \$DRIDOCK_HOST_CDP_URL (and legacy \$CLAUDEBOX_HOST_CDP_URL),
                                           --network host. On exit (any status, incl. SIGINT), closes any page
                                           tabs the script opened but didn't page.close() — so browser.close()
                                           alone can't leak tabs. Opt-out: CB_BROWSER_CDP_KEEP=1.
   cb-browser net                          ensure/print the shared network name
-  cb-browser ip                           print this project VM's reachable IP (\$CLAUDEBOX_VM_IP) —
+  cb-browser ip                           print this project VM's reachable IP (\$DRIDOCK_VM_IP) —
                                           the address the human's Mac/Chrome uses; NOT localhost.
                                           It rotates on VM restart, so read it fresh; never hardcode it.
 
@@ -66,9 +66,12 @@ EOF
 _ensure_net() { docker network inspect "$NET" >/dev/null 2>&1 || docker network create "$NET" >/dev/null; }
 
 # The reachable VM IP the Mac (and its Chrome, over CDP) uses to hit a published
-# workload. The wrapper injects it as CLAUDEBOX_VM_IP (refreshed each run, so it tracks
-# rotation); the container can't self-discover it. Empty => bridge/VM not ready.
-_vm_ip() { printf '%s' "${CLAUDEBOX_VM_IP:-}"; }
+# workload. The wrapper injects it as DRIDOCK_VM_IP (legacy CLAUDEBOX_VM_IP also
+# exported by the entrypoint's #16 alias shim throughout 3.x — either is read here
+# for belt-and-suspenders; 4.0 drops the shim so DRIDOCK_ is the survivor).
+# Refreshed each run, so it tracks rotation; the container can't self-discover it.
+# Empty => bridge/VM not ready.
+_vm_ip() { printf '%s' "${DRIDOCK_VM_IP:-${CLAUDEBOX_VM_IP:-}}"; }
 
 # Ensure the debug Chrome has at least one page target before Playwright attaches.
 # Playwright's chromium.connectOverCDP against a stock (non-Playwright) Chrome falls
@@ -99,7 +102,7 @@ case "$cmd" in
   ip)
     ip="$(_vm_ip)"
     if [ -n "$ip" ]; then echo "$ip"; else
-      echo "cb-browser: VM IP unknown (CLAUDEBOX_VM_IP unset). Restart this session so the wrapper re-injects it; on the Mac 'dridock ip' prints it." >&2; exit 1
+      echo "cb-browser: VM IP unknown (DRIDOCK_VM_IP unset). Restart this session so the wrapper re-injects it; on the Mac 'dridock ip' prints it." >&2; exit 1
     fi ;;
 
   shot)
@@ -153,7 +156,7 @@ RUNNER
 
   script-cdp)
     script="${1:-}"; [ -f "$script" ] || _usage; shift
-    [ -n "${CLAUDEBOX_HOST_CDP_URL:-}" ] || {
+    [ -n "${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" ] || {
         echo "cb-browser script-cdp: no host CDP bridge. On the Mac run 'dridock browser-bridge up', then restart this session." >&2; exit 1; }
     sdir="$(cd "$(dirname "$script")" && pwd)"; sfile="$(basename "$script")"
     outdir="${CB_BROWSER_OUT:-$PWD/cb-browser-out}"; mkdir -p "$outdir"
@@ -164,7 +167,7 @@ RUNNER
     # dedicated (see browser-testing.md § "B security"); the human shouldn't be doing
     # casual browsing in it. Non-page targets (service workers, iframes, background_page,
     # workers) are never touched — we filter type=="page".
-    _cdp_base="$(printf '%s' "$CLAUDEBOX_HOST_CDP_URL" | sed -E 's#/+$##')"
+    _cdp_base="$(printf '%s' "${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" | sed -E 's#/+$##')"
     # Auto-warm: our cleanup drives the debug Chrome to zero pages after a run whose
     # script only opened its own tabs, which would make the NEXT script-cdp/cdp attach
     # fail with "Browser.setDownloadBehavior: not supported". Fire BEFORE _pre so the
@@ -191,12 +194,19 @@ RUNNER
     trap _cleanup EXIT INT TERM
     # --network host so the container reaches the Mac's bridge (192.168.64.1) over col0
     # (same as `cdp`). --network host CANNOT resolve cb-net container names — if your
-    # script also needs to hit an in-VM workload, address it at $CLAUDEBOX_VM_IP:<port>
+    # script also needs to hit an in-VM workload, address it at $DRIDOCK_VM_IP:<port>
     # (its published port), not by cb-net name. See browser-testing.md § "Custom CDP flows".
+    # Pass BOTH the canonical DRIDOCK_ and the legacy CLAUDEBOX_ env names to the
+    # Playwright sub-container. The entrypoint's alias shim (#16, 3.2.1) doesn't
+    # reach a --network host `docker run` that doesn't go through the dridock
+    # entrypoint, so a sub-container script written to EITHER name must find it.
+    # Values are the same and resolved via the shim above (either input works).
+    _cdp="${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}"
+    _ip="${DRIDOCK_VM_IP:-${CLAUDEBOX_VM_IP:-}}"
     docker run --rm --network host \
-        -e CB_OUT=/out -e CDP_URL="$CLAUDEBOX_HOST_CDP_URL" \
-        -e CLAUDEBOX_HOST_CDP_URL="$CLAUDEBOX_HOST_CDP_URL" \
-        -e CLAUDEBOX_VM_IP="${CLAUDEBOX_VM_IP:-}" \
+        -e CB_OUT=/out -e CDP_URL="$_cdp" \
+        -e DRIDOCK_HOST_CDP_URL="$_cdp"    -e CLAUDEBOX_HOST_CDP_URL="$_cdp" \
+        -e DRIDOCK_VM_IP="$_ip"            -e CLAUDEBOX_VM_IP="$_ip" \
         -v "$sdir:/work:ro" -v "$outdir:/out" -w /out "$PW_IMAGE" \
         bash -lc "$INSTALL && NODE_PATH=/pw/node_modules node /work/$sfile $*"
     echo "cb-browser: /out -> $outdir/  (script-cdp: cleanup on exit; opt-out CB_BROWSER_CDP_KEEP=1)" ;;
@@ -219,8 +229,8 @@ RUNNER
     # 192.168.64.x from --network-address) is collision-free across projects and is
     # the one to prefer; colima ALSO forwards the published port to the Mac's
     # localhost, which is immediate but collides if two projects share a port.
-    ip="${CLAUDEBOX_VM_IP:-$(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 \
-        | grep -E '^192\.168\.' | grep -vE '^192\.168\.5\.' | head -1)}" || true
+    ip="${DRIDOCK_VM_IP:-${CLAUDEBOX_VM_IP:-$(ip -4 -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 \
+        | grep -E '^192\.168\.' | grep -vE '^192\.168\.5\.' | head -1)}}" || true
     echo "cb-browser: watching $url (headful, live)"
     [ -n "${ip:-}" ] && echo "  open   http://$ip:$port        (this project's VM IP — no cross-project collision)"
     echo "  or     http://localhost:$port   (colima-forwarded; simplest, but collides if two projects share the port)"
@@ -231,7 +241,7 @@ RUNNER
 
   cdp)
     url="${1:-}"; [ -n "$url" ] || _usage
-    [ -n "${CLAUDEBOX_HOST_CDP_URL:-}" ] || {
+    [ -n "${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" ] || {
         echo "cb-browser: no host CDP bridge. On the Mac run 'dridock browser-bridge up', then restart this session." >&2; exit 1; }
     # The browser is the human's Chrome, ON THE MAC. It cannot reach your workload via
     # localhost/127.0.0.1 (that's the Mac's own loopback, not this VM) — only via the
@@ -246,13 +256,13 @@ RUNNER
           echo "cb-browser cdp: rewrote $url -> $newurl (the Mac's Chrome reaches this VM only at its IP, not localhost)" >&2
           url="$newurl"
         else
-          echo "cb-browser cdp: WARNING '$url' uses localhost — the Mac's Chrome can't reach this VM via localhost, and CLAUDEBOX_VM_IP is unset so I can't rewrite it. Use http://<vm-ip>:<port> (get it: cb-browser ip)." >&2
+          echo "cb-browser cdp: WARNING '$url' uses localhost — the Mac's Chrome can't reach this VM via localhost, and DRIDOCK_VM_IP is unset so I can't rewrite it. Use http://<vm-ip>:<port> (get it: cb-browser ip)." >&2
         fi ;;
     esac
     outdir="${2:-${CB_BROWSER_OUT:-$PWD/cb-browser-out}}"; mkdir -p "$outdir"
     # Same auto-warm as script-cdp — Playwright connectOverCDP fails against a stock
     # Chrome with zero page targets. See _cdp_ensure_page for the full rationale.
-    _cdp_base="$(printf '%s' "$CLAUDEBOX_HOST_CDP_URL" | sed -E 's#/+$##')"
+    _cdp_base="$(printf '%s' "${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" | sed -E 's#/+$##')"
     _cdp_ensure_page "$_cdp_base"
     read -r -d '' runner <<'RUNNER' || true
 const { chromium } = require("playwright");
@@ -269,7 +279,7 @@ const { chromium } = require("playwright");
 })().catch(e => { console.error("cb-browser cdp error:", e.message); process.exit(1); });
 RUNNER
     # --network host so the container reaches the Mac's bridge (192.168.64.1) via col0
-    docker run --rm --network host -e TARGET="$url" -e CDP_URL="$CLAUDEBOX_HOST_CDP_URL" -e CBR_RUNNER="$runner" \
+    docker run --rm --network host -e TARGET="$url" -e CDP_URL="${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" -e CBR_RUNNER="$runner" \
         -v "$outdir:/out" "$PW_IMAGE" \
         bash -lc "$INSTALL && printf '%s' \"\$CBR_RUNNER\" > /tmp/cdp.cjs && NODE_PATH=/pw/node_modules node /tmp/cdp.cjs"
     echo "cb-browser: opened $url in your Chrome (screenshot -> $outdir/cdp.png)" ;;

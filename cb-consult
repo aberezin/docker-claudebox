@@ -25,8 +25,8 @@
 #   cb-consult resolve <id> done  # mark it adopted
 set -euo pipefail
 
-DIR="${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}"
-PID="${CLAUDEBOX_PROJECT_ID:-unknown}"
+DIR="${DRIDOCK_CONSULT_DIR:-${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}}"
+PID="${DRIDOCK_PROJECT_ID:-${CLAUDEBOX_PROJECT_ID:-unknown}}"
 
 _ts() { date +%Y-%m-%dT%H-%M-%S 2>/dev/null || echo unknown; }
 

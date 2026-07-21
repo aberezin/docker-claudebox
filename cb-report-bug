@@ -20,8 +20,8 @@
 #   EOF
 set -euo pipefail
 
-DIR="${CLAUDEBOX_FRAMEWORK_BUGS_DIR:-/home/claude/framework-bugs}"
-PID="${CLAUDEBOX_PROJECT_ID:-unknown}"
+DIR="${DRIDOCK_FRAMEWORK_BUGS_DIR:-${CLAUDEBOX_FRAMEWORK_BUGS_DIR:-/home/claude/framework-bugs}}"
+PID="${DRIDOCK_PROJECT_ID:-${CLAUDEBOX_PROJECT_ID:-unknown}}"
 LAYER="other"
 TITLE=""
 BODY_FILE=""

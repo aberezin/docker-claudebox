@@ -26,6 +26,41 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.2.2] — 2026-07-21 _(fork)_
+
+### Changed
+
+- **Baked `cb-*` helpers migrated to read `${DRIDOCK_X:-${CLAUDEBOX_X:-…}}`
+  at every site**, so 4.0's shim removal doesn't strand them. 3.2.1's
+  entrypoint aliaser papered over legacy-name reads at runtime; that
+  worked but a claudebot in the wild (`51cb139f`) rightly flagged that
+  4.0 (or any container path that skips the entrypoint) would silently
+  regress them. All 14 legacy-name reads across the 5 baked helpers now
+  prefer the canonical DRIDOCK_ name with CLAUDEBOX_ as fallback:
+  - `cb-browser` (6 reads: VM_IP + HOST_CDP_URL)
+  - `cb-consult` (2 reads: CONSULT_DIR + PROJECT_ID)
+  - `cb-report-bug` (2 reads: FRAMEWORK_BUGS_DIR + PROJECT_ID)
+  - `cb-harness-watch-consults` (3 reads: CONSULT_DIR +
+    FRAMEWORK_BUGS_DIR + HARNESS_WATCH_INTERVAL)
+  - `cb-host-shim` (2 reads: HOST_AGENT_URL + HOST_AGENT_TOKEN)
+
+  `cb-browser`'s Playwright-in-a-sub-container `docker run --network host`
+  now also exports BOTH DRIDOCK_ and CLAUDEBOX_ names via `-e` (the
+  entrypoint's alias shim doesn't reach a sub-container that bypasses
+  it). User-facing help + error strings updated to name DRIDOCK_ first.
+
+### Added
+
+- **Lint** in `tests/test_env_rename_compat.sh` — scans every `cb-*`
+  helper for `${CLAUDEBOX_X:-…}` reads, fails if any appear without a
+  sibling `${DRIDOCK_X:-` fallback (docker `-e CLAUDEBOX_X=…`
+  passthrough is exempted as a legit sub-container env passthrough).
+  Verified: fires on a synthetic regression (17→16 passed with 1
+  intentionally-broken probe file), passes cleanly on the migrated
+  tree (17/0). This is the forcing function that keeps the migration
+  intact — any new bare-legacy read in a `cb-*` helper trips the build
+  immediately instead of silently accumulating.
+
 ## [3.2.1] — 2026-07-21 _(fork)_
 
 ### Fixed

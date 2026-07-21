@@ -7,8 +7,8 @@
 set -uo pipefail
 
 _cmd="$(basename "$0")"
-url="${CLAUDEBOX_HOST_AGENT_URL:-}"
-tok="${CLAUDEBOX_HOST_AGENT_TOKEN:-}"
+url="${DRIDOCK_HOST_AGENT_URL:-${CLAUDEBOX_HOST_AGENT_URL:-}}"
+tok="${DRIDOCK_HOST_AGENT_TOKEN:-${CLAUDEBOX_HOST_AGENT_TOKEN:-}}"
 if [ -z "$url" ] || [ -z "$tok" ]; then
     echo "$_cmd: dridock host agent not available — this is a shim that proxies to the Mac." >&2
     echo "  Enable it on the Mac (opt-in, trusted harness-dev only):  dridock host-agent up" >&2
