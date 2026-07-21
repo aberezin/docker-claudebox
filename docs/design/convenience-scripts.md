@@ -78,9 +78,26 @@ full surface. Full split rationale: issue [#1](https://github.com/aberezin/docke
 - The container-side `/dridock` skill (seeded by the entrypoint) runs `cb-help` as
   part of its self-report.
 
+## Env-var reads inside a `cb-*` helper (3.x compat window)
+
+The 3.0 rebrand renamed the env-var prefix `CLAUDEBOX_*` → `DRIDOCK_*`. During
+3.x, the entrypoint's `_dridock_alias_env` shim symmetrically mirrors every pair
+in `env-rename.map` after sidecar load, so **an existing `cb-*` helper reading
+`${CLAUDEBOX_VM_IP:-}` still works** (the shim exports that from `DRIDOCK_VM_IP`).
+DO NOT roll a per-helper compat check for legacy env names — the shim covers it,
+and per-helper checks were the exact pattern that let the `cb-browser` bug in
+#16 slip past every review.
+
+When you're editing an existing helper anyway, do the small courtesy of migrating
+its reads to `${DRIDOCK_X:-${CLAUDEBOX_X:-}}` — that way, when 4.0 removes the
+shim, the helper still works with the canonical name. New helpers written from
+scratch should read only `${DRIDOCK_X:-}`. Full standard:
+[env-var-rename.md](env-var-rename.md).
+
 ## See also
 
 - [browser-testing.md](browser-testing.md) — `cb-browser`.
 - [framework-bug-reporting.md](framework-bug-reporting.md) — `cb-report-bug`.
 - [framework-consult.md](framework-consult.md) — `cb-consult` (the container side of a consult).
+- [env-var-rename.md](env-var-rename.md) — 3.x `CLAUDEBOX_*` ↔ `DRIDOCK_*` compat standard.
 - The top-level `CLAUDE.md` "Conventions worth knowing".

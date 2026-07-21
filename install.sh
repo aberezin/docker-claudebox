@@ -125,6 +125,19 @@ if [ -f "$SCRIPT_DIR/host-agent.py" ]; then
 	echo "📝 Installed host-agent.py to $INSTALL_DIR (for 'dridock host-agent')"
 fi
 
+# Install the shared env-rename map (#16, 3.2.1) into the XDG data dir. The wrapper
+# reads it at source-time to alias renamed CLAUDEBOX_* env vars to their DRIDOCK_*
+# canonical names. Same file is baked into the container image at
+# /usr/local/lib/dridock/env-rename.map for the entrypoint's own symmetric aliaser.
+# Best-effort; skipping only breaks legacy-name compat (all in-file reads use the
+# canonical names). See docs/design/env-var-rename.md.
+if [ -f "$SCRIPT_DIR/env-rename.map" ]; then
+	DRIDOCK_SHARE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/dridock"
+	if mkdir -p "$DRIDOCK_SHARE_DIR" 2>/dev/null && install -m 644 "$SCRIPT_DIR/env-rename.map" "$DRIDOCK_SHARE_DIR/env-rename.map" 2>/dev/null; then
+		echo "📝 Installed env-rename.map to $DRIDOCK_SHARE_DIR (CLAUDEBOX_* ↔ DRIDOCK_* compat)"
+	fi
+fi
+
 # Install the /dridock Claude Code skill (human status glance) into the user's global
 # skills dir, so /dridock works in any project. Skip with CLAUDEBOX_SKIP_SKILL=1
 # (kept as the alias name for one deprecation cycle).

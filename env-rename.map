@@ -1,0 +1,67 @@
+# dridock: DRIDOCK_X → CLAUDEBOX_X env-var rename map.
+# One "NEW LEGACY" pair per line; blank/comment lines ignored.
+#
+# Single source of truth for every env-var renamed in the 3.0 rebrand.
+# Read by TWO callers, both of which mirror the two names in both directions
+# for the whole 3.x deprecation cycle:
+#   1. HOST side: wrapper.sh at source-time, via `_dridock_alias`, so a
+#      Mac-set CLAUDEBOX_X reaches the in-file DRIDOCK_X reads.
+#   2. CONTAINER side: entrypoint.sh at boot, via `_dridock_alias_env`,
+#      run AFTER `_load_env_sidecar` (sidecars are the durability layer;
+#      the sidecar's canonical DRIDOCK_X value wins over anything stale
+#      that was baked into an older `docker run -e`).
+#
+# Adding a new rename? Add one line here. Both callers pick it up
+# automatically. No Bash edits anywhere else — that's the whole point.
+#
+# Removed in 4.0 together with both aliasers.
+# See docs/design/env-var-rename.md for the full standard.
+#
+# ── user-facing envs (settable on the Mac by the human) ──────────────────
+DRIDOCK_ALLOW_NEW              CLAUDEBOX_ALLOW_NEW
+DRIDOCK_ALLOW_SUBDIR           CLAUDEBOX_ALLOW_SUBDIR
+DRIDOCK_BIN_NAME               CLAUDEBOX_BIN_NAME
+DRIDOCK_CAFFEINATE             CLAUDEBOX_CAFFEINATE
+DRIDOCK_CDP_BIND               CLAUDEBOX_CDP_BIND
+DRIDOCK_CDP_CHROME_PORT        CLAUDEBOX_CDP_CHROME_PORT
+DRIDOCK_CDP_PORT               CLAUDEBOX_CDP_PORT
+DRIDOCK_CDP_PROFILE            CLAUDEBOX_CDP_PROFILE
+DRIDOCK_CHROME                 CLAUDEBOX_CHROME
+DRIDOCK_CONSULT_DIR            CLAUDEBOX_CONSULT_DIR
+DRIDOCK_CONTAINER_NAME         CLAUDEBOX_CONTAINER_NAME
+DRIDOCK_DATA_DIR               CLAUDEBOX_DATA_DIR
+DRIDOCK_DEFAULT_PLUGINS        CLAUDEBOX_DEFAULT_PLUGINS
+DRIDOCK_FRAMEWORK_BUGS_DIR     CLAUDEBOX_FRAMEWORK_BUGS_DIR
+DRIDOCK_GIT_EMAIL              CLAUDEBOX_GIT_EMAIL
+DRIDOCK_GIT_NAME               CLAUDEBOX_GIT_NAME
+DRIDOCK_HARNESS_DEV            CLAUDEBOX_HARNESS_DEV
+DRIDOCK_HARNESS_DEV            CLAUDEBOX_FRAMEWORK_DEV
+DRIDOCK_HARNESS_WATCH_INTERVAL CLAUDEBOX_HARNESS_WATCH_INTERVAL
+DRIDOCK_HOSTNAME               CLAUDEBOX_HOSTNAME
+DRIDOCK_HOST_AGENT_BIND        CLAUDEBOX_HOST_AGENT_BIND
+DRIDOCK_HOST_AGENT_PORT        CLAUDEBOX_HOST_AGENT_PORT
+DRIDOCK_HOST_AGENT_PY          CLAUDEBOX_HOST_AGENT_PY
+DRIDOCK_HOST_CDP_URL           CLAUDEBOX_HOST_CDP_URL
+DRIDOCK_IMAGE                  CLAUDEBOX_IMAGE
+DRIDOCK_IMAGE_NAME             CLAUDEBOX_IMAGE_NAME
+DRIDOCK_MINIMAL                CLAUDEBOX_MINIMAL
+DRIDOCK_MODE_CRON              CLAUDEBOX_MODE_CRON
+DRIDOCK_MODE_CRON_FILE         CLAUDEBOX_MODE_CRON_FILE
+DRIDOCK_NO_API_KEY             CLAUDEBOX_NO_API_KEY
+DRIDOCK_NO_DRIFT_WARN          CLAUDEBOX_NO_DRIFT_WARN
+DRIDOCK_PRUNE_ON_START         CLAUDEBOX_PRUNE_ON_START
+DRIDOCK_SKIP_PREFLIGHT         CLAUDEBOX_SKIP_PREFLIGHT
+DRIDOCK_SOCKET_VMNET           CLAUDEBOX_SOCKET_VMNET
+DRIDOCK_SOURCE_ONLY            CLAUDEBOX_SOURCE_ONLY
+DRIDOCK_SSH_DIR                CLAUDEBOX_SSH_DIR
+DRIDOCK_TMPFS_TMP              CLAUDEBOX_TMPFS_TMP
+# ── container-only envs (wrapper injects, baked cb-* helpers read) ────────
+# These NEVER needed the host-side alias because the user doesn't set them
+# on the Mac — the wrapper computes them and pushes them in. They DO need
+# the container-side alias, because legacy-name cb-* readers silently
+# fail without it (the leak that #16 filed against cb-browser).
+DRIDOCK_VM_IP                  CLAUDEBOX_VM_IP
+DRIDOCK_PROJECT_ID             CLAUDEBOX_PROJECT_ID
+DRIDOCK_WORKSPACE              CLAUDEBOX_WORKSPACE
+DRIDOCK_HOST_AGENT_URL         CLAUDEBOX_HOST_AGENT_URL
+DRIDOCK_HOST_AGENT_TOKEN       CLAUDEBOX_HOST_AGENT_TOKEN

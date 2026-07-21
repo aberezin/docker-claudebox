@@ -41,6 +41,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [n-tier-networking.md](design/n-tier-networking.md) | The standard for addressing/binding/CORS in multi-tier apps (service-name vs rotating VM IP). |
 | [disk-management.md](design/disk-management.md) | The standard for docker-disk under the per-project VM — prune discipline, `cb-df`, the ENOSPC/Write-tool escape. |
 | [git-and-api-auth.md](design/git-and-api-auth.md) | The SSH-for-git / tokens-for-API-only split (#10) — provider-agnostic, no credential-helper hijack. |
+| [env-var-rename.md](design/env-var-rename.md) | 3.x compat standard for CLAUDEBOX_* ↔ DRIDOCK_* env vars — the shared `env-rename.map` + symmetric aliaser on both sides (host wrapper + container entrypoint). Removed in 4.0. |
 | [framework-guidance.md](design/framework-guidance.md) | How framework guidance reaches every claudebot — `~/.claude/CLAUDE.md` (user memory), rewritten each start. |
 | [framework-consult.md](design/framework-consult.md) | Supervised claudebot ↔ framework-Claude threads that turn recurring problems into baked standards. |
 | [backends.md](design/backends.md) | Developing/testing the harness off the Mac — the docker backend + the host-agent proxy, and the security model. |

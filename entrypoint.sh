@@ -356,6 +356,7 @@ outside the workspace and `~/.claude`. After a rebuild/recreate they're gone.
 - ~/.claude/bin is in PATH — custom scripts placed here by the user are available to you
 - ~/.claude/init.d/*.sh scripts run once on first container create (not on subsequent starts)
 - Extra host directories may be mounted via DRIDOCK_MOUNT_* env vars (legacy CLAUDEBOX_MOUNT_* still accepted) — check what's available if you need files outside the workspace
+- During 3.x, `DRIDOCK_*` and `CLAUDEBOX_*` env vars are interchangeable INSIDE the container: the entrypoint mirrors every renamed pair symmetrically at boot (from `/usr/local/lib/dridock/env-rename.map`). Prefer the `DRIDOCK_*` name in new code and new `~/.claude/init.d/` hooks; legacy `CLAUDEBOX_*` names go away in 4.0. Baked `cb-*` helpers currently mostly read legacy names — the shim makes that work; migrate any you edit to `${DRIDOCK_X:-${CLAUDEBOX_X:-}}` while you're in the file.
 
 ## Remember
 This file is FRAMEWORK guidance (user memory), not your project's CLAUDE.md — it is rewritten
@@ -653,6 +654,37 @@ _load_env_sidecar secrets   secret
 _load_env_sidecar cdp       cdp
 _load_env_sidecar vmip      vmip
 _load_env_sidecar hostagent hostagent
+
+# ── 3.x env-var rename compat shim (#16, standardized in 3.2.1) ─────────────
+# Mirror every DRIDOCK_X ↔ CLAUDEBOX_X pair from the shared rename map so both
+# names are usable by any downstream process — legacy-reading cb-* helpers
+# (cb-browser, cb-consult, cb-report-bug, cb-harness-watch-consults, cb-host-shim)
+# see the CLAUDEBOX_X name they expect; new code that reads only DRIDOCK_X also
+# works. Symmetric, both directions per pair.
+#
+# ORDER MATTERS: this MUST fire AFTER the _load_env_sidecar calls above. Sidecars
+# are the durability layer — they carry the canonical DRIDOCK_X value (and may
+# explicitly UNSET it, e.g. bridge-down clears DRIDOCK_HOST_CDP_URL). Running
+# the alias BEFORE would let a stale CLAUDEBOX_X from an older `docker run -e`
+# shadow an intentionally-empty sidecar entry, so the canonical clear would
+# never take effect. Post-sidecar: the sidecar wins and its value propagates.
+#
+# Removed in 4.0 together with wrapper.sh's _dridock_alias.
+# See docs/design/env-var-rename.md for the full standard.
+_dridock_alias_env() {
+	local map=/usr/local/lib/dridock/env-rename.map new legacy rest
+	[ -r "$map" ] || return 0
+	while read -r new legacy rest; do
+		case "$new" in ''|'#'*) continue ;; esac
+		[ -n "$legacy" ] || continue
+		if   [ -n "${!new:-}"    ] && [ -z "${!legacy:-}" ]; then
+			export "$legacy=${!new}"
+		elif [ -n "${!legacy:-}" ] && [ -z "${!new:-}"    ]; then
+			export "$new=${!legacy}"
+		fi
+	done < "$map"
+}
+_dridock_alias_env
 
 # mode env vars — CLAUDEBOX_MODE_* canonical, CLAUDE_MODE_* legacy fallback
 _mode_api="${DRIDOCK_MODE_API:-${CLAUDE_MODE_API:-}}"

@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.2.0"
+DRIDOCK_VERSION="3.2.1"
 
 # Minimum Claude Code CLI the harness expects in the image. NOT the pin (that lives in
 # `Dockerfile` ARG CLAUDE_VERSION) — this is the floor `checkversion` warns below, set
@@ -21,11 +21,12 @@ DRIDOCK_VERSION="3.2.0"
 # depending on a newer claude capability. See #17.
 CB_CLAUDE_CLI_FLOOR="2.1.206"
 
-# ── 3.0 backward-compat alias setup ──────────────────────────────────────────
+# ── 3.x backward-compat alias setup (#16, standardized in 3.2.1) ─────────────
 # For each user-input env var renamed CLAUDEBOX_X → DRIDOCK_X in 3.0, copy the
 # CLAUDEBOX_X value into DRIDOCK_X if the user set only the old name. All in-file
-# reads below use the new name only. This block is the single source of truth for
-# what got renamed — grep for `_ALIAS_MAP` to find it. Removed in 4.0.
+# reads below use the new name only. The pair list lives in `env-rename.map` at
+# repo root — shared with `entrypoint.sh`'s container-side aliaser, so a new
+# rename is a one-line edit. Removed in 4.0. See docs/design/env-var-rename.md.
 _dridock_alias() {
     # $1 = new (DRIDOCK_X), $2 = legacy (CLAUDEBOX_X). Copies legacy → new if new is
     # unset AND legacy is set. Uses :- to survive `set -u` if the harness ever adopts
@@ -36,43 +37,31 @@ _dridock_alias() {
         export "$new"
     fi
 }
-# _DRIDOCK_ALIAS_MAP — the renamed vars.
-_dridock_alias DRIDOCK_ALLOW_NEW           CLAUDEBOX_ALLOW_NEW
-_dridock_alias DRIDOCK_ALLOW_SUBDIR        CLAUDEBOX_ALLOW_SUBDIR
-_dridock_alias DRIDOCK_BIN_NAME            CLAUDEBOX_BIN_NAME
-_dridock_alias DRIDOCK_CAFFEINATE          CLAUDEBOX_CAFFEINATE
-_dridock_alias DRIDOCK_CDP_BIND            CLAUDEBOX_CDP_BIND
-_dridock_alias DRIDOCK_CDP_CHROME_PORT     CLAUDEBOX_CDP_CHROME_PORT
-_dridock_alias DRIDOCK_CDP_PORT            CLAUDEBOX_CDP_PORT
-_dridock_alias DRIDOCK_CDP_PROFILE         CLAUDEBOX_CDP_PROFILE
-_dridock_alias DRIDOCK_CHROME              CLAUDEBOX_CHROME
-_dridock_alias DRIDOCK_CONSULT_DIR         CLAUDEBOX_CONSULT_DIR
-_dridock_alias DRIDOCK_CONTAINER_NAME      CLAUDEBOX_CONTAINER_NAME
-_dridock_alias DRIDOCK_DATA_DIR            CLAUDEBOX_DATA_DIR
-_dridock_alias DRIDOCK_DEFAULT_PLUGINS     CLAUDEBOX_DEFAULT_PLUGINS
-_dridock_alias DRIDOCK_FRAMEWORK_BUGS_DIR  CLAUDEBOX_FRAMEWORK_BUGS_DIR
-_dridock_alias DRIDOCK_GIT_EMAIL           CLAUDEBOX_GIT_EMAIL
-_dridock_alias DRIDOCK_GIT_NAME            CLAUDEBOX_GIT_NAME
-_dridock_alias DRIDOCK_HARNESS_DEV         CLAUDEBOX_HARNESS_DEV
-_dridock_alias DRIDOCK_HARNESS_DEV         CLAUDEBOX_FRAMEWORK_DEV   # 2.22.0 alias-of-an-alias
-_dridock_alias DRIDOCK_HOSTNAME            CLAUDEBOX_HOSTNAME
-_dridock_alias DRIDOCK_HOST_AGENT_BIND     CLAUDEBOX_HOST_AGENT_BIND
-_dridock_alias DRIDOCK_HOST_AGENT_PORT     CLAUDEBOX_HOST_AGENT_PORT
-_dridock_alias DRIDOCK_HOST_AGENT_PY       CLAUDEBOX_HOST_AGENT_PY
-_dridock_alias DRIDOCK_HOST_CDP_URL        CLAUDEBOX_HOST_CDP_URL
-_dridock_alias DRIDOCK_IMAGE               CLAUDEBOX_IMAGE
-_dridock_alias DRIDOCK_IMAGE_NAME          CLAUDEBOX_IMAGE_NAME
-_dridock_alias DRIDOCK_MINIMAL             CLAUDEBOX_MINIMAL
-_dridock_alias DRIDOCK_MODE_CRON           CLAUDEBOX_MODE_CRON
-_dridock_alias DRIDOCK_MODE_CRON_FILE      CLAUDEBOX_MODE_CRON_FILE
-_dridock_alias DRIDOCK_NO_API_KEY          CLAUDEBOX_NO_API_KEY
-_dridock_alias DRIDOCK_NO_DRIFT_WARN       CLAUDEBOX_NO_DRIFT_WARN
-_dridock_alias DRIDOCK_PRUNE_ON_START      CLAUDEBOX_PRUNE_ON_START
-_dridock_alias DRIDOCK_SKIP_PREFLIGHT      CLAUDEBOX_SKIP_PREFLIGHT
-_dridock_alias DRIDOCK_SOCKET_VMNET        CLAUDEBOX_SOCKET_VMNET
-_dridock_alias DRIDOCK_SOURCE_ONLY         CLAUDEBOX_SOURCE_ONLY
-_dridock_alias DRIDOCK_SSH_DIR             CLAUDEBOX_SSH_DIR
-_dridock_alias DRIDOCK_TMPFS_TMP           CLAUDEBOX_TMPFS_TMP
+# Look up the shared map: next to wrapper.sh (dev / source layout), then in the
+# installed data dir (per install.sh), then in the container's baked location
+# (harmless — this branch only runs on the Mac / dev machine; the container-side
+# aliaser reads its own copy). Silent no-op if we can't find one — the wrapper
+# still works, just without legacy env-name compat.
+_dridock_alias_map_file() {
+    local _wrap_dir _try
+    _wrap_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
+    for _try in \
+        "$_wrap_dir/env-rename.map" \
+        "${XDG_DATA_HOME:-$HOME/.local/share}/dridock/env-rename.map" \
+        "/usr/local/share/dridock/env-rename.map"; do
+        [ -r "$_try" ] && { printf '%s' "$_try"; return 0; }
+    done
+    return 1
+}
+if _dridock_map="$(_dridock_alias_map_file)"; then
+    while read -r _new _legacy _rest; do
+        case "$_new" in ''|'#'*) continue ;; esac
+        [ -n "$_legacy" ] || continue
+        _dridock_alias "$_new" "$_legacy"
+    done < "$_dridock_map"
+    unset _dridock_map _new _legacy _rest
+fi
+unset -f _dridock_alias_map_file
 # CLAUDEBOX_ENV_* and CLAUDEBOX_MOUNT_* prefixes are handled inline where the wrapper
 # iterates over them (both prefixes accepted).
 

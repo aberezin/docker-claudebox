@@ -232,7 +232,11 @@ case "$_sig2" in *"|awaiting-claudebot|"*) ok "sig encodes id|status|nturns" ;; 
 # invisible to the other.
 CBC="$SCRIPT_DIR/../cb-consult"
 if grep -q 'framework-consult' "$WRAPPER" && grep -q 'framework-consult' "$CBC"; then ok "wrapper & cb-consult agree on /home/claude/framework-consult mount"; else bad "consult mount path drifted between wrapper and cb-consult"; fi
-if grep -q 'CLAUDEBOX_CONSULT_DIR' "$WRAPPER" && grep -q 'CLAUDEBOX_CONSULT_DIR' "$CBC"; then ok "wrapper & cb-consult agree on CLAUDEBOX_CONSULT_DIR"; else bad "CLAUDEBOX_CONSULT_DIR drifted"; fi
+# 3.2.1: the DRIDOCK_/CLAUDEBOX_ pair for CONSULT_DIR is now sourced from the shared
+# env-rename.map (docs/design/env-var-rename.md); the wrapper itself no longer has
+# the literal `CLAUDEBOX_CONSULT_DIR` line. Accept either source of truth.
+_MAP="$SCRIPT_DIR/../env-rename.map"
+if { grep -qE '(DRIDOCK|CLAUDEBOX)_CONSULT_DIR' "$WRAPPER" || grep -qE '(DRIDOCK|CLAUDEBOX)_CONSULT_DIR' "$_MAP" 2>/dev/null; } && grep -qE '(DRIDOCK|CLAUDEBOX)_CONSULT_DIR' "$CBC"; then ok "wrapper & cb-consult agree on the CONSULT_DIR env pair"; else bad "CONSULT_DIR env pair drifted (neither wrapper.sh nor env-rename.map declares it, or cb-consult doesn't read it)"; fi
 rm -rf "$(dirname "$CT")"
 
 echo "--- host agent (Approach 2, phase 1): security posture + wiring contract ---"

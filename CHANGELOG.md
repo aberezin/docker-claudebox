@@ -26,6 +26,69 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.2.1] — 2026-07-21 _(fork)_
+
+### Fixed
+
+- **`CLAUDEBOX_*` → `DRIDOCK_*` env compat now covers container-internal reads
+  too, not just host-side** (#16, framework consult
+  `2026-07-21T01-31-28-unknown`). The 3.0 rebrand promised "all of 3.x accepts
+  `CLAUDEBOX_*` env" but only wired the host side (wrapper's `_dridock_alias`);
+  the entrypoint injected only `DRIDOCK_*` into the container, and every baked
+  `cb-*` helper written before the rename (cb-browser, cb-consult, cb-report-bug,
+  cb-harness-watch-consults, cb-host-shim) still reads `CLAUDEBOX_*` at each
+  site. Result: `cb-browser cdp` hard-failed "no host CDP bridge" on a fresh
+  3.x session even though the bridge was fully up.
+
+  Fix: a symmetric container-side aliaser (`_dridock_alias_env` in
+  entrypoint.sh), driven by the same rename map the host wrapper reads.
+
+  - **New `env-rename.map` at repo root** — single source of truth for every
+    renamed pair. 42 entries: the 36 host-facing envs the wrapper already
+    aliased, plus 5 container-only ones (`DRIDOCK_VM_IP`, `DRIDOCK_PROJECT_ID`,
+    `DRIDOCK_HOST_AGENT_URL`, `DRIDOCK_HOST_AGENT_TOKEN`,
+    `DRIDOCK_HARNESS_WATCH_INTERVAL`) that the entrypoint injects but the
+    wrapper never needed. A new rename is one line in this file.
+  - **`wrapper.sh`** refactored: `_dridock_alias` now loops over the shared
+    map instead of 36 hardcoded call lines. Same behavior; one file to grep.
+  - **`entrypoint.sh:_dridock_alias_env`** — new function, runs AFTER
+    `_load_env_sidecar` (sidecars are the durability layer; running the
+    aliaser first would let a stale legacy env baked into an older
+    `docker run -e` shadow an intentionally-empty sidecar entry).
+    Symmetric mirror: `DRIDOCK_X` set → export `CLAUDEBOX_X`; `CLAUDEBOX_X`
+    set → export `DRIDOCK_X`; both set → don't clobber; neither set → both
+    stay unset.
+  - **`Dockerfile`** bakes `env-rename.map` to `/usr/local/lib/dridock/`;
+    **`install.sh`** copies it to `$XDG_DATA_HOME/dridock/` on the host so
+    the wrapper picks it up post-install.
+  - **New standard** [`docs/design/env-var-rename.md`](docs/design/env-var-rename.md) —
+    documents the mechanism, sidecar-ordering rule, 4.0-removal timeline, and
+    the "don't roll per-helper compat" convention. Cross-linked from
+    3.0-migration.md § "Backward compat window", convenience-scripts.md, and
+    the docs index.
+  - **Baked `~/.claude/CLAUDE.md`** guidance gains one line noting the
+    interchangeability during 3.x — prevents future claudebots from getting
+    confused seeing both names in `env`.
+  - **`tests/test_env_rename_compat.sh`** (new, 16 asserts) — extracts the
+    aliaser function from entrypoint.sh, source-and-invokes it against a
+    scratch map, and pins the symmetric-mirror semantics. Also parses the
+    map file itself (every non-comment line = two shell idents) and guards
+    that the critical container-only pairs are present (regression guard
+    for the exact class of leak in #16).
+  - **Follow-up (non-blocking, not part of this fix)**: migrate the five
+    baked cb-* helpers to read `${DRIDOCK_X:-${CLAUDEBOX_X:-}}` at each
+    site opportunistically, so 4.0's shim-removal doesn't strand them.
+
+- **SessionStart consult hook now works inside a framework-dev container**,
+  not only on the Mac. Pre-3.2.1 the hook (`.claude/hooks/consult-session-start.sh`)
+  looked for `~/.config/claudebox/consult` and nudged `claudebox consult watch`
+  — both host-only paths. Inside the container it silently exited (the consult
+  dir is at `$DRIDOCK_CONSULT_DIR`, and the in-container watcher verb is
+  `cb-harness-watch-consults`). Missed the 2026-07-21T01:31 consult that
+  triggered #16. Hook now detects `[ -f /.dockerenv ]`, resolves both paths
+  and both verbs, and nudges the correct one for the environment. Same silent
+  no-op semantics when nothing is pending AND a watcher is already running.
+
 ## [3.2.0] — 2026-07-20 _(fork)_
 
 ### Changed
