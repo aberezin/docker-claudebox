@@ -26,6 +26,44 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.3.0] — 2026-07-21 _(fork)_
+
+### Added — host↔image contract change (`-env` sidecar)
+
+- **#30 Part 1** — `DRIDOCK_ENV_*` / `CLAUDEBOX_ENV_*` / `CLAUDE_ENV_*`
+  forwarded values now persist across `docker start`. The wrapper writes a
+  chmod-600 `~/.claude/.<container>-env` sidecar (KEY=VALUE) each run
+  alongside the existing `-e` flags; the entrypoint's `_load_env_sidecar
+  env forwarded-env` (sixth call in the loader block) re-reads it on every
+  start. Pre-3.3.0 these forwards ONLY rode `-e` on `docker run`, so a
+  changed value on a subsequent invocation of an existing container
+  silently no-op'd — a recurring rediscovery that cost multiple debug
+  sessions.
+
+  **Behavior details:**
+  - **Changed value** — set `DRIDOCK_ENV_FOO=y` on a container originally
+    created with `FOO=x`: takes effect on the next run.
+  - **Explicit clear** — set `DRIDOCK_ENV_FOO=` (empty): sidecar loader
+    UNSETs `FOO`, so a value baked in at container-create time is dropped.
+  - **Removed forward** — omit `DRIDOCK_ENV_FOO` on a subsequent run: the
+    baked value from container-create PERSISTS (loader only knows what
+    the sidecar names). To fully drop, either explicit-clear once or
+    recreate the container. `--recreate` shortcut is #30 Part 2.
+
+  **Security**: the sidecar is chmod 600 (like `-auth` and `-secrets`) —
+  `DRIDOCK_ENV_*` values can legitimately carry credentials
+  (`DRIDOCK_ENV_ANTHROPIC_API_KEY` is a documented pattern), so
+  0600-file-only is strictly better than `-e`-in-docker-argv leak surface.
+
+### Migration
+
+MINOR bump per docs/versioning.md — new sidecar filename + format is a
+host↔image contract change. Wrapper 3.3.0 writes `-env` sidecars that
+older entrypoints ignore (harmless); entrypoint 3.3.0 loads `-env`
+sidecars that older wrappers don't write (harmless — loader no-ops on
+missing file). No user action needed on upgrade. `dridock checkversion`
+will warn about the wrapper↔image version gap until `make build`.
+
 ## [3.2.5] — 2026-07-21 _(fork)_
 
 ### Fixed

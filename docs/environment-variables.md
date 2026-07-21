@@ -55,7 +55,13 @@ The `DRIDOCK_ENV_` prefix injects arbitrary env vars into the container. The pre
 DRIDOCK_ENV_GITHUB_TOKEN=xxx DRIDOCK_ENV_MY_VAR=hello dridock "do stuff"
 ```
 
-`DRIDOCK_ENV_*` is injected via `docker run -e`, so it only applies on the **first** run of a container. A restarted (`docker start`) container does **not** see it. For anything that must survive restarts — especially **secrets** — use the per-project secrets file below.
+**Persistence across `docker start`** (updated in 3.3.0, see #30). Each `DRIDOCK_ENV_*` forward is written to two places: the usual `docker run -e` (which only applies on the first run) AND a chmod-600 `~/.claude/.<container>-env` sidecar the entrypoint re-reads on every start. Consequence:
+
+- **A CHANGED value** — set `DRIDOCK_ENV_FOO=y` when the container was created with `FOO=x`: takes effect on the next run (fixed).
+- **An EXPLICITLY CLEARED value** — set `DRIDOCK_ENV_FOO=` (empty): the sidecar loader UNSETs `FOO`, so a value baked in at container-create time is dropped.
+- **A REMOVED forward** — omit `DRIDOCK_ENV_FOO` entirely on a subsequent run: the baked value from container-create PERSISTS. To fully drop it, either set `DRIDOCK_ENV_FOO=` on a run OR recreate the container (`docker rm` it and re-run; a `--recreate` shortcut is #30 Part 2).
+
+For **secrets**, `.dridock/secrets.env` below is still the cleaner channel (single source of truth, gitignored, format-checked). `DRIDOCK_ENV_*` is best for one-off / ad-hoc env you don't want to persist to a file.
 
 ## Secrets — `.dridock/secrets.env`
 

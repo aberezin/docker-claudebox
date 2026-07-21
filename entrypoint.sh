@@ -654,6 +654,17 @@ _load_env_sidecar secrets   secret
 _load_env_sidecar cdp       cdp
 _load_env_sidecar vmip      vmip
 _load_env_sidecar hostagent hostagent
+# #30 — DRIDOCK_ENV_* / CLAUDEBOX_ENV_* / CLAUDE_ENV_* forwarded values.
+# Pre-3.3.0 these rode `-e` on docker run only, so a CHANGED value silently
+# no-op'd on `docker start` (a container that already existed). Now they also
+# land in a chmod-600 `.<name>-env` sidecar the wrapper rewrites each run;
+# loading here means new/changed forwards apply on restart. Same loader shape
+# as auth/secrets — empty value UNSETs, so `DRIDOCK_ENV_FOO=` explicitly clears
+# a baked FOO. Fully REMOVING a forward from a fresh run (unsetting the
+# DRIDOCK_ENV_FOO host-side var) does NOT clear the baked value — the loader
+# only sees keys the sidecar names. That's #30 Part 2 (--recreate flag), out
+# of Part 1 scope; document it in docs/environment-variables.md.
+_load_env_sidecar env       forwarded-env
 
 # ── 3.x env-var rename compat shim (#16, standardized in 3.2.1) ─────────────
 # Mirror every DRIDOCK_X ↔ CLAUDEBOX_X pair from the shared rename map so both

@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.2.5"
+DRIDOCK_VERSION="3.3.0"
 
 # The name the user actually typed to invoke us. Both `dridock` and legacy
 # `claudebox` symlink to this wrapper (install.sh's --bin-name), so help
@@ -2730,6 +2730,20 @@ fi
 
 
 # forward DRIDOCK_ENV_* / CLAUDEBOX_ENV_* / CLAUDE_ENV_* vars (strip prefix: FOO=bar)
+# TWO channels, both required (#30):
+#   - `-e FOO=bar` on docker run — takes effect on the FIRST run when the container
+#     is being created. Cannot be re-applied on `docker start`, which is what every
+#     subsequent invocation of a still-existing container takes.
+#   - `.${container_name}${_role}-env` sidecar (KEY=VALUE, chmod 600) — the
+#     entrypoint's `_load_env_sidecar env` re-reads this on EVERY start, so a
+#     changed DRIDOCK_ENV_FOO value takes effect on the next `docker start` too.
+#     Pre-#30 the wrapper only had the -e path, so DRIDOCK_ENV_FOO silently no-oped
+#     on restarted containers (recurring rediscovery — see #30 body). The sidecar
+#     kills the class.
+# Security: -env goes chmod 600 like -auth/-secrets — the values can carry
+# credentials (DRIDOCK_ENV_ANTHROPIC_API_KEY is a documented pattern), and
+# 0600-file is strictly better than the -e-in-docker-argv leak surface.
+_ENV_LINES=""
 while IFS='=' read -r name value; do
     case "$name" in
         DRIDOCK_ENV_*)   stripped="${name#DRIDOCK_ENV_}" ;;
@@ -2738,8 +2752,18 @@ while IFS='=' read -r name value; do
         *) continue ;;
     esac
     DOCKER_ARGS+=(-e "$stripped=$value")
-    dbg "forwarding env: $stripped"
+    _ENV_LINES+="$stripped=$value"$'\n'
+    dbg "forwarding env: $stripped (+ -env sidecar)"
 done < <(env | grep -E "^(DRIDOCK_ENV_|CLAUDEBOX_ENV_|CLAUDE_ENV_)")
+# Write the sidecar for each container role (always — even when empty, so a stale
+# sidecar from a prior run doesn't survive a run with no forwards). Same three-role
+# pattern as -auth/-secrets.
+for _erole in "" _prog _cron; do
+    _ef="$CLAUDE_DIR/.${container_name}${_erole}-env"
+    printf '%s' "$_ENV_LINES" > "$_ef"
+    chmod 600 "$_ef"
+done
+unset _ENV_LINES _erole _ef
 
 # mount extra volumes via DRIDOCK_MOUNT_* / CLAUDEBOX_MOUNT_* / CLAUDE_MOUNT_*
 while IFS='=' read -r name value; do
