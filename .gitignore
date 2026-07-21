@@ -17,5 +17,7 @@ tests/.fixtures/cron-*/
 base/
 desc.txt
 pyrightconfig.json
+/.dridock/config.yml
+/.dridock/secrets.env
 /.claudebox/config.yml
 /.claudebox/secrets.env
