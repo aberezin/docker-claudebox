@@ -26,6 +26,68 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.3.3] — 2026-07-21 _(fork)_
+
+### Fixed
+
+- **#32 f/u2** — the `dridock migrate` verb dispatch ended with an
+  unconditional `exit 0` even when it printed `⚠ done, resolve and re-run`
+  (the split-brain / live-cdp guard case). Message right, exit code
+  wrong. Automation (`dridock migrate || alert`, setup scripts, Makefile
+  targets) saw success on a half-successful run. One-token change: `exit
+  "${_mig_state_rc:-0}"`. The same silent-drop family the whole 3.3.x
+  series has been draining — this closes the one remaining caller class
+  the 3.3.1/3.3.2 signals still lied to.
+
+- **#25** — test-infra rename miss. `tests/common.sh` still declared
+  `IMAGE_NAME="claudebox"`, `CONTAINER_PREFIX="claudebox-test"`, and
+  `CBX_TEST_WS=".../claudebox-test-ws"` — the throwaway test image built
+  in-container was tagged `claudebox:test` post-3.0-rebrand. Cosmetic
+  (invisible outside the suite) but confusing when reading test output.
+  Now `dridock:test` / `dridock-test` / `dridock-test-ws`. Also updated
+  `tests/test_entrypoint.sh` (`FROM dridock:test`) and
+  `tests/test_e2e_telegram.sh` (internal shell-var `E2E_CLAUDEBOX_NAME`
+  → `E2E_DRIDOCK_NAME`, `_e2e_run_claudebox_cron_tg` →
+  `_e2e_run_dridock_cron_tg`, container name prefixes, prose refs).
+  Internal renames only — no external contract broken.
+
+### Added
+
+- **#28** — two new tests in `tests/test_cron.sh`:
+  - **`test_cron_6field_sub_minute_fires`** — verifies the sub-minute
+    CADENCE of a `*/20 * * * * *` schedule (previously only the FIRST
+    firing was tested via `test_cron_end_to_end_fires`). Expects ≥2
+    firings in 60s.
+  - **`test_cron_overlap_protection`** — verifies cron.py's per-job
+    lock skips a fire while the previous run is still active. Uses a
+    haiku instruction that takes 5-15s on a `*/10` schedule; expects
+    fewer completed runs than boundaries hit AND ≥1 skip log line.
+
+  Both are haiku-driven (cron.py has no shell-exec path, only
+  `instruction`) so they cost 2-4 haiku calls each; still an order
+  of magnitude cheaper than the leave-it-untested regression risk.
+
+- **`tests/test_cbvm.sh`** — source-level assertion that the `migrate`
+  verb's trailing `exit` uses `"${_mig_state_rc..."`, not a hardcoded
+  `exit 0`. Catches the specific class of regression that's now
+  committed itself into 3.3.1 + 3.3.2. Bear-side: **154/0** (was
+  153/0).
+
+### House rule — CLAUDE.md
+
+Added a new convention (last bullet in "Conventions worth knowing"):
+
+> Never silently discard user state or user-supplied input — fail fast
+> or say so loudly. When code accepts an input (flag, env var, config
+> value) or performs an operation (move, migrate, forward), the outcome
+> must be either fully applied OR a visible, non-zero signal to the
+> caller.
+
+Names the five instances that motivated the rule (#17, #30, #31,
+#32-A, #32-B) and calls out that the class was reproduced INSIDE the
+fix for #32 twice. Every future skip / drop / override must print
+stderr AND return a rc a caller can act on.
+
 ## [3.3.2] — 2026-07-21 _(fork)_
 
 ### Fixed — 3.3.1 exit-contract bug in the live-Chrome guard

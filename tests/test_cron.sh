@@ -479,6 +479,127 @@ EOF
     _cron_cleanup_dirs
 }
 
+# ── #28: 6-field sub-minute cadence (multiple firings within a minute) ──────
+# test_cron_end_to_end_fires uses a 6-field schedule but only verifies the FIRST
+# firing. This test proves the sub-minute CADENCE — a `*/20 * * * * *` schedule
+# should fire at least twice in a 50-second window. Uses haiku (cron.py only
+# supports claude `instruction`, no shell-exec path).
+test_cron_6field_sub_minute_fires() {
+    _cron_setup_dirs
+    local cron_file="$CRON_TMP/cron.yaml"
+    cat > "$cron_file" <<EOF
+jobs:
+  - name: heartbeat
+    schedule: "*/20 * * * * *"
+    model: $TEST_MODEL
+    instruction: |
+      Respond with exactly the single word TICK and nothing else.
+EOF
+    chmod a+rw "$cron_file" 2>/dev/null || true
+
+    local cname="dridock-cron-6field-$$-$RANDOM"
+    docker run -d --name "$cname" \
+        --network host \
+        -e "CLAUDEBOX_MODE_CRON=1" \
+        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
+        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+        -v "$cron_file:/cron.yaml:ro" \
+        -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
+        -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \
+        "$IMAGE" >/dev/null 2>&1
+
+    # Wait 60 seconds — at */20 that's 3 boundaries; haiku responds ~5-10s so
+    # we should see ≥2 completed runs.
+    sleep 60
+
+    local logs count
+    logs=$(docker logs "$cname" 2>&1)
+    # Count firings via activity dirs (one per fire event).
+    count=$(find "$CRON_TMP/home/.claude/cron/history" -type d -name '20*-heartbeat' 2>/dev/null | wc -l | tr -d ' ')
+    docker rm -f "$cname" >/dev/null 2>&1 || true
+
+    if [ "$count" -lt 2 ]; then
+        echo "  FAIL: expected ≥2 firings in 60s for */20 cadence, got $count"
+        echo "  logs (last 30):"
+        echo "$logs" | tail -30 | sed 's/^/    /'
+        _cron_cleanup_dirs
+        return 1
+    fi
+    echo "  OK: 6-field */20 schedule fired $count times in 60s (≥2)"
+    _cron_cleanup_dirs
+}
+
+# ── #28: overlap protection ─────────────────────────────────────────────────
+# A slow job on a fast schedule should NOT get a concurrent second instance.
+# Overlap check runs across FIRES: cron.py's per-job lock skips the next fire
+# if the previous one is still running. Uses a `*/10 * * * * *` (every 10s)
+# schedule with a haiku instruction that takes ~5-15s per run — most boundaries
+# should get skipped. Verify at least one skip happened AND fired-count < half
+# of boundaries-passed.
+test_cron_overlap_protection() {
+    _cron_setup_dirs
+    local cron_file="$CRON_TMP/cron.yaml"
+    # Instruction that's slow enough that the next 10s boundary lands
+    # while the previous run is still active. Haiku on a long-ish prompt
+    # reliably takes 5-10s+.
+    cat > "$cron_file" <<EOF
+jobs:
+  - name: slowjob
+    schedule: "*/10 * * * * *"
+    model: $TEST_MODEL
+    instruction: |
+      Please count from 1 to 20 in English words, one per line. Take your time.
+EOF
+    chmod a+rw "$cron_file" 2>/dev/null || true
+
+    local cname="dridock-cron-overlap-$$-$RANDOM"
+    docker run -d --name "$cname" \
+        --network host \
+        -e "CLAUDEBOX_MODE_CRON=1" \
+        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
+        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
+        -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
+        -e "DEBUG=true" \
+        -v "$cron_file:/cron.yaml:ro" \
+        -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
+        -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \
+        "$IMAGE" >/dev/null 2>&1
+
+    # Wait 45s — 4 boundaries (0, 10, 20, 30, 40). If overlap protection
+    # works, we should see fewer completed runs than boundaries, and at
+    # least one skip log line.
+    sleep 45
+
+    local logs fires overlap_msgs
+    logs=$(docker logs "$cname" 2>&1)
+    fires=$(find "$CRON_TMP/home/.claude/cron/history" -type d -name '20*-slowjob' 2>/dev/null | wc -l | tr -d ' ')
+    # cron.py skip-on-overlap prints something like "still running, skipping"
+    # or "overlapping". Case-insensitive across common phrasings.
+    overlap_msgs=$(echo "$logs" | grep -icE 'skip.*(still|running|overlap|previous|active)' || true)
+    docker rm -f "$cname" >/dev/null 2>&1 || true
+
+    if [ "$overlap_msgs" -lt 1 ]; then
+        echo "  FAIL: no skip messages in cron.py logs — overlap protection either isn't logging or didn't trigger"
+        echo "  fires observed: $fires (in 45s of */10 schedule = 4 boundaries)"
+        echo "  logs (last 50):"
+        echo "$logs" | tail -50 | sed 's/^/    /'
+        _cron_cleanup_dirs
+        return 1
+    fi
+    # 4 boundaries in 45s; overlap-protected we expect fires < 4 (at least one
+    # skip). If fires == 4 with no skips, overlap protection is off.
+    if [ "$fires" -ge 4 ]; then
+        echo "  FAIL: overlap protection let all 4 boundaries fire ($fires runs, expected <4)"
+        _cron_cleanup_dirs
+        return 1
+    fi
+    echo "  OK: overlap protection: $fires firings across 4 boundaries; $overlap_msgs skip log line(s)"
+    _cron_cleanup_dirs
+}
+
 ALL_TESTS+=(
     test_cron_invalid_yaml_fails
     test_cron_missing_file_env_fails
@@ -489,4 +610,6 @@ ALL_TESTS+=(
     test_cron_root_defaults_and_template_vars
     test_cron_system_prompt_end_to_end
     test_cron_end_to_end_fires
+    test_cron_6field_sub_minute_fires
+    test_cron_overlap_protection
 )

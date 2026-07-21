@@ -1,9 +1,9 @@
 #!/bin/bash
 
-IMAGE_NAME="claudebox"           # local, bare name (no registry) — matches the fork
+IMAGE_NAME="dridock"             # local, bare name (no registry) — matches the 3.0+ fork rebrand
 TEST_TAG="test"
 IMAGE="${IMAGE_NAME}:${TEST_TAG}"
-CONTAINER_PREFIX="claudebox-test"
+CONTAINER_PREFIX="dridock-test"
 WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 EXTRA_CONTAINERS=()
 ALL_TESTS=()
@@ -21,7 +21,7 @@ CBX_BACKEND="${DRIDOCK_BACKEND:-${CLAUDEBOX_BACKEND:-$([ -f /.dockerenv ] && ech
 if [ "$CBX_BACKEND" = docker ]; then CBX_TEST_CTX=""; DCTX=(); else CBX_TEST_CTX="colima-${CBX_TEST_PROFILE}"; DCTX=(--context "$CBX_TEST_CTX"); fi
 # workspace lives OUTSIDE the repo git tree (under $HOME so colima auto-mounts it),
 # so the wrapper resolves the project root to it (not the repo) and pollutes nothing.
-CBX_TEST_WS="$HOME/.cache/claudebox-test-ws"
+CBX_TEST_WS="$HOME/.cache/dridock-test-ws"
 CBX_PREV_CTX=""
 
 # load .env if present (optional — environment variables also work)
@@ -187,7 +187,7 @@ setup() {
         # keeps the profile light and socket_vmnet out of the picture)
         colima start -p "$CBX_TEST_PROFILE" --cpu 4 --memory 4 --disk 30 >/dev/null 2>&1
 
-        echo "building claudebox test image ($IMAGE) into $CBX_TEST_PROFILE..."
+        echo "building dridock test image ($IMAGE) into $CBX_TEST_PROFILE..."
         docker "${DCTX[@]}" build --target minimal -t "$IMAGE" "$WORKDIR" >/dev/null 2>&1
 
         # run the whole suite against the test VM: bare `docker ...` in tests, and the

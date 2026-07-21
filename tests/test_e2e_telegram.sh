@@ -2,7 +2,7 @@
 
 # End-to-end Telegram tests. Drives the user side of the chat with
 # psyb0t/telethon-plus (HTTP wrapper around a real Telegram MTProto userbot)
-# while a real claudebox container runs cron+telegram mode against the same
+# while a real dridock container runs cron+telegram mode against the same
 # chat. Verifies:
 #
 #   1. cron output → bot message → markdown rendered correctly (no PUA leak,
@@ -15,12 +15,12 @@
 #      kind=text label in logs
 #
 # Required env (loaded from tests/.env):
-#   CLAUDEBOX_TELEGRAM_BOT_TOKEN   bot the claudebox container connects as
+#   DRIDOCK_TELEGRAM_BOT_TOKEN     bot the dridock container connects as (legacy CLAUDEBOX_TELEGRAM_BOT_TOKEN still read as fallback)
 #   TELEGRAM_CHAT_ID               chat id (positive = DM user id)
 #   TELETHON_API_ID, TELETHON_API_HASH, TELETHON_SESSION  MTProto creds
 #   TELETHON_AUTH_KEY              bearer key for the telethon-plus HTTP API
 #
-# Per-test container logs are dumped under tests/logs/<testname>-claudebox.log
+# Per-test container logs are dumped under tests/logs/<testname>-dridock.log
 # and tests/logs/<testname>-telethon.log. tests/logs/<testname>.log itself
 # captures the test's own stdout (set up by test.sh).
 
@@ -76,7 +76,7 @@ _e2e_pick_port() {
 # Start telethon-plus. Sets E2E_TELETHON_NAME, E2E_TELETHON_PORT, E2E_TELETHON_URL.
 _e2e_start_telethon() {
     E2E_TELETHON_PORT=$(_e2e_pick_port)
-    E2E_TELETHON_NAME="claudebox-e2e-telethon-$$-$RANDOM"
+    E2E_TELETHON_NAME="dridock-e2e-telethon-$$-$RANDOM"
     E2E_TELETHON_URL="http://127.0.0.1:$E2E_TELETHON_PORT"
 
     docker pull "$TELETHON_IMAGE" >/dev/null 2>&1 || true
@@ -114,9 +114,9 @@ _e2e_dump_and_kill() {
 # Args: <testname>
 _e2e_teardown_containers() {
     local testname="$1"
-    _e2e_dump_and_kill "${E2E_CLAUDEBOX_NAME:-}"  "claudebox" "$testname"
+    _e2e_dump_and_kill "${E2E_DRIDOCK_NAME:-}"  "dridock" "$testname"
     _e2e_dump_and_kill "${E2E_TELETHON_NAME:-}"   "telethon"  "$testname"
-    E2E_CLAUDEBOX_NAME=""
+    E2E_DRIDOCK_NAME=""
     E2E_TELETHON_NAME=""
     # Give Telegram a moment to release the bot polling slot before next test
     sleep 2
@@ -250,15 +250,15 @@ PY
     return 1
 }
 
-# ---- Common docker run for claudebox in cron+telegram ----------------------
-# Sets E2E_CLAUDEBOX_NAME. Args: <cron_yaml_path>
-_e2e_run_claudebox_cron_tg() {
+# ---- Common docker run for dridock in cron+telegram ----------------------
+# Sets E2E_DRIDOCK_NAME. Args: <cron_yaml_path>
+_e2e_run_dridock_cron_tg() {
     local cron_file="$1"
     local tg_yml="$E2E_TMP/home/.claude/telegram.yml"
     _e2e_write_telegram_yml "$tg_yml"
 
-    E2E_CLAUDEBOX_NAME="claudebox-e2e-$$-$RANDOM"
-    docker run -d --name "$E2E_CLAUDEBOX_NAME" \
+    E2E_DRIDOCK_NAME="dridock-e2e-$$-$RANDOM"
+    docker run -d --name "$E2E_DRIDOCK_NAME" \
         --network host \
         -e "CLAUDEBOX_MODE_CRON=1" \
         -e "CLAUDEBOX_MODE_TELEGRAM=1" \
@@ -306,7 +306,7 @@ EOF
 
     local baseline
     baseline=$(tg_latest_msg_id)
-    _e2e_run_claudebox_cron_tg "$cron_file"
+    _e2e_run_dridock_cron_tg "$cron_file"
 
     local result bot_msg_id bot_msg_text
     if ! result=$(tg_wait_for_bot_message "$baseline" "Logs" 90); then
@@ -394,7 +394,7 @@ EOF
 
     local baseline
     baseline=$(tg_latest_msg_id)
-    _e2e_run_claudebox_cron_tg "$cron_file"
+    _e2e_run_dridock_cron_tg "$cron_file"
 
     local result cron_msg_id
     if ! result=$(tg_wait_for_bot_message "$baseline" "CRONREPLYTARGET" 90); then
@@ -420,7 +420,7 @@ EOF
         || { _e2e_teardown_containers "$TNAME"; _e2e_cleanup_dirs; return 1; }
 
     local logs
-    logs=$(docker logs "$E2E_CLAUDEBOX_NAME" 2>&1)
+    logs=$(docker logs "$E2E_DRIDOCK_NAME" 2>&1)
     assert_contains "$logs" "reply to cron job replytarget" "bot logged cron reply" \
         || { _e2e_teardown_containers "$TNAME"; _e2e_cleanup_dirs; return 1; }
     assert_contains "$logs" "history_dir=" "bot logged history_dir on cron reply" \
@@ -451,7 +451,7 @@ jobs:
 EOF
     chmod a+rw "$cron_file" 2>/dev/null || true
 
-    _e2e_run_claudebox_cron_tg "$cron_file"
+    _e2e_run_dridock_cron_tg "$cron_file"
     sleep 6   # let the bot register its long-poll
 
     local marker="TEXTECHO$RANDOM$$"
@@ -494,7 +494,7 @@ jobs:
 EOF
     chmod a+rw "$cron_file" 2>/dev/null || true
 
-    _e2e_run_claudebox_cron_tg "$cron_file"
+    _e2e_run_dridock_cron_tg "$cron_file"
     sleep 6
 
     local seed_marker="SEED$RANDOM$$"
@@ -523,7 +523,7 @@ EOF
         || { _e2e_teardown_containers "$TNAME"; _e2e_cleanup_dirs; return 1; }
 
     local logs
-    logs=$(docker logs "$E2E_CLAUDEBOX_NAME" 2>&1)
+    logs=$(docker logs "$E2E_DRIDOCK_NAME" 2>&1)
     # The bot logs the Bot API message id; telethon's seed_resp_id is the MTProto
     # view of the same logical message. We can't trivially translate, so just
     # assert that *some* "reply to message <int> kind=text" line was logged.

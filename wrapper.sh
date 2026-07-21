@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.3.2"
+DRIDOCK_VERSION="3.3.3"
 
 # The name the user actually typed to invoke us. Both `dridock` and legacy
 # `claudebox` symlink to this wrapper (install.sh's --bin-name), so help
@@ -2361,7 +2361,12 @@ HELP
         else
             echo "✅ done."
         fi
-        exit 0
+        # #32 f/u2 — the exit code has to match the message: automation like
+        # `dridock migrate || alert` (setup scripts, Makefile targets) needs the
+        # verb to signal failure when it half-succeeded. Same silent-drop family
+        # that the whole 3.3.x series has been draining — the ⚠ line without a
+        # matching rc was the one caller class the 3.3.1/3.3.2 signals still lied to.
+        exit "${_mig_state_rc:-0}"
         ;;
     down)
         _cbid="$(cb_project_id_ro "$CB_PROJECT_ROOT")"

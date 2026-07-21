@@ -490,6 +490,16 @@ esac
 rm -rf "$MTMP"
 unset XDG_CONFIG_HOME
 
+# #32 f/u2 (3.3.3) — the `migrate` verb dispatch must propagate cb_migrate_state_dirs's
+# rc rather than always `exit 0`. Runtime end-to-end is expensive here (spawns docker etc.);
+# a source-level assertion catches the specific class of regression I've now committed
+# three times: signals set at the function level, verb exit code hardcoded to 0.
+if grep -qE '^\s*exit\s+"\$\{_mig_state_rc' "$WRAPPER"; then
+    ok "migrate verb: exit propagates \$_mig_state_rc (not hardcoded 'exit 0')"
+else
+    bad "migrate verb: trailing exit does not propagate \$_mig_state_rc — this reintroduces the #32 f/u2 silent-success bug"
+fi
+
 echo "--- lint: every cb_* function CALLED is DEFINED (catches rename/undefined regressions) ---"
 _defined="$(grep -oE '^[[:space:]]*_?cb_[a-z0-9_]+\(\)' "$WRAPPER" | grep -oE '_?cb_[a-z0-9_]+' | sort -u)"
 # "used" = cb_* in CALL position: strip comments, then variable refs ($cb_x) and

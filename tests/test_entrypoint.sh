@@ -100,7 +100,7 @@ test_entrypoint_config_patching() {
 test_entrypoint_initd() {
     local img
     img=$(docker build -q -f - "$WORKDIR" <<'DEOF'
-FROM claudebox:test
+FROM dridock:test
 RUN mkdir -p /home/claude/.claude/init.d && \
     printf '#!/bin/bash\necho INITRAN > /tmp/init-marker\n' > /home/claude/.claude/init.d/01-test.sh && \
     chmod +x /home/claude/.claude/init.d/01-test.sh
