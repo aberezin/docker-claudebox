@@ -386,6 +386,86 @@ grep -q PURGED "$PTMP/out" && ok "purge removes the project's data dir" || bad "
 grep -q SIBOK  "$PTMP/out" && ok "purge leaves other projects untouched" || bad "purge touched a sibling project"
 rm -rf "$PTMP"
 
+echo "--- cb_migrate_state_dirs — #32 defect guards ---"
+# Sandbox: fake XDG_CONFIG_HOME with legacy state, no colliding dridock/ dirs.
+# Verifies the HAPPY PATH first: all four legacy subdirs relocate cleanly.
+MTMP=$(mktemp -d)
+export XDG_CONFIG_HOME="$MTMP"
+mkdir -p "$XDG_CONFIG_HOME/claudebox"/{cdp,consult,framework-bugs,host-agent}
+echo hello > "$XDG_CONFIG_HOME/claudebox/framework-bugs/bug1.md"
+mkdir -p "$XDG_CONFIG_HOME/claudebox/consult/thread1"
+echo world > "$XDG_CONFIG_HOME/claudebox/consult/thread1/meta"
+cb_migrate_state_dirs >/dev/null 2>&1
+[ -d "$XDG_CONFIG_HOME/dridock/cdp" ]              && ok "happy: cdp moved"              || bad "happy: cdp did not move"
+[ -d "$XDG_CONFIG_HOME/dridock/framework-bugs" ]   && ok "happy: framework-bugs moved"   || bad "happy: framework-bugs did not move"
+[ -f "$XDG_CONFIG_HOME/dridock/framework-bugs/bug1.md" ] && ok "happy: content preserved" || bad "happy: content lost"
+[ ! -d "$XDG_CONFIG_HOME/claudebox/cdp" ]          && ok "happy: legacy cdp gone"        || bad "happy: legacy cdp still exists"
+rm -rf "$MTMP"
+
+# #32 Defect B — split-brain: BOTH roots have the same subdir. The 3.3.1 fix
+# MERGES non-colliding entries into dridock/ and keeps colliding entries
+# side-by-side with a `.legacy-<ts>` suffix. Verify the two shapes:
+#
+#   (i) clean merge — no filename collisions → all legacy entries reach dridock/,
+#       function returns 0, message shows "merged N entries".
+#   (ii) collision — same filename in both roots → both copies kept, the legacy
+#        one is suffix-renamed, function returns non-zero.
+MTMP=$(mktemp -d)
+export XDG_CONFIG_HOME="$MTMP"
+mkdir -p "$XDG_CONFIG_HOME/claudebox/framework-bugs" "$XDG_CONFIG_HOME/dridock/framework-bugs"
+echo legacy > "$XDG_CONFIG_HOME/claudebox/framework-bugs/only-legacy.md"
+echo new    > "$XDG_CONFIG_HOME/dridock/framework-bugs/only-new.md"
+out=$(cb_migrate_state_dirs 2>&1); rc=$?
+[ "$rc" -eq 0 ]                                                     && ok "clean-merge: returns 0"                          || bad "clean-merge: expected rc 0, got $rc"
+printf '%s' "$out" | grep -q "merged 1 entries"                     && ok "clean-merge: reports N merged"                   || bad "clean-merge: missing 'merged 1 entries' message"
+[ -f "$XDG_CONFIG_HOME/dridock/framework-bugs/only-legacy.md" ]     && ok "clean-merge: legacy entry now in dridock/"       || bad "clean-merge: legacy entry did not move"
+[ -f "$XDG_CONFIG_HOME/dridock/framework-bugs/only-new.md" ]        && ok "clean-merge: new entry untouched"                || bad "clean-merge: new entry clobbered"
+[ ! -d "$XDG_CONFIG_HOME/claudebox/framework-bugs" ]                && ok "clean-merge: legacy subdir removed"              || bad "clean-merge: legacy subdir remains"
+rm -rf "$MTMP"
+
+# Collision case
+MTMP=$(mktemp -d)
+export XDG_CONFIG_HOME="$MTMP"
+mkdir -p "$XDG_CONFIG_HOME/claudebox/framework-bugs" "$XDG_CONFIG_HOME/dridock/framework-bugs"
+echo LEGACY > "$XDG_CONFIG_HOME/claudebox/framework-bugs/same-name.md"
+echo NEW    > "$XDG_CONFIG_HOME/dridock/framework-bugs/same-name.md"
+out=$(cb_migrate_state_dirs 2>&1); rc=$?
+[ "$rc" -ne 0 ]                                                     && ok "collision: returns non-zero"                     || bad "collision: expected non-zero rc"
+printf '%s' "$out" | grep -q "SPLIT-BRAIN merged"                   && ok "collision: SPLIT-BRAIN message present"          || bad "collision: missing SPLIT-BRAIN merged message"
+[ "$(cat "$XDG_CONFIG_HOME/dridock/framework-bugs/same-name.md")" = "NEW" ] && ok "collision: dridock/ copy is authoritative" || bad "collision: dridock/ content clobbered"
+ls "$XDG_CONFIG_HOME/dridock/framework-bugs/" | grep -qE '^same-name\.md\.legacy-[0-9]+$' && ok "collision: legacy kept with .legacy-<ts> suffix" || bad "collision: legacy suffix-renamed copy missing"
+rm -rf "$MTMP"
+
+# cdp split-brain — Chrome profile explicitly refused (no auto-merge)
+MTMP=$(mktemp -d)
+export XDG_CONFIG_HOME="$MTMP"
+mkdir -p "$XDG_CONFIG_HOME/claudebox/cdp" "$XDG_CONFIG_HOME/dridock/cdp"
+touch "$XDG_CONFIG_HOME/claudebox/cdp/preferences.json"
+touch "$XDG_CONFIG_HOME/dridock/cdp/preferences.json"
+out=$(cb_migrate_state_dirs 2>&1); rc=$?
+[ "$rc" -ne 0 ]                                                     && ok "cdp split-brain: returns non-zero"               || bad "cdp split-brain: expected non-zero rc"
+printf '%s' "$out" | grep -qE 'cdp.*SPLIT.*Cannot auto-merge'       && ok "cdp split-brain: explicit refusal message"       || bad "cdp split-brain: missing refusal message"
+[ -f "$XDG_CONFIG_HOME/claudebox/cdp/preferences.json" ]            && ok "cdp split-brain: legacy untouched"               || bad "cdp split-brain: legacy clobbered"
+[ -f "$XDG_CONFIG_HOME/dridock/cdp/preferences.json" ]              && ok "cdp split-brain: dridock/ untouched"             || bad "cdp split-brain: dridock/ clobbered"
+rm -rf "$MTMP"
+
+# _cb_state_home split-brain read-time warning — deduped per name per shell.
+MTMP=$(mktemp -d)
+export XDG_CONFIG_HOME="$MTMP"
+mkdir -p "$XDG_CONFIG_HOME/claudebox/cdp" "$XDG_CONFIG_HOME/dridock/cdp"
+unset _CB_SPLIT_WARNED_cdp 2>/dev/null || true
+out1=$(_cb_state_home cdp 2>&1 >/dev/null); out2=$(_cb_state_home cdp 2>&1 >/dev/null)
+# Warning may fire once (subshell resets the marker). Just verify it DOES fire when both exist.
+# In the same shell, deduping is best-effort; the important invariant is: user gets AT LEAST one warning.
+printf '%s' "$out1$out2" | grep -q "SPLIT" && ok "_cb_state_home: split-brain warning fires" || bad "_cb_state_home: no split warning when both exist"
+path=$(_cb_state_home cdp 2>/dev/null)
+case "$path" in
+    */dridock/cdp) ok "_cb_state_home: prefers dridock/ even in split-brain" ;;
+    *) bad "_cb_state_home: split-brain returned '$path' (expected */dridock/cdp)" ;;
+esac
+rm -rf "$MTMP"
+unset XDG_CONFIG_HOME
+
 echo "--- lint: every cb_* function CALLED is DEFINED (catches rename/undefined regressions) ---"
 _defined="$(grep -oE '^[[:space:]]*_?cb_[a-z0-9_]+\(\)' "$WRAPPER" | grep -oE '_?cb_[a-z0-9_]+' | sort -u)"
 # "used" = cb_* in CALL position: strip comments, then variable refs ($cb_x) and

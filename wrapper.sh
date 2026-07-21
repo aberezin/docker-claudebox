@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.3.0"
+DRIDOCK_VERSION="3.3.1"
 
 # The name the user actually typed to invoke us. Both `dridock` and legacy
 # `claudebox` symlink to this wrapper (install.sh's --bin-name), so help
@@ -101,13 +101,28 @@ cb_xdg_dir() {
 # a user who hasn't run `dridock migrate` doesn't lose access to their consults /
 # framework-bug reports / cdp state), otherwise returns the dridock/ path as
 # canonical for a fresh mkdir. Callers still need to `mkdir -p` before writing.
-# `dridock migrate` (cb_migrate_data_dir) relocates each legacy subdir to the
+# `dridock migrate` (cb_migrate_state_dirs) relocates each legacy subdir to the
 # dridock/ one so this fallback becomes a no-op post-migrate; kept for one
 # deprecation cycle (removed in 4.0 with the legacy root).
+#
+# #32 — persistent split-brain warning. When BOTH roots have the same subdir,
+# reads unconditionally prefer dridock/, silently orphaning legacy content.
+# Warn on every invocation (deduped per-name via a shell variable) so the user
+# can't miss the state until they clean it up.
 _cb_state_home() {
     local base new old
     base="$(cb_config_home)"
     new="$base/dridock/$1"; old="$base/claudebox/$1"
+    # Split-brain: warn once per name per shell (var name is deterministic; safe under set -u via ${…-}).
+    if [ -d "$new" ] && [ -d "$old" ]; then
+        local _warn_var="_CB_SPLIT_WARNED_${1//-/_}"
+        if [ -z "${!_warn_var-}" ]; then
+            echo "⚠ state dir $1: SPLIT — ~/.config/dridock/$1 AND ~/.config/claudebox/$1 both exist. Reads prefer dridock/; legacy content is orphaned. 'dridock migrate' will refuse; merge or remove one root by hand." >&2
+            eval "$_warn_var=1"
+        fi
+        printf '%s' "$new"
+        return 0
+    fi
     if [ -d "$new" ]; then printf '%s' "$new"
     elif [ -d "$old" ]; then printf '%s' "$old"
     else printf '%s' "$new"; fi
@@ -1959,16 +1974,87 @@ cb_migrate_machine_config() {
 # (cdp / consult / framework-bugs / host-agent) from ~/.config/claudebox/<name>
 # to ~/.config/dridock/<name>. Idempotent per subdir. Only moves subdirs the
 # 3.0 rebrand missed — the per-project data dir + machine config each have
-# their own migrator above. #29 fix.
+# their own migrator above.
+#
+# #29 introduced the function; #32 (3.3.1) added two guards for cases the
+# original happy-path implementation didn't consider:
+#
+#   Defect A — the `cdp/` subdir hosts a live Chrome debug profile the
+#   browser-bridge is running against; `mv` on it renames inodes out from
+#   under running Chrome, and the profile's SingletonLock / Preferences
+#   encode absolute paths, so the next launch silently starts a fresh
+#   profile OR errors. This function is called via `cb_auto_migrate`, so
+#   the mv is opt-out, not opt-in — user runs any `dridock` on 3.2.4 with
+#   the bridge up, live profile relocates. Guard: pgrep for Chrome using
+#   the specific --user-data-dir=$old path; if found, SKIP the cdp move
+#   with an actionable message.
+#
+#   Defect B — when BOTH `~/.config/{dridock,claudebox}/$name` exist, a
+#   bare "leaving both" warning strand the legacy content: `_cb_state_home`
+#   unconditionally prefers dridock/, so the legacy dir becomes unreachable
+#   with no signal after the warning scrolls off. Guard: return non-zero
+#   from this function when any split-brain hit occurred, and print a
+#   persistent-visibility message pointing at the specific dir. The read
+#   path in `_cb_state_home` also warns on every read while split — no
+#   more "silent orphan" (see the same-file _cb_state_home changes).
 cb_migrate_state_dirs() {
-    local xdg name old new
+    local xdg name old new split=0
     xdg="$(cb_config_home)"
     for name in cdp consult framework-bugs host-agent; do
         old="$xdg/claudebox/$name"
         new="$xdg/dridock/$name"
         [ -d "$old" ] || continue
+
+        # Defect A guard — live-Chrome check for the cdp profile ONLY.
+        # `pgrep -f` on macOS + Linux matches the FULL command line; Chrome
+        # runs with an absolute --user-data-dir, so an exact prefix match
+        # against $old is precise (no false positive from paths that merely
+        # contain the string). Skip means the legacy path stays readable —
+        # `_cb_state_home` falls back — so the browser bridge keeps working
+        # until the user closes Chrome and runs `dridock migrate` explicitly.
+        if [ "$name" = cdp ] && pgrep -f -- "--user-data-dir=$old" >/dev/null 2>&1; then
+            echo "  ⚠ state dir cdp: SKIPPING — Chrome is running against $old" >&2
+            echo "     Close it (or run 'dridock browser-bridge down'), then 'dridock migrate' again." >&2
+            echo "     The bridge keeps working from the legacy path until then." >&2
+            continue
+        fi
+
         if [ -e "$new" ]; then
-            echo "  ⚠ state dir $name: both claudebox/ and dridock/ have it — leaving both" >&2
+            # Defect B — merge, don't orphan. Non-colliding entries in the legacy
+            # dir move to dridock/. Colliding entries get a `.legacy-<ts>` suffix
+            # so both copies stay reachable and the user can pick. Split=1 only
+            # when a real collision happened (needs human attention); a clean
+            # merge is a full success. cdp is intentionally excluded — its content
+            # is a Chrome profile (thousands of interdependent files) that does
+            # not merge safely.
+            if [ "$name" = cdp ]; then
+                echo "  ⚠ state dir cdp: SPLIT — both roots exist. Cannot auto-merge a Chrome profile safely." >&2
+                echo "     'dridock browser-bridge down', close Chrome, then keep whichever profile you want and delete the other." >&2
+                split=1
+                continue
+            fi
+            local _merged=0 _collided=0 _suffix _entry _base
+            _suffix=".legacy-$(date +%Y%m%d%H%M%S)"
+            shopt -s nullglob dotglob
+            for _entry in "$old"/*; do
+                _base="$(basename "$_entry")"
+                if [ ! -e "$new/$_base" ]; then
+                    mv "$_entry" "$new/$_base"
+                    _merged=$((_merged + 1))
+                else
+                    mv "$_entry" "$new/${_base}${_suffix}"
+                    echo "     collision: $name/$_base kept as $name/${_base}${_suffix} — pick one and delete the other" >&2
+                    _collided=$((_collided + 1))
+                fi
+            done
+            shopt -u nullglob dotglob
+            rmdir "$old" 2>/dev/null || true
+            if [ "$_collided" -gt 0 ]; then
+                echo "  ⚠ state dir $name: SPLIT-BRAIN merged — $_merged clean, $_collided collision(s) kept side-by-side." >&2
+                split=1
+            else
+                echo "  ✓ state dir: claudebox/$name → dridock/$name (merged $_merged entries into existing dridock/$name)"
+            fi
             continue
         fi
         mkdir -p "$xdg/dridock"
@@ -1977,7 +2063,10 @@ cb_migrate_state_dirs() {
     done
     # remove the now-empty legacy root if it's empty (cheap, silent on failure)
     rmdir "$xdg/claudebox" 2>/dev/null || true
-    return 0
+    # Return non-zero on any split-brain so callers (cb_auto_migrate + the
+    # explicit `migrate` verb) can surface a persistent notice rather than
+    # ship a one-time stderr scroll. Callers may ignore rc if they don't care.
+    return "$split"
 }
 
 # cb_auto_migrate ROOT — silently migrate a legacy `.claudebox/`-only workspace on
@@ -2242,7 +2331,10 @@ HELP
         _mig_id="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
         [ -n "$_mig_id" ] && cb_migrate_data_dir "$_mig_id"
         cb_migrate_machine_config
-        cb_migrate_state_dirs
+        # #32 — cb_migrate_state_dirs returns non-zero when it skipped a subdir
+        # (live-Chrome guard OR split-brain). Surface the skip in the final line
+        # rather than printing "✅ done" over a stderr scroll the user missed.
+        _mig_state_rc=0; cb_migrate_state_dirs || _mig_state_rc=$?
         if [ "$_mig_all" = 1 ]; then
             echo "migrate --all: sweeping legacy project data dirs…"
             _mig_old_root="$(cb_config_home)/claudebox/projects"
@@ -2257,7 +2349,11 @@ HELP
                 echo "  (no legacy claudebox/projects/ dir — nothing to sweep)"
             fi
         fi
-        echo "✅ done."
+        if [ "${_mig_state_rc:-0}" -ne 0 ]; then
+            echo "⚠  done — but one or more state dirs were skipped (see warnings above). Resolve and re-run 'dridock migrate'."
+        else
+            echo "✅ done."
+        fi
         exit 0
         ;;
     down)

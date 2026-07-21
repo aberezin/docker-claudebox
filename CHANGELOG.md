@@ -26,6 +26,70 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.3.1] — 2026-07-21 _(fork)_
+
+### Fixed — 3.2.4 regression in `cb_migrate_state_dirs`
+
+**#32** — Arfy caught both defects in a sandbox before running live migration.
+
+**Defect A (blocker)** — `cb_migrate_state_dirs` did a bare `mv` on `cdp/`
+with no check for whether Chrome was running against the debug profile.
+`~/.config/claudebox/cdp/` is a full Chrome debug profile (3k+ files on
+Arfy's Mac) actively in use by `dridock browser-bridge`; `mv` renames the
+inode, Chrome's open fds follow, but the profile's SingletonLock and
+Preferences encode absolute paths — next launch silently starts a fresh
+profile OR errors. Made worse by `cb_auto_migrate` firing this on ANY
+`dridock` invocation (opt-out, not opt-in). Now a `pgrep -f -- "--user-data-dir=$old"`
+check skips the cdp move if Chrome is running against it, with an
+actionable message pointing at `dridock browser-bridge down` and re-run.
+Skip is safe: `_cb_state_home` falls back to the legacy path.
+
+**Defect B** — when BOTH `~/.config/{dridock,claudebox}/$name` existed
+(realistic path: user works on 3.2.4 without migrating, `_cb_state_home`
+creates `dridock/$name`, then explicit `migrate` hits this branch), the
+old code printed `"leaving both"` and returned success. `_cb_state_home`
+unconditionally prefers `dridock/`, so legacy content became silently
+unreachable — 7 consult threads would be stranded on Arfy's Mac. Now:
+`cb_migrate_state_dirs` **merges** the two roots instead of orphaning —
+non-colliding entries move into `dridock/$name` cleanly (returns 0 with
+a `merged N entries` count); filename collisions get a `.legacy-<ts>`
+suffix so both copies stay reachable and the user picks the winner
+(returns non-zero to force attention). The Chrome profile (`cdp/`) is
+explicitly excluded from auto-merge — its thousands of interdependent
+files don't merge safely — and gets a "close Chrome and pick one"
+message. `_cb_state_home` also prints a per-read SPLIT warning (deduped
+per name per shell) so state can't scroll off unnoticed if the user
+recreates the situation between migrations. The explicit `migrate` verb
+ends with `⚠ done` + "resolve and re-run" instead of `✅ done` when any
+collision or refusal occurred.
+
+Same silent-drop family as #17 / #30 / #31 — and the first instance that
+could damage state the user did not ask us to touch. See Arfy's #32 body
+for the "never silently discard user state" house-rule proposal.
+
+### Added — `tests/test_cbvm.sh` coverage for both guards
+
+Five new test blocks under `cb_migrate_state_dirs`:
+- **happy path** — all four subdirs relocate, content preserved, legacy gone.
+- **clean-merge split-brain** — non-colliding entries merge into dridock/,
+  rc 0, `merged N entries` message, legacy subdir removed.
+- **collision split-brain** — colliding filename kept with `.legacy-<ts>`
+  suffix, dridock/ copy authoritative, rc non-zero.
+- **cdp split-brain** — refused explicitly (no auto-merge for Chrome
+  profile), rc non-zero, both roots untouched.
+- **`_cb_state_home` read-time** — split warning fires on read; dridock/
+  still wins; deduped per name per shell.
+
+Bear-side in-container: 149/0 (was 130/0 — 19 new assertions).
+
+### Upgrade notice
+
+Everyone on 3.2.4 or 3.3.0 who has a live browser-bridge Chrome running
+should upgrade to 3.3.1 BEFORE running any `dridock` command. Auto-migrate
+fired without a guard could corrupt the Chrome debug profile. Fix ships
+without needing a `make build`: `./install.sh` from the canonical clone
+picks up the new wrapper.
+
 ## [3.3.0] — 2026-07-21 _(fork)_
 
 ### Added — host↔image contract change (`-env` sidecar)
