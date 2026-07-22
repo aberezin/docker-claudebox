@@ -8,18 +8,17 @@ import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 
 /**
  * `dridock features <verb>` — the 3.0 rename of `profiles`. Ports the
- * corresponding bash `features)` case at wrapper.sh:2323 + `cb_features_cmd`
- * at wrapper.sh:1430.
+ * corresponding bash `features)` case + cb_features_cmd at wrapper.sh:1430.
  *
- * Phase 2 only implements `list` (or bare `dridock features`, which defaults
- * to list). The "enabled" half is FileSystem-only; the "available" catalog
- * needs a Docker throwaway container against the project image — that piece
- * is stubbed with a Phase 3 marker.
- *
- * enable/disable/info stubbed with rc=2 + "use bash wrapper" — those mutate
- * config.yml (need the safe-rewrite scaffolding due in Phase 3) or need
- * Docker access (info runs a `cat manifest.yml` in a throwaway container).
+ * Phase 2 shipped `list` (FS-only). Phase 3 adds `enable`/`disable`/`info`:
+ *   enable/disable go through ProjectConfig.setFeatures → writeTextAtomic,
+ *   so a crash mid-write can never leave a truncated config.yml (the
+ *   3.3.6 Tier-1 #5 class of bug — silent-write-failure).
+ *   info is stubbed for Phase 4 — needs to `docker run --rm cat
+ *   /usr/local/lib/dridock/features/<name>/manifest.yml`.
  */
+const FEATURE_NAME_REGEX = /^[A-Za-z0-9_-]+$/;
+
 export class FeaturesCommand implements Command {
   readonly verb: "features" | "profiles";
 
@@ -33,25 +32,23 @@ export class FeaturesCommand implements Command {
   async run(args: string[], ctx: Context): Promise<number> {
     const sub = args[0] ?? "list";
 
-    // Legacy `profiles` alias — one-line deprecation notice to stderr, same
-    // as bash's cb_profiles_cmd, then fall through to features handling.
     if (this.verb === "profiles") {
       ctx.stderr.write(`ℹ 'dridock profiles' is a legacy alias — use 'dridock features' (removed in 4.0).\n`);
     }
 
     if (sub === "list" || sub === "") return await this.list(ctx);
     if (sub === "-h" || sub === "--help") { this.printHelp(ctx); return 0; }
-
-    if (["enable", "disable", "info"].includes(sub)) {
-      ctx.stderr.write(`dridock-ts (Phase 2): '${ctx.binName} features ${sub}' not yet ported — use the bash wrapper\n`);
+    if (sub === "enable") return await this.enable(args[1], ctx);
+    if (sub === "disable") return await this.disable(args[1], ctx);
+    if (sub === "info") {
+      ctx.stderr.write(`dridock-ts (Phase 3): '${ctx.binName} features info' not yet ported — use the bash wrapper (needs Docker cat on image)\n`);
       return 2;
     }
     throw new DridockError(`features: unknown sub-verb '${sub}' (try: ${ctx.binName} features --help)`);
   }
 
   private async list(ctx: Context): Promise<number> {
-    const git = this.gitOverride ?? new RealGitToplevel();
-    const project = await new ProjectRootResolver(ctx.fs, git).resolve(ctx.cwd);
+    const project = await this.resolveProject(ctx);
     const cfg = new ProjectConfig(ctx.fs);
     const enabled = await cfg.features(project.configPath);
 
@@ -62,11 +59,61 @@ export class FeaturesCommand implements Command {
       ctx.stdout.write(`  (none — add e.g.  features: [typescript, python]  to ${project.dotName}/config.yml, or run '${ctx.binName} features enable typescript')\n`);
     }
     ctx.stdout.write(`\n`);
-    // Available-features listing needs Docker — Phase 3.
-    ctx.stdout.write(`available: (Phase 2 stub — 'available' listing needs Docker, use bash wrapper for the full list)\n`);
-    ctx.stdout.write(`\n`);
+    ctx.stdout.write(`available: (Phase 4 — 'available' listing needs Docker, use bash wrapper for the full list)\n\n`);
     ctx.stdout.write(`enable / disable: '${ctx.binName} features enable <name>' / '${ctx.binName} features disable <name>'\n`);
     return 0;
+  }
+
+  private async enable(name: string | undefined, ctx: Context): Promise<number> {
+    if (name === undefined || name === "") {
+      ctx.stderr.write(`usage: ${ctx.binName} features enable <name>\n`);
+      return 1;
+    }
+    if (!FEATURE_NAME_REGEX.test(name)) {
+      ctx.stderr.write(`features enable: bad name '${name}' (allowed: A-Z a-z 0-9 _ -)\n`);
+      return 1;
+    }
+    const project = await this.resolveProject(ctx);
+    const cfg = new ProjectConfig(ctx.fs);
+    const existing = await cfg.features(project.configPath);
+    if (existing.includes(name)) {
+      ctx.stdout.write(`  ✓ ${name} already enabled\n`);
+      return 0;
+    }
+    const next = [...existing, name];
+    await cfg.setFeatures(project.configPath, next);
+    ctx.stdout.write(`  ✓ enabled feature '${name}' (${next.join(", ")}). On next '${ctx.binName}' run, on.sh installs it.\n`);
+    return 0;
+  }
+
+  private async disable(name: string | undefined, ctx: Context): Promise<number> {
+    if (name === undefined || name === "") {
+      ctx.stderr.write(`usage: ${ctx.binName} features disable <name>\n`);
+      return 1;
+    }
+    if (!FEATURE_NAME_REGEX.test(name)) {
+      ctx.stderr.write(`features disable: bad name '${name}' (allowed: A-Z a-z 0-9 _ -)\n`);
+      return 1;
+    }
+    const project = await this.resolveProject(ctx);
+    const cfg = new ProjectConfig(ctx.fs);
+    const existing = await cfg.features(project.configPath);
+    if (!existing.includes(name)) {
+      ctx.stdout.write(`  ℹ ${name} isn't in features: — nothing to disable\n`);
+      return 0;
+    }
+    const remaining = existing.filter((f) => f !== name);
+    await cfg.setFeatures(project.configPath, remaining);
+    const remainingHint = remaining.length > 0 ? ` (remaining: ${remaining.join(", ")})` : "";
+    // Phase 4 will run off.sh in the container if it's up + remove the
+    // ~/.claude/.feature-<name> marker in the project's data dir.
+    ctx.stdout.write(`  ✓ disabled feature '${name}'${remainingHint}. off.sh will run on next '${ctx.binName}' start.\n`);
+    return 0;
+  }
+
+  private async resolveProject(ctx: Context) {
+    const git = this.gitOverride ?? new RealGitToplevel();
+    return await new ProjectRootResolver(ctx.fs, git).resolve(ctx.cwd);
   }
 
   private printHelp(ctx: Context): void {
@@ -74,8 +121,7 @@ export class FeaturesCommand implements Command {
     ctx.stdout.write(`  list                    show enabled + available features (default)\n`);
     ctx.stdout.write(`  enable <name>           add <name> to features: in .dridock/config.yml\n`);
     ctx.stdout.write(`  disable <name>          remove <name> from features: (runs the feature's off.sh)\n`);
-    ctx.stdout.write(`  info <name>             print the feature's manifest.yml\n`);
-    ctx.stdout.write(`\n`);
+    ctx.stdout.write(`  info <name>             print the feature's manifest.yml\n\n`);
     ctx.stdout.write(`  '${ctx.binName} profiles' is an alias for one deprecation cycle (2.x → 3.0).\n`);
     ctx.stdout.write(`  Full design: docs/design/features-system.md\n`);
   }

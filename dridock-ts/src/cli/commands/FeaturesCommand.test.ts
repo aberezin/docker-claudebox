@@ -34,7 +34,7 @@ describe("FeaturesCommand — list", () => {
     expect(out).toContain("enabled for this project (.dridock/config.yml → features:)");
     expect(out).toContain("  typescript\n");
     expect(out).toContain("  python\n");
-    expect(out).toContain("Phase 2 stub");
+    expect(out).toContain("Phase 4");   // 'available' listing still stubbed pending Docker adapter
   });
 
   test("empty enabled list -> the 'add e.g. …' hint", async () => {
@@ -63,18 +63,93 @@ describe("FeaturesCommand — list", () => {
   });
 });
 
-describe("FeaturesCommand — sub-verb dispatch", () => {
-  test("enable/disable/info stubbed with rc=2 + 'use bash wrapper' (Phase 2 boundary)", async () => {
-    for (const sub of ["enable", "disable", "info"] as const) {
-      const fs = new InMemoryFileSystem();
-      const { ctx, stderr } = makeCtx(fs);
-      const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run([sub, "typescript"], ctx);
-      expect(rc).toBe(2);
-      expect(stderr.text()).toContain("not yet ported");
-    }
+describe("FeaturesCommand — enable (Phase 3)", () => {
+  test("enable adds a feature to an empty features:", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["enable", "typescript"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("✓ enabled feature 'typescript'");
+    const cfg = await fs.readText("/p/.dridock/config.yml");
+    expect(cfg).toContain("features: [typescript]");
   });
 
-  test("unknown sub-verb -> DridockError rc=1 with helpful message", async () => {
+  test("enable is idempotent — 'already enabled' + no rewrite when duplicate", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\nfeatures: [typescript]\n");
+    const beforeWrites = fs.recordedWrites.length;
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["enable", "typescript"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("already enabled");
+    expect(fs.recordedWrites.length).toBe(beforeWrites);   // no atomic-write fired
+  });
+
+  test("enable rejects bad names before writing", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["enable", "bad name!"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("bad name");
+  });
+
+  test("enable missing name → usage + rc 1", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["enable"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("usage: dridock features enable");
+  });
+});
+
+describe("FeaturesCommand — disable (Phase 3)", () => {
+  test("disable removes the feature; remaining list surfaced", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\nfeatures: [typescript, python]\n");
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["disable", "typescript"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("✓ disabled feature 'typescript'");
+    expect(stdout.text()).toContain("remaining: python");
+    const cfg = await fs.readText("/p/.dridock/config.yml");
+    expect(cfg).toContain("features: [python]");
+  });
+
+  test("disable a feature that isn't in the list → 'nothing to disable', no write", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\nfeatures: [python]\n");
+    const beforeWrites = fs.recordedWrites.length;
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["disable", "typescript"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("nothing to disable");
+    expect(fs.recordedWrites.length).toBe(beforeWrites);
+  });
+
+  test("disable the last remaining feature → block removed entirely", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\nfeatures: [only]\n");
+    const { ctx } = makeCtx(fs);
+    await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["disable", "only"], ctx);
+    const cfg = await fs.readText("/p/.dridock/config.yml");
+    expect(cfg).not.toContain("features:");
+    expect(cfg).toContain("id: abc");
+  });
+});
+
+describe("FeaturesCommand — sub-verb dispatch", () => {
+  test("info still stubbed with rc=2 (Phase 4 — needs Docker cat)", async () => {
+    const fs = new InMemoryFileSystem();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["info", "typescript"], ctx);
+    expect(rc).toBe(2);
+    expect(stderr.text()).toContain("not yet ported");
+  });
+
+  test("unknown sub-verb -> DridockError rc=1", async () => {
     const fs = new InMemoryFileSystem();
     const { ctx } = makeCtx(fs);
     try {

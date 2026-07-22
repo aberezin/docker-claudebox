@@ -14,6 +14,30 @@ export class ProjectConfig {
   constructor(private readonly fs: FileSystem) {}
 
   /**
+   * Rewrite the `features:` block in config.yml to `names` (flow-style),
+   * stripping any existing `features:`/`profiles:` (both flow and block
+   * form). Empty `names` removes the block entirely. Ports
+   * cb_features_write at wrapper.sh:1346 — the safe-rewrite scaffolding
+   * (writeTextAtomic) means a power-cut mid-write can never leave a
+   * truncated config.yml (the class fixed for `cb_features_write` in
+   * 3.3.6 Tier-1 #5).
+   */
+  async setFeatures(configPath: string, names: readonly string[]): Promise<void> {
+    const text = await this.fs.readTextOrUndefined(configPath);
+    if (text === undefined) {
+      throw new Error(`setFeatures: no config.yml at ${configPath} — run 'dridock start' first to initialize`);
+    }
+    const stripped = stripFeaturesBlock(text);
+    // Trim trailing blank lines so the appended features: block sits
+    // cleanly at the end (matches the bash `awk 'NF{p=1}...'` trim step).
+    const trimmed = stripped.replace(/\n+$/, "");
+    const rebuilt = names.length === 0
+      ? trimmed + "\n"
+      : `${trimmed}\n\nfeatures: [${names.join(", ")}]\n`;
+    await this.fs.writeTextAtomic(configPath, rebuilt);
+  }
+
+  /**
    * The project's stable id — the value of the `id:` key in config.yml.
    * Returns undefined if config.yml is missing, id: is missing, or id is
    * the sentinel "auto" (which means "unbootstrapped, generate on first
@@ -75,6 +99,31 @@ export function parseTopLevelString(text: string, key: string): string | undefin
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Strip `features:` and `profiles:` blocks (flow OR block form) from a
+ * YAML doc. Ports the awk at wrapper.sh:1352-1359 exactly:
+ *   - `features: [a,b,c]` on one line → drop that line
+ *   - `features:` (or with trailing comment) → drop that line AND every
+ *     following `  - x` / blank / `  # comment` line until a
+ *     non-indented, non-comment line ends the block
+ */
+export function stripFeaturesBlock(text: string): string {
+  const out: string[] = [];
+  let skipping = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\s*(?:features|profiles):\s*\[/.test(line)) { skipping = false; continue; }
+    if (/^\s*(?:features|profiles):\s*(?:#.*)?$/.test(line)) { skipping = true; continue; }
+    if (skipping) {
+      if (/^\s*-\s*/.test(line)) continue;   // block item
+      if (/^\s*(?:#.*)?$/.test(line)) continue;   // comment/blank inside block
+      skipping = false;
+      // fall through — this line belongs to the next YAML key
+    }
+    out.push(line);
+  }
+  return out.join("\n");
 }
 
 /**

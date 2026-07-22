@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { ProjectConfig, parseFeatures, parseTopLevelString } from "./ProjectConfig.ts";
+import { ProjectConfig, parseFeatures, parseTopLevelString, stripFeaturesBlock } from "./ProjectConfig.ts";
 import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 
 describe("parseFeatures — YAML tolerance (matches wrapper.sh awk)", () => {
@@ -104,6 +104,76 @@ describe("parseTopLevelString — flat YAML KEY: VALUE (matches _cb_yaml_get)", 
   });
   test("missing key -> undefined", () => {
     expect(parseTopLevelString("vm:\n  disk: 60G\n", "id")).toBeUndefined();
+  });
+});
+
+describe("stripFeaturesBlock — the awk at wrapper.sh:1352", () => {
+  test("strips flow-style features:", () => {
+    expect(stripFeaturesBlock("id: abc\nfeatures: [x, y]\nvm:\n  cpu: 4\n"))
+      .toBe("id: abc\nvm:\n  cpu: 4\n");
+  });
+  test("strips flow-style profiles: (legacy)", () => {
+    expect(stripFeaturesBlock("id: abc\nprofiles: [x]\n")).toBe("id: abc\n");
+  });
+  test("strips block-style features: with items", () => {
+    const before = ["id: abc", "features:", "  - x", "  - y", "vm:", "  cpu: 4", ""].join("\n");
+    expect(stripFeaturesBlock(before)).toBe(["id: abc", "vm:", "  cpu: 4", ""].join("\n"));
+  });
+  test("block-style: blank + comment lines inside block don't end it", () => {
+    const before = ["id: abc", "features:", "  # comment", "", "  - x", "vm:", "  cpu: 4", ""].join("\n");
+    expect(stripFeaturesBlock(before)).toBe(["id: abc", "vm:", "  cpu: 4", ""].join("\n"));
+  });
+  test("keeps unrelated content intact", () => {
+    const before = "vm:\n  cpu: 4\nnetwork:\n  hostname: foo\n";
+    expect(stripFeaturesBlock(before)).toBe(before);
+  });
+});
+
+describe("ProjectConfig.setFeatures — safe rewrite (writeTextAtomic under the hood)", () => {
+  test("writes flow-style block, atomic", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\nvm:\n  cpu: 4\n");
+    await new ProjectConfig(fs).setFeatures("/p/.dridock/config.yml", ["typescript", "python"]);
+    const out = await fs.readText("/p/.dridock/config.yml");
+    expect(out).toContain("id: abc");
+    expect(out).toContain("vm:");
+    expect(out).toContain("features: [typescript, python]");
+    expect(fs.recordedWrites.some((w) => w.path === "/p/.dridock/config.yml")).toBe(true);
+  });
+
+  test("replaces an existing flow-style block (no duplication)", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\nfeatures: [old]\nvm:\n  cpu: 4\n");
+    await new ProjectConfig(fs).setFeatures("/p/.dridock/config.yml", ["new"]);
+    const out = await fs.readText("/p/.dridock/config.yml");
+    expect(out).toContain("features: [new]");
+    expect(out).not.toContain("features: [old]");
+    // Only ONE features: line total (no duplication)
+    expect(out.match(/^\s*features:/gm)?.length ?? 0).toBe(1);
+  });
+
+  test("replaces an existing block-style block", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\nfeatures:\n  - old\nvm:\n  cpu: 4\n");
+    await new ProjectConfig(fs).setFeatures("/p/.dridock/config.yml", ["new"]);
+    const out = await fs.readText("/p/.dridock/config.yml");
+    expect(out).toContain("features: [new]");
+    expect(out).not.toContain("- old");
+  });
+
+  test("empty names removes the block entirely", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\nfeatures: [x]\n");
+    await new ProjectConfig(fs).setFeatures("/p/.dridock/config.yml", []);
+    const out = await fs.readText("/p/.dridock/config.yml");
+    expect(out).not.toContain("features:");
+    expect(out).toContain("id: abc");
+  });
+
+  test("throws when config.yml missing (matches bash's `no config.yml at $cfg`)", async () => {
+    const fs = new InMemoryFileSystem();
+    await expect(new ProjectConfig(fs).setFeatures("/p/.dridock/config.yml", ["x"]))
+      .rejects.toThrow(/no config.yml/);
   });
 });
 
