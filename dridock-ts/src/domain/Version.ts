@@ -42,27 +42,49 @@ export class Version {
     return new Version(Number(match[1]), Number(match[2]), Number(match[3]), input.trim());
   }
 
+  /**
+   * Bash-parity permissive parse (ports cb_semver_cmp's handling of
+   * `0.1.0-rc1` → treats non-digit trailing chars per-component as if the
+   * digits alone were the value, missing fields default to 0). Never
+   * throws — invalid input parses as 0.0.0. Match bash's silent behavior
+   * so a weirdly-stamped image doesn't blow up checkversion.
+   */
+  static parseLoose(input: string): Version {
+    const trimmed = input.trim().replace(/^v/, "");
+    const parts = trimmed.split(".");
+    const num = (s: string | undefined): number => {
+      if (s === undefined) return 0;
+      const leading = s.match(/^(\d+)/);
+      return leading ? Number(leading[1]) : 0;
+    };
+    return new Version(num(parts[0]), num(parts[1]), num(parts[2]), input.trim());
+  }
+
   toString(): string { return `${this.major}.${this.minor}.${this.patch}`; }
 
   /**
-   * Structural compare: -1 if this < other, 0 if equal, +1 if this > other.
+   * Structural compare — returns `gt`/`lt`/`eq` to match wrapper.sh's
+   * cb_semver_cmp output vocabulary directly.
    */
-  compareTo(other: Version): -1 | 0 | 1 {
-    if (this.major !== other.major) return this.major < other.major ? -1 : 1;
-    if (this.minor !== other.minor) return this.minor < other.minor ? -1 : 1;
-    if (this.patch !== other.patch) return this.patch < other.patch ? -1 : 1;
-    return 0;
+  compareTo(other: Version): "gt" | "lt" | "eq" {
+    if (this.major !== other.major) return this.major < other.major ? "lt" : "gt";
+    if (this.minor !== other.minor) return this.minor < other.minor ? "lt" : "gt";
+    if (this.patch !== other.patch) return this.patch < other.patch ? "lt" : "gt";
+    return "eq";
   }
 
   /**
-   * Highest bump severity between two versions — used by `checkversion` to
-   * decide the message ("🔴 MAJOR behind" vs "🟡 PATCH behind"). Symmetric:
-   * skewSeverity(a, b) === skewSeverity(b, a).
+   * Highest bump severity between this and another version — used by
+   * `checkversion` to decide the message ("🔴 MAJOR behind" vs "🟡 PATCH
+   * behind"). Symmetric: a.skewSeverity(b) === b.skewSeverity(a).
    */
-  static skewSeverity(a: Version, b: Version): Severity {
-    if (a.major !== b.major) return "major";
-    if (a.minor !== b.minor) return "minor";
-    if (a.patch !== b.patch) return "patch";
+  skewSeverity(other: Version): Severity {
+    if (this.major !== other.major) return "major";
+    if (this.minor !== other.minor) return "minor";
+    if (this.patch !== other.patch) return "patch";
     return "same";
   }
+
+  /** Static form kept for callers that prefer a symmetric two-arg call. */
+  static skewSeverity(a: Version, b: Version): Severity { return a.skewSeverity(b); }
 }

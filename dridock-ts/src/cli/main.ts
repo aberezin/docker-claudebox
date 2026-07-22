@@ -14,6 +14,7 @@ import { CommandRegistry } from "./CommandRegistry.ts";
 import { VersionCommand } from "./commands/VersionCommand.ts";
 import { ConsultCommand } from "./commands/ConsultCommand.ts";
 import { FeaturesCommand } from "./commands/FeaturesCommand.ts";
+import { CheckversionCommand } from "./commands/CheckversionCommand.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
 import { DridockError } from "../domain/errors.ts";
@@ -36,6 +37,7 @@ function buildRegistry(): CommandRegistry {
   registry.register(new ConsultCommand());
   registry.register(new FeaturesCommand("features"));
   registry.register(new FeaturesCommand("profiles"));
+  registry.register(new CheckversionCommand());
   // Additional verbs registered in later phases.
   return registry;
 }

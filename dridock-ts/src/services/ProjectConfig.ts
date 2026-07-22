@@ -14,6 +14,23 @@ export class ProjectConfig {
   constructor(private readonly fs: FileSystem) {}
 
   /**
+   * The project's stable id — the value of the `id:` key in config.yml.
+   * Returns undefined if config.yml is missing, id: is missing, or id is
+   * the sentinel "auto" (which means "unbootstrapped, generate on first
+   * `dridock start`"). Ports the read-only half of cb_project_id_ro.
+   *
+   * The read-only variant intentionally does NOT trigger a bootstrap
+   * (cb_project_id / cb_init_project_config) — that's a write path.
+   */
+  async projectId(configPath: string): Promise<string | undefined> {
+    const text = await this.fs.readTextOrUndefined(configPath);
+    if (text === undefined) return undefined;
+    const id = parseTopLevelString(text, "id");
+    if (id === undefined || id === "auto") return undefined;
+    return id;
+  }
+
+  /**
    * Enabled features from `configPath`.
    *   - missing/unreadable config -> `[]` (matches bash's `[ -f "$cfg" ] || return 0`)
    *   - flow style: `features: [typescript, python]`
@@ -30,6 +47,34 @@ export class ProjectConfig {
     if (text === undefined) return [];
     return parseFeatures(text);
   }
+}
+
+/**
+ * Grab the value of a top-level KEY: VALUE line from the config-file
+ * text. Not nested — bash uses `_cb_yaml_get` which is also flat-only
+ * for the ids/hostnames dridock cares about. Value is trimmed and any
+ * matching quote pair stripped; comments after the value dropped.
+ * Missing key → undefined. Empty value → undefined.
+ */
+export function parseTopLevelString(text: string, key: string): string | undefined {
+  const re = new RegExp(`^\\s*${escapeRegex(key)}\\s*:\\s*(.*)$`);
+  for (const rawLine of text.split(/\r?\n/)) {
+    // Skip indented (nested-child) lines; only top-level keys match. A key
+    // is "top-level" iff the line starts at column 0 (no leading whitespace).
+    if (/^\s/.test(rawLine)) continue;
+    const m = rawLine.match(re);
+    if (!m) continue;
+    let v = m[1]!.replace(/\s+#.*$/, "").trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+      v = v.slice(1, -1);
+    }
+    return v === "" ? undefined : v;
+  }
+  return undefined;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**

@@ -29,16 +29,44 @@ describe("Version.parse", () => {
   });
 });
 
-describe("Version.compareTo", () => {
-  test.each<[string, string, -1 | 0 | 1]>([
-    ["3.3.7", "3.3.7", 0],
-    ["3.3.6", "3.3.7", -1],
-    ["3.3.8", "3.3.7", 1],
-    ["3.2.99", "3.3.0", -1],   // minor beats patch
-    ["2.99.99", "3.0.0", -1],  // major beats minor
-    ["10.0.0", "9.99.99", 1],  // numeric, not lexical (bash sort -V pitfall)
+describe("Version.compareTo (bash cb_semver_cmp — gt|lt|eq)", () => {
+  test.each<[string, string, "gt" | "lt" | "eq"]>([
+    ["3.3.7", "3.3.7", "eq"],
+    ["3.3.6", "3.3.7", "lt"],
+    ["3.3.8", "3.3.7", "gt"],
+    ["3.2.99", "3.3.0", "lt"],   // minor beats patch
+    ["2.99.99", "3.0.0", "lt"],  // major beats minor
+    ["10.0.0", "9.99.99", "gt"], // numeric, not lexical (bash sort -V pitfall)
   ])("(%s).compareTo(%s) === %s", (a, b, expected) => {
     expect(Version.parse(a).compareTo(Version.parse(b))).toBe(expected);
+  });
+});
+
+describe("Version.parseLoose (bash-parity permissive parser)", () => {
+  test("plain MAJOR.MINOR.PATCH parses like strict", () => {
+    expect(Version.parseLoose("3.3.7").toString()).toBe("3.3.7");
+  });
+  test("strips per-component non-digit suffix like bash's ${x%%[!0-9]*} (0-rc1 -> 0)", () => {
+    expect(Version.parseLoose("3.3.7-rc1").toString()).toBe("3.3.7");
+    expect(Version.parseLoose("3.3.0-rc1").toString()).toBe("3.3.0");
+  });
+  test("missing fields default to 0", () => {
+    expect(Version.parseLoose("3").toString()).toBe("3.0.0");
+    expect(Version.parseLoose("3.5").toString()).toBe("3.5.0");
+  });
+  test("non-numeric leading -> 0 (never throws — bash silently 0's)", () => {
+    expect(Version.parseLoose("nope").toString()).toBe("0.0.0");
+  });
+  test("+meta suffix on patch treated like -rc suffix", () => {
+    expect(Version.parseLoose("3.3.7+meta").toString()).toBe("3.3.7");
+  });
+});
+
+describe("Version.skewSeverity (instance form)", () => {
+  test("delegates to the static form — a.skewSeverity(b) matches Version.skewSeverity(a,b)", () => {
+    const a = Version.parse("3.3.7");
+    const b = Version.parse("3.4.0");
+    expect(a.skewSeverity(b)).toBe(Version.skewSeverity(a, b));
   });
 });
 

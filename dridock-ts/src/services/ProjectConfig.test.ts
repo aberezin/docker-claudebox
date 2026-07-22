@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { ProjectConfig, parseFeatures } from "./ProjectConfig.ts";
+import { ProjectConfig, parseFeatures, parseTopLevelString } from "./ProjectConfig.ts";
 import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 
 describe("parseFeatures — YAML tolerance (matches wrapper.sh awk)", () => {
@@ -79,6 +79,48 @@ describe("parseFeatures — YAML tolerance (matches wrapper.sh awk)", () => {
       "  - typescript",
       "",
     ].join("\n"))).toEqual(["typescript", "python"]);
+  });
+});
+
+describe("parseTopLevelString — flat YAML KEY: VALUE (matches _cb_yaml_get)", () => {
+  test("basic key + value", () => {
+    expect(parseTopLevelString("id: abc12345\n", "id")).toBe("abc12345");
+  });
+  test("skips indented keys — nested `id` under `vm:` doesn't shadow top-level", () => {
+    const y = "vm:\n  id: nested-should-be-ignored\nid: real-id\n";
+    expect(parseTopLevelString(y, "id")).toBe("real-id");
+  });
+  test("strips trailing '# comment'", () => {
+    expect(parseTopLevelString("id: abc  # scratch\n", "id")).toBe("abc");
+  });
+  test("strips matching double-quote wrap", () => {
+    expect(parseTopLevelString('id: "abc"\n', "id")).toBe("abc");
+  });
+  test("strips matching single-quote wrap", () => {
+    expect(parseTopLevelString("id: 'abc'\n", "id")).toBe("abc");
+  });
+  test("empty value -> undefined", () => {
+    expect(parseTopLevelString("id: \n", "id")).toBeUndefined();
+  });
+  test("missing key -> undefined", () => {
+    expect(parseTopLevelString("vm:\n  disk: 60G\n", "id")).toBeUndefined();
+  });
+});
+
+describe("ProjectConfig.projectId", () => {
+  test("returns id when present + not 'auto'", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc12345\n");
+    expect(await new ProjectConfig(fs).projectId("/p/.dridock/config.yml")).toBe("abc12345");
+  });
+  test("returns undefined for 'auto' sentinel (means: bootstrap not run yet)", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: auto\n");
+    expect(await new ProjectConfig(fs).projectId("/p/.dridock/config.yml")).toBeUndefined();
+  });
+  test("returns undefined when config.yml missing (matches cb_project_id_ro)", async () => {
+    const fs = new InMemoryFileSystem();
+    expect(await new ProjectConfig(fs).projectId("/p/.dridock/config.yml")).toBeUndefined();
   });
 });
 
