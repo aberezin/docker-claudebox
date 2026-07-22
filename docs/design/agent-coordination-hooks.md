@@ -104,34 +104,32 @@ tree ever gets shared.
 
 Once the agent is running, a persistent `Monitor` polls the comments endpoint every 60
 seconds and emits one notification per **new matching** comment. The filter is the same
-whitelist regex the catch-up hook uses.
+whitelist regex the catch-up hook uses, and the polling shape is the same too:
+`since=<last-successful-fetch-timestamp>`, advanced only after a successful fetch.
 
 ```bash
-# Persistent Monitor, whitelist by recipient marker, dedup via a seen-ids file,
-# fail-loud after 3 consecutive gh api failures.
+# Persistent Monitor — since=-based, whitelist by recipient marker, fail-loud
+# after 3 consecutive gh api failures, heartbeat file for external liveness checks.
 set -u
-seen=/tmp/gh-watch-seen.txt
-gh api "repos/$OWNER/$REPO/issues/comments?per_page=100" 2>/dev/null \
-  | jq -r '.[].id | tostring' > "$seen"   # seed with existing IDs
-
+HEARTBEAT=/tmp/gh-watch-heartbeat
+LAST="$(date -u +%Y-%m-%dT%H:%M:%SZ)"   # arm-time — nothing older will be surfaced
 FAILS=0
 while true; do
-  if OUT=$(gh api "repos/$OWNER/$REPO/issues/comments?per_page=30&sort=created&direction=desc" 2>&1); then
+  NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if OUT=$(gh api "repos/$OWNER/$REPO/issues/comments?since=$LAST&per_page=100" 2>&1); then
     FAILS=0
     printf '%s' "$OUT" | jq -r '
         .[]
         | select(.body | test("^\\s*\\*\\*→ (Bear|Alan):\\*\\*"))
-        | [(.id|tostring), (.issue_url | split("/") | last), .user.login, (.body // "" | split("\n")[0] | .[:120])]
+        | [(.issue_url | split("/") | last), .user.login, (.body // "" | split("\n")[0] | .[:120])]
         | @tsv
       ' 2>/dev/null \
-      | while IFS=$(printf '\t') read -r cid inum author first; do
-          [ -z "$cid" ] && continue
-          if ! grep -qx "$cid" "$seen"; then
-            echo "$cid" >> "$seen"
-            ts=$(date +%H:%M:%S)
-            echo "[$ts] #$inum ← $author: $first"
-          fi
+      | while IFS=$(printf '\t') read -r inum author first; do
+          [ -z "$inum" ] && continue
+          ts=$(date +%H:%M:%S)
+          echo "[$ts] #$inum ← $author: $first"
         done
+    LAST="$NOW"   # advance only on success — outages don't lose messages
   else
     FAILS=$((FAILS + 1))
     if [ "$FAILS" -eq 3 ]; then
@@ -139,10 +137,32 @@ while true; do
       echo "[$ts] WATCHER ERROR: 3 consecutive gh api failures — check GH_TOKEN / network. Last error tail: $(printf '%s' "$OUT" | tail -1 | head -c 200)"
     fi
   fi
-  touch "$seen"   # heartbeat: stale mtime unambiguously means the loop died
+  touch "$HEARTBEAT"   # stat this from outside to distinguish "dead loop" from "quiet period"
   sleep 60
 done
 ```
+
+Why `since=<last-successful-fetch>` and not a seed-plus-seen-ids design: the
+seed-and-dedup shape has a latent bug that fires the session AFTER the repo crosses 100
+comments. `gh api …/comments?per_page=100` without `sort` returns **oldest-first**, but
+the intuitive poll (`sort=created&direction=desc`) returns **newest-first** — so the seed
+grabs the wrong 100, misses the newest, and every poll's newest 30 show up as unseen
+until you cross the 30-boundary. Burst-prone, latent, silent. `since=` avoids the whole
+class: the query is bounded by time, there's nothing to seed, and dedup is implicit in
+"we already looked at things older than LAST."
+
+### Why LAST advances only on success (opposite of the catch-up watermark)
+
+The catch-up hook's watermark advances **unconditionally** — because it runs once per
+session start and a stuck watermark replays the same N comments every session forever.
+
+The Monitor's `LAST` advances **only on success** — because it runs every 60 seconds and
+a not-yet-advanced `LAST` just re-tries the same window on the next iteration. When the
+outage clears, the recovery poll's `since=LAST` covers the whole outage window in one
+shot (potentially bursty for a long outage — an accepted trade-off vs missing messages).
+
+Both choices are the right answer for their context. Same variable name, opposite
+semantics — this is worth calling out when reading either script.
 
 Arm it as the agent's first action of the session (the catch-up hook's
 `additionalContext` reminds the agent to do this):
@@ -165,9 +185,11 @@ here has a matching loud one:
 - **3 consecutive `gh api` failures** → `WATCHER ERROR: check GH_TOKEN / network` with
   the last-error tail. Emitted as a stdout line, which the Monitor tool surfaces as a
   notification like any other event.
-- **The seen-ids file gets `touch`ed every poll**, so its mtime is a heartbeat. A file
-  whose mtime is > 90 s stale means the loop died; a check as simple as
-  `stat -c %Y $seen` from the agent side tells you which.
+- **A heartbeat file** (`/tmp/gh-watch-heartbeat` or equivalent) gets `touch`ed every
+  poll, so its mtime is a liveness signal. A file whose mtime is > 90 s stale means
+  the loop died; a check as simple as `stat -c %Y <heartbeat>` from the agent side
+  tells you which. The heartbeat file's only job is to be `touch`ed — it carries no
+  content.
 
 Both were forced by real incidents in this project (see [Never silently discard user
 state or user-supplied input](../../CLAUDE.md#conventions-worth-knowing) in the root
@@ -193,10 +215,22 @@ Whitelist is the right answer. The trade-off — unaddressed observations don't
 push-notify — is fine; agents can catch those on periodic `gh issue list` sweeps.
 
 The blacklist temptation is real. Both agents on this project shipped blacklist filters
-first; both hit false-positive regressions when their outbound shape expanded (Bear
-introduced a `Shipped in <version>` opener; Arfy introduced a `Closing per <peer>` opener
-— neither had a matching blacklist entry until it fired incorrectly). The whitelist has
-never had that failure mode.
+first; both hit failures for **different** reasons, both fatal to the pattern:
+
+- **Arfy's bug was DIRECTION.** Her first cut was `select(test("→ Arfy") | not)` — which
+  drops exactly the messages **addressed to** her (`→ Arfy`) and keeps everything else,
+  including her own outbound. It only *looked* like it worked because regex escaping made
+  the pattern match nothing, so nothing was filtered — everything passed, and unaddressed
+  close-comments (`Closing per <peer>`) leaked through as noise. Reverse-direction bug,
+  hidden by a co-occurring regex bug — extra-nasty.
+- **Bear's bug was UNENUMERATED SHAPES.** Direction was right (skip outbound patterns
+  like `**→ Arfy:**` and `— Bear` tail), but any new outbound shape not on the skip list
+  fired a false-positive notification. Concrete instance: introducing a `Shipped in
+  <version>` close-comment opener with no matching skip entry meant every close-comment
+  Bear posted pinged Bear right back.
+
+Whitelist eliminates both classes: the recipient-arrow either matches or it doesn't, no
+direction to invert and no outbound shape to enumerate.
 
 ## Watermark semantics
 
