@@ -26,6 +26,130 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.3.6] — 2026-07-22 _(fork)_
+
+### Fixed — #37 systematic silent-drop audit (10 Tier 1 verified)
+
+Arfy fanned out an analytical audit across `wrapper.sh`, `entrypoint.sh`,
+and the six Python daemons after the sixth silent-drop-family instance
+(#36), then line-verified 10 findings against the actual code. The 3.3.3
+house rule stops NEW instances of this class; this ships fixes the rule
+can't retroactively grep for. Six were already caught + fixed by
+Bear↔Arfy earlier in the 3.3.x sequence; these are the remaining 10.
+
+**wrapper.sh** (5 fixes):
+
+- **#1** — `dridock migrate` verb accumulated rc from `cb_migrate_state_dirs`
+  only (added in 3.3.2). The verb runs FOUR migrators — `cb_migrate_workspace` /
+  `_data_dir` / `_machine_config` / `_state_dirs` — and the other three each
+  `return 1` on a `.claudebox/`↔`.dridock/` collision but had their rc
+  discarded. `dridock migrate` printed their `⚠ … leaving both, resolve
+  by hand` to stderr and STILL exited 0. Same defect on three siblings of
+  the state_dirs case. Now OR-accumulates rc across all four; also gave
+  `cb_migrate_workspace` a real return code (was hardcoded to 0). Every
+  half-successful migrate now exits non-zero for automation.
+- **#2** — `cb_secrets_put` used `cat "$tmp" > "$sf"` and returned the
+  next line's `chmod` rc. If the redirect failed (ENOSPC, RO filesystem)
+  `$sf` was left empty or partial — the credential the caller just set
+  was LOST — and callers (`--seed-secret`, `--secrets-file`) printed
+  `✓ …/secrets.env: $key` regardless. Now checks the redirect, returns 1
+  on failure with a loud stderr line; both callers updated to honor rc
+  and count failures separately.
+- **#5** — `cb_features_write` had the same silent-write bug in a
+  different file. `cb_features_{enable,disable}`'s `|| return 1` guard
+  could never fire because the function always returned `rm`'s 0. A
+  failed `config.yml` write printed `✓ enabled feature '$name'` over a
+  wiped config. Same fix pattern: check the redirect, return 1 on failure.
+- **#6** — `dridock consult post` swallowed unknown flags (`*) : ;;`) →
+  `--auther` (typo) posted with default author, no error, "posted"
+  success. Also `--diff wrongpath` silently produced no `proposed.diff`
+  because the branch was `[ -n "$_diff" ] && [ -f "$_diff" ] && cp …` —
+  bad path just short-circuits. Now: unknown flag → error + exit 1;
+  `--diff` requires the file to exist AND the copy to succeed.
+- **#7** — `dridock bootstrap --repo <url>` printed `❌ clone failed`
+  on stderr but kept going, counted the failed repo in the "✓ N sibling
+  repo(s) cloned" summary, and exited 0. Now tracks successful vs failed
+  clones separately, reports `✓ M/N cloned` with the true count, and
+  exits non-zero if any failed.
+
+**entrypoint.sh** (4 fixes):
+
+- **#3** — `~/.claude/init.d/*.sh` hooks (the documented durable escape
+  hatch) ran once on first container create; a failing hook's rc went
+  only to `dbg` and the completion marker was set unconditionally. So
+  a failed setup was marked complete forever, invisibly. Now: capture
+  per-script rc, complain to stderr on failure, and set the marker only
+  if EVERY script succeeded — a failing hook re-runs on the next
+  container create until it works or the user notices.
+- **#8** — the feature-install loop had a bare `continue` on malformed
+  feature names, silent inside an otherwise-loud loop (unknown-feature
+  and install-failed branches both `echo … >&2`). Now: matches the
+  loop's own convention with a stderr line before the skip.
+- **#9** — `groupmod` / `usermod` at the top of the entrypoint (docker
+  socket GID match, host UID/GID match for `claude` user) ran unchecked.
+  A silent `usermod` failure means the later `chown claude:claude`
+  stamps files with the UNCHANGED UID → host files end up misowned
+  when the container exits, invisible until the user hits a permission
+  error on their Mac. Now: `|| echo "dridock: … FAILED — host files may
+  end up misowned" >&2` on each of the three calls.
+- **#10** — `.claude.json` patch used `UPDATED=$(jq …) && printf > …`.
+  The `&&` correctly avoids truncating on jq parse failure, but the
+  failure itself was silent — startup proceeded as if the patch landed,
+  so the trust dialog reappeared and sandbox settings looked wrong with
+  no dridock-level trace. Now: fail loud with the file name + jq's own
+  error tail when the patch skips.
+
+**api_server.py** (1 fix):
+
+- **#4** — the OpenAI adapter dropped image blocks silently when
+  `_save_oai_image` returned `None` (SSRF rejection for loopback /
+  private / metadata IPs, unsupported scheme, download failure, or bad
+  `data:` URI). The request returned a normal 200 with claude answering
+  as if no image was attached; the OpenAI client got a coherent-but-
+  wrong answer with no signal the image was dropped — only a server-
+  side `log.warning`. Now: injects a visible `[image failed to load: <url-hint>
+  (SSRF / scheme / download / bad data-URI — see server log)]` text
+  block in place of the dropped image, so both claude and the OpenAI
+  client see the failure. Same shape for the empty-URL case.
+
+### Added — regression tests for #4
+
+`test_oai_resolve_content_marks_failed_image_visibly` (renamed from
+`_skips_failed_image` which pinned the old wrong behavior) +
+`test_oai_resolve_content_marks_empty_url_visibly`. Both assert the
+visible marker is present and includes a URL hint. 37/37 python unit
+tests pass (was 36; +1 new empty-URL case).
+
+### Not fixed here — flagged for Tier 2 follow-up
+
+Arfy's audit also surfaced six agent-flagged items she did NOT line-
+verify (marked "spot-check before touching"): `cb_set_hostname` config
+write, `cb_inject_vm_env` empty sidecar, bootstrap positional-intent
+dedup, empty-always-skill skip, telegram `[SEND_FILE:]` refused-outside-
+workspace with no inline note, telegram `on_callback` unknown key.
+Each is LOW-MEDIUM at worst. Deferring: bear-side spot-check them one
+at a time when there's a slot.
+
+### Upgrade
+
+Image rebuild required (fixes touch entrypoint.sh + api_server.py, both
+baked). `./install.sh` + `make build` after pulling.
+
+### Bear-side verification
+
+- syntax: wrapper + entrypoint + api_server all clean
+- wrapper.sh version: dridock 3.3.6
+- test_cbvm.sh: 154/0
+- test_rename_completeness.sh: 0/0 (247 OK)
+- test_env_rename_compat.sh: 17/0
+- python unit tests: 37/37 (test_api_server_oai + test_md_to_tg_html)
+
+Behavioral changes in this release are all "previously wrong path now
+correct" — no user-visible API changes. `dridock migrate` and
+`dridock bootstrap --repo` may now exit non-zero when they previously
+exited 0 on partial success; automation calling `|| alert` should treat
+this as the fix, not the regression.
+
 ## [3.3.5] — 2026-07-22 _(fork)_
 
 ### Fixed

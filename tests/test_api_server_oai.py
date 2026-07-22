@@ -203,12 +203,29 @@ def test_oai_resolve_content_image_block_becomes_text_pointer(tmp):
     assert os.path.isfile(embedded)
 
 
-def test_oai_resolve_content_skips_failed_image():
-    # Unsafe URL → SSRF guard returns None → block is dropped (not crashed).
+def test_oai_resolve_content_marks_failed_image_visibly():
+    # #37 Tier 1 #4 — was `skips_failed_image` (silent drop). SSRF-rejected /
+    # unresolvable image now injects a visible [image failed to load: …] text
+    # block so both Claude and the OpenAI client see the drop instead of
+    # getting a coherent-but-wrong answer with no signal.
     blocks = [{"type": "image_url", "image_url": {"url": "http://localhost/x.png"}}]
     with patch("api_server.socket.getaddrinfo", return_value=_gai("127.0.0.1")):
         got = _run(api_server._oai_resolve_content(blocks))
-    assert got == []
+    assert len(got) == 1, "one block in → one block out (visible marker replaces the drop)"
+    assert got[0]["type"] == "text"
+    assert "image failed to load" in got[0]["text"], f"expected failure marker, got: {got[0]!r}"
+    assert "http://localhost/x.png" in got[0]["text"], "URL hint should be surfaced for debuggability"
+
+
+def test_oai_resolve_content_marks_empty_url_visibly():
+    # #37 Tier 1 #4 — empty image_url.url was also silently dropped; now
+    # produces a visible marker.
+    blocks = [{"type": "image_url", "image_url": {"url": ""}}]
+    got = _run(api_server._oai_resolve_content(blocks))
+    assert len(got) == 1
+    assert got[0]["type"] == "text"
+    assert "image failed to load" in got[0]["text"]
+    assert "empty" in got[0]["text"]
 
 
 # ── _oai_messages_to_claude ───────────────────────────────────────────────────

@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.3.5"
+DRIDOCK_VERSION="3.3.6"
 
 # The name the user actually typed to invoke us. Both `dridock` and legacy
 # `claudebox` symlink to this wrapper (install.sh's --bin-name), so help
@@ -458,7 +458,17 @@ cb_secrets_put() {
     tmp="$(mktemp)"
     grep -vE "^[[:space:]]*${key}=" "$sf" > "$tmp" 2>/dev/null || true
     printf '%s=%s\n' "$key" "$val" >> "$tmp"
-    cat "$tmp" > "$sf"; rm -f "$tmp"
+    # #37 Tier 1 #2 — check the redirect. On ENOSPC / RO-fs the truncating
+    # `> "$sf"` leaves the file empty or partial and the just-set secret is
+    # LOST; without the check the function returned chmod's rc (0) and
+    # callers (--seed-secret / --secrets-file) printed "✓ …/secrets.env: $key"
+    # over a wiped file. Fail loud + non-zero so callers can act.
+    if ! cat "$tmp" > "$sf"; then
+        echo "❌ failed to write secrets file: $sf" >&2
+        rm -f "$tmp"
+        return 1
+    fi
+    rm -f "$tmp"
     chmod 600 "$sf"
 }
 
@@ -1358,7 +1368,15 @@ cb_features_write() {
         flow="${flow#, }"
         printf '\nfeatures: [%s]\n' "$flow" >> "$tmp"
     fi
-    cat "$tmp" > "$cfg"
+    # #37 Tier 1 #5 — check the redirect. Was returning rm's rc (always 0),
+    # so cb_features_{enable,disable}'s `|| return 1` guard could never fire
+    # on a failed config.yml write; caller printed "✓ enabled feature …"
+    # over a truncated/empty config. Fail loud + non-zero.
+    if ! cat "$tmp" > "$cfg"; then
+        echo "❌ failed to write features to $cfg" >&2
+        rm -f "$tmp"
+        return 1
+    fi
     rm -f "$tmp"
 }
 
@@ -1910,7 +1928,7 @@ cb_bootstrap() {
 # cb_migrate_workspace ROOT — move ROOT/.claudebox/* → ROOT/.dridock/*, rewrite
 # ROOT/.gitignore lines. Idempotent (no-op when there's nothing to migrate).
 cb_migrate_workspace() {
-    local root="$1" src dst f name tmp
+    local root="$1" src dst f name tmp split=0
     src="$root/.claudebox"; dst="$root/.dridock"
     [ -d "$src" ] || return 0
     mkdir -p "$dst"
@@ -1919,6 +1937,7 @@ cb_migrate_workspace() {
         name="$(basename "$f")"
         if [ -e "$dst/$name" ]; then
             echo "  ⚠ $(basename "$root")/.claudebox/$name: also exists in .dridock/ — leaving both, resolve by hand" >&2
+            split=1
             continue
         fi
         mv "$f" "$dst/$name"
@@ -1931,7 +1950,10 @@ cb_migrate_workspace() {
         rm -f "$tmp"
     fi
     rmdir "$src" 2>/dev/null && echo "  ✓ removed empty .claudebox/"
-    return 0
+    # #37 Tier 1 #1 — return non-zero when any workspace file skipped due to
+    # split-brain, so the migrate verb can OR-accumulate across all four
+    # migrators (was only capturing cb_migrate_state_dirs' rc pre-3.3.6).
+    return "$split"
 }
 
 # cb_migrate_data_dir ID — move ~/.config/claudebox/projects/<id> → ~/.config/dridock/projects/<id>.
@@ -2334,14 +2356,18 @@ HELP
             shift
         done
         echo "migrate: $CB_PROJECT_ROOT"
-        cb_migrate_workspace "$CB_PROJECT_ROOT"
+        # #37 Tier 1 #1 — accumulate rc from EVERY migrator, not just state_dirs.
+        # cb_migrate_workspace / _data_dir / _machine_config / _state_dirs each
+        # `return 1` on a .claudebox↔.dridock collision they can't safely
+        # resolve; the verb has to exit non-zero when any of them did, or
+        # `dridock migrate || alert` misses split state in three of the four.
+        # (3.3.2 fixed this for state_dirs only; this closes the sibling siblings.)
+        _mig_state_rc=0
+        cb_migrate_workspace "$CB_PROJECT_ROOT" || _mig_state_rc=1
         _mig_id="$(cb_project_id_ro "$CB_PROJECT_ROOT")"
-        [ -n "$_mig_id" ] && cb_migrate_data_dir "$_mig_id"
-        cb_migrate_machine_config
-        # #32 — cb_migrate_state_dirs returns non-zero when it skipped a subdir
-        # (live-Chrome guard OR split-brain). Surface the skip in the final line
-        # rather than printing "✅ done" over a stderr scroll the user missed.
-        _mig_state_rc=0; cb_migrate_state_dirs || _mig_state_rc=$?
+        [ -n "$_mig_id" ] && { cb_migrate_data_dir "$_mig_id" || _mig_state_rc=1; }
+        cb_migrate_machine_config || _mig_state_rc=1
+        cb_migrate_state_dirs || _mig_state_rc=1
         if [ "$_mig_all" = 1 ]; then
             echo "migrate --all: sweeping legacy project data dirs…"
             _mig_old_root="$(cb_config_home)/claudebox/projects"
@@ -2484,14 +2510,23 @@ HELP
                 _t="$_ch/$_cid"; mkdir -p "$_t"
                 _author=framework; _status=""; _diff=""
                 shift 3 2>/dev/null || true
+                # #37 Tier 1 #6 — reject unknown flags loudly (was `*) : ;;` —
+                # silently swallowed typos like `--auther` and posted with the
+                # default author, no error, "posted" success message).
                 while [ $# -gt 0 ]; do case "$1" in
                     --author) _author="${2:-framework}"; shift ;;
                     --status) _status="${2:-}"; shift ;;
                     --diff)   _diff="${2:-}"; shift ;;
-                    *) : ;;
+                    *) echo "consult post: unknown arg '$1' (allowed: --author, --status, --diff)" >&2; exit 1 ;;
                 esac; shift; done
                 cb_consult_post "$_t" "$_author"
-                [ -n "$_diff" ] && [ -f "$_diff" ] && cp "$_diff" "$_t/proposed.diff"
+                # #37 Tier 1 #6 (cont.) — if --diff was given, require the file
+                # to exist AND the copy to succeed. Was silently no-op on
+                # `--diff wrongpath` while still printing "posted" success.
+                if [ -n "$_diff" ]; then
+                    [ -f "$_diff" ] || { echo "consult post: --diff file not found: $_diff" >&2; exit 1; }
+                    cp "$_diff" "$_t/proposed.diff" || { echo "consult post: failed to copy diff to $_t/proposed.diff" >&2; exit 1; }
+                fi
                 [ -n "$_status" ] && cb_consult_meta_set "$_t" status "$_status"
                 echo "posted $_author turn to $_cid${_status:+ (status=$_status)}" ;;
             watch)
@@ -2626,19 +2661,35 @@ HELP
                 grep -qxF "$_ig" "$PWD/.gitignore" 2>/dev/null || echo "$_ig" >> "$PWD/.gitignore"
             done
             if [ "${#_bs_repos[@]}" -gt 0 ]; then
+                # #37 Tier 1 #7 — count actual clone successes, exclude failures
+                # from the summary, exit non-zero if any repo failed to clone.
+                # Was: "❌ clone failed" on stderr → keep going → "✓ N sibling
+                # repo(s) cloned" counting the failed one → exit 0. Summary
+                # actively contradicted the error; rc lied to automation.
+                _bs_cloned=0; _bs_clone_fail=0
                 for _url in "${_bs_repos[@]}"; do
                     _name="$(basename "$_url" .git)"
                     if [ -e "$PWD/$_name" ]; then
                         echo "  ⚠ $_name/ already exists — skipping clone" >&2
+                        _bs_cloned=$((_bs_cloned + 1))   # existing counts as "we have it"
                     else
                         echo "  ⬇ cloning $_url → $_name/ …"
-                        if command -v gh >/dev/null 2>&1 && gh repo clone "$_url" "$_name" >/dev/null 2>&1; then :
-                        elif git clone -q "$_url" "$_name" 2>/dev/null; then :
-                        else echo "  ❌ clone failed: $_url (private? check 'gh auth login' / the URL)" >&2; fi
+                        if command -v gh >/dev/null 2>&1 && gh repo clone "$_url" "$_name" >/dev/null 2>&1; then
+                            _bs_cloned=$((_bs_cloned + 1))
+                        elif git clone -q "$_url" "$_name" 2>/dev/null; then
+                            _bs_cloned=$((_bs_cloned + 1))
+                        else
+                            echo "  ❌ clone failed: $_url (private? check 'gh auth login' / the URL)" >&2
+                            _bs_clone_fail=$((_bs_clone_fail + 1))
+                        fi
                     fi
                     grep -qxF "/$_name/" "$PWD/.gitignore" 2>/dev/null || echo "/$_name/" >> "$PWD/.gitignore"
                 done
-                echo "  ✓ ${#_bs_repos[@]} sibling repo(s) cloned + gitignored (parent won't track them as gitlinks)"
+                echo "  ✓ $_bs_cloned/${#_bs_repos[@]} sibling repo(s) cloned + gitignored (parent won't track them as gitlinks)"
+                if [ "$_bs_clone_fail" -gt 0 ]; then
+                    echo "  ❌ $_bs_clone_fail of ${#_bs_repos[@]} clone(s) failed — bootstrap partial" >&2
+                    exit 1
+                fi
             else
                 echo "  ℹ multi-repo parent ready — clone your repos as siblings (they're auto-gitignored as you add them), or use --repo <url>"
             fi
@@ -2655,12 +2706,19 @@ HELP
         # secrets: file-based only, so nothing sensitive is echoed or shell-history'd.
         if [ -n "$_bs_secfile" ]; then
             [ -f "$_bs_secfile" ] || { echo "bootstrap: --secrets-file not found: $_bs_secfile" >&2; exit 1; }
-            _sn=0
+            _sn=0; _sfail=0
             while IFS='=' read -r _k _v; do
                 case "$_k" in ''|\#*) continue ;; esac
-                cb_secrets_put "$PWD" "$_k" "$_v"; _sn=$((_sn + 1))
+                # #37 Tier 1 #2 — cb_secrets_put now returns 1 on write failure
+                # (was silently returning chmod's 0 while dropping the credential).
+                if cb_secrets_put "$PWD" "$_k" "$_v"; then
+                    _sn=$((_sn + 1))
+                else
+                    _sfail=$((_sfail + 1))
+                fi
             done < "$_bs_secfile"
             echo "  ✓ $(cb_project_dot_basename "$PWD")/secrets.env ($_sn key(s) from $_bs_secfile; gitignored, chmod 600)"
+            [ "$_sfail" -gt 0 ] && echo "  ❌ $_sfail secret(s) failed to write to $(cb_project_dot_basename "$PWD")/secrets.env — check disk space / permissions" >&2
         fi
         # --seed-secret KEY=CMD (repeatable): run CMD on the host, put stdout in secrets.env as KEY.
         # Handles --gh-token too (which appended GH_TOKEN=gh auth token above). Empty output = skipped
@@ -2674,8 +2732,13 @@ HELP
                 # command has, and the leading space `gh auth token` prints).
                 _val="$(eval "$_c" 2>/dev/null | awk '{sub(/^[[:space:]]+/,""); sub(/[[:space:]]+$/,""); print; exit}' || true)"
                 if [ -n "$_val" ]; then
-                    cb_secrets_put "$PWD" "$_k" "$_val"
-                    echo "  ✓ $(cb_project_dot_basename "$PWD")/secrets.env: $_k (from host '$_c'; gitignored, chmod 600)"
+                    # #37 Tier 1 #2 — honor cb_secrets_put's rc so a failed
+                    # secrets.env write doesn't print ✓ over a wiped file.
+                    if cb_secrets_put "$PWD" "$_k" "$_val"; then
+                        echo "  ✓ $(cb_project_dot_basename "$PWD")/secrets.env: $_k (from host '$_c'; gitignored, chmod 600)"
+                    else
+                        echo "  ❌ $(cb_project_dot_basename "$PWD")/secrets.env: $_k — write failed (check disk space / permissions)" >&2
+                    fi
                 else
                     echo "  ⚠ --seed-secret $_k: '$_c' returned nothing — skipped" >&2
                 fi

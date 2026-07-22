@@ -878,10 +878,26 @@ async def _oai_resolve_content(content: Union[str, list[Any]]) -> Union[str, lis
         if block.get("type") == "image_url":
             url = block.get("image_url", {}).get("url", "")
             if not url:
+                # #37 Tier 1 #4 — visible-to-Claude notice on empty URL. Was
+                # a silent drop; the request returned 200 with claude answering
+                # as if no image was ever attached, and the OpenAI client had
+                # no way to know.
+                resolved.append({"type": "text", "text": "[image failed to load: image_url.url was empty]"})
                 continue
             saved = await _save_oai_image(url)
             if saved:
                 resolved.append({"type": "text", "text": f"[See image: {saved}]"})
+            else:
+                # #37 Tier 1 #4 — same class as the empty-url case above.
+                # _save_oai_image returns None for SSRF-rejected URLs (loopback /
+                # private / metadata IPs), unsupported schemes, unfetchable
+                # remotes, and undecodable data: URIs. Each was silently dropped
+                # pre-3.3.6 → 200 with a coherent-but-wrong answer. Inject a
+                # visible marker so both claude and the OpenAI client know the
+                # image didn't make it. See _save_oai_image / _is_safe_remote_url
+                # for the specific rejection reasons this covers.
+                url_hint = url[:60] + ("…" if len(url) > 60 else "")
+                resolved.append({"type": "text", "text": f"[image failed to load: {url_hint} (rejected by SSRF guard, unsupported scheme, download failure, or bad data-URI — see server log)]"})
             continue
         resolved.append(block)
     return resolved

@@ -19,7 +19,12 @@ if [ -S /var/run/docker.sock ]; then
 	CURRENT_DOCKER_GID=$(getent group docker | cut -d: -f3)
 	if [ "$SOCKET_GID" != "$CURRENT_DOCKER_GID" ]; then
 		dbg "fixing docker socket GID: $CURRENT_DOCKER_GID -> $SOCKET_GID"
-		groupmod -g "$SOCKET_GID" docker
+		# #37 Tier 1 #9 — surface groupmod failure. Silent failure means the
+		# in-container docker group GID doesn't match the socket's, so `docker`
+		# calls fail with permission errors later — hard to diagnose without
+		# a trace here.
+		groupmod -g "$SOCKET_GID" docker \
+			|| echo "dridock: groupmod -g $SOCKET_GID docker FAILED — docker socket access likely broken" >&2
 	fi
 fi
 dbg "docker socket done"
@@ -49,11 +54,18 @@ if [ -n "$CLAUDE_WORKSPACE" ] && [ -d "$CLAUDE_WORKSPACE" ]; then
 	if [ "$HOST_UID" != "0" ] && [ "$HOST_GID" != "0" ]; then
 		if [ "$HOST_GID" != "$CURRENT_GID" ]; then
 			dbg "fixing GID: $CURRENT_GID -> $HOST_GID"
-			groupmod -g "$HOST_GID" claude
+			# #37 Tier 1 #9 — surface UID/GID remap failures. If the target
+			# GID is in use, groupmod fails silently and the later
+			# `chown claude:claude` stamps files with the UNCHANGED gid →
+			# host files misowned when the container exits, invisible to
+			# the user until they hit a permission error on their Mac.
+			groupmod -g "$HOST_GID" claude \
+				|| echo "dridock: groupmod -g $HOST_GID claude FAILED — host files may end up misowned" >&2
 		fi
 		if [ "$HOST_UID" != "$CURRENT_UID" ]; then
 			dbg "fixing UID: $CURRENT_UID -> $HOST_UID"
-			usermod -u "$HOST_UID" claude
+			usermod -u "$HOST_UID" claude \
+				|| echo "dridock: usermod -u $HOST_UID claude FAILED — host files may end up misowned" >&2
 		fi
 		PARALLEL=$(( $(nproc) / 2 ))
 		[ "$PARALLEL" -lt 1 ] && PARALLEL=1
@@ -539,15 +551,28 @@ CLAUDE_JSON="$CLAUDE_CONFIG_DIR/.claude.json"
 mkdir -p "$CLAUDE_CONFIG_DIR"
 
 dbg "configuring .claude.json"
+# #37 Tier 1 #10 — the `UPDATED=$(jq …) && printf > …` shape correctly
+# avoids truncating $CLAUDE_JSON when jq fails to parse it (jq exits
+# non-zero, && short-circuits, no write). But the failure itself is
+# silent: startup proceeds as if the patch landed, so the trust prompt
+# reappears in the sandbox and settings look wrong with no dridock-level
+# trace of why. Fail loud on jq parse failure so the user sees which
+# mounted file is malformed.
 if [ -f "$CLAUDE_JSON" ]; then
-	UPDATED=$(jq '.installMethod = "native" | .autoUpdates = false | .autoUpdatesProtectedForNative = true' "$CLAUDE_JSON") && \
+	if ! UPDATED=$(jq '.installMethod = "native" | .autoUpdates = false | .autoUpdatesProtectedForNative = true' "$CLAUDE_JSON" 2>&1); then
+		echo "dridock: could not patch $(basename "$CLAUDE_JSON") (invalid JSON in mounted file) — settings.installMethod / autoUpdates NOT applied. jq: $UPDATED" >&2
+	else
 		printf '%s\n' "$UPDATED" > "$CLAUDE_JSON"
+	fi
 else
 	cp /claude/.claude.json "$CLAUDE_JSON"
 fi
 
-UPDATED=$(jq --arg dir "$WORKSPACE_DIR" '.projects[$dir].hasTrustDialogAccepted = true' "$CLAUDE_JSON") && \
+if ! UPDATED=$(jq --arg dir "$WORKSPACE_DIR" '.projects[$dir].hasTrustDialogAccepted = true' "$CLAUDE_JSON" 2>&1); then
+	echo "dridock: could not patch $(basename "$CLAUDE_JSON") (invalid JSON) — trust dialog for $WORKSPACE_DIR NOT pre-accepted; you'll see the prompt on first run. jq: $UPDATED" >&2
+else
 	printf '%s\n' "$UPDATED" > "$CLAUDE_JSON"
+fi
 
 # Persist permissions.defaultMode=bypassPermissions in settings.json. `--dangerously-skip-
 # permissions` at invocation time isn't fully authoritative in newer Claude Code — certain
@@ -570,17 +595,34 @@ dbg ".claude.json done"
 INIT_MARKER="/var/run/claude-initialized"
 if [ ! -f "$INIT_MARKER" ]; then
 	INIT_DIR="/home/claude/.claude/init.d"
+	# #37 Tier 1 #3 — capture per-script rc, complain to stderr on failure,
+	# and only set the marker if EVERY script succeeded. init.d is the
+	# documented durable "escape hatch"; a failed hook silently marked-done
+	# forever was a fire-and-forget bug that the user could only discover
+	# by noticing the intended setup didn't happen. Now: failure → loud
+	# stderr + no marker + retry on next container create.
+	init_rc=0
 	if [ -d "$INIT_DIR" ]; then
 		dbg "first run: executing init scripts from $INIT_DIR"
 		for script in "$INIT_DIR"/*.sh; do
 			[ ! -f "$script" ] && continue
 			dbg "init: running $script"
 			bash "$script"
-			dbg "init: $script exited with $?"
+			_rc=$?
+			if [ "$_rc" -ne 0 ]; then
+				echo "dridock: init.d/$(basename "$script") exited $_rc — will retry on next container create" >&2
+				init_rc=1
+			else
+				dbg "init: $script exited 0"
+			fi
 		done
 	fi
-	touch "$INIT_MARKER"
-	dbg "init marker created"
+	if [ "$init_rc" -eq 0 ]; then
+		touch "$INIT_MARKER"
+		dbg "init marker created"
+	else
+		echo "dridock: init.d had failures — marker NOT set; init scripts will re-run on the next container create" >&2
+	fi
 fi
 
 # ── durable env sidecars → THIS shell's environment ──────────────────────────
@@ -986,7 +1028,15 @@ _install_features() {
 	if [ ! -f "$pf" ] && [ -f "$pf_legacy" ]; then pf="$pf_legacy"; fi
 	[ -f "$pf" ] || return 0
 	for feat in $(cat "$pf" 2>/dev/null); do
-		case "$feat" in ''|*[!A-Za-z0-9_-]*) continue ;; esac
+		# #37 Tier 1 #8 — was `continue ;` bare, the ONLY silent path in an
+		# otherwise-loud loop (unknown-feature + install-failed branches below
+		# both echo to stderr). A malformed name (typo, whitespace) got dropped
+		# with zero signal. Now: match the loop's own convention — say so.
+		case "$feat" in
+			''|*[!A-Za-z0-9_-]*)
+				echo "dridock: ignoring malformed feature name '$feat' in $pf" >&2
+				continue ;;
+		esac
 		# Either marker suffices — 2.x set `.profile-$feat`, 3.0 sets `.feature-$feat`.
 		[ -f "$CLAUDE_CONFIG_DIR/.feature-$feat" ] && continue
 		[ -f "$CLAUDE_CONFIG_DIR/.profile-$feat" ] && continue
