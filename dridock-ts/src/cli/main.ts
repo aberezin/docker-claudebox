@@ -19,6 +19,8 @@ import { InfoCommand } from "./commands/InfoCommand.ts";
 import { MigrateCommand } from "./commands/MigrateCommand.ts";
 import { DownCommand } from "./commands/DownCommand.ts";
 import { DestroyCommand } from "./commands/DestroyCommand.ts";
+import { StopCommand } from "./commands/StopCommand.ts";
+import { StartCommand } from "./commands/StartCommand.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
 import { DridockError } from "../domain/errors.ts";
@@ -47,6 +49,8 @@ function buildRegistry(): CommandRegistry {
   registry.register(new MigrateCommand());
   registry.register(new DownCommand());
   registry.register(new DestroyCommand());
+  registry.register(new StopCommand());
+  registry.register(new StartCommand());
   // Additional verbs registered in later phases.
   return registry;
 }
