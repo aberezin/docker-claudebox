@@ -1,0 +1,106 @@
+import type { FileSystem } from "../../infra/FileSystem.ts";
+
+/**
+ * In-memory FileSystem for tests. No disk, no `mktemp -d`, no
+ * `XDG_CONFIG_HOME=` scaffolding. Tests seed it directly:
+ *
+ *   const fs = new InMemoryFileSystem();
+ *   fs.seed("/proj/.dridock/config.yml", "id: abc\nvm:\n  cpu: 4\n");
+ *   const info = await new InfoCommand(fs, …).run([], ctx);
+ *
+ * Deliberately narrow — same surface as the FileSystem interface, plus a
+ * `seed` helper and a `.recordedWrites` array for asserting writes happened.
+ */
+export class InMemoryFileSystem implements FileSystem {
+  private readonly files = new Map<string, { content: string; mode?: number }>();
+  private readonly directories = new Set<string>();
+  readonly recordedWrites: Array<{ path: string; content: string; mode?: number }> = [];
+
+  /** Test-only: pre-populate a file. Marks all its parent dirs as existing. */
+  seed(path: string, content: string, opts: { mode?: number } = {}): void {
+    this.files.set(path, { content, mode: opts.mode });
+    let dir = dirnameOf(path);
+    while (dir && dir !== "/" && dir !== ".") {
+      this.directories.add(dir);
+      dir = dirnameOf(dir);
+    }
+  }
+
+  /** Test-only: pre-create a directory (with no files in it yet). */
+  seedDir(path: string): void {
+    this.directories.add(path);
+    let dir = dirnameOf(path);
+    while (dir && dir !== "/" && dir !== ".") {
+      this.directories.add(dir);
+      dir = dirnameOf(dir);
+    }
+  }
+
+  async readText(path: string): Promise<string> {
+    const entry = this.files.get(path);
+    if (entry === undefined) throw new Error(`InMemoryFileSystem: no such file: ${path}`);
+    return entry.content;
+  }
+
+  async readTextOrUndefined(path: string): Promise<string | undefined> {
+    return this.files.get(path)?.content;
+  }
+
+  async writeText(path: string, content: string, opts: { mode?: number } = {}): Promise<void> {
+    this.files.set(path, { content, mode: opts.mode });
+    this.recordedWrites.push({ path, content, mode: opts.mode });
+    // Also mark parent dir as existing
+    let dir = dirnameOf(path);
+    while (dir && dir !== "/" && dir !== ".") {
+      this.directories.add(dir);
+      dir = dirnameOf(dir);
+    }
+  }
+
+  async exists(path: string): Promise<boolean> {
+    return this.files.has(path) || this.directories.has(path);
+  }
+
+  async isDirectory(path: string): Promise<boolean> {
+    return this.directories.has(path);
+  }
+
+  async listDir(path: string): Promise<string[]> {
+    if (!this.directories.has(path)) throw new Error(`InMemoryFileSystem: no such directory: ${path}`);
+    const prefix = path.endsWith("/") ? path : `${path}/`;
+    const names = new Set<string>();
+    for (const filePath of this.files.keys()) {
+      if (filePath.startsWith(prefix)) {
+        const rest = filePath.slice(prefix.length);
+        const firstSegment = rest.split("/")[0];
+        if (firstSegment !== undefined && firstSegment !== "") names.add(firstSegment);
+      }
+    }
+    for (const dirPath of this.directories) {
+      if (dirPath === path) continue;
+      if (dirPath.startsWith(prefix)) {
+        const rest = dirPath.slice(prefix.length);
+        const firstSegment = rest.split("/")[0];
+        if (firstSegment !== undefined && firstSegment !== "") names.add(firstSegment);
+      }
+    }
+    return [...names].sort();
+  }
+
+  /** Test-only: get the mode of a file (for asserting chmod). */
+  modeOf(path: string): number | undefined {
+    return this.files.get(path)?.mode;
+  }
+
+  /** Test-only: full path listing (for debug printing). */
+  allPaths(): string[] {
+    return [...this.files.keys(), ...this.directories].sort();
+  }
+}
+
+/** Local `dirname` — avoids importing node:path so this file is trivially portable. */
+function dirnameOf(path: string): string {
+  const lastSlash = path.lastIndexOf("/");
+  if (lastSlash <= 0) return "/";
+  return path.slice(0, lastSlash);
+}
