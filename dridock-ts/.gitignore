@@ -6,6 +6,10 @@ out
 dist
 *.tgz
 
+# compiled single-binary output (bun build --compile)
+bin/
+*.bun-build
+
 # code coverage
 coverage
 *.lcov

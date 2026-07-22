@@ -119,6 +119,41 @@ else
 fi
 rm -f "$WRAPPER_TMP"
 
+# Optional: also build + install the parallel TypeScript rewrite (`dridock-ts` in the
+# same INSTALL_DIR). Off by default — set DRIDOCK_INSTALL_TS=1 to opt in. Bash
+# wrapper remains the canonical `dridock`; the TS binary is available side-by-side
+# as `dridock-ts` for users who want to try it. Requires bun (installer offered).
+# See docs/design/typescript-rewrite.md for what verbs the TS binary handles vs
+# what still needs the bash wrapper.
+if [ -n "${DRIDOCK_INSTALL_TS:-}" ]; then
+	if [ ! -d "$SCRIPT_DIR/dridock-ts" ]; then
+		echo "⚠  DRIDOCK_INSTALL_TS=1 set but $SCRIPT_DIR/dridock-ts is missing — skipping TS binary install."
+	else
+		if ! command -v bun >/dev/null 2>&1; then
+			echo "⚠  DRIDOCK_INSTALL_TS=1 set but 'bun' is not installed."
+			echo "   Install it (https://bun.sh — curl -fsSL https://bun.sh/install | bash) and re-run install.sh."
+			echo "   Skipping TS binary install for now (bash wrapper is fine on its own)."
+		else
+			echo "🔨 Compiling dridock-ts (TypeScript rewrite) → single binary..."
+			(cd "$SCRIPT_DIR/dridock-ts" && bun install --frozen-lockfile >/dev/null 2>&1 || true; bun run build) || {
+				echo "⚠  TS binary build failed — bash wrapper installed OK, continuing."
+			}
+			TS_BIN="$SCRIPT_DIR/dridock-ts/bin/dridock"
+			if [ -x "$TS_BIN" ]; then
+				echo "📝 Installing dridock-ts to $INSTALL_DIR/dridock-ts..."
+				if [ -w "$INSTALL_DIR" ]; then
+					install -m 755 "$TS_BIN" "$INSTALL_DIR/dridock-ts"
+				elif command -v sudo >/dev/null 2>&1; then
+					sudo install -m 755 "$TS_BIN" "$INSTALL_DIR/dridock-ts"
+				fi
+				echo "   ✓ dridock-ts installed side-by-side with the bash wrapper."
+				echo "   Try it: 'dridock-ts version', 'dridock-ts features list', 'dridock-ts checkversion'."
+				echo "   See docs/design/typescript-rewrite.md for what it handles vs what still needs bash."
+			fi
+		fi
+	fi
+fi
+
 # Install host-agent.py next to the wrapper (the wrapper resolves it there) — the opt-in
 # Mac agent for `dridock host-agent up` (Approach 2). Best-effort; skip if absent.
 if [ -f "$SCRIPT_DIR/host-agent.py" ]; then
