@@ -26,6 +26,70 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.3.5] — 2026-07-22 _(fork)_
+
+### Fixed
+
+- **#36** — `/config key=value` silently dropped its args in the Telegram
+  bot. `cmd_config` (`telegram_bot.py:627`) accepted `context.args` but
+  only ever displayed the current config; the setter branch never ran.
+  So `/config model=sonnet` dumped the unchanged config back with no
+  error and no effect — the next prompt still ran on the old model.
+
+  Textbook instance of the class the CLAUDE.md house rule (added 3.3.3)
+  explicitly names: "Never silently discard user-supplied input — fail
+  fast or say so loudly." The bug predates the rule; the rule now
+  covers it. **Found and fixed by Arfy during #22 verification** —
+  she diagnosed, wrote the diff, and runtime-verified against a
+  hot-mounted container before handing it to bear to land.
+
+  Fix routes `key=value` args through the same `_apply_choice` validator
+  `/model` and `/effort` already use — same closed-set validation (models
+  from `AVAILABLE_MODELS`, efforts from `AVAILABLE_EFFORTS`), same
+  ValueError-on-invalid, same "reset to yaml default" via `__reset__`.
+  Behavior now:
+  - `/config` (no args) — unchanged, shows current settings.
+  - `/config model=sonnet` — applies via `_apply_choice`, replies
+    `updated: model=sonnet`, next prompt uses sonnet.
+  - `/config model=bogus` — replies with the same allowlist error the
+    `_apply_choice` path produces elsewhere; no silent drop.
+  - `/config bogus` (no `=`) — replies `bad argument 'bogus' — use
+    key=value, e.g. /config model=sonnet`.
+  - `/config foo=bar` (unknown key) — replies with the settable-key
+    list; points at `/system_prompt` / `/append_system_prompt` for
+    text-valued keys (which can contain spaces, so they keep their own
+    dedicated commands).
+
+  Peer-audited the other `cmd_*` handlers in `telegram_bot.py`: none
+  have the same silent-drop pattern. `cmd_start` / `cmd_status` /
+  `cmd_cancel` / `cmd_reload` take no args by design; `cmd_model` /
+  `cmd_effort` / `cmd_system_prompt` / `cmd_append_system_prompt` all
+  properly handle their args (validated `_apply_choice` or the text
+  setter). `cmd_config` was the outlier.
+
+### Not fixed here — flagged, deferred
+
+- **cmd_config unit test.** Arfy runtime-verified the fix (against a
+  hot-mounted `telegram_bot.py` in the #22 container); no automated
+  test yet because `cmd_config` is async + needs python-telegram-bot's
+  `Update`/`Context` mocked (~50 lines). Small follow-up if the code
+  needs another change; the diff itself is small enough that the
+  runtime verify + the peer audit above are adequate for a hotfix.
+
+### Batch defect corrected in-flight
+
+- Bear's #22 compound batch (posted before this fix) told Arfy to test
+  `/config model=sonnet` as the model-switch mechanism. Pre-fix that
+  step was silently broken (the very bug this ships). With #36 landed,
+  the batch step becomes correct rather than needing a rewrite to
+  `/model`. Arfy noted this; no batch-text update needed.
+
+### Upgrade
+
+Image rebuild required (fix is in `telegram_bot.py`, baked into the
+image). `./install.sh` + `make build` after pulling. No wrapper-only
+path this time.
+
 ## [3.3.4] — 2026-07-22 _(fork)_
 
 ### Fixed — critical shipped-image bugs from #21 Mac-side verification

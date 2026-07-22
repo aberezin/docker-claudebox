@@ -627,14 +627,48 @@ async def cmd_reload(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     chat = update.effective_chat
-    if not user or not chat or not is_allowed(chat.id, user.id):
+    msg = update.effective_message
+    if not user or not chat or not msg or not is_allowed(chat.id, user.id):
+        return
+
+    # `/config key=value [key2=value2 …]` applies overrides through the same
+    # validated setter as /model and /effort; bare `/config` shows current
+    # settings. Never silently ignore args (CLAUDE.md house rule): apply them,
+    # or reply with a specific error. Text-valued keys (system_prompt,
+    # append_system_prompt) can contain spaces, so they keep their own commands.
+    if context.args:
+        settable = {"model": AVAILABLE_MODELS, "effort": AVAILABLE_EFFORTS}
+        applied = []
+        for tok in context.args:
+            key, sep, value = tok.partition("=")
+            key = key.strip().lower()
+            value = value.strip().lower()
+            if not sep or not value:
+                await msg.reply_text(
+                    f"bad argument {tok!r} — use key=value, e.g. /config model=sonnet"
+                )
+                return
+            if key not in settable:
+                await msg.reply_text(
+                    f"unknown config key {key!r} (settable here: "
+                    f"{', '.join(sorted(settable))}); text values use "
+                    f"/system_prompt or /append_system_prompt"
+                )
+                return
+            try:
+                _apply_choice(chat.id, key, value, settable[key])
+            except ValueError as e:
+                await msg.reply_text(str(e))
+                return
+            applied.append(f"{key}={_resolved_value(chat.id, key)}")
+        await msg.reply_text("updated: " + ", ".join(applied))
         return
 
     chat_cfg = get_chat_config(chat.id)
     lines = [f"chat {chat.id}:"]
     for k, v in sorted(chat_cfg.items()):
         lines.append(f"  {k}: {v}")
-    await update.effective_message.reply_text("\n".join(lines))
+    await msg.reply_text("\n".join(lines))
 
 
 def _resolved_value(chat_id: int, key: str, default: str = "default") -> str:
