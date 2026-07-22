@@ -1123,8 +1123,22 @@ async def openai_chat_completions(
 # ── MCP server ────────────────────────────────────────────────────────────────
 
 from mcp.server.fastmcp import FastMCP  # noqa: E402
+from mcp.server.transport_security import TransportSecuritySettings  # noqa: E402
 
 _mcp = FastMCP("claudebox", streamable_http_path="/")
+# #34 — the MCP SDK's streamable_http_app() enables DNS-rebinding protection
+# by default, with allowed_hosts limited to localhost/127.0.0.1/::1. That
+# rejects every legitimate remote client of dridock's /mcp endpoint —
+# Claude Desktop and any sibling agent on cb-net address this container by
+# published VM IP (or by container name inside cb-net). The dridock model
+# already gates this endpoint with bearer auth via the _MCPWithAuth wrapper
+# below, so the DNS-rebinding protection is redundant AND breaks the
+# intended use case (real users get "Invalid Host header" 400s). Disable
+# the SDK-side host guard and rely on the bearer wrapper as the sole
+# access gate — the same shape we use for the OpenAI + native REST surfaces.
+_mcp.settings.transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=False,
+)
 
 
 @_mcp.tool()

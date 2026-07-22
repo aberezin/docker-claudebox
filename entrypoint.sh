@@ -729,8 +729,14 @@ if [ "$_mode_telegram" = "1" ] && [ "$_mode_cron" = "1" ]; then
 	COMBINED_ENV="$COMBINED_ENV; export DRIDOCK_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file")"
 	COMBINED_ENV="$COMBINED_ENV; export DRIDOCK_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}")"
 	COMBINED_ENV="$COMBINED_ENV; export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH"
+	# #33 — use absolute /usr/bin/python3, not bare `python3`. The full image
+	# has pyenv shims on PATH ahead of /usr/bin, and pyenv's own 3.12 does NOT
+	# have the daemon deps (uvicorn/fastapi/mcp/telegram/croniter) — the base
+	# stage installed those into the SYSTEM python only. Bare `python3`
+	# resolved to pyenv → ModuleNotFoundError → every daemon mode crashed on
+	# boot in the shipped image. Absolute path bypasses PATH resolution.
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "$COMBINED_ENV; python3 /home/claude/cron.py & CRON_PID=\$!; trap 'kill \$CRON_PID 2>/dev/null' EXIT INT TERM; python3 /home/claude/telegram_bot.py"
+		bash -c "$COMBINED_ENV; /usr/bin/python3 /home/claude/cron.py & CRON_PID=\$!; trap 'kill \$CRON_PID 2>/dev/null' EXIT INT TERM; /usr/bin/python3 /home/claude/telegram_bot.py"
 fi
 
 # api mode — run fastapi server instead of claude
@@ -741,7 +747,7 @@ if [ "$_mode_api" = "1" ]; then
 	CLAUDE_UID=$(id -u claude)
 	CLAUDE_GID=$(id -g claude)
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_API_PORT=$_mode_api_port && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec python3 /home/claude/api_server.py"
+		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_API_PORT=$_mode_api_port && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec /usr/bin/python3 /home/claude/api_server.py"
 fi
 
 # telegram mode — run telegram bot instead of claude
@@ -752,7 +758,7 @@ if [ "$_mode_telegram" = "1" ]; then
 	CLAUDE_UID=$(id -u claude)
 	CLAUDE_GID=$(id -g claude)
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec python3 /home/claude/telegram_bot.py"
+		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec /usr/bin/python3 /home/claude/telegram_bot.py"
 fi
 
 # cron mode — run scheduler that fires claude per cron yaml
@@ -772,7 +778,7 @@ if [ "$_mode_cron" = "1" ]; then
 	mkdir -p /home/claude/.claude/cron/history
 	chown -R claude:claude /home/claude/.claude/cron 2>/dev/null || true
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file") && export DRIDOCK_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}") && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec python3 /home/claude/cron.py"
+		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file") && export DRIDOCK_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}") && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec /usr/bin/python3 /home/claude/cron.py"
 fi
 
 # build the command to run as claude

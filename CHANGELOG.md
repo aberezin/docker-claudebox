@@ -26,6 +26,100 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.3.4] — 2026-07-22 _(fork)_
+
+### Fixed — critical shipped-image bugs from #21 Mac-side verification
+
+Arfy verified #21 MCP conformance PASSES against Claude Desktop v1.18286,
+but the setup surfaced two shipped-image bugs that break the full image
+for every real user of the non-interactive daemon modes. Both are
+invisible to bear-side automated tests because those build a `minimal`
+throwaway image that doesn't exercise these code paths.
+
+**#33 — every daemon mode crashes on boot in the full `dridock:latest` image.**
+
+`entrypoint.sh`'s four daemon launchers (api / telegram / cron /
+telegram+cron) do `exec python3 <daemon>.py` using bare `python3`. The
+base stage installs the daemon dependencies (`fastapi`, `uvicorn`,
+`python-telegram-bot`, `pyyaml`, `mcp`, `croniter`) into
+`/usr/bin/python3`. The **full** target then installs pyenv, whose shims
+sit ahead of `/usr/bin/` on `PATH` — so bare `python3` resolved to
+pyenv's 3.12, which has none of those deps. Real users got
+`ModuleNotFoundError: uvicorn` (and equivalents) on every attempt to
+start api/telegram/cron modes. This breaks #19/#20/#21/#22/#23 on the
+image that actually ships.
+
+Fixed by using the absolute `/usr/bin/python3` in all four launcher
+`exec` lines (entrypoint.sh:739, 750, 761, 781). Absolute path bypasses
+`PATH` resolution and PYENV_VERSION entirely — the daemon code hasn't
+changed, only the interpreter it launches under.
+
+**#34 — MCP endpoint refused every remote client (`Invalid Host header`).**
+
+`api_server.py` mounted `_mcp.streamable_http_app()` with no
+transport-security configuration. The MCP SDK enables DNS-rebinding
+protection by default, with `allowed_hosts` limited to
+`localhost:* / 127.0.0.1:* / [::1]:*`. Every Claude Desktop / A2A /
+sibling-agent connection reaches `/mcp/` by the container's VM IP
+(or a `cb-net` container name), so the `Host` header never matched the
+default allowlist — `initialize` returned HTTP 400 `Invalid Host header`
+for every real client. This blocked the whole reason `/mcp/` is
+published on the VM IP, and directly blocks the #27 A2A vision
+(sibling agents reaching each other's `/mcp/` over the private VM
+network).
+
+Fixed by explicitly setting
+`_mcp.settings.transport_security = TransportSecuritySettings(
+enable_dns_rebinding_protection=False)` before calling
+`streamable_http_app()`. The bearer-auth `_MCPWithAuth` wrapper stays
+as the sole access gate — same shape as the OpenAI and native REST
+surfaces on the same port. Bear-side smoke: an initialize with a
+spoofed remote-IP `Host` header now returns HTTP 200 (was 400).
+
+### Not fixed here — flagged, deferred
+
+Arfy's #21 write-up also noted that `claude_run`'s first-call latency
+after a container swap exceeded Claude Desktop's default MCP client
+timeout (MCP -32001) before succeeding on retry. Benign for now (retry
+worked); worth a note in `docs/modes/api.md` if it recurs. No code
+change.
+
+### Bear-batch hygiene lessons (memory-only)
+
+Two Bear defects Arfy caught while running the #21 batch — both now
+baked into `project_bear_arfy_workflow.md` in bear's auto-memory:
+
+- Compound batches must never scaffold under `/tmp/` on Arfy's Mac —
+  colima mounts `$HOME` only, so a `/tmp/`-rooted workspace is invisible
+  to the VM daemon. Bootstrap fallbacks now use `~/Development/<name>`.
+- Compound batches must never pass a secret via
+  `docker run -e VAR="$(cat …)"` — that puts the credential in docker's
+  own argv (visible in `ps`, history, `docker inspect`). Same
+  "secrets are file-based, never CLI" rule already in the container
+  `CLAUDE.md`, now also applied to instructions I hand Arfy.
+
+### Upgrade
+
+Image rebuild REQUIRED (unlike 3.2.4→3.3.3 which were wrapper-only).
+`./install.sh` picks up the wrapper's DRIDOCK_VERSION bump; `make build`
+in the harness clone rebuilds `dridock:latest` with the entrypoint +
+api_server fixes baked. Anyone running api/telegram/cron modes on the
+full image today has a broken deployment — this is the fix.
+
+### Bear-side verification
+
+- `test_api.sh` MCP subset (5 tests) re-run against a rebuilt minimal
+  test image: **5/5 GREEN**. No regression from the transport-security
+  change.
+- Live curl smoke: `initialize` with spoofed `Host: 192.168.99.99:18945`
+  now HTTP 200 (was 400 pre-fix).
+- Syntax: entrypoint.sh + api_server.py clean.
+
+#33 end-to-end verification requires the full image (pyenv only exists
+there). Bear can't rebuild the full image in-container quickly; Arfy
+runs `make build` on Mac + retests. Compound batch coming after this
+push.
+
 ## [3.3.3] — 2026-07-21 _(fork)_
 
 ### Fixed
