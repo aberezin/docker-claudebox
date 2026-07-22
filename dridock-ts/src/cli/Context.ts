@@ -39,6 +39,8 @@ export interface TextWriter {
 export class StringWriter implements TextWriter {
   private readonly chunks: string[] = [];
   write(chunk: string): void { this.chunks.push(chunk); }
+  /** All chunks concatenated. Alias `toString` kept for `${writer}` interpolation. */
+  text(): string { return this.chunks.join(""); }
   toString(): string { return this.chunks.join(""); }
   reset(): void { this.chunks.length = 0; }
 }

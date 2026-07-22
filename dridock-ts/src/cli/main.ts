@@ -13,6 +13,7 @@ import { basename } from "node:path";
 import { CommandRegistry } from "./CommandRegistry.ts";
 import { VersionCommand } from "./commands/VersionCommand.ts";
 import { ConsultCommand } from "./commands/ConsultCommand.ts";
+import { FeaturesCommand } from "./commands/FeaturesCommand.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
 import { DridockError } from "../domain/errors.ts";
@@ -33,6 +34,8 @@ function buildRegistry(): CommandRegistry {
   const registry = new CommandRegistry();
   registry.register(new VersionCommand());
   registry.register(new ConsultCommand());
+  registry.register(new FeaturesCommand("features"));
+  registry.register(new FeaturesCommand("profiles"));
   // Additional verbs registered in later phases.
   return registry;
 }
