@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.3.6"
+DRIDOCK_VERSION="3.3.7"
 
 # The name the user actually typed to invoke us. Both `dridock` and legacy
 # `claudebox` symlink to this wrapper (install.sh's --bin-name), so help
@@ -2764,8 +2764,11 @@ esac
 # `bootstrap` is handled above and re-execs into the wrapper AFTER writing the project dir,
 # so it never trips the new-project guard.
 case "${1:-}" in
+    # Throwaway/management verbs (handled by if-blocks + a dedicated passthrough
+    # case later) — skip VM guards, no VM work needed.
     setup-token|-v|--version|doctor|auth|mcp|stop|clear-session) : ;;
-    *)
+    # Empty (interactive launch) or any flag → run VM guards + fall through.
+    ''|-*)
         cb_guard_workspace   "$CB_PROJECT_ROOT" || exit 1
         # Auto-migrate a legacy `.claudebox/`-only project to `.dridock/` before the
         # new-project guard would (incorrectly) offer to scaffold a fresh project on
@@ -2773,6 +2776,17 @@ case "${1:-}" in
         cb_auto_migrate      "$CB_PROJECT_ROOT"
         cb_guard_new_project "$CB_PROJECT_ROOT" || exit 1
         cb_check_infra_drift "$CB_PROJECT_ROOT"
+        ;;
+    # Any bare-word first arg reaching this point is a typo. The main dispatch
+    # above (case at ~2172) enumerates + `exit`s every legitimate verb, so a
+    # bareword getting here means either an unknown top-level command
+    # (`dridock chrome`) OR a stray bareword after `start` (`dridock start
+    # chrome`). Pre-3.3.7 both silently spun up a VM to pass the token to
+    # claude as an arg — user-reported footgun. Refuse fast.
+    *)
+        echo "❌ unknown dridock verb: '$1'" >&2
+        echo "   run '$CB_SELF --help' for the list of valid verbs" >&2
+        exit 1
         ;;
 esac
 

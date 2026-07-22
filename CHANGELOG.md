@@ -26,6 +26,50 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.3.7] — 2026-07-22 _(fork)_
+
+### Fixed
+
+- **Unknown-verb footgun** (user-reported): `dridock <bareword>` where
+  `<bareword>` is not a known verb (e.g. `dridock chrome`) silently
+  spun up the project VM and passed the bareword to claude as an arg,
+  because the wrapper's main dispatch case matched only known verbs and
+  then fell through to interactive-launch for everything else, treating
+  unrecognized first args as claude passthrough tokens. Alan hit this
+  by mis-typing a verb in a real project directory (`docker-claudebox`);
+  the VM started for a typo. Same class was reachable via
+  `dridock start <bareword>` since 2.24.0's `start)` branch just shifts
+  and falls through, so post-shift `$1` = the stray bareword hit the
+  same path.
+
+  Fix: added an explicit reject branch to the guards case at
+  wrapper.sh:2766. Every known verb the main dispatch handles above
+  already `exit`s (info/status/vm/version/checkversion/migrate/…), so
+  reaching the guards with a bareword `$1` is a typo by construction —
+  either an unmatched top-level command or a post-`start` stray. Now:
+
+  ```
+  $ dridock chrome
+  ❌ unknown dridock verb: 'chrome'
+     run 'dridock --help' for the list of valid verbs
+  $ echo $?
+  1
+  ```
+
+  Same output + exit 1 for `dridock start chrome`. No VM setup, no
+  cb-infra reach, no colima work — immediate rejection.
+
+  Flags (`-p`, `--model`, etc.) still pass through unchanged; empty
+  `$1` (bare `dridock`) still hits the existing version + usage-hint
+  path from #12/2.24.0; known throwaway verbs (`setup-token`, `stop`,
+  `clear-session`, `doctor`, `auth`, `mcp`, `-v`, `--version`) still
+  skip guards and reach their dedicated handlers.
+
+### Upgrade
+
+Wrapper-only change; no image rebuild needed. `./install.sh` picks it
+up.
+
 ## [3.3.6] — 2026-07-22 _(fork)_
 
 ### Fixed — #37 systematic silent-drop audit (10 Tier 1 verified)
