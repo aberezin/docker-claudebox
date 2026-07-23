@@ -29,10 +29,45 @@ export interface Docker {
    * if the docker command itself failed (VM down / image absent).
    */
   imageVersion(context: string | undefined, image: string): Promise<ImageVersion>;
+
+  /**
+   * Run `claude --version` inside the image via a throwaway container
+   * and return the trimmed first line, or IMAGE_UNAVAILABLE if the
+   * container-run failed / output was empty. Ports cb_image_claude_version
+   * at wrapper.sh:973 — strips the "(Claude Code)" suffix on success.
+   *
+   * The claude CLI is a separate axis from the harness semver (that's
+   * imageVersion); this one decides which claude flags are real. Auto-
+   * update is disabled in the image so this only moves on a rebuild.
+   */
+  imageClaudeCliVersion(context: string | undefined, image: string): Promise<ImageVersion>;
 }
 
 /** Production impl. */
 export class RealDocker implements Docker {
+  async imageClaudeCliVersion(context: string | undefined, image: string): Promise<ImageVersion> {
+    // `docker run --rm --entrypoint claude <image> --version` → first
+    // line; strips " (Claude Code)" suffix. Bash-parity for
+    // cb_image_claude_version at wrapper.sh:973.
+    const args = [
+      "docker",
+      ...(context !== undefined ? ["--context", context] : []),
+      "run", "--rm", "--entrypoint", "claude", image, "--version",
+    ];
+    try {
+      const proc = Bun.spawn(args, { stdout: "pipe", stderr: "ignore" });
+      const text = await new Response(proc.stdout).text();
+      const rc = await proc.exited;
+      if (rc !== 0) return IMAGE_UNAVAILABLE;
+      const firstLine = text.split(/\r?\n/)[0] ?? "";
+      const trimmed = firstLine.replace(/\s*\(Claude Code\)\s*$/, "").trim();
+      if (trimmed === "") return IMAGE_UNAVAILABLE;
+      return trimmed;
+    } catch {
+      return IMAGE_UNAVAILABLE;
+    }
+  }
+
   async imageVersion(context: string | undefined, image: string): Promise<ImageVersion> {
     // `{{ or (index .Config.Labels "org.dridock.version") (index .Config.Labels
     // "org.claudebox.version") }}` — a Go template that returns the new label

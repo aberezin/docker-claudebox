@@ -44,15 +44,12 @@ export class ConsultCommand implements Command {
     for (const t of threads) {
       const status = t.status !== "" ? t.status : "?";
       const title = t.title !== "" ? t.title : "(no title)";
-      // Same shape as wrapper.sh:2474 printf: `  <id>  [status]  title`
-      ctx.stdout.write(`  ${padRight(t.id, 28)}  [${padRight(status, 20)}]  ${title}\n`);
+      // Tight columns — same shape as wrapper.sh:2474 printf `  %s  [%s]  %s`.
+      // Arfy #38 §🟠 caught the earlier fixed-width padding as a needless
+      // diff from bash.
+      ctx.stdout.write(`  ${t.id}  [${status}]  ${title}\n`);
     }
     ctx.stdout.write(`\nshow:  ${ctx.binName} consult show <id>     approve/revise/reject: ${ctx.binName} consult <verb> <id>\n`);
     return 0;
   }
-}
-
-/** Left-align + right-pad to width. */
-function padRight(s: string, width: number): string {
-  return s.length >= width ? s : s + " ".repeat(width - s.length);
 }

@@ -15,6 +15,10 @@ export interface CheckVersionInputs {
   /** Absent for "no dridock project in $PWD" — matches the `[ -n "$cid" ]` branch. */
   readonly projectImageVersion?: ImageVersion;
   readonly projectId?: string;
+  /** The baked claude CLI version from the project image (only fetched
+   *  when projectId is set — matches bash's `if [ -n "$cid" ]`).
+   *  IMAGE_UNAVAILABLE when the docker call failed. */
+  readonly claudeCliVersion?: ImageVersion;
 }
 
 export type CheckVersionOutcome =
@@ -34,11 +38,17 @@ export class CheckVersionService {
     const project = projectId !== undefined
       ? await this.docker.imageVersion(projectContext(projectId), this.imageName)
       : undefined;
+    // Only fetch claude CLI version when we have a project image to run
+    // against — matches bash's `if [ -n "$cid" ]` gating at wrapper.sh:1085.
+    const claudeCli = projectId !== undefined
+      ? await this.docker.imageClaudeCliVersion(projectContext(projectId), this.imageName)
+      : undefined;
     const inputs: CheckVersionInputs = {
       wrapperVersion,
       infraImageVersion: infra,
       projectImageVersion: project,
       projectId,
+      claudeCliVersion: claudeCli,
     };
     return { ...inputs, outcome: classify(inputs) };
   }

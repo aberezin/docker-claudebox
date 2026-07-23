@@ -65,6 +65,11 @@ export class CheckversionCommand implements Command {
     ctx.stdout.write(`  image (cb-infra):      ${e.infraImageVersion}\n`);
     if (e.projectId !== undefined) {
       ctx.stdout.write(`  image (this project):  ${e.projectImageVersion ?? "?"}   (VM ${projectProfile(e.projectId)})\n`);
+      // Bash-parity: the claude CLI in the image is a separate axis from
+      // the harness semver. Show "unavailable" when it's not queryable
+      // (VM down / image absent) — matches wrapper.sh:1093. Arfy #38 §🟠
+      // caught this row missing.
+      ctx.stdout.write(`  claude CLI (in image): ${e.claudeCliVersion ?? "unavailable"}\n`);
     } else {
       ctx.stdout.write(`  image (this project):  <no dridock project in ${ctx.cwd}>\n`);
     }

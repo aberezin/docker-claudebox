@@ -37,23 +37,39 @@ describe("InfoCommand", () => {
     expect(out).not.toContain("image (project):");
   });
 
-  test("full project prints VM name, config path, and Phase 3 stubs for VM/network", async () => {
+  test("full project prints VM name, config path, resolved data dir, and Phase 3 stubs for VM/network", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc12345\n");
     const docker = new InMemoryDocker();
     docker.seedImage("colima-cb-infra", "dridock:latest", "3.3.7");
     docker.seedImage("colima-cb-abc12345", "dridock:latest", "3.3.7");
+    docker.seedClaudeCliVersion("colima-cb-abc12345", "dridock:latest", "0.5.14");
     const { ctx, stdout } = makeCtx(fs);
     await new InfoCommand("info", "dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
     const out = stdout.text();
     expect(out).toContain("project id:        abc12345");
     expect(out).toContain("VM:                cb-abc12345");
     expect(out).toContain("config.yml:        /p/.dridock/config.yml");
+    // Arfy #38 §🟠: baked claude CLI version row present (bash-parity)
+    expect(out).toContain("claude CLI (image): 0.5.14");
+    // Arfy #38 §🟠: data-dir path resolved to a real path, no literal token
+    expect(out).toContain("/home/alan/.config/dridock/projects/abc12345/claude");
+    expect(out).not.toContain("<XDG data dir>");
     // Phase 3 stubs are visible + labeled (audit rule: no silent drops).
     expect(out).toContain("VM status: Phase 3 stub");
     expect(out).toContain("container status: Phase 3 stub");
     expect(out).toContain("network:             (Phase 3 stub");
     expect(out).toContain("machine:             (Phase 3 stub");
+  });
+
+  test("data-dir path honors machine-config data_root override (~ expansion works)", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    // Machine config sets a custom data_root
+    fs.seed("/home/alan/.config/dridock/config.yml", "data_root: ~/custom-data\n");
+    const { ctx, stdout } = makeCtx(fs);
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p")).run([], ctx);
+    expect(stdout.text()).toContain("/home/alan/custom-data/abc/claude");
   });
 
   test("secrets.env row: absent -> hint; present -> count keys", async () => {

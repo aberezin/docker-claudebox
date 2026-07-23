@@ -50,6 +50,39 @@ describe("CheckversionCommand — happy paths", () => {
     expect(out).toContain("✅ in sync");
   });
 
+  test("Arfy #38 §🟠: claude CLI (in image) row present when project is set", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    const docker = new InMemoryDocker();
+    docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
+    docker.seedImage("colima-cb-abc", "dridock:latest", DRIDOCK_TS_VERSION);
+    docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "0.5.14");
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    expect(stdout.text()).toContain("claude CLI (in image): 0.5.14");
+  });
+
+  test("Arfy #38 §🟠: claude CLI row prints 'unavailable' when image missing (matches bash's 'unavailable')", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    const docker = new InMemoryDocker();
+    docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
+    docker.seedImage("colima-cb-abc", "dridock:latest", DRIDOCK_TS_VERSION);
+    // NOTE: no seedClaudeCliVersion — InMemoryDocker returns IMAGE_UNAVAILABLE
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    expect(stdout.text()).toContain("claude CLI (in image): unavailable");
+  });
+
+  test("claude CLI row NOT printed when there's no dridock project (bash-parity: gated by cid)", async () => {
+    const fs = new InMemoryFileSystem();
+    const docker = new InMemoryDocker();
+    docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    expect(stdout.text()).not.toContain("claude CLI");
+  });
+
   test("reseed-needed: cb-infra current, project VM behind", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");

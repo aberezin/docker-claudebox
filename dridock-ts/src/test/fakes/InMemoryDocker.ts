@@ -8,14 +8,24 @@ import { IMAGE_UNAVAILABLE } from "../../infra/Docker.ts";
  */
 export class InMemoryDocker implements Docker {
   private readonly labels = new Map<string, ImageVersion>();
+  private readonly claudeVersions = new Map<string, ImageVersion>();
 
   /** Seed the "next `imageVersion(ctx, img)` returns X" outcome. */
   seedImage(context: string | undefined, image: string, version: ImageVersion): void {
     this.labels.set(this.key(context, image), version);
   }
 
+  /** Seed the "next `imageClaudeCliVersion(ctx, img)` returns X" outcome. */
+  seedClaudeCliVersion(context: string | undefined, image: string, version: ImageVersion): void {
+    this.claudeVersions.set(this.key(context, image), version);
+  }
+
   async imageVersion(context: string | undefined, image: string): Promise<ImageVersion> {
     return this.labels.get(this.key(context, image)) ?? IMAGE_UNAVAILABLE;
+  }
+
+  async imageClaudeCliVersion(context: string | undefined, image: string): Promise<ImageVersion> {
+    return this.claudeVersions.get(this.key(context, image)) ?? IMAGE_UNAVAILABLE;
   }
 
   private key(context: string | undefined, image: string): string {

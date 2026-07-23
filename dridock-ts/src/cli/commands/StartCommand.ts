@@ -63,6 +63,23 @@ export class StartCommand implements Command {
       return 1;
     }
 
+    // ── mode detect + programmatic validation ─────────────────────────
+    // Order matters: validate -p args BEFORE the VM/image ensure. The
+    // whole point of moving the allowlist out of bash was to reject bad
+    // flags (unknown, invalid --effort, missing value) BEFORE any side
+    // effect — matching wrapper.sh:3150 which rejects at parse time,
+    // long before any docker call. Doing the VM/image checks first (as
+    // an earlier version did) let those checks preempt the validator when
+    // the VM was down, silently converting a rejectable arg error into
+    // a "use the bash wrapper" stub — Arfy caught this in #38 verify.
+    const isProg = args.some((a) => a === "-p" || a === "--print");
+    let validated: ReturnType<typeof validateProgArgs> | undefined;
+    if (isProg) {
+      // Throws DridockError rc 1 on any deviation; the CLI wrapper
+      // catches + prints. This runs BEFORE colima/docker touches.
+      validated = validateProgArgs(args);
+    }
+
     const colima = this.colimaOverride ?? new RealColima();
     const runtime = this.runtimeOverride ?? new RealContainerRuntime();
     const docker = this.dockerOverride ?? new RealDocker();
@@ -72,8 +89,7 @@ export class StartCommand implements Command {
     // ── VM ensure — MVP: fail loudly if the VM isn't up ────────────────
     if (!(await colima.isRunning(profile))) {
       ctx.stderr.write(`VM ${profile} is not running.\n`);
-      ctx.stderr.write(`dridock-ts (Phase 4 MVP): VM boot is Phase 4b — use the bash wrapper to cold-start:\n`);
-      ctx.stderr.write(`     $(command -v dridock)  # bash wrapper handles 'colima start' + reseed\n`);
+      ctx.stderr.write(`dridock-ts (Phase 4 MVP): VM boot is Phase 4b — use the bash wrapper to cold-start.\n`);
       return 2;
     }
 
@@ -86,8 +102,7 @@ export class StartCommand implements Command {
     }
 
     // ── mode dispatch ─────────────────────────────────────────────────
-    const isProg = args.some((a) => a === "-p" || a === "--print");
-    if (isProg) return await this.runProgrammatic(args, id, ctx, runtime, context);
+    if (isProg) return await this.runProgrammaticValidated(validated!, id, ctx, runtime, context);
     return await this.runInteractive(args, id, ctx, runtime, context);
   }
 
@@ -125,12 +140,8 @@ export class StartCommand implements Command {
     return await runtime.runInteractive(runArgs);
   }
 
-  private async runProgrammatic(args: readonly string[], id: string, ctx: Context, runtime: ContainerRuntime, context: string): Promise<number> {
+  private async runProgrammaticValidated(validated: ReturnType<typeof validateProgArgs>, id: string, ctx: Context, runtime: ContainerRuntime, context: string): Promise<number> {
     void id;
-    // Validate + strip wrapper-only flags. Throws DridockError on any
-    // deviation — CLI wrapper catches + prints.
-    const validated = validateProgArgs(args);
-
     if (validated.wantsUpdate) {
       ctx.stderr.write(`dridock-ts (Phase 4b): --update is Phase 4b — use the bash wrapper for the update path.\n`);
       return 2;

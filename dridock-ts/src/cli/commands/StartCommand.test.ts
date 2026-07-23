@@ -184,3 +184,111 @@ describe("StartCommand — programmatic (-p) path", () => {
     expect(stderr.text()).toContain("--update is Phase 4b");
   });
 });
+
+describe("StartCommand — Arfy #38 finding: -p validator runs BEFORE VM/image checks", () => {
+  // Regression tests for Arfy's finding: an invalid -p flag with the VM
+  // down (a very common state — right after `dridock down` or a fresh
+  // boot) MUST still reject rc 1 (Unknown flag / Invalid effort / …), NOT
+  // silently degrade to rc 2 (VM-not-running stub). The whole point of
+  // the port's ProgArgValidator is to reject bad flags before any
+  // side effect. This mirrors bash wrapper.sh:3150 which parses args
+  // long before touching docker.
+
+  function seedProjectVmDown(fs: InMemoryFileSystem): { colima: InMemoryColima; docker: InMemoryDocker } {
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-abc", status: "Stopped", address: "" });
+    return { colima, docker: new InMemoryDocker() };
+  }
+
+  test("invalid flag with VM down → rc 1 'Unknown flag' (not rc 2 VM stub)", async () => {
+    const fs = new InMemoryFileSystem();
+    const { colima, docker } = seedProjectVmDown(fs);
+    const { ctx } = makeCtx(fs);
+    try {
+      await new StartCommand("dridock:latest", colima, new InMemoryContainerRuntime(), docker, new StubGitToplevel("/p")).run(["-p", "hi", "--nonsense"], ctx);
+      throw new Error("expected DridockError");
+    } catch (e) {
+      expect(e).toBeInstanceOf(DridockError);
+      expect((e as DridockError).exitCode).toBe(1);
+      expect((e as Error).message).toContain("Unknown flag");
+    }
+  });
+
+  test("invalid --effort with VM down → rc 1 'Invalid effort' (matches #31)", async () => {
+    const fs = new InMemoryFileSystem();
+    const { colima, docker } = seedProjectVmDown(fs);
+    const { ctx } = makeCtx(fs);
+    try {
+      await new StartCommand("dridock:latest", colima, new InMemoryContainerRuntime(), docker, new StubGitToplevel("/p")).run(["-p", "hi", "--effort", "hihg"], ctx);
+      throw new Error("expected DridockError");
+    } catch (e) {
+      expect(e).toBeInstanceOf(DridockError);
+      expect((e as DridockError).exitCode).toBe(1);
+      expect((e as Error).message).toContain("Invalid effort");
+    }
+  });
+
+  test("invalid --output-format with VM down → rc 1 'Invalid output format'", async () => {
+    const fs = new InMemoryFileSystem();
+    const { colima, docker } = seedProjectVmDown(fs);
+    const { ctx } = makeCtx(fs);
+    try {
+      await new StartCommand("dridock:latest", colima, new InMemoryContainerRuntime(), docker, new StubGitToplevel("/p")).run(["-p", "hi", "--output-format", "csv"], ctx);
+      throw new Error("expected DridockError");
+    } catch (e) {
+      expect(e).toBeInstanceOf(DridockError);
+      expect((e as DridockError).exitCode).toBe(1);
+      expect((e as Error).message).toContain("Invalid output format");
+    }
+  });
+
+  test("missing --model value with VM down → rc 1 'Missing value' (not rc 2)", async () => {
+    const fs = new InMemoryFileSystem();
+    const { colima, docker } = seedProjectVmDown(fs);
+    const { ctx } = makeCtx(fs);
+    try {
+      await new StartCommand("dridock:latest", colima, new InMemoryContainerRuntime(), docker, new StubGitToplevel("/p")).run(["-p", "hi", "--model"], ctx);
+      throw new Error("expected DridockError");
+    } catch (e) {
+      expect(e).toBeInstanceOf(DridockError);
+      expect((e as DridockError).exitCode).toBe(1);
+      expect((e as Error).message).toContain("Missing value");
+    }
+  });
+
+  test("bare '-p' (no prompt) with VM down → rc 1 'no prompt provided'", async () => {
+    const fs = new InMemoryFileSystem();
+    const { colima, docker } = seedProjectVmDown(fs);
+    const { ctx } = makeCtx(fs);
+    try {
+      await new StartCommand("dridock:latest", colima, new InMemoryContainerRuntime(), docker, new StubGitToplevel("/p")).run(["-p"], ctx);
+      throw new Error("expected DridockError");
+    } catch (e) {
+      expect(e).toBeInstanceOf(DridockError);
+      expect((e as DridockError).exitCode).toBe(1);
+      expect((e as Error).message).toContain("no prompt provided");
+    }
+  });
+
+  test("valid -p args with VM DOWN → still rc 2 VM stub (validator passed → VM check now fires)", async () => {
+    // Complement to the above: if the validator is HAPPY, the next gate
+    // is VM-running, which correctly returns rc 2. This distinguishes
+    // "flag rejected" (rc 1) from "flags fine, cluster cold" (rc 2).
+    const fs = new InMemoryFileSystem();
+    const { colima, docker } = seedProjectVmDown(fs);
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new StartCommand("dridock:latest", colima, new InMemoryContainerRuntime(), docker, new StubGitToplevel("/p")).run(["-p", "hi"], ctx);
+    expect(rc).toBe(2);
+    expect(stderr.text()).toContain("not running");
+  });
+
+  test("interactive (no -p) with VM DOWN → rc 2 VM stub (no change to non-prog path)", async () => {
+    const fs = new InMemoryFileSystem();
+    const { colima, docker } = seedProjectVmDown(fs);
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new StartCommand("dridock:latest", colima, new InMemoryContainerRuntime(), docker, new StubGitToplevel("/p")).run([], ctx);
+    expect(rc).toBe(2);
+    expect(stderr.text()).toContain("not running");
+  });
+});
