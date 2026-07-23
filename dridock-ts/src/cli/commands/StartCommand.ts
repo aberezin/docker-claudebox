@@ -1,6 +1,5 @@
 import type { Command } from "../Command.ts";
 import type { Context } from "../Context.ts";
-import { DridockError } from "../../domain/errors.ts";
 import type { Colima } from "../../infra/Colima.ts";
 import { RealColima } from "../../infra/Colima.ts";
 import type { ContainerRuntime, RunArgs } from "../../infra/ContainerRuntime.ts";
@@ -22,16 +21,39 @@ import { RealGitToplevel } from "../../infra/GitToplevel.ts";
  * fails loudly with the same shape of advice as bash (audit rule: no
  * silent "silently does something surprising"). The full VM-ensure
  * orchestration (`colima start` with per-project cpu/mem/disk, reseed
- * on version drift, entrypoint bootstrap) is Phase 4b — that's the
- * biggest single chunk in the wrapper and needs its own commit for
- * proper testing.
+ * on version drift, entrypoint bootstrap) is Phase 4b.
  *
  * Two modes:
  *   1. Interactive (no -p) — `docker run -it` (or `docker start -ai` if
  *      a container for this workspace already exists).
  *   2. Programmatic (-p) — runs through ProgArgValidator first (the
- *      allowlist that closed #17/#31/#37), then a detached `_prog`
- *      container.
+ *      allowlist that closed #17/#31/#37), then a foreground-attached
+ *      `_prog` container (bash-parity for wrapper.sh:3288 — no -it,
+ *      no -d, works headless in scripts / CI / pipes).
+ *
+ * Argv-parity note (Arfy #38 part 4): DOCKER_ARGS in wrapper.sh:2812 is
+ * the source of truth for the run shape. The essential subset ported
+ * here is:
+ *   --network host
+ *   -e DRIDOCK_WORKSPACE=<pwd>
+ *   -e DRIDOCK_PROJECT_ID=<id>
+ *   -e DRIDOCK_CONTAINER_NAME=<container_name>
+ *   -v <ssh>:/home/claude/.ssh
+ *   -v <~/.claude>:/home/claude/.claude
+ *   -v <pwd>:<pwd>
+ *   -v /var/run/docker.sock:/var/run/docker.sock
+ * Deferred to Phase 4b (opt-in extras / framework-dev): CDP-bridge URL,
+ * host-agent URL/token, framework-bugs mount, consult mount, tmpfs /tmp,
+ * DRIDOCK_ENV_ passthrough, DEBUG passthrough, DRIDOCK_GIT_NAME + EMAIL,
+ * RC/no-continue sidecars. All absent-but-optional in a normal user run
+ * of -p; adding
+ * them is mechanical when Phase 4b lands. NOT a silent skip — this
+ * comment IS the visible signal.
+ *
+ * Container reuse: matches wrapper.sh:3281 for -p (existing → write
+ * args sidecar + `docker start -a`; missing → `docker run --name`) and
+ * the interactive path (existing → `docker start -ai`; missing →
+ * `docker run -it`).
  */
 export class StartCommand implements Command {
   readonly verb = "start" as const;
@@ -64,21 +86,11 @@ export class StartCommand implements Command {
     }
 
     // ── mode detect + programmatic validation ─────────────────────────
-    // Order matters: validate -p args BEFORE the VM/image ensure. The
-    // whole point of moving the allowlist out of bash was to reject bad
-    // flags (unknown, invalid --effort, missing value) BEFORE any side
-    // effect — matching wrapper.sh:3150 which rejects at parse time,
-    // long before any docker call. Doing the VM/image checks first (as
-    // an earlier version did) let those checks preempt the validator when
-    // the VM was down, silently converting a rejectable arg error into
-    // a "use the bash wrapper" stub — Arfy caught this in #38 verify.
+    // Validate -p args BEFORE the VM/image ensure — the whole point of
+    // the allowlist is to reject bad flags with no side effect.
     const isProg = args.some((a) => a === "-p" || a === "--print");
     let validated: ReturnType<typeof validateProgArgs> | undefined;
-    if (isProg) {
-      // Throws DridockError rc 1 on any deviation; the CLI wrapper
-      // catches + prints. This runs BEFORE colima/docker touches.
-      validated = validateProgArgs(args);
-    }
+    if (isProg) validated = validateProgArgs(args);
 
     const colima = this.colimaOverride ?? new RealColima();
     const runtime = this.runtimeOverride ?? new RealContainerRuntime();
@@ -106,72 +118,105 @@ export class StartCommand implements Command {
     return await this.runInteractive(args, id, ctx, runtime, context);
   }
 
+  /**
+   * Interactive path. Reuse container if it exists; otherwise fresh run.
+   * The container's argv is empty — the entrypoint pulls extra args from
+   * a sidecar (`~/.claude/.<container>-interactive-args`) at
+   * wrapper.sh's entrypoint.sh:1105.
+   */
   private async runInteractive(args: readonly string[], id: string, ctx: Context, runtime: ContainerRuntime, context: string): Promise<number> {
-    void id;
     const cname = containerName(ctx.cwd);
-    const existing = await runtime.psFilter(context, cname);
-    if (existing !== undefined && /^Up /.test(existing.status)) {
-      // Container is already running — attach via `docker start -ai`.
-      // (bash uses `docker attach`; -ai does the same thing for a running one.)
-      return await runtime.startAttached(context, cname);
-    }
-    if (existing !== undefined) {
-      // Stopped/exited container — reattach.
-      return await runtime.startAttached(context, cname);
+
+    // Write extra interactive args to the sidecar the entrypoint reads.
+    // Only when args non-empty — matches wrapper.sh:3311 shape.
+    if (args.length > 0) {
+      const sidecarPath = `${ctx.home}/.claude/.${cname}-interactive-args`;
+      await ctx.fs.writeText(sidecarPath, shellQuote(args) + "\n", { mode: 0o600 });
     }
 
-    // Fresh run. Assemble the minimum-viable docker run.
-    const runArgs: RunArgs = {
-      context,
-      containerName: cname,
-      image: this.imageName,
-      mounts: [
-        { host: ctx.cwd, container: ctx.cwd },
-        { host: `${ctx.home}/.claude`, container: "/home/claude/.claude" },
-        { host: "/var/run/docker.sock", container: "/var/run/docker.sock" },
-      ],
-      env: [],
-      workdir: ctx.cwd,
-      network: "cb-net",
-      mode: "interactive",
-      cmd: ["claude", "--dangerously-skip-permissions", ...args],
-      publishPorts: [],
-    };
+    const existing = await runtime.psFilter(context, cname);
+    if (existing !== undefined) {
+      // Reuse: docker start -ai reattaches (works for both running and stopped).
+      return await runtime.startAttached(context, cname);
+    }
+    // Fresh run.
+    const runArgs = this.baseRunArgs(context, cname, id, ctx, "interactive", []);
     return await runtime.runInteractive(runArgs);
   }
 
+  /**
+   * Programmatic path. wrapper.sh:3281 shape:
+   *   - Container missing → `docker run --name … [DOCKER_ARGS] <image> <PASS_ARGS>`
+   *   - Container present → write `.<name>-args` sidecar, `docker start -a`
+   *
+   * "attached" mode = no -it, no -d — foreground stdio inherited, no
+   * TTY required. Works headless (scripts, CI, `… | jq`).
+   */
   private async runProgrammaticValidated(validated: ReturnType<typeof validateProgArgs>, id: string, ctx: Context, runtime: ContainerRuntime, context: string): Promise<number> {
-    void id;
     if (validated.wantsUpdate) {
       ctx.stderr.write(`dridock-ts (Phase 4b): --update is Phase 4b — use the bash wrapper for the update path.\n`);
       return 2;
     }
 
     const cname = containerName(ctx.cwd, "programmatic");
-    const runArgs: RunArgs = {
+    const existing = await runtime.psFilter(context, cname);
+    if (existing !== undefined) {
+      // Reuse path — args go via sidecar, then `docker start -a`. Matches
+      // wrapper.sh:3293. Arfy #38 part 4 caught this: without reuse the
+      // second `-p` invocation hits `name already in use`.
+      const argsFile = `${ctx.home}/.claude/.${cname}-args`;
+      await ctx.fs.writeText(argsFile, shellQuote(validated.claudeArgs) + "\n", { mode: 0o600 });
+      return await runtime.startAttached(context, cname);
+    }
+    // Fresh run.
+    const runArgs = this.baseRunArgs(context, cname, id, ctx, "attached", validated.claudeArgs);
+    return await runtime.runInteractive(runArgs);
+  }
+
+  /**
+   * Assemble the RunArgs the two paths share. Same mount + env skeleton
+   * as wrapper.sh's DOCKER_ARGS (the essential subset — see class comment
+   * for what's deferred to Phase 4b).
+   */
+  private baseRunArgs(context: string, cname: string, id: string, ctx: Context, mode: RunArgs["mode"], cmd: readonly string[]): RunArgs {
+    return {
       context,
       containerName: cname,
       image: this.imageName,
+      // --network host: the claudebot itself uses HOST networking, so it
+      // sees the reachable-VM IP for CDP / published-port testing. `cb-net`
+      // is the SIBLING-WORKLOAD network (attached to workloads the
+      // claudebot spins up); the claudebot never sits on it. Arfy #38
+      // part 4 caught the earlier `cb-net` hardcode as a hard rc-125
+      // failure ("network cb-net not found") in fresh VMs.
+      network: "host",
       mounts: [
-        { host: ctx.cwd, container: ctx.cwd },
+        { host: `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
         { host: `${ctx.home}/.claude`, container: "/home/claude/.claude" },
+        { host: ctx.cwd, container: ctx.cwd },
         { host: "/var/run/docker.sock", container: "/var/run/docker.sock" },
       ],
-      env: [{ key: "DRIDOCK_CONTAINER_NAME", value: cname }],
-      workdir: ctx.cwd,
-      network: "cb-net",
-      // Foreground-attached, NO TTY (matches wrapper.sh:3288). Prog mode
-      // must work headless — scripts, CI, `dridock -p '…' | jq`. `-it`
-      // fails hard the moment stdin isn't a real terminal: `cannot attach
-      // stdin to a TTY-enabled container`. Arfy #38 part 3 caught the
-      // earlier "interactive" MVP shortcut here.
-      mode: "attached",
-      cmd: ["claude", "--dangerously-skip-permissions", ...validated.claudeArgs],
+      env: [
+        { key: "DRIDOCK_WORKSPACE", value: ctx.cwd },
+        { key: "DRIDOCK_PROJECT_ID", value: id },
+        { key: "DRIDOCK_CONTAINER_NAME", value: cname },
+      ],
+      mode,
+      // Container argv is bare user args. The entrypoint prepends
+      // `claude --dangerously-skip-permissions` — entrypoint.sh:1078
+      // + 1141. Passing `claude …` here would double-prefix and fail.
+      cmd,
       publishPorts: [],
     };
-    return await runtime.runInteractive(runArgs);
   }
 }
 
-// Re-export for tests that need to build DridockError expectations.
-export { DridockError };
+/**
+ * Single-quote shell-escape a list of args into one line suitable for
+ * `bash -c` re-evaluation — same shape as bash's `printf '%q '`.
+ * The entrypoint's args-file reader does `cat "$ARGS_FILE"` then splits
+ * on IFS, so each arg must be safely re-tokenized as one word.
+ */
+export function shellQuote(args: readonly string[]): string {
+  return args.map((a) => `'${a.replaceAll("'", "'\\''")}'`).join(" ");
+}

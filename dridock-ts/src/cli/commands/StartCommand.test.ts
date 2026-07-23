@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { StartCommand } from "./StartCommand.ts";
+import { StartCommand, shellQuote } from "./StartCommand.ts";
 import { InMemoryFileSystem } from "../../test/fakes/InMemoryFileSystem.ts";
 import { InMemoryColima } from "../../test/fakes/InMemoryColima.ts";
 import { InMemoryContainerRuntime } from "../../test/fakes/InMemoryContainerRuntime.ts";
@@ -72,7 +72,11 @@ describe("StartCommand — guards", () => {
 });
 
 describe("StartCommand — interactive path (assumes VM up + image present)", () => {
-  test("no existing container → runInteractive with correct mounts + cmd", async () => {
+  test("no existing container → runInteractive with bash-parity mounts + env + host network", async () => {
+    // Arfy #38 part 4 argv-diff: network must be "host" (not cb-net);
+    // container argv must be BARE user args (entrypoint prepends
+    // `claude --dangerously-skip-permissions`); ~/.ssh mount required
+    // for git ops; DRIDOCK_WORKSPACE / DRIDOCK_PROJECT_ID env needed.
     const fs = new InMemoryFileSystem();
     const colima = new InMemoryColima();
     const docker = new InMemoryDocker();
@@ -85,15 +89,22 @@ describe("StartCommand — interactive path (assumes VM up + image present)", ()
     const run = runtime.runs[0]!;
     expect(run.containerName).toBe("claude-_p");
     expect(run.mode).toBe("interactive");
-    expect(run.workdir).toBe("/p");
-    expect(run.network).toBe("cb-net");
-    // Essential mounts present
-    expect(run.mounts).toContainEqual({ host: "/p", container: "/p" });
+    // The blocker — network=host, not cb-net.
+    expect(run.network).toBe("host");
+    // Bash-parity mounts (wrapper.sh:2818-2821): ~/.ssh/claudebox,
+    // ~/.claude, workspace, docker socket.
+    expect(run.mounts).toContainEqual({ host: "/home/alan/.ssh/claudebox", container: "/home/claude/.ssh" });
     expect(run.mounts).toContainEqual({ host: "/home/alan/.claude", container: "/home/claude/.claude" });
+    expect(run.mounts).toContainEqual({ host: "/p", container: "/p" });
     expect(run.mounts).toContainEqual({ host: "/var/run/docker.sock", container: "/var/run/docker.sock" });
-    // Command form
-    expect(run.cmd[0]).toBe("claude");
-    expect(run.cmd).toContain("--dangerously-skip-permissions");
+    // Env — workspace + project id + container name.
+    expect(run.env).toContainEqual({ key: "DRIDOCK_WORKSPACE", value: "/p" });
+    expect(run.env).toContainEqual({ key: "DRIDOCK_PROJECT_ID", value: "abc" });
+    expect(run.env).toContainEqual({ key: "DRIDOCK_CONTAINER_NAME", value: "claude-_p" });
+    // Container CMD: BARE (entrypoint prepends `claude ...`, wrapper.sh
+    // passes just PASS_ARGS). Passing "claude" here would double-prefix.
+    expect(run.cmd).not.toContain("claude");
+    expect(run.cmd).not.toContain("--dangerously-skip-permissions");
   });
 
   test("existing container → startAttached, not runInteractive", async () => {
@@ -110,7 +121,7 @@ describe("StartCommand — interactive path (assumes VM up + image present)", ()
     expect(runtime.runs).toEqual([]);
   });
 
-  test("passes extra args through to claude cmd", async () => {
+  test("interactive extra args written to sidecar (entrypoint reads at wrapper.sh entrypoint.sh:1105)", async () => {
     const fs = new InMemoryFileSystem();
     const colima = new InMemoryColima();
     const docker = new InMemoryDocker();
@@ -118,12 +129,15 @@ describe("StartCommand — interactive path (assumes VM up + image present)", ()
     seedReadyProject(fs, colima, docker);
     const { ctx } = makeCtx(fs);
     await new StartCommand("dridock:latest", colima, runtime, docker, new StubGitToplevel("/p")).run(["--resume"], ctx);
-    expect(runtime.runs[0]!.cmd).toContain("--resume");
+    // Sidecar written with the args; container CMD stays bare.
+    const sidecar = await fs.readText("/home/alan/.claude/.claude-_p-interactive-args");
+    expect(sidecar).toContain("--resume");
+    expect(runtime.runs[0]!.cmd).not.toContain("--resume");   // NOT in container argv
   });
 });
 
 describe("StartCommand — programmatic (-p) path", () => {
-  test("valid -p → runs the _prog container with validated args", async () => {
+  test("valid -p → runs the _prog container with validated args, host network, no claude prefix", async () => {
     const fs = new InMemoryFileSystem();
     const colima = new InMemoryColima();
     const docker = new InMemoryDocker();
@@ -135,12 +149,46 @@ describe("StartCommand — programmatic (-p) path", () => {
     expect(runtime.runs.length).toBe(1);
     const run = runtime.runs[0]!;
     expect(run.containerName).toBe("claude-_p_prog");
+    // Arfy #38 part 4 argv-diff: --network host (not cb-net).
+    expect(run.network).toBe("host");
+    // Container CMD: BARE. The entrypoint prepends `claude
+    // --dangerously-skip-permissions` (entrypoint.sh:1086). Passing
+    // "claude" here would double-prefix.
+    expect(run.cmd).not.toContain("claude");
+    expect(run.cmd).not.toContain("--dangerously-skip-permissions");
+    // The validated -p args pass through
     expect(run.cmd).toContain("-p");
     expect(run.cmd).toContain("hello world");
     expect(run.cmd).toContain("--output-format");
-    expect(run.cmd).toContain("text");   // default format added by validator
-    // Env: DRIDOCK_CONTAINER_NAME wired for sidecar IPC
+    expect(run.cmd).toContain("text");
+    // Env: DRIDOCK_CONTAINER_NAME + workspace + project id
     expect(run.env).toContainEqual({ key: "DRIDOCK_CONTAINER_NAME", value: "claude-_p_prog" });
+    expect(run.env).toContainEqual({ key: "DRIDOCK_WORKSPACE", value: "/p" });
+    expect(run.env).toContainEqual({ key: "DRIDOCK_PROJECT_ID", value: "abc" });
+  });
+
+  test("Arfy #38 part 4: second -p reuses the _prog container via sidecar + docker start -a (no rename collision)", async () => {
+    // The bug: unconditional `docker run --name <_prog>` → second call
+    // fails rc 125 "container name already in use". Bash reuses:
+    // wrapper.sh:3293 writes args to `~/.claude/.<name>-args`, then
+    // `docker start -a <name>`.
+    const fs = new InMemoryFileSystem();
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    const runtime = new InMemoryContainerRuntime();
+    seedReadyProject(fs, colima, docker);
+    runtime.seedPs("claude-_p_prog", { name: "claude-_p_prog", status: "Exited (0) 3m", image: "dridock:latest" });
+    const { ctx } = makeCtx(fs);
+    const rc = await new StartCommand("dridock:latest", colima, runtime, docker, new StubGitToplevel("/p")).run(["-p", "hello"], ctx);
+    expect(rc).toBe(0);
+    // Reuse path: no fresh docker run
+    expect(runtime.runs).toEqual([]);
+    // But a docker start -a (via startAttached in the fake)
+    expect(runtime.starts).toEqual([{ context: "colima-cb-abc", container: "claude-_p_prog" }]);
+    // Args written to sidecar the entrypoint's ARGS_FILE reader consumes
+    const argsFileContent = await fs.readText("/home/alan/.claude/.claude-_p_prog-args");
+    expect(argsFileContent).toContain("-p");
+    expect(argsFileContent).toContain("hello");
   });
 
   test("Arfy #38 part 3: -p mode uses 'attached' (no -it, no -d), works headless", async () => {
@@ -218,6 +266,31 @@ describe("StartCommand — programmatic (-p) path", () => {
     const rc = await new StartCommand("dridock:latest", colima, new InMemoryContainerRuntime(), docker, new StubGitToplevel("/p")).run(["-p", "hi", "--update"], ctx);
     expect(rc).toBe(2);
     expect(stderr.text()).toContain("--update is Phase 4b");
+  });
+});
+
+describe("shellQuote — bash `printf %q ` parity for the args-sidecar", () => {
+  test("simple args round-trip through bash-style single-quote wrap", () => {
+    expect(shellQuote(["-p", "hello"])).toBe("'-p' 'hello'");
+  });
+
+  test("embedded single quote escaped via the '\\'' idiom", () => {
+    expect(shellQuote(["it's"])).toBe(`'it'\\''s'`);
+  });
+
+  test("empty string args preserved (bash would print '')", () => {
+    expect(shellQuote(["a", "", "b"])).toBe("'a' '' 'b'");
+  });
+
+  test("shell-metacharacters neutralized (spaces, $, *, ;, |, backticks)", () => {
+    const dangerous = ["a b", "$foo", "rm -rf *", "a;b", "a|b", "`x`"];
+    const q = shellQuote(dangerous);
+    // Every char between the outer single-quotes is literal — the shell
+    // won't glob/expand/evaluate any of it.
+    for (const bad of ["$", "*", ";", "|", "`"]) expect(q).toContain(bad);
+    // But each is inside a quoted region — sanity by structure
+    expect(q.startsWith("'")).toBe(true);
+    expect(q.endsWith("'")).toBe(true);
   });
 });
 
