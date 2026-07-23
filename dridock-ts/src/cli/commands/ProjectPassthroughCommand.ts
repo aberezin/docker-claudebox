@@ -98,6 +98,16 @@ export abstract class ProjectPassthroughCommand implements Command {
       removeAfter: true,
       mode: this.mode,
       network: "host",
+      // #40 fix — `--entrypoint claude` bypasses entrypoint.sh's
+      // `cd $WORKSPACE_DIR`, so without an explicit -w, claude runs
+      // in the image's default WORKDIR (/workspace) and local-scope
+      // `mcp add` keys under `.projects["/workspace"]` instead of the
+      // real workspace path. Claudebot then reads the real-path key
+      // and never sees the added server (bug caught in gammaray:
+      // added → persisted at wrong project key → claudebot blind to it).
+      // StartCommand doesn't need this because it uses the entrypoint
+      // (which does the cd); passthrough must set -w explicitly.
+      workdir: ctx.cwd,
       mounts: [
         // SSH — needed if `claude mcp` ever gits (some MCP add commands
         // clone; matches bash's DOCKER_ARGS.).

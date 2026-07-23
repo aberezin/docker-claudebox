@@ -176,6 +176,36 @@ describe("ProjectPassthroughCommand — #39 fix: correct project scope + HOME + 
     expect(run.containerName).not.toBe("claude-_p_prog");
   });
 
+  test("#40 fix: workdir = ctx.cwd → -w in argv → claude runs in the REAL workspace path (not /workspace)", async () => {
+    // Regression for #40. Without -w, `--entrypoint claude` lands in
+    // the image's default WORKDIR (/workspace) and local-scope `mcp
+    // add` keys under `.projects["/workspace"]` — where the real
+    // claudebot never looks. The fix: set `workdir: ctx.cwd` so the
+    // container runs in the same path StartCommand's entrypoint would
+    // `cd` to. Verified via the derived argv (must contain `-w
+    // <ctx.cwd>`).
+    const { fs, colima, docker, runtime } = seedReadyProject();
+    const cmd = new McpCommand("dridock:latest", { colima, docker, runtime, git: new StubGitToplevel("/p") });
+    const { ctx } = makeCtx(fs, "/Users/alan/dev/gammaray");
+    // Match the seeded project id resolution — the fixture uses cwd "/p"
+    // but this test uses a real-looking path; re-seed the git toplevel
+    // + a config.yml at that path so ProjectRoot resolves correctly.
+    fs.seed("/Users/alan/dev/gammaray/.dridock/config.yml", "id: abc\n");
+    const cmd2 = new McpCommand("dridock:latest", { colima, docker, runtime, git: new StubGitToplevel("/Users/alan/dev/gammaray") });
+    await cmd2.run(["add", "testsrv", "--", "echo", "hi"], ctx);
+    const run = runtime.runs[0]!;
+    expect(run.workdir).toBe("/Users/alan/dev/gammaray");
+    // Derived argv includes -w <real-path>
+    const { buildRunArgv } = await import("../../infra/ContainerRuntime.ts");
+    const argv = buildRunArgv(run);
+    expect(argv).toContain("-w");
+    expect(argv[argv.indexOf("-w") + 1]).toBe("/Users/alan/dev/gammaray");
+    // Must NOT be the image's default /workspace (the bug)
+    expect(argv[argv.indexOf("-w") + 1]).not.toBe("/workspace");
+    // Suppress unused
+    void cmd;
+  });
+
   test("ANTHROPIC_API_KEY passthrough when set; not when unset (no stray leak)", async () => {
     const { fs, colima, docker, runtime } = seedReadyProject();
     const cmd = new McpCommand("dridock:latest", { colima, docker, runtime, git: new StubGitToplevel("/p") });
