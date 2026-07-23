@@ -46,14 +46,11 @@ describe("CommandRegistry — dispatch table", () => {
     expect(ctx.stdout.toString()).toBe(`dridock ${DRIDOCK_TS_VERSION}\n`);
   });
 
-  test("known verb WITHOUT registered command → returns 2 + stderr note (phased-port fallback)", async () => {
+  test("known verb WITHOUT registered command → throws (composition-root bug — every verb has a command post-P4e)", async () => {
     const registry = new CommandRegistry();
-    // register nothing — 'info' is a known verb but no command registered
+    // register nothing — 'info' is a known verb; unregistered is now a bug
     const ctx = makeCtx();
-    const rc = await registry.dispatch(["info"], ctx);
-    expect(rc).toBe(2);
-    expect(ctx.stderr.toString()).toContain("not yet ported");
-    expect(ctx.stderr.toString()).toContain("info");
+    await expect(registry.dispatch(["info"], ctx)).rejects.toThrow(/composition-root bug/);
   });
 
   test("unknown bareword → throws UnknownVerbError (matches wrapper.sh:2766 / 3.3.7)", async () => {

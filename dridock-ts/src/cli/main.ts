@@ -31,6 +31,8 @@ import { ClearSessionCommand } from "./commands/ClearSessionCommand.ts";
 import { SetupTokenCommand, DoctorCommand, AuthCommand, McpCommand } from "./commands/ThrowawayCommands.ts";
 import { HarnessCommand } from "./commands/HarnessCommand.ts";
 import { BootstrapCommand } from "./commands/BootstrapCommand.ts";
+import { BashDelegateCommand } from "./commands/BashDelegateCommand.ts";
+import { HelpCommand } from "./commands/HelpCommand.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
 import { DridockError } from "../domain/errors.ts";
@@ -80,6 +82,14 @@ function buildRegistry(): CommandRegistry {
   registry.register(new McpCommand());
   registry.register(new HarnessCommand());
   registry.register(new BootstrapCommand());
+  // P4e transparent delegates (Python daemons untouched; only the bash
+  // orchestration layer is being reused). See
+  // project_ts_browserbridge_hostagent_full_port_todo memory for the
+  // eventual full-TS port.
+  registry.register(new BashDelegateCommand("browser-bridge"));
+  registry.register(new BashDelegateCommand("host-agent"));
+  registry.register(new BashDelegateCommand("claude-dir"));   // read-only bash helper — same delegation
+  registry.register(new HelpCommand());
   return registry;
 }
 

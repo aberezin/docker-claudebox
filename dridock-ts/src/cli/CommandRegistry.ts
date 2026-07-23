@@ -81,10 +81,10 @@ export class CommandRegistry {
 
     const cmd = this.commands.get(verb);
     if (cmd === undefined) {
-      // Known verb but no command registered yet — shell out to bash wrapper
-      // during the phased port. Phase 5 removes this branch entirely.
-      ctx.stderr.write(`dridock-ts (Phase 2): '${verb}' not yet ported — use the bash wrapper\n`);
-      return 2;
+      // Every known verb should have a Command registered post-P4e.
+      // Reaching this branch means the composition root (main.ts's
+      // buildRegistry) missed a verb — programmer error, not runtime.
+      throw new Error(`CommandRegistry: verb '${verb}' known but no command registered (composition-root bug — check main.ts buildRegistry)`);
     }
 
     return await cmd.run(argv.slice(1), ctx);
