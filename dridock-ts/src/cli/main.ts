@@ -30,6 +30,7 @@ import { ReportBugCommand } from "./commands/ReportBugCommand.ts";
 import { ClearSessionCommand } from "./commands/ClearSessionCommand.ts";
 import { SetupTokenCommand, DoctorCommand, AuthCommand, McpCommand } from "./commands/ThrowawayCommands.ts";
 import { HarnessCommand } from "./commands/HarnessCommand.ts";
+import { BootstrapCommand } from "./commands/BootstrapCommand.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
 import { DridockError } from "../domain/errors.ts";
@@ -78,6 +79,7 @@ function buildRegistry(): CommandRegistry {
   registry.register(new AuthCommand());
   registry.register(new McpCommand());
   registry.register(new HarnessCommand());
+  registry.register(new BootstrapCommand());
   return registry;
 }
 
