@@ -79,20 +79,30 @@ export class VmDiskUsageService {
 
     ctx.stdout.write(`dridock VM disk usage (actual on the Mac / provisioned max):\n`);
     if (live.length === 0) {
-      ctx.stdout.write(`  (no dridock VMs)\n`);
+      ctx.stdout.write(`(no dridock VMs)\n`);
     } else {
       const nameWidth = Math.max(7, ...live.map((r) => r.name.length));
-      ctx.stdout.write(`  ${"PROFILE".padEnd(nameWidth)}  STATUS   ON-DISK   MAX\n`);
-      for (const r of live.sort((a, b) => a.name.localeCompare(b.name))) {
-        ctx.stdout.write(`  ${r.name.padEnd(nameWidth)}  ${r.status.padEnd(7)}  ${r.onDisk.padEnd(8)}  ${r.max}\n`);
+      ctx.stdout.write(`${"PROFILE".padEnd(nameWidth)}  STATUS   ON-DISK   MAX\n`);
+      // Arfy #38 P4c pass 2 B3 cosmetic: default (human) listed FIRST
+      // to match bash cb_vm_usage output ordering. Sort with default
+      // priority-first, then everything else alphabetically.
+      const sorted = [...live].sort((a, b) => {
+        const aDefault = a.name.startsWith("default");
+        const bDefault = b.name.startsWith("default");
+        if (aDefault && !bDefault) return -1;
+        if (!aDefault && bDefault) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      for (const r of sorted) {
+        ctx.stdout.write(`${r.name.padEnd(nameWidth)}  ${r.status.padEnd(7)}  ${r.onDisk.padEnd(8)}  ${r.max}\n`);
       }
     }
     if (orph.length > 0) {
       ctx.stdout.write(`\norphaned disks — no VM owns these (reclaim with '${ctx.binName} vm gc'):\n`);
       const nameWidth = Math.max(4, ...orph.map((r) => r.name.length));
-      ctx.stdout.write(`  ${"DISK".padEnd(nameWidth)}  ON-DISK   MAX\n`);
+      ctx.stdout.write(`${"DISK".padEnd(nameWidth)}  ON-DISK   MAX\n`);
       for (const r of orph.sort((a, b) => a.name.localeCompare(b.name))) {
-        ctx.stdout.write(`  ${r.name.padEnd(nameWidth)}  ${r.onDisk.padEnd(8)}  ${r.max}\n`);
+        ctx.stdout.write(`${r.name.padEnd(nameWidth)}  ${r.onDisk.padEnd(8)}  ${r.max}\n`);
       }
     }
     ctx.stdout.write(`\ntotals — projects: ${cbH(projKb * 1024)}   cb-infra: ${cbH(infraKb * 1024)}   default(human): ${cbH(defKb * 1024)}   orphaned: ${cbH(orphKb * 1024)}\n`);
@@ -107,18 +117,18 @@ export class VmDiskUsageService {
     const infra = vms.find((v) => v.name === "cb-infra");
     ctx.stdout.write(`dridock VM disk usage (provisioned max):\n`);
     if (project.length === 0 && infra === undefined) {
-      ctx.stdout.write(`  (no dridock VMs)\n`);
+      ctx.stdout.write(`(no dridock VMs)\n`);
       return 0;
     }
     const nameWidth = Math.max(7, ...vms.map((v) => v.name.length));
-    ctx.stdout.write(`  ${"PROFILE".padEnd(nameWidth)}  STATUS   MAX\n`);
+    ctx.stdout.write(`${"PROFILE".padEnd(nameWidth)}  STATUS   MAX\n`);
     for (const vm of [...project].sort((a, b) => a.name.localeCompare(b.name))) {
-      ctx.stdout.write(`  ${vm.name.padEnd(nameWidth)}  ${vm.status.padEnd(7)}  ${vm.disk ?? "?"}\n`);
+      ctx.stdout.write(`${vm.name.padEnd(nameWidth)}  ${vm.status.padEnd(7)}  ${vm.disk ?? "?"}\n`);
     }
     if (infra !== undefined) {
-      ctx.stdout.write(`  ${infra.name.padEnd(nameWidth)}  ${infra.status.padEnd(7)}  ${infra.disk ?? "?"}\n`);
+      ctx.stdout.write(`${infra.name.padEnd(nameWidth)}  ${infra.status.padEnd(7)}  ${infra.disk ?? "?"}\n`);
     }
-    ctx.stdout.write(`\n  (on-disk actual + orphaned-disk detection require limactl + LIMA_HOME — install colima)\n`);
+    ctx.stdout.write(`\n(on-disk actual + orphaned-disk detection require limactl + LIMA_HOME — install colima)\n`);
     return 0;
   }
 }

@@ -21,11 +21,17 @@ export function cbNum(input: string): number {
   return Number(match[1]);
 }
 
-const UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"] as const;
+const UNITS = ["B", "K", "M", "G", "T", "P"] as const;
 
 /**
- * `cbH(1073741824)` → `"1 GiB"`. Empty/zero input → `"0B"` (matches bash's
- * `cb_h` behavior of `"$( ... echo 0B )"`).
+ * `cbH(1073741824)` → `"1G"`. Empty/zero input → `"0B"`. Byte-for-byte
+ * bash-parity with `cb_h` at wrapper.sh:850: single-letter units
+ * (B/K/M/G/T/P — NOT the "KiB/MiB" long form), NO space between number
+ * and unit, integer values print without decimals, non-integer with one
+ * decimal (`8G`, `1.5K`, `1023B`).
+ *
+ * Arfy #38 P4c pass 2 B3 cosmetic: unit format was `28.1 GiB` — this
+ * fixes to `28.1G`.
  */
 export function cbH(bytes?: number): string {
   if (bytes === undefined || bytes === 0 || !Number.isFinite(bytes)) return "0B";
@@ -38,8 +44,6 @@ export function cbH(bytes?: number): string {
     unit += 1;
   }
 
-  // Match wrapper.sh's rendering: whole numbers as `N Unit`, non-whole with
-  // one decimal place. `1.5 KiB`, `8 GiB`, `1023 B`.
   const rendered = Number.isInteger(value) ? String(value) : value.toFixed(1);
-  return unit === 0 ? `${rendered}B` : `${rendered} ${UNITS[unit]}`;
+  return `${rendered}${UNITS[unit]}`;
 }

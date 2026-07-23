@@ -26,16 +26,18 @@ describe("cbNum — parity with wrapper.sh's cb_num", () => {
   });
 });
 
-describe("cbH — parity with wrapper.sh's cb_h", () => {
-  // Exact cases from tests/test_cbvm.sh's cb_h assertion block.
+describe("cbH — parity with wrapper.sh's cb_h (single-letter units, no space)", () => {
+  // Bash cb_h at :850 uses single-letter units (B/K/M/G/T/P) and NO
+  // space between number and unit — vm usage renders "60G", "28.1G",
+  // "1023B". Arfy #38 P4c pass 2 B3 cosmetic fix.
   test.each<[number | undefined, string]>([
     [0, "0B"],
     [undefined, "0B"],
     [512, "512B"],
-    [1024, "1 KiB"],
-    [1536, "1.5 KiB"],
-    [1073741824, "1 GiB"],
-    [8 * 1073741824, "8 GiB"],
+    [1024, "1K"],
+    [1536, "1.5K"],
+    [1073741824, "1G"],
+    [8 * 1073741824, "8G"],
   ])("cbH(%s) === '%s'", (bytes, expected) => {
     expect(cbH(bytes)).toBe(expected);
   });
@@ -46,6 +48,6 @@ describe("cbH — parity with wrapper.sh's cb_h", () => {
 
   test("handles values up to Number.MAX_SAFE_INTEGER without overflow", () => {
     // Bash's arithmetic silently overflowed on `((huge * 1024))`; JS is safe.
-    expect(cbH(1024 ** 5)).toBe("1 PiB");
+    expect(cbH(1024 ** 5)).toBe("1P");
   });
 });
