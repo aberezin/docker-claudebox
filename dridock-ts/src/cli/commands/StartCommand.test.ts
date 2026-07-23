@@ -92,11 +92,15 @@ describe("StartCommand — interactive path (assumes VM up + image present)", ()
     // The blocker — network=host, not cb-net.
     expect(run.network).toBe("host");
     // Bash-parity mounts (wrapper.sh:2818-2821): ~/.ssh/claudebox,
-    // ~/.claude, workspace, docker socket.
+    // PER-PROJECT data dir (NOT ~/.claude — Arfy #38 pass 5), workspace,
+    // docker socket.
     expect(run.mounts).toContainEqual({ host: "/home/alan/.ssh/claudebox", container: "/home/claude/.ssh" });
-    expect(run.mounts).toContainEqual({ host: "/home/alan/.claude", container: "/home/claude/.claude" });
+    expect(run.mounts).toContainEqual({ host: "/home/alan/.config/dridock/projects/abc/claude", container: "/home/claude/.claude" });
     expect(run.mounts).toContainEqual({ host: "/p", container: "/p" });
     expect(run.mounts).toContainEqual({ host: "/var/run/docker.sock", container: "/var/run/docker.sock" });
+    // MUST NOT mount the host global — this is the security-adjacent
+    // finding: it holds THIS session's own credentials + history.
+    expect(run.mounts).not.toContainEqual({ host: "/home/alan/.claude", container: "/home/claude/.claude" });
     // Env — workspace + project id + container name.
     expect(run.env).toContainEqual({ key: "DRIDOCK_WORKSPACE", value: "/p" });
     expect(run.env).toContainEqual({ key: "DRIDOCK_PROJECT_ID", value: "abc" });
@@ -121,7 +125,7 @@ describe("StartCommand — interactive path (assumes VM up + image present)", ()
     expect(runtime.runs).toEqual([]);
   });
 
-  test("interactive extra args written to sidecar (entrypoint reads at wrapper.sh entrypoint.sh:1105)", async () => {
+  test("interactive extra args written to sidecar INSIDE the per-project data dir (visible via /home/claude/.claude mount)", async () => {
     const fs = new InMemoryFileSystem();
     const colima = new InMemoryColima();
     const docker = new InMemoryDocker();
@@ -129,8 +133,11 @@ describe("StartCommand — interactive path (assumes VM up + image present)", ()
     seedReadyProject(fs, colima, docker);
     const { ctx } = makeCtx(fs);
     await new StartCommand("dridock:latest", colima, runtime, docker, new StubGitToplevel("/p")).run(["--resume"], ctx);
-    // Sidecar written with the args; container CMD stays bare.
-    const sidecar = await fs.readText("/home/alan/.claude/.claude-_p-interactive-args");
+    // Sidecar path lives INSIDE the per-project data dir — the entrypoint
+    // mounts the data dir at /home/claude/.claude and reads sidecars from
+    // there. Writing to the host global ~/.claude would be invisible to
+    // the container. Arfy #38 pass 5 informed this fix.
+    const sidecar = await fs.readText("/home/alan/.config/dridock/projects/abc/claude/.claude-_p-interactive-args");
     expect(sidecar).toContain("--resume");
     expect(runtime.runs[0]!.cmd).not.toContain("--resume");   // NOT in container argv
   });
@@ -170,7 +177,7 @@ describe("StartCommand — programmatic (-p) path", () => {
   test("Arfy #38 part 4: second -p reuses the _prog container via sidecar + docker start -a (no rename collision)", async () => {
     // The bug: unconditional `docker run --name <_prog>` → second call
     // fails rc 125 "container name already in use". Bash reuses:
-    // wrapper.sh:3293 writes args to `~/.claude/.<name>-args`, then
+    // wrapper.sh:3293 writes args to `<data_dir>/.<name>-args`, then
     // `docker start -a <name>`.
     const fs = new InMemoryFileSystem();
     const colima = new InMemoryColima();
@@ -185,10 +192,58 @@ describe("StartCommand — programmatic (-p) path", () => {
     expect(runtime.runs).toEqual([]);
     // But a docker start -a (via startAttached in the fake)
     expect(runtime.starts).toEqual([{ context: "colima-cb-abc", container: "claude-_p_prog" }]);
-    // Args written to sidecar the entrypoint's ARGS_FILE reader consumes
-    const argsFileContent = await fs.readText("/home/alan/.claude/.claude-_p_prog-args");
+    // Args written to sidecar INSIDE the per-project data dir (Arfy #38
+    // pass 5): visible to the container via the /home/claude/.claude
+    // mount; writing to global ~/.claude would be a phantom write.
+    const argsFileContent = await fs.readText("/home/alan/.config/dridock/projects/abc/claude/.claude-_p_prog-args");
     expect(argsFileContent).toContain("-p");
     expect(argsFileContent).toContain("hello");
+  });
+
+  test("Arfy #38 pass 5: -p also mounts the per-project data dir, NOT the host global ~/.claude", async () => {
+    // The security-adjacent finding: mounting the host global would leak
+    // the human's own credentials + session history into every claudebot,
+    // AND the claudebot wouldn't find its per-project OAuth sidecars.
+    const fs = new InMemoryFileSystem();
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    const runtime = new InMemoryContainerRuntime();
+    seedReadyProject(fs, colima, docker);
+    const { ctx } = makeCtx(fs);
+    await new StartCommand("dridock:latest", colima, runtime, docker, new StubGitToplevel("/p")).run(["-p", "hi"], ctx);
+    const run = runtime.runs[0]!;
+    expect(run.mounts).toContainEqual({
+      host: "/home/alan/.config/dridock/projects/abc/claude",
+      container: "/home/claude/.claude",
+    });
+    expect(run.mounts).not.toContainEqual({
+      host: "/home/alan/.claude",
+      container: "/home/claude/.claude",
+    });
+  });
+
+  test("DRIDOCK_DATA_DIR override respected in the mount source (bash-parity wrapper.sh:2168)", async () => {
+    const fs = new InMemoryFileSystem();
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    const runtime = new InMemoryContainerRuntime();
+    seedReadyProject(fs, colima, docker);
+    // Set env override before command construction — the command reads
+    // process.env at run() time via MachineConfig.
+    const orig = process.env["DRIDOCK_DATA_DIR"];
+    process.env["DRIDOCK_DATA_DIR"] = "/tmp/override-data-dir";
+    try {
+      const { ctx } = makeCtx(fs);
+      await new StartCommand("dridock:latest", colima, runtime, docker, new StubGitToplevel("/p")).run(["-p", "hi"], ctx);
+      const run = runtime.runs[0]!;
+      expect(run.mounts).toContainEqual({
+        host: "/tmp/override-data-dir",
+        container: "/home/claude/.claude",
+      });
+    } finally {
+      if (orig === undefined) delete process.env["DRIDOCK_DATA_DIR"];
+      else process.env["DRIDOCK_DATA_DIR"] = orig;
+    }
   });
 
   test("Arfy #38 part 3: -p mode uses 'attached' (no -it, no -d), works headless", async () => {

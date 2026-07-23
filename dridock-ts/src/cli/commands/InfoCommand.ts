@@ -5,8 +5,8 @@ import { RealDocker, infraContext, projectContext, projectProfile } from "../../
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
 import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
-import { ProjectConfig, parseTopLevelString } from "../../services/ProjectConfig.ts";
-import { xdgRoot } from "../../domain/paths.ts";
+import { ProjectConfig } from "../../services/ProjectConfig.ts";
+import { MachineConfig } from "../../services/MachineConfig.ts";
 import { DRIDOCK_TS_VERSION } from "../../domain/dridockVersion.ts";
 
 /**
@@ -81,25 +81,13 @@ export class InfoCommand implements Command {
   }
 
   /**
-   * Resolve the project's data-dir path — ports cb_data_root +
-   * cb_project_data_dir. If the machine config sets `data_root:`, use it
-   * (with ~ expansion); otherwise use the baked default `<xdg>/projects`.
+   * Resolve the project's data-dir path — routes through the shared
+   * MachineConfig service so `info` (which prints it) and `start` (which
+   * mounts it) agree by construction. Arfy #38 pass 5 caught the two
+   * commands disagreeing on this exact path.
    */
   private async resolveDataDir(ctx: Context, projectId: string): Promise<string> {
-    const xdg = await xdgRoot(ctx.fs, process.env, ctx.home);
-    const machineConfigPath = `${xdg}/config.yml`;
-    const machineText = await ctx.fs.readTextOrUndefined(machineConfigPath);
-    let dataRoot = `${xdg}/projects`;  // baked default (wrapper.sh:149)
-    if (machineText !== undefined) {
-      const configured = parseTopLevelString(machineText, "data_root");
-      if (configured !== undefined) {
-        // ~ expansion — matches cb_expand_path at wrapper.sh:185.
-        dataRoot = configured.startsWith("~/") ? `${ctx.home}/${configured.slice(2)}`
-                 : configured === "~"           ? ctx.home
-                 : configured;
-      }
-    }
-    return `${dataRoot}/${projectId}/claude`;
+    return await new MachineConfig(ctx.fs, process.env, ctx.home).projectDataDir(projectId);
   }
 
   private async renderSecretsRow(dotDir: string, ctx: Context): Promise<void> {

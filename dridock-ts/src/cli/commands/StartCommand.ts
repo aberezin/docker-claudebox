@@ -12,6 +12,7 @@ import { ProjectConfig } from "../../services/ProjectConfig.ts";
 import { containerName } from "../../services/ContainerName.ts";
 import { guardWorkspace } from "../../services/WorkspaceGuard.ts";
 import { validateProgArgs } from "../../services/ProgArgValidator.ts";
+import { MachineConfig } from "../../services/MachineConfig.ts";
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
 import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 
@@ -113,9 +114,23 @@ export class StartCommand implements Command {
       return 2;
     }
 
+    // Resolve the per-project data dir — the source path for the
+    // `/home/claude/.claude` mount. MUST match wrapper.sh's CLAUDE_DIR
+    // (wrapper.sh:2805 `cb_project_data_dir($CB_PROJECT_ID)`). Arfy #38
+    // pass 5 caught the earlier `${home}/.claude` hardcode: the HOST
+    // GLOBAL ~/.claude has the human's own credentials + history, NOT
+    // the project's OAuth sidecars + session — leaking global creds
+    // into every claudebot AND breaking auth (container looks for its
+    // per-project _prog-auth sidecar under this mount).
+    const dataDir = await new MachineConfig(ctx.fs, process.env, ctx.home).projectDataDir(id);
+    // Ensure the per-project data dir exists before mount (matches
+    // wrapper.sh:2810 `mkdir -p "$CLAUDE_DIR"`). Container's auth
+    // sidecars land here on first run.
+    await ctx.fs.mkdirRecursive(dataDir);
+
     // ── mode dispatch ─────────────────────────────────────────────────
-    if (isProg) return await this.runProgrammaticValidated(validated!, id, ctx, runtime, context);
-    return await this.runInteractive(args, id, ctx, runtime, context);
+    if (isProg) return await this.runProgrammaticValidated(validated!, id, ctx, runtime, context, dataDir);
+    return await this.runInteractive(args, id, ctx, runtime, context, dataDir);
   }
 
   /**
@@ -124,13 +139,16 @@ export class StartCommand implements Command {
    * a sidecar (`~/.claude/.<container>-interactive-args`) at
    * wrapper.sh's entrypoint.sh:1105.
    */
-  private async runInteractive(args: readonly string[], id: string, ctx: Context, runtime: ContainerRuntime, context: string): Promise<number> {
+  private async runInteractive(args: readonly string[], id: string, ctx: Context, runtime: ContainerRuntime, context: string, dataDir: string): Promise<number> {
     const cname = containerName(ctx.cwd);
 
-    // Write extra interactive args to the sidecar the entrypoint reads.
-    // Only when args non-empty — matches wrapper.sh:3311 shape.
+    // Sidecar files live INSIDE the per-project data dir — same location
+    // the entrypoint mounts as /home/claude/.claude and reads sidecars
+    // relative to. Was previously written to `${ctx.home}/.claude/...`
+    // (global ~/.claude), which would be invisible to the container
+    // because the container mounts dataDir at /home/claude/.claude.
     if (args.length > 0) {
-      const sidecarPath = `${ctx.home}/.claude/.${cname}-interactive-args`;
+      const sidecarPath = `${dataDir}/.${cname}-interactive-args`;
       await ctx.fs.writeText(sidecarPath, shellQuote(args) + "\n", { mode: 0o600 });
     }
 
@@ -140,7 +158,7 @@ export class StartCommand implements Command {
       return await runtime.startAttached(context, cname);
     }
     // Fresh run.
-    const runArgs = this.baseRunArgs(context, cname, id, ctx, "interactive", []);
+    const runArgs = this.baseRunArgs(context, cname, id, ctx, "interactive", [], dataDir);
     return await runtime.runInteractive(runArgs);
   }
 
@@ -152,7 +170,7 @@ export class StartCommand implements Command {
    * "attached" mode = no -it, no -d — foreground stdio inherited, no
    * TTY required. Works headless (scripts, CI, `… | jq`).
    */
-  private async runProgrammaticValidated(validated: ReturnType<typeof validateProgArgs>, id: string, ctx: Context, runtime: ContainerRuntime, context: string): Promise<number> {
+  private async runProgrammaticValidated(validated: ReturnType<typeof validateProgArgs>, id: string, ctx: Context, runtime: ContainerRuntime, context: string, dataDir: string): Promise<number> {
     if (validated.wantsUpdate) {
       ctx.stderr.write(`dridock-ts (Phase 4b): --update is Phase 4b — use the bash wrapper for the update path.\n`);
       return 2;
@@ -161,15 +179,15 @@ export class StartCommand implements Command {
     const cname = containerName(ctx.cwd, "programmatic");
     const existing = await runtime.psFilter(context, cname);
     if (existing !== undefined) {
-      // Reuse path — args go via sidecar, then `docker start -a`. Matches
-      // wrapper.sh:3293. Arfy #38 part 4 caught this: without reuse the
-      // second `-p` invocation hits `name already in use`.
-      const argsFile = `${ctx.home}/.claude/.${cname}-args`;
+      // Reuse: args → sidecar INSIDE the data dir (visible to the
+      // container via the /home/claude/.claude mount), then `docker
+      // start -a`. Matches wrapper.sh:3295.
+      const argsFile = `${dataDir}/.${cname}-args`;
       await ctx.fs.writeText(argsFile, shellQuote(validated.claudeArgs) + "\n", { mode: 0o600 });
       return await runtime.startAttached(context, cname);
     }
     // Fresh run.
-    const runArgs = this.baseRunArgs(context, cname, id, ctx, "attached", validated.claudeArgs);
+    const runArgs = this.baseRunArgs(context, cname, id, ctx, "attached", validated.claudeArgs, dataDir);
     return await runtime.runInteractive(runArgs);
   }
 
@@ -178,7 +196,7 @@ export class StartCommand implements Command {
    * as wrapper.sh's DOCKER_ARGS (the essential subset — see class comment
    * for what's deferred to Phase 4b).
    */
-  private baseRunArgs(context: string, cname: string, id: string, ctx: Context, mode: RunArgs["mode"], cmd: readonly string[]): RunArgs {
+  private baseRunArgs(context: string, cname: string, id: string, ctx: Context, mode: RunArgs["mode"], cmd: readonly string[], dataDir: string): RunArgs {
     return {
       context,
       containerName: cname,
@@ -191,8 +209,16 @@ export class StartCommand implements Command {
       // failure ("network cb-net not found") in fresh VMs.
       network: "host",
       mounts: [
-        { host: `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
-        { host: `${ctx.home}/.claude`, container: "/home/claude/.claude" },
+        // SSH source honors DRIDOCK_SSH_DIR (legacy CLAUDE_SSH_DIR)
+        // override, matching wrapper.sh:2169. Default `~/.ssh/claudebox`.
+        { host: process.env["DRIDOCK_SSH_DIR"] ?? process.env["CLAUDE_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
+        // The per-project data dir — NOT the host's global ~/.claude.
+        // Arfy #38 pass 5 caught this: the host global has the human's
+        // credentials + session history, which would leak into every
+        // claudebot AND miss the project's own OAuth sidecars.
+        // Matches wrapper.sh:2819 `$CLAUDE_DIR:/home/claude/.claude`
+        // where `CLAUDE_DIR=cb_project_data_dir($id)` at wrapper.sh:2805.
+        { host: dataDir, container: "/home/claude/.claude" },
         { host: ctx.cwd, container: ctx.cwd },
         { host: "/var/run/docker.sock", container: "/var/run/docker.sock" },
       ],
