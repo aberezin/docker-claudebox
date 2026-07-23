@@ -191,6 +191,23 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Guard: only operate on colima profiles that start with "cb-". Ports
+ * cb_guard_profile at wrapper.sh:600 — protects against accidentally
+ * `colima stop`-ing the human's default VM.
+ */
+export function isCbProfile(profile: string): boolean {
+  return /^cb-.+/.test(profile);
+}
+
+/**
+ * Count running project VMs (cb-* profiles, EXCLUDING cb-infra which is
+ * the shared image-store). Ports cb_running_cb_count via cb_running_cb_profiles.
+ */
+export function countRunningProjectVms(vms: readonly VmInfo[]): number {
+  return vms.filter((v) => v.name.startsWith("cb-") && v.name !== "cb-infra" && v.status === "Running").length;
+}
+
 /** Parse `colima list --json` output — JSONL, one VM per line. Tolerates
  *  blank lines, trailing whitespace, and lines that fail to parse (skipped
  *  silently — matches bash's awk-based parser). Exported for unit tests. */

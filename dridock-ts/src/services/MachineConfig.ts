@@ -1,6 +1,6 @@
 import type { FileSystem } from "../infra/FileSystem.ts";
 import { xdgRoot } from "../domain/paths.ts";
-import { parseTopLevelString } from "./ProjectConfig.ts";
+import { parseTopLevelString, parseNestedYaml } from "./ProjectConfig.ts";
 
 /**
  * Reads the machine-wide dridock config (`<xdg>/config.yml`, with legacy
@@ -42,6 +42,23 @@ export class MachineConfig {
       if (configured !== undefined) dataRoot = this.expandHome(configured);
     }
     return `${dataRoot}/${projectId}/claude`;
+  }
+
+  /**
+   * VM sizing defaults from the machine config (`vm.default_cpu`,
+   * `vm.default_memory`, `vm.default_disk`), or undefined if unset.
+   * The project config's own `vm:` block overrides these; caller layers
+   * the fallback. Ports the machine-level half of cb_vm_get at
+   * wrapper.sh:534.
+   *
+   * ALSO used for count limits (`vm.warn_max`, `vm.hard_max`).
+   */
+  async machineDefault(key: "vm.default_cpu" | "vm.default_memory" | "vm.default_disk" | "vm.warn_max" | "vm.hard_max"): Promise<string | undefined> {
+    const xdg = await xdgRoot(this.fs, this.env, this.home);
+    const text = await this.fs.readTextOrUndefined(`${xdg}/config.yml`);
+    if (text === undefined) return undefined;
+    const [parent, child] = key.split(".") as [string, string];
+    return parseNestedYaml(text, parent, child);
   }
 
   private expandHome(p: string): string {

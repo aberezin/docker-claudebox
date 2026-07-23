@@ -1,4 +1,5 @@
 import type { FileSystem } from "../infra/FileSystem.ts";
+import { cbNum } from "../domain/units.ts";
 
 /**
  * Reads a project's `.dridock/config.yml` (or legacy `.claudebox/config.yml`)
@@ -35,6 +36,31 @@ export class ProjectConfig {
       ? trimmed + "\n"
       : `${trimmed}\n\nfeatures: [${names.join(", ")}]\n`;
     await this.fs.writeTextAtomic(configPath, rebuilt);
+  }
+
+  /**
+   * The VM sizing for this project, with per-level fallbacks:
+   *   1. project's own config.yml under `vm:` (cpu/memory/disk)
+   *   2. machine config `vm.default_*` (via `MachineConfig.vmDefault(field)`)
+   *   3. baked default (cpu=4, memory=8GiB, disk=60GiB)
+   * Bash values are numeric-strippable (`cb_num` reduces "8GiB" → 8) —
+   * we return the same integer shape (GiB for memory/disk).
+   */
+  async vmSize(configPath: string, field: "cpu" | "memory" | "disk", machineDefault?: string): Promise<number> {
+    const text = await this.fs.readTextOrUndefined(configPath);
+    const raw = text !== undefined ? parseNestedYaml(text, "vm", field) : undefined;
+    const value = raw ?? machineDefault ?? bakedVmDefault(field);
+    return cbNumOr0(value);
+  }
+
+  /**
+   * `network.hostname` from config.yml — for `dridock net`. undefined
+   * when unset.
+   */
+  async networkHostname(configPath: string): Promise<string | undefined> {
+    const text = await this.fs.readTextOrUndefined(configPath);
+    if (text === undefined) return undefined;
+    return parseNestedYaml(text, "network", "hostname");
   }
 
   /**
@@ -99,6 +125,50 @@ export function parseTopLevelString(text: string, key: string): string | undefin
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Extract a nested `parent.child` YAML value from a 2-level document.
+ * Matches `_cb_yaml_get` at wrapper.sh:156 — indent-anchored (top-level
+ * keys have no leading whitespace; block children are indented). Returns
+ * undefined for missing/blank values. Not general YAML — mirrors bash's
+ * awk-based flat/nested reader.
+ */
+export function parseNestedYaml(text: string, parent: string, child: string): string | undefined {
+  let inParent = false;
+  const parentRe = new RegExp(`^${escapeRegex(parent)}\\s*:`);
+  const childRe = new RegExp(`^\\s+${escapeRegex(child)}\\s*:\\s*(.*)$`);
+  for (const rawLine of text.split(/\r?\n/)) {
+    if (rawLine.trim() === "" || /^\s*#/.test(rawLine)) continue;
+    if (parentRe.test(rawLine)) { inParent = true; continue; }
+    if (!/^\s/.test(rawLine)) { inParent = false; continue; }  // any non-indented line ends the parent
+    if (!inParent) continue;
+    const m = rawLine.match(childRe);
+    if (!m) continue;
+    let v = m[1]!.replace(/\s+#.*$/, "").trim();
+    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+    return v === "" ? undefined : v;
+  }
+  return undefined;
+}
+
+/**
+ * Bash `cb_num` — strip suffix → integer part. Reuses domain/units.ts's
+ * cbNum (which throws on unparseable) but wraps in a 0-default because
+ * bash's `${cb_num():-0}` pattern silently degrades unparseable to 0.
+ */
+function cbNumOr0(s: string): number {
+  try { return Math.floor(cbNum(s)); }
+  catch { return 0; }
+}
+
+/** Bash `cb_baked_default vm.<field>` (wrapper.sh:143-146). */
+function bakedVmDefault(field: "cpu" | "memory" | "disk"): string {
+  switch (field) {
+    case "cpu":    return "4";
+    case "memory": return "8GiB";
+    case "disk":   return "100GiB";
+  }
 }
 
 /**
