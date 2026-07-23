@@ -4,32 +4,22 @@ import type { Docker } from "../../infra/Docker.ts";
 import { RealDocker, infraContext } from "../../infra/Docker.ts";
 
 /**
- * Passthrough verbs that spawn a throwaway container to run one `claude`
- * subcommand. Ports the `setup-token|-v|--version|doctor|auth|mcp|stop|
- * clear-session` allowlist at wrapper.sh:2769 (setup-token) + the top-
- * level shortcuts. Uses cb-infra as the docker context so a project VM
- * isn't required.
+ * TRULY-STATELESS passthrough verbs — run one `claude` subcommand in a
+ * throwaway container against cb-infra (no project VM required, no
+ * persistent state written). Just `setup-token` and `doctor` here now.
  *
- * All four run the same shape:
- *   docker --context colima-cb-infra run --rm --entrypoint claude
- *          dridock:latest <sub> <args...>
+ * `mcp` + `auth` USED to be in this file — they've been extracted to
+ * `ProjectPassthroughCommand` because they mutate PROJECT-scoped
+ * persistent config and need the project data-dir mount + HOME +
+ * CLAUDE_CONFIG_DIR env fix. See #39.
  *
- * Output goes directly to the user's stdout/stderr via runCapture (which
- * we could stream, but MVP captures + prints — that's still bash-parity
- * for the setup-token/doctor/auth/mcp shape).
- *
- * DELIBERATE DIVERGENCE from bash — cb-infra context, not the project VM.
- * Arfy #38 P4c pass 3 noted this: bash cold-starts the CURRENT DIR's
- * project VM to run these throwaway verbs (which also spuriously
- * cold-starts a VM for `dridock doctor` in a bare shell, and TTY-fails
- * on the throwaway container in a non-terminal). TS routes to cb-infra
- * instead: no project VM required to run `claude doctor`. Arfy prefers
- * TS's shape; keeping it. If a `-v/--version/doctor/mcp` invocation ever
- * legitimately needs the PROJECT image's baked claude (vs cb-infra's),
- * revisit — for now cb-infra's is identical (same image tag).
+ * DELIBERATE DIVERGENCE from bash — bash cold-starts the current dir's
+ * project VM to run doctor/setup-token; TS routes to cb-infra instead.
+ * No project VM required to run `claude doctor`. Arfy #38 P4c pass 3
+ * explicitly preferred this shape.
  */
 abstract class ClaudePassthroughCommand implements Command {
-  abstract readonly verb: "setup-token" | "doctor" | "auth" | "mcp";
+  abstract readonly verb: "setup-token" | "doctor";
   constructor(
     protected readonly dockerOverride?: Docker,
     protected readonly imageName = "dridock:latest",
@@ -51,10 +41,4 @@ export class SetupTokenCommand extends ClaudePassthroughCommand {
 }
 export class DoctorCommand extends ClaudePassthroughCommand {
   readonly verb = "doctor" as const;
-}
-export class AuthCommand extends ClaudePassthroughCommand {
-  readonly verb = "auth" as const;
-}
-export class McpCommand extends ClaudePassthroughCommand {
-  readonly verb = "mcp" as const;
 }

@@ -15,7 +15,7 @@ import { CompletionCommand } from "./CompletionCommand.ts";
 import { FrameworkBugsCommand } from "./FrameworkBugsCommand.ts";
 import { ReportBugCommand } from "./ReportBugCommand.ts";
 import { ClearSessionCommand } from "./ClearSessionCommand.ts";
-import { SetupTokenCommand, DoctorCommand, AuthCommand, McpCommand } from "./ThrowawayCommands.ts";
+import { SetupTokenCommand, DoctorCommand } from "./ThrowawayCommands.ts";
 
 function makeCtx(fs: InMemoryFileSystem, cwd = "/p"): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
   const stdout = new StringWriter();
@@ -312,20 +312,8 @@ describe("Throwaway container commands (setup-token/doctor/auth/mcp)", () => {
     expect(docker.runCalls[0]!.opts.args).toEqual(["doctor", "--verbose"]);
   });
 
-  test("auth returns docker rc verbatim", async () => {
-    const docker = new InMemoryDocker();
-    docker.runCaptureFallback = { rc: 42, stdout: "" };
-    const { ctx } = makeCtx(new InMemoryFileSystem());
-    const rc = await new AuthCommand(docker).run(["login"], ctx);
-    expect(rc).toBe(42);
-    expect(docker.runCalls[0]!.opts.args).toEqual(["auth", "login"]);
-  });
-
-  test("mcp works too", async () => {
-    const docker = new InMemoryDocker();
-    docker.runCaptureFallback = { rc: 0, stdout: "" };
-    const { ctx } = makeCtx(new InMemoryFileSystem());
-    await new McpCommand(docker).run(["list"], ctx);
-    expect(docker.runCalls[0]!.opts.args).toEqual(["mcp", "list"]);
-  });
+  // Note: `auth` and `mcp` moved to ProjectPassthroughCommand (#39 fix
+  // — they mutate persistent project-scoped config so they need the
+  // project VM + data-dir mount + HOME/CLAUDE_CONFIG_DIR env, not the
+  // stateless cb-infra throwaway shape). See ProjectPassthroughCommand.test.ts.
 });

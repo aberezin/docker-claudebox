@@ -45,6 +45,27 @@ export interface RunArgs {
    * See docs/design/disk-management.md.
    */
   readonly tmpfs?: readonly string[];
+  /**
+   * Optional `--entrypoint <bin>` — overrides the image's ENTRYPOINT so
+   * the container runs `<bin> <cmd...>` directly, bypassing entrypoint.sh.
+   * Used by the `mcp` / `auth` project passthroughs (bash: wrapper.sh:3128)
+   * — those need to run `claude <verb>` directly against the mounted
+   * project state, not through the entrypoint's sidecar-reading dance.
+   *
+   * BEWARE: bypassing entrypoint.sh means HOME isn't set to
+   * /home/claude and the user is root. Callers must set
+   * `-e HOME=/home/claude -e CLAUDE_CONFIG_DIR=/home/claude/.claude`
+   * explicitly (see #39 root cause). Without those, `claude mcp add`
+   * writes to /root/.claude.json — outside the mount + ephemeral with
+   * --rm.
+   */
+  readonly entrypoint?: string;
+  /**
+   * Optional `--rm` — remove the container automatically on exit. Used
+   * with `entrypoint` for the throwaway passthroughs so nothing
+   * accumulates on the docker daemon per invocation.
+   */
+  readonly removeAfter?: boolean;
 }
 
 export interface PsRow {
@@ -120,11 +141,13 @@ export class RealContainerRuntime implements ContainerRuntime {
 export function buildRunArgv(args: RunArgs): string[] {
   const argv: string[] = ["docker", "--context", args.context, "run"];
   argv.push("--name", args.containerName);
+  if (args.removeAfter === true) argv.push("--rm");
   switch (args.mode) {
     case "interactive": argv.push("-it"); break;
     case "detached":    argv.push("-d");  break;
     case "attached":    break; // no -i / -t / -d — foreground, no TTY. See RunArgs.mode comment.
   }
+  if (args.entrypoint !== undefined) argv.push("--entrypoint", args.entrypoint);
   if (args.network !== undefined) argv.push("--network", args.network);
   if (args.workdir !== undefined) argv.push("-w", args.workdir);
   if (args.envFile !== undefined) argv.push("--env-file", args.envFile);
