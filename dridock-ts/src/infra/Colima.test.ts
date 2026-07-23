@@ -1,6 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { parseColimaListJson } from "./Colima.ts";
-import { InMemoryColima } from "../test/fakes/InMemoryColima.ts";
+import { InMemoryColima, StubPinger } from "../test/fakes/InMemoryColima.ts";
 
 describe("parseColimaListJson", () => {
   test("parses JSONL output (one VM per line)", () => {
@@ -61,5 +61,79 @@ describe("InMemoryColima — fake behaviors match Real semantics", () => {
     await c.delete("cb-never-existed"); // no throw
     expect(c.deletions).toEqual(["cb-abc", "cb-abc", "cb-never-existed"]);
     expect(await c.get("cb-abc")).toBeUndefined();
+  });
+});
+
+describe("InMemoryColima.start (P4a)", () => {
+  test("start records the profile + opts + marks VM Running + assigns address when networkAddress: true", async () => {
+    const c = new InMemoryColima();
+    const rc = await c.start("cb-abc", { cpu: 4, memoryGiB: 8, diskGiB: 60, networkAddress: true });
+    expect(rc).toBe(0);
+    expect(c.starts).toEqual([{ profile: "cb-abc", opts: { cpu: 4, memoryGiB: 8, diskGiB: 60, networkAddress: true } }]);
+    const vm = await c.get("cb-abc");
+    expect(vm?.status).toBe("Running");
+    expect(vm?.address).toBe("192.168.64.100");
+    expect(vm?.cpu).toBe(4);
+    expect(vm?.memory).toBe("8GiB");
+    expect(vm?.disk).toBe("60GiB");
+  });
+
+  test("start with networkAddress: false → no address (matches cb-infra shape)", async () => {
+    const c = new InMemoryColima();
+    await c.start("cb-infra", { cpu: 2, memoryGiB: 4, diskGiB: 40, networkAddress: false });
+    expect((await c.get("cb-infra"))?.address).toBe("");
+  });
+
+  test("nextStartRc override → nonzero rc, VM state NOT mutated", async () => {
+    const c = new InMemoryColima();
+    c.nextStartRc = 1;
+    const rc = await c.start("cb-abc", { cpu: 4, memoryGiB: 8, diskGiB: 60, networkAddress: true });
+    expect(rc).toBe(1);
+    expect(await c.get("cb-abc")).toBeUndefined();
+    // But the call was still recorded — for assertion of "we tried"
+    expect(c.starts).toHaveLength(1);
+  });
+
+  test("extraMounts recorded in opts", async () => {
+    const c = new InMemoryColima();
+    await c.start("cb-abc", { cpu: 4, memoryGiB: 8, diskGiB: 60, networkAddress: true, extraMounts: ["/scratch:w"] });
+    expect(c.starts[0]!.opts.extraMounts).toEqual(["/scratch:w"]);
+  });
+});
+
+describe("InMemoryColima.waitReachable (P4a)", () => {
+  test("returns the seeded address instantly when nextWaitReachableSuccess=true", async () => {
+    const c = new InMemoryColima();
+    c.seedVm({ name: "cb-abc", status: "Running", address: "1.2.3.4" });
+    expect(await c.waitReachable("cb-abc")).toBe("1.2.3.4");
+  });
+
+  test("returns undefined when nextWaitReachableSuccess=false (simulates timeout)", async () => {
+    const c = new InMemoryColima();
+    c.seedVm({ name: "cb-abc", status: "Running", address: "1.2.3.4" });
+    c.nextWaitReachableSuccess = false;
+    expect(await c.waitReachable("cb-abc")).toBeUndefined();
+  });
+
+  test("returns undefined when the VM has no address (freshly started, col0 not yet up)", async () => {
+    const c = new InMemoryColima();
+    c.seedVm({ name: "cb-abc", status: "Running", address: "" });
+    expect(await c.waitReachable("cb-abc")).toBeUndefined();
+  });
+
+  test("returns undefined when the profile is absent", async () => {
+    const c = new InMemoryColima();
+    expect(await c.waitReachable("cb-nonexistent")).toBeUndefined();
+  });
+});
+
+describe("StubPinger (P4a)", () => {
+  test("returns seeded outcome; unseeded hosts default false", async () => {
+    const p = new StubPinger();
+    p.seedReachable("1.2.3.4", true);
+    p.seedReachable("5.6.7.8", false);
+    expect(await p.reachable("1.2.3.4", 100)).toBe(true);
+    expect(await p.reachable("5.6.7.8", 100)).toBe(false);
+    expect(await p.reachable("9.9.9.9", 100)).toBe(false);
   });
 });

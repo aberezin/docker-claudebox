@@ -17,6 +17,25 @@ export type ImageVersion = string;
 export const IMAGE_UNSTAMPED = "unstamped" as const;
 export const IMAGE_UNAVAILABLE = "unavailable" as const;
 
+/** Compact identity of a docker image — id + labels — used for reseed
+ *  drift detection (`cb_ensure_image` / `cb_refresh_container`). */
+export interface ImageIdentity {
+  /** The `sha256:…` id from `docker image inspect --format {{.Id}}`. */
+  readonly id: string;
+  /** Whole label map. Callers pluck what they need. */
+  readonly labels: Readonly<Record<string, string>>;
+}
+
+/** Compact `docker inspect --format` output for a container. */
+export interface ContainerIdentity {
+  readonly name: string;
+  /** `.Image` — the SHA the container was created from. Diffs against
+   *  `image inspect` `.Id` for `cb_refresh_container`. */
+  readonly imageId: string;
+  /** Docker status string, e.g. "Up 3 minutes", "Exited (0) 5 min ago". */
+  readonly status?: string;
+}
+
 export interface Docker {
   /**
    * Read the org.dridock.version label off an image inside a docker
@@ -41,6 +60,48 @@ export interface Docker {
    * update is disabled in the image so this only moves on a rebuild.
    */
   imageClaudeCliVersion(context: string | undefined, image: string): Promise<ImageVersion>;
+
+  /**
+   * `docker image inspect` — returns id + label map, or undefined if the
+   * image isn't present (VM down / image absent). Used by
+   * ImageEnsureService for reseed drift detection.
+   */
+  imageIdentity(context: string, image: string): Promise<ImageIdentity | undefined>;
+
+  /**
+   * `docker container inspect --format` on one container name. Returns
+   * name + created-from image id + docker status string. undefined when
+   * the container doesn't exist. Used by cb_refresh_container equivalent.
+   */
+  containerIdentity(context: string, containerName: string): Promise<ContainerIdentity | undefined>;
+
+  /**
+   * `docker rm -f <container>` — force-remove. No-op if absent. Used by
+   * cb_refresh_container after label mismatch.
+   */
+  containerRemove(context: string, containerName: string): Promise<void>;
+
+  /**
+   * Pipe `docker save $image` on `sourceContext` into `docker load` on
+   * `targetContext`. Best-effort — returns rc 0 iff both ends succeeded.
+   * Ports the `save | load` pipeline in cb_ensure_image at
+   * wrapper.sh:707 + :714. Big-image blocking op (multi-second at least).
+   */
+  saveAndLoad(sourceContext: string, image: string, targetContext: string): Promise<number>;
+
+  /**
+   * Run a throwaway container and capture its stdout — `docker run --rm`.
+   * Used for `features info` (cat manifest.yml) and other one-shot reads.
+   * Returns {rc, stdout} — never throws for exec failure.
+   */
+  runCapture(context: string | undefined, image: string, opts: RunCaptureOpts): Promise<{ rc: number; stdout: string }>;
+}
+
+export interface RunCaptureOpts {
+  /** Override the image's ENTRYPOINT (e.g. "sh" or "cat"). */
+  readonly entrypoint?: string;
+  /** Args passed to the image / entrypoint. */
+  readonly args: readonly string[];
 }
 
 /** Production impl. */
@@ -87,6 +148,90 @@ export class RealDocker implements Docker {
       return text;
     } catch {
       return IMAGE_UNAVAILABLE;
+    }
+  }
+
+  async imageIdentity(context: string, image: string): Promise<ImageIdentity | undefined> {
+    // `--format {json .}` isn't universally supported; use two Go-templates
+    // separated by a delimiter to get id + labels in one shot.
+    const args = [
+      "docker", "--context", context, "image", "inspect", image,
+      "--format", "{{.Id}}{{json .Config.Labels}}",
+    ];
+    try {
+      const proc = Bun.spawn(args, { stdout: "pipe", stderr: "ignore" });
+      const text = await new Response(proc.stdout).text();
+      const rc = await proc.exited;
+      if (rc !== 0) return undefined;
+      const line = text.split(/\r?\n/)[0] ?? "";
+      const [id, labelsJson] = line.split("");
+      if (id === undefined || id === "" || labelsJson === undefined) return undefined;
+      // Labels can be `null` when the image has none — Go's `{{json}}` emits
+      // `null` in that case, which JSON.parse accepts as `null`.
+      const parsed = JSON.parse(labelsJson) as Record<string, string> | null;
+      return { id, labels: parsed ?? {} };
+    } catch {
+      return undefined;
+    }
+  }
+
+  async containerIdentity(context: string, containerName: string): Promise<ContainerIdentity | undefined> {
+    const args = [
+      "docker", "--context", context, "container", "inspect", containerName,
+      "--format", "{{.Image}}{{.State.Status}}",
+    ];
+    try {
+      const proc = Bun.spawn(args, { stdout: "pipe", stderr: "ignore" });
+      const text = await new Response(proc.stdout).text();
+      const rc = await proc.exited;
+      if (rc !== 0) return undefined;
+      const line = text.split(/\r?\n/)[0] ?? "";
+      const [imageId, status] = line.split("");
+      if (imageId === undefined || imageId === "") return undefined;
+      return { name: containerName, imageId, status };
+    } catch {
+      return undefined;
+    }
+  }
+
+  async containerRemove(context: string, containerName: string): Promise<void> {
+    const proc = Bun.spawn(["docker", "--context", context, "rm", "-f", containerName], {
+      stdout: "ignore", stderr: "ignore",
+    });
+    await proc.exited;
+    // rc discarded — `rm -f` on an absent container is "not found" which
+    // we treat as success (idempotent, matches bash `|| true` shape).
+  }
+
+  async saveAndLoad(sourceContext: string, image: string, targetContext: string): Promise<number> {
+    // Pipe stdout of `docker save` into stdin of `docker load`. Both
+    // stderr are swallowed to match bash (`>/dev/null`).
+    const save = Bun.spawn(["docker", "--context", sourceContext, "save", image], {
+      stdout: "pipe", stderr: "ignore",
+    });
+    const load = Bun.spawn(["docker", "--context", targetContext, "load"], {
+      stdin: save.stdout, stdout: "ignore", stderr: "ignore",
+    });
+    const [saveRc, loadRc] = await Promise.all([save.exited, load.exited]);
+    return saveRc === 0 && loadRc === 0 ? 0 : Math.max(saveRc, loadRc);
+  }
+
+  async runCapture(context: string | undefined, image: string, opts: RunCaptureOpts): Promise<{ rc: number; stdout: string }> {
+    const args = [
+      "docker",
+      ...(context !== undefined ? ["--context", context] : []),
+      "run", "--rm",
+      ...(opts.entrypoint !== undefined ? ["--entrypoint", opts.entrypoint] : []),
+      image,
+      ...opts.args,
+    ];
+    try {
+      const proc = Bun.spawn(args, { stdout: "pipe", stderr: "ignore" });
+      const stdout = await new Response(proc.stdout).text();
+      const rc = await proc.exited;
+      return { rc, stdout };
+    } catch {
+      return { rc: 1, stdout: "" };
     }
   }
 }
