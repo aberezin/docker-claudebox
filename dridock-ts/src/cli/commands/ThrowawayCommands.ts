@@ -17,6 +17,16 @@ import { RealDocker, infraContext } from "../../infra/Docker.ts";
  * Output goes directly to the user's stdout/stderr via runCapture (which
  * we could stream, but MVP captures + prints — that's still bash-parity
  * for the setup-token/doctor/auth/mcp shape).
+ *
+ * DELIBERATE DIVERGENCE from bash — cb-infra context, not the project VM.
+ * Arfy #38 P4c pass 3 noted this: bash cold-starts the CURRENT DIR's
+ * project VM to run these throwaway verbs (which also spuriously
+ * cold-starts a VM for `dridock doctor` in a bare shell, and TTY-fails
+ * on the throwaway container in a non-terminal). TS routes to cb-infra
+ * instead: no project VM required to run `claude doctor`. Arfy prefers
+ * TS's shape; keeping it. If a `-v/--version/doctor/mcp` invocation ever
+ * legitimately needs the PROJECT image's baked claude (vs cb-infra's),
+ * revisit — for now cb-infra's is identical (same image tag).
  */
 abstract class ClaudePassthroughCommand implements Command {
   abstract readonly verb: "setup-token" | "doctor" | "auth" | "mcp";

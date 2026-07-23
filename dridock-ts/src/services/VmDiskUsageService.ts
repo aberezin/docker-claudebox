@@ -82,7 +82,12 @@ export class VmDiskUsageService {
       ctx.stdout.write(`(no dridock VMs)\n`);
     } else {
       const nameWidth = Math.max(7, ...live.map((r) => r.name.length));
-      ctx.stdout.write(`${"PROFILE".padEnd(nameWidth)}  STATUS   ON-DISK   MAX\n`);
+      const statusWidth = Math.max(6, ...live.map((r) => r.status.length));
+      // ON-DISK width computed from actual values, matching bash's
+      // `column -t` auto-width. Arfy #38 P4c pass 3 residual: was
+      // padded fixed 8 → 1 space wider than bash for typical values.
+      const onDiskWidth = Math.max(7, ...live.map((r) => r.onDisk.length));
+      ctx.stdout.write(`${"PROFILE".padEnd(nameWidth)}  ${"STATUS".padEnd(statusWidth)}  ${"ON-DISK".padEnd(onDiskWidth)}  MAX\n`);
       // Arfy #38 P4c pass 2 B3 cosmetic: default (human) listed FIRST
       // to match bash cb_vm_usage output ordering. Sort with default
       // priority-first, then everything else alphabetically.
@@ -94,15 +99,16 @@ export class VmDiskUsageService {
         return a.name.localeCompare(b.name);
       });
       for (const r of sorted) {
-        ctx.stdout.write(`${r.name.padEnd(nameWidth)}  ${r.status.padEnd(7)}  ${r.onDisk.padEnd(8)}  ${r.max}\n`);
+        ctx.stdout.write(`${r.name.padEnd(nameWidth)}  ${r.status.padEnd(statusWidth)}  ${r.onDisk.padEnd(onDiskWidth)}  ${r.max}\n`);
       }
     }
     if (orph.length > 0) {
       ctx.stdout.write(`\norphaned disks — no VM owns these (reclaim with '${ctx.binName} vm gc'):\n`);
       const nameWidth = Math.max(4, ...orph.map((r) => r.name.length));
-      ctx.stdout.write(`${"DISK".padEnd(nameWidth)}  ON-DISK   MAX\n`);
+      const onDiskWidth = Math.max(7, ...orph.map((r) => r.onDisk.length));
+      ctx.stdout.write(`${"DISK".padEnd(nameWidth)}  ${"ON-DISK".padEnd(onDiskWidth)}  MAX\n`);
       for (const r of orph.sort((a, b) => a.name.localeCompare(b.name))) {
-        ctx.stdout.write(`${r.name.padEnd(nameWidth)}  ${r.onDisk.padEnd(8)}  ${r.max}\n`);
+        ctx.stdout.write(`${r.name.padEnd(nameWidth)}  ${r.onDisk.padEnd(onDiskWidth)}  ${r.max}\n`);
       }
     }
     ctx.stdout.write(`\ntotals — projects: ${cbH(projKb * 1024)}   cb-infra: ${cbH(infraKb * 1024)}   default(human): ${cbH(defKb * 1024)}   orphaned: ${cbH(orphKb * 1024)}\n`);
