@@ -86,6 +86,42 @@ This requires [bun](https://bun.sh) and installs the compiled binary as
 wrapper remains the canonical `dridock` — the TS binary is opt-in for
 verification.
 
+## Why real-Mac verification matters (Arfy's rule)
+
+The unit tests are necessary but **not sufficient** for anything that
+touches the container-run path. `dridock-ts start` needed **six live
+verification passes** on real macOS + real colima before it worked:
+
+1. `-p` allowlist bypassed when VM was down (ordering bug)
+2. `-p` used `-it` → fails headless in scripts/CI/pipes
+3. `--network cb-net` (wrong network — sibling workloads only) → rc 125
+4. Six argv-parity divergences from `wrapper.sh` `DOCKER_ARGS`
+5. `-p` container name reused unconditionally → rc 125 on second run
+6. `start` mounted the host global `~/.claude` (would leak the human's
+   creds + break auth) — a security-adjacent bug the *structural* argv-diff
+   missed because only the *resolved* source path differed
+
+**Every one was green across all TS unit tests.** They live in the gap
+between mocked interfaces (`InMemoryContainerRuntime`, `InMemoryColima`,
+`InMemoryDocker`) and a live docker daemon + real auth + real filesystem
+paths. That gap is exactly what Arfy's Mac-side pass is for.
+
+Two habits emerged that dramatically cut the cycle:
+- **Argv-diff before re-verify.** After Arfy caught two blockers in one
+  round, we did a full bear-side token-diff of the derived `docker run`
+  argv against `wrapper.sh`'s `DOCKER_ARGS` before asking her to
+  re-bootstrap. That review turned up 6 changes at once instead of 6
+  separate re-verifies.
+- **Resolved-path sweep, not structural-diff.** The structural argv-diff
+  sees `-v X:/home/claude/.claude` and confirms parity — but if `X`
+  resolves to `${home}/.claude` vs `$CLAUDE_DIR`, only the resolved
+  value diverges. A resolved-path sweep of every mount/env/sidecar in
+  the run catches that class.
+
+Bake both habits into any Phase-4b re-verify cycle. The unit tests are
+excellent for correctness; they cannot substitute for a Mac-side pass
+on anything that runs a container.
+
 ## Verification plan (Arfy)
 
 Before we merge to master, we need the TS binary to prove out on real
@@ -187,6 +223,11 @@ Once Arfy signs off on the fidelity of each shipped verb, we squash the
 The bash wrapper stays as the default binary; TS remains opt-in via
 `DRIDOCK_INSTALL_TS=1` until Phase 4b closes the remaining gaps and we
 flip the default.
+
+**Sign-off status (2026-07-23)**: Arfy signed off #38 on `af64a07` after
+six Mac-side verification passes. See "Why real-Mac verification matters"
+above for the pattern. Branch is ready to squash to master on Alan's
+call; nothing else outstanding.
 
 ## See also
 
