@@ -12,6 +12,11 @@ export interface ProcessProbe {
    *  returns false — the migrator falls back to "assume nothing's using
    *  it" which is the same behavior as macOS+Linux without pgrep. */
   processMatchingCmdline(pattern: string): Promise<boolean>;
+
+  /** True iff a process with the given pid exists (and we can signal it —
+   *  matches bash `kill -0 $pid 2>/dev/null`). Never throws. Used by the
+   *  host-agent "is it up?" check. */
+  processAlive(pid: number): Promise<boolean>;
 }
 
 export class RealProcessProbe implements ProcessProbe {
@@ -31,13 +36,31 @@ export class RealProcessProbe implements ProcessProbe {
       return false;
     }
   }
+
+  async processAlive(pid: number): Promise<boolean> {
+    if (!Number.isFinite(pid) || pid <= 0) return false;
+    try {
+      // Node/Bun: `process.kill(pid, 0)` throws if the process doesn't
+      // exist OR we lack permission to signal it. `kill -0` semantics —
+      // same signal-with-no-effect check bash uses.
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
-/** Test double — pre-seeded pattern → matching bool. */
+/** Test double — pre-seeded pattern → matching bool + pid → alive bool. */
 export class StubProcessProbe implements ProcessProbe {
   private readonly matches = new Map<string, boolean>();
+  private readonly alive = new Map<number, boolean>();
   seedMatch(pattern: string, matches: boolean): void { this.matches.set(pattern, matches); }
+  seedAlive(pid: number, alive: boolean): void { this.alive.set(pid, alive); }
   async processMatchingCmdline(pattern: string): Promise<boolean> {
     return this.matches.get(pattern) ?? false;
+  }
+  async processAlive(pid: number): Promise<boolean> {
+    return this.alive.get(pid) ?? false;
   }
 }

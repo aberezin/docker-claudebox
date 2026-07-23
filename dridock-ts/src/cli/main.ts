@@ -24,6 +24,11 @@ import { StartCommand } from "./commands/StartCommand.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
 import { DridockError } from "../domain/errors.ts";
+import { RealProcessProbe } from "../infra/ProcessProbe.ts";
+import { RealClock } from "../infra/Clock.ts";
+import { RealGitToplevel } from "../infra/GitToplevel.ts";
+import { ProjectRootResolver } from "../services/ProjectRoot.ts";
+import { autoMigrateIfNeeded } from "../services/AutoMigrate.ts";
 import type { Context, TextWriter } from "./Context.ts";
 
 /** Adapts Node-compat `process.stdout` / `process.stderr` to the narrow
@@ -91,6 +96,18 @@ async function main(): Promise<number> {
   const ctx = buildContext(binaryArg);
 
   try {
+    // Auto-migrate: legacy `.claudebox/`-only project → `.dridock/`. Ports
+    // cb_auto_migrate at wrapper.sh:2105. Silent no-op when: opt-out env
+    // set, .claudebox absent, or .dridock already present. Runs BEFORE
+    // dispatch so verbs read from the correct dot dir.
+    const fs = new RealFileSystem();
+    const project = await new ProjectRootResolver(fs, new RealGitToplevel()).resolve(ctx.cwd);
+    await autoMigrateIfNeeded(project.root, {
+      fs, probe: new RealProcessProbe(), clock: new RealClock(),
+      env: process.env, home: ctx.home,
+      onNotice: (m) => ctx.stderr.write(m),
+    });
+
     return await registry.dispatch(userArgs, ctx);
   } catch (err) {
     if (err instanceof DridockError) {

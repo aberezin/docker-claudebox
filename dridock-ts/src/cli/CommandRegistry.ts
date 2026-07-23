@@ -56,12 +56,23 @@ export class CommandRegistry {
       return 0;
     }
 
-    // Flag first-arg → passthrough to the eventual interactive-launch path.
-    // Not implemented in Phase 2; guarded here so the "unknown verb" branch
-    // doesn't accidentally reject legit `dridock -p '…'` invocations.
+    // Flag first-arg → auto-invoke `start` with the whole argv. Bash
+    // wrapper does the same via its `case` fall-through: any bareword
+    // that isn't a management verb reaches the start path.
+    // Matches user expectation for `dridock -p '…'` and `dridock --help`.
     if (verb.startsWith("-")) {
-      ctx.stderr.write(`dridock-ts (Phase 2): flag passthrough not implemented yet — use the bash wrapper for '${verb}' invocations\n`);
-      return 2;
+      // --help / -h at top level → StartCommand doesn't handle these;
+      // route to the help verb explicitly.
+      if (verb === "--help" || verb === "-h") {
+        const help = this.commands.get("help" as Verb);
+        if (help !== undefined) return await help.run(argv.slice(1), ctx);
+      }
+      const start = this.commands.get("start" as Verb);
+      if (start === undefined) {
+        // Fresh compile-registry case — nothing to fall through to.
+        throw new UnknownVerbError(verb);
+      }
+      return await start.run(argv, ctx);
     }
 
     if (!isKnownVerb(verb)) {
@@ -81,9 +92,9 @@ export class CommandRegistry {
 
   private writeBanner(ctx: Context): void {
     const versionSpec = VERBS.version.summary;
-    ctx.stdout.write(`dridock-ts (Phase 2 — parallel to wrapper.sh)\n\n`);
+    ctx.stdout.write(`dridock\n\n`);
     ctx.stdout.write(`  ${ctx.binName} version              ${versionSpec}\n`);
+    ctx.stdout.write(`  ${ctx.binName} start                start/attach the claudebot for $PWD\n`);
     ctx.stdout.write(`  ${ctx.binName} help                 full help\n`);
-    ctx.stdout.write(`  (use the bash wrapper for interactive/programmatic launch until Phase 4 lands)\n`);
   }
 }

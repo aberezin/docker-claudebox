@@ -17,5 +17,8 @@ import type { Verb } from "../domain/Verbs.ts";
  */
 export interface Command {
   readonly verb: Verb;
-  run(args: string[], ctx: Context): Promise<number>;
+  /** Post-verb argv slice. Widened to `readonly` so callers with a
+   *  frozen argv slice (the Registry's top-level flag passthrough) can
+   *  pass through without copying. Commands must not mutate the array. */
+  run(args: readonly string[], ctx: Context): Promise<number>;
 }

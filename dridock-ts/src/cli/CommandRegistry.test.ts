@@ -33,7 +33,7 @@ describe("CommandRegistry — dispatch table", () => {
     const ctx = makeCtx();
     const rc = await registry.dispatch([], ctx);
     expect(rc).toBe(0);
-    expect(ctx.stdout.toString()).toContain("dridock-ts (Phase 2");
+    expect(ctx.stdout.toString()).toContain("dridock");   // simplified banner post-P4b
     expect(ctx.stderr.toString()).toBe("");
   });
 
@@ -78,12 +78,42 @@ describe("CommandRegistry — dispatch table", () => {
     }
   });
 
-  test("first arg starting with '-' → not-yet-implemented, exit 2, no throw", async () => {
+  test("first arg starting with '-' when start is NOT registered → UnknownVerbError", async () => {
+    // Fresh registry with no start command. This shouldn't happen in
+    // production (main.ts always registers start) but the branch exists.
     const registry = new CommandRegistry();
     const ctx = makeCtx();
+    try {
+      await registry.dispatch(["-p", "hello"], ctx);
+      throw new Error("expected UnknownVerbError");
+    } catch (e) {
+      expect(e).toBeInstanceOf(UnknownVerbError);
+    }
+  });
+
+  test("first arg starting with '-' → routes to start command (P4b: dridock -p '…' works at top level)", async () => {
+    // Prove the routing: register a mock start that records what argv it got.
+    const registry = new CommandRegistry();
+    let receivedArgs: readonly string[] = [];
+    registry.register({
+      verb: "start",
+      run: async (args) => { receivedArgs = args; return 0; },
+    });
+    const ctx = makeCtx();
     const rc = await registry.dispatch(["-p", "hello"], ctx);
-    expect(rc).toBe(2);
-    expect(ctx.stderr.toString()).toContain("flag passthrough not implemented");
+    expect(rc).toBe(0);
+    expect(receivedArgs).toEqual(["-p", "hello"]);
+  });
+
+  test("--help at top level → routes to help command when registered", async () => {
+    const registry = new CommandRegistry();
+    let helpCalled = false;
+    registry.register({ verb: "start", run: async () => 0 });
+    registry.register({ verb: "help", run: async () => { helpCalled = true; return 0; } });
+    const ctx = makeCtx();
+    const rc = await registry.dispatch(["--help"], ctx);
+    expect(rc).toBe(0);
+    expect(helpCalled).toBe(true);
   });
 });
 

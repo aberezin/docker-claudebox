@@ -39,6 +39,12 @@ export interface RunArgs {
   readonly cmd: readonly string[];
   /** Extra `-p HOST:CONTAINER` port publishes. */
   readonly publishPorts: readonly string[];
+  /**
+   * Optional `--tmpfs MOUNT:OPTS` — the DRIDOCK_TMPFS_TMP opt-in for
+   * RAM-backing /tmp so docker bloat can't ENOSPC-kill the Bash tool.
+   * See docs/design/disk-management.md.
+   */
+  readonly tmpfs?: readonly string[];
 }
 
 export interface PsRow {
@@ -130,6 +136,7 @@ export function buildRunArgv(args: RunArgs): string[] {
     argv.push("-v", spec);
   }
   for (const p of args.publishPorts) argv.push("-p", p);
+  for (const t of args.tmpfs ?? []) argv.push("--tmpfs", t);
   argv.push(args.image);
   argv.push(...args.cmd);
   return argv;
