@@ -21,6 +21,14 @@ import { DownCommand } from "./commands/DownCommand.ts";
 import { DestroyCommand } from "./commands/DestroyCommand.ts";
 import { StopCommand } from "./commands/StopCommand.ts";
 import { StartCommand } from "./commands/StartCommand.ts";
+import { VmCommand } from "./commands/VmCommand.ts";
+import { IpCommand, NetCommand } from "./commands/IpNetCommand.ts";
+import { DfCommand } from "./commands/DfCommand.ts";
+import { CompletionCommand } from "./commands/CompletionCommand.ts";
+import { FrameworkBugsCommand } from "./commands/FrameworkBugsCommand.ts";
+import { ReportBugCommand } from "./commands/ReportBugCommand.ts";
+import { ClearSessionCommand } from "./commands/ClearSessionCommand.ts";
+import { SetupTokenCommand, DoctorCommand, AuthCommand, McpCommand } from "./commands/ThrowawayCommands.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
 import { DridockError } from "../domain/errors.ts";
@@ -56,7 +64,18 @@ function buildRegistry(): CommandRegistry {
   registry.register(new DestroyCommand());
   registry.register(new StopCommand());
   registry.register(new StartCommand());
-  // Additional verbs registered in later phases.
+  registry.register(new VmCommand());
+  registry.register(new IpCommand());
+  registry.register(new NetCommand());
+  registry.register(new DfCommand());
+  registry.register(new CompletionCommand());
+  registry.register(new FrameworkBugsCommand());
+  registry.register(new ReportBugCommand());
+  registry.register(new ClearSessionCommand());
+  registry.register(new SetupTokenCommand());
+  registry.register(new DoctorCommand());
+  registry.register(new AuthCommand());
+  registry.register(new McpCommand());
   return registry;
 }
 

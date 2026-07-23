@@ -67,6 +67,15 @@ export class InMemoryColima implements Colima {
     const vm = this.vms.get(profile);
     return vm !== undefined && vm.address !== "" ? vm.address : undefined;
   }
+
+  readonly sshCalls: Array<{ profile: string; cmd: readonly string[]; rc: number }> = [];
+  /** RC scripted for the NEXT ssh call — default 0. */
+  nextSshRc = 0;
+  async ssh(profile: string, cmd: readonly string[]): Promise<number> {
+    const rc = this.nextSshRc;
+    this.sshCalls.push({ profile, cmd, rc });
+    return rc;
+  }
 }
 
 /** Test double for the ping primitive — reachable() returns a scripted bool. */

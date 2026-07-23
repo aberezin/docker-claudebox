@@ -71,6 +71,13 @@ export interface Colima {
    * cb_wait_reachable at wrapper.sh:1247.
    */
   waitReachable(profile: string, opts?: WaitReachableOpts): Promise<string | undefined>;
+
+  /**
+   * `colima ssh -p <profile> -- <cmd>` — run a command inside a VM's
+   * shell. Used by `vm gc` to `sudo fstrim` inside each running VM.
+   * Returns rc. Never throws.
+   */
+  ssh(profile: string, cmd: readonly string[]): Promise<number>;
 }
 
 /** Probes network reachability of a single host. Split out because the ping
@@ -163,6 +170,16 @@ export class RealColima implements Colima {
       stdout: "ignore", stderr: "ignore",
     });
     await proc.exited;
+  }
+
+  async ssh(profile: string, cmd: readonly string[]): Promise<number> {
+    try {
+      const proc = Bun.spawn(["colima", "ssh", "-p", profile, "--", ...cmd], {
+        stdin: "ignore",       // don't swallow parent stdin — bash uses `</dev/null` in vm gc
+        stdout: "ignore", stderr: "ignore",
+      });
+      return await proc.exited;
+    } catch { return 1; }
   }
 
   async waitReachable(profile: string, opts: WaitReachableOpts = {}): Promise<string | undefined> {

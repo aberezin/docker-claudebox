@@ -87,6 +87,24 @@ export class InMemoryDocker implements Docker {
     return this.runCaptures.get(`${image}\0${opts.args.join(" ")}`) ?? this.runCaptureFallback ?? { rc: 127, stdout: "" };
   }
 
+  readonly imagePrunes: Array<{ context: string; reclaimed: string }> = [];
+  readonly builderPrunes: Array<{ context: string; reclaimed: string }> = [];
+  /** Reclaimed strings scripted for the NEXT prune calls — default "0B". */
+  nextImagePruneReclaimed = "0B";
+  nextBuilderPruneReclaimed = "0B";
+
+  async imagePrune(context: string): Promise<{ rc: number; reclaimed: string }> {
+    const reclaimed = this.nextImagePruneReclaimed;
+    this.imagePrunes.push({ context, reclaimed });
+    return { rc: 0, reclaimed };
+  }
+
+  async builderPrune(context: string): Promise<{ rc: number; reclaimed: string }> {
+    const reclaimed = this.nextBuilderPruneReclaimed;
+    this.builderPrunes.push({ context, reclaimed });
+    return { rc: 0, reclaimed };
+  }
+
   private key(context: string | undefined, image: string): string {
     return `${context ?? "default"}\0${image}`;
   }

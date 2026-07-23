@@ -55,6 +55,8 @@ export const VERBS = {
   features:         { summary: "list / enable / disable / info the project's features", class: "state-mgmt", needsProject: true } as const,
   profiles:         { summary: "legacy 2.x alias of `features`",                    class: "state-mgmt",   needsProject: true } as const,
   vm:               { summary: "colima VM diagnostics",                             class: "vm-mgmt",      needsProject: false, subcommands: ["ls", "list", "usage", "df", "gc"] as const } as const,
+  ip:               { summary: "print this project VM's reachable IP",              class: "readonly",     needsProject: true } as const,
+  net:              { summary: "print the browse dashboard; with <name>, set network.hostname", class: "state-mgmt", needsProject: true } as const,
   "browser-bridge": { summary: "opt-in CDP bridge to your real Chrome",             class: "vm-mgmt",      needsProject: true,  subcommands: ["up", "down"] as const } as const,
   "host-agent":     { summary: "framework-dev host-command proxy (TRUSTED)",        class: "vm-mgmt",      needsProject: false, subcommands: ["up", "down", "status"] as const } as const,
   harness:          { summary: "framework-dev-only: sync cb-infra image",           class: "vm-mgmt",      needsProject: false, subcommands: ["sync"] as const } as const,

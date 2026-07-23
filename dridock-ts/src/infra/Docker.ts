@@ -95,6 +95,20 @@ export interface Docker {
    * Returns {rc, stdout} — never throws for exec failure.
    */
   runCapture(context: string | undefined, image: string, opts: RunCaptureOpts): Promise<{ rc: number; stdout: string }>;
+
+  /**
+   * `docker image prune -f` in a specific context. Returns the reclaimed
+   * bytes if the docker output includes a "reclaimed" line, else 0.
+   * Used by `vm gc`. Ports wrapper.sh:939.
+   */
+  imagePrune(context: string): Promise<{ rc: number; reclaimed: string }>;
+
+  /**
+   * `docker builder prune -f` — the build-cache pruner. On image-iterating
+   * projects the build cache is the real accumulator (`image prune` never
+   * touches it — see docs/design/disk-management.md). Ports wrapper.sh:940.
+   */
+  builderPrune(context: string): Promise<{ rc: number; reclaimed: string }>;
 }
 
 export interface RunCaptureOpts {
@@ -233,6 +247,26 @@ export class RealDocker implements Docker {
     } catch {
       return { rc: 1, stdout: "" };
     }
+  }
+
+  async imagePrune(context: string): Promise<{ rc: number; reclaimed: string }> {
+    return await runPruneCommand(["docker", "--context", context, "image", "prune", "-f"]);
+  }
+  async builderPrune(context: string): Promise<{ rc: number; reclaimed: string }> {
+    return await runPruneCommand(["docker", "--context", context, "builder", "prune", "-f"]);
+  }
+}
+
+/** Shared prune helper — parses the "Total reclaimed space: X" line. */
+async function runPruneCommand(argv: string[]): Promise<{ rc: number; reclaimed: string }> {
+  try {
+    const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore" });
+    const text = await new Response(proc.stdout).text();
+    const rc = await proc.exited;
+    const match = text.match(/reclaimed[^:]*:\s*(\S+)/i);
+    return { rc, reclaimed: match?.[1] ?? "0B" };
+  } catch {
+    return { rc: 1, reclaimed: "0B" };
   }
 }
 
