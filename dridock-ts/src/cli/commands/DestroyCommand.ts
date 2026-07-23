@@ -6,15 +6,14 @@ import { RealColima } from "../../infra/Colima.ts";
 import { projectProfile } from "../../infra/Docker.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
 import { ProjectConfig } from "../../services/ProjectConfig.ts";
+import { MachineConfig } from "../../services/MachineConfig.ts";
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
 import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 
 /**
  * `dridock destroy [--purge]` — destroy this project's VM. Ports
- * wrapper.sh:2402. `--purge` also deletes the project's data dir
- * (session/settings/plugins) — deferred to bash for now since it needs
- * the `cb_project_data_dir` machine-config lookup + a big rm -rf.
- * The VM-destroy half runs entirely here.
+ * wrapper.sh:2402. `--purge` also deletes the per-project data dir
+ * (session/settings/plugins/sidecars) for a truly clean slate.
  */
 export class DestroyCommand implements Command {
   readonly verb = "destroy" as const;
@@ -24,7 +23,7 @@ export class DestroyCommand implements Command {
     private readonly gitOverride?: GitToplevel,
   ) {}
 
-  async run(args: string[], ctx: Context): Promise<number> {
+  async run(args: readonly string[], ctx: Context): Promise<number> {
     let purge = false;
     for (const arg of args) {
       switch (arg) {
@@ -49,9 +48,19 @@ export class DestroyCommand implements Command {
     ctx.stdout.write(`  💥 destroying VM ${profile}...\n`);
     await colima.delete(profile);
     ctx.stdout.write(`  ✓ ${profile} destroyed\n`);
+
     if (purge) {
-      ctx.stderr.write(`dridock-ts (Phase 4): --purge (data-dir rm -rf) not yet ported — use the bash wrapper for --purge\n`);
-      return 2;
+      const dataDir = await new MachineConfig(ctx.fs, process.env, ctx.home).projectDataDir(id);
+      // Guard: the resolved path must contain the project id — protects
+      // against a machine config typo somehow yielding e.g. `/` or `$HOME`.
+      // Matches the same class as bash's cb_purge_data guard at :813.
+      if (!dataDir.includes(`/${id}/`)) {
+        ctx.stderr.write(`❌ refusing to rm -rf ${dataDir} — path doesn't contain project id '${id}' (config error?)\n`);
+        return 1;
+      }
+      ctx.stdout.write(`  🧹 purging data dir ${dataDir}...\n`);
+      await ctx.fs.removeDirRecursive(dataDir);
+      ctx.stdout.write(`  ✓ purged\n`);
     }
     return 0;
   }

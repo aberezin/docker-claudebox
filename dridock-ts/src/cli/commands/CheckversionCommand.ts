@@ -3,6 +3,8 @@ import type { Context } from "../Context.ts";
 import { DridockError } from "../../domain/errors.ts";
 import { CheckVersionService, infraContext, projectContext, projectProfile, type CheckVersionOutcome, type CheckVersionInputs } from "../../services/CheckVersion.ts";
 import { RealDocker, type Docker } from "../../infra/Docker.ts";
+import type { Colima } from "../../infra/Colima.ts";
+import { RealColima } from "../../infra/Colima.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
 import { ProjectConfig } from "../../services/ProjectConfig.ts";
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
@@ -26,10 +28,10 @@ export class CheckversionCommand implements Command {
     private readonly imageName = "dridock:latest",
     private readonly dockerOverride?: Docker,
     private readonly gitOverride?: GitToplevel,
+    private readonly colimaOverride?: Colima,
   ) {}
 
-  async run(args: string[], ctx: Context): Promise<number> {
-    // Arg parsing — matches the tiny loop in cb_checkversion (wrapper.sh:1075).
+  async run(args: readonly string[], ctx: Context): Promise<number> {
     let all = false;
     for (const arg of args) {
       switch (arg) {
@@ -41,10 +43,6 @@ export class CheckversionCommand implements Command {
           throw new DridockError(`checkversion: unknown arg '${arg}'`);
       }
     }
-    if (all) {
-      ctx.stderr.write(`dridock-ts (Phase 2): 'checkversion --all' not yet ported — use the bash wrapper\n`);
-      return 2;
-    }
 
     const docker = this.dockerOverride ?? new RealDocker();
     const git = this.gitOverride ?? new RealGitToplevel();
@@ -55,6 +53,29 @@ export class CheckversionCommand implements Command {
     const evaluation = await svc.evaluate(DRIDOCK_TS_VERSION, projectId);
 
     this.renderHeader(evaluation, ctx);
+
+    if (all) {
+      // Ports the `--all` branch at wrapper.sh:1105 — enumerate every
+      // cb-* VM (excluding cb-infra + this project) and print each's
+      // image version. Uses the extended Colima adapter.
+      const colima = this.colimaOverride ?? new RealColima();
+      const vms = await colima.list();
+      const thisProfile = projectId !== undefined ? projectProfile(projectId) : "";
+      const others = vms
+        .map((v) => v.name)
+        .filter((n) => n.startsWith("cb-") && n !== "cb-infra" && n !== thisProfile);
+      ctx.stdout.write(`  all cb-* project VMs (--all):\n`);
+      if (others.length === 0) {
+        ctx.stdout.write(`    (none besides this project)\n`);
+      } else {
+        for (const profile of others.sort()) {
+          const version = await docker.imageVersion(`colima-${profile}`, this.imageName);
+          ctx.stdout.write(`    ${profile.padEnd(24)} ${version}\n`);
+        }
+      }
+      ctx.stdout.write(`\n`);
+    }
+
     this.renderOutcome(evaluation.outcome, ctx);
     return 0;
   }

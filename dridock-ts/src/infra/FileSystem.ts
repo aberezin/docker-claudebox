@@ -48,6 +48,10 @@ export interface FileSystem {
   /** Change permission bits on a file (e.g. 0o600 on secrets.env). */
   chmod(path: string, mode: number): Promise<void>;
 
+  /** `rm -rf <path>` — remove a directory and its entire content. No-op if
+   *  absent. Used by `destroy --purge` for the per-project data dir. */
+  removeDirRecursive(path: string): Promise<void>;
+
   /**
    * Atomic write: writes to a sibling tempfile, fsync, rename over `path`.
    * The rename is atomic within the same directory on POSIX, so a reader

@@ -123,13 +123,52 @@ describe("CheckversionCommand — happy paths", () => {
 });
 
 describe("CheckversionCommand — arg handling", () => {
-  test("--all is deferred with rc=2 (Phase 3 will port)", async () => {
+  test("--all enumerates other cb-* project VMs (P4c: fully ported)", async () => {
     const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: this-project\n");
     const docker = new InMemoryDocker();
-    const { ctx, stderr } = makeCtx(fs);
-    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run(["--all"], ctx);
-    expect(rc).toBe(2);
-    expect(stderr.text()).toContain("not yet ported");
+    docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
+    docker.seedImage("colima-cb-this-project", "dridock:latest", DRIDOCK_TS_VERSION);
+    docker.seedImage("colima-cb-other-a", "dridock:latest", "3.3.6");
+    docker.seedImage("colima-cb-other-b", "dridock:latest", "3.3.5");
+    const { InMemoryColima } = await import("../../test/fakes/InMemoryColima.ts");
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    colima.seedVm({ name: "cb-this-project", status: "Running", address: "1.1.1.1" });
+    colima.seedVm({ name: "cb-other-a", status: "Running", address: "2.2.2.2" });
+    colima.seedVm({ name: "cb-other-b", status: "Stopped", address: "" });
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), colima).run(["--all"], ctx);
+    expect(rc).toBe(0);
+    const out = stdout.text();
+    // Section header
+    expect(out).toContain("all cb-* project VMs (--all):");
+    // Other VMs listed in the --all block
+    expect(out).toContain("cb-other-a");
+    expect(out).toContain("cb-other-b");
+    expect(out).toContain("3.3.6");
+    expect(out).toContain("3.3.5");
+    // The --all BLOCK excludes this project + cb-infra. Header row for
+    // this project mentions cb-this-project (`(VM cb-this-project)`) —
+    // that's expected. Assert on the --all block content only:
+    const allBlock = out.split("all cb-* project VMs (--all):")[1] ?? "";
+    expect(allBlock).not.toContain("cb-this-project");
+    expect(allBlock).not.toContain("cb-infra ");   // trailing space to distinguish from column-aligned VMs
+  });
+
+  test("--all with no other VMs → '(none besides this project)'", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: only-me\n");
+    const docker = new InMemoryDocker();
+    docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
+    docker.seedImage("colima-cb-only-me", "dridock:latest", DRIDOCK_TS_VERSION);
+    const { InMemoryColima } = await import("../../test/fakes/InMemoryColima.ts");
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    colima.seedVm({ name: "cb-only-me", status: "Running", address: "1.1.1.1" });
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), colima).run(["--all"], ctx);
+    expect(stdout.text()).toContain("(none besides this project)");
   });
 
   test("--help prints usage + exits 0", async () => {

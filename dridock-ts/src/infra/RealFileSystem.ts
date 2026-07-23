@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readdir, stat, chmod, rename, unlink, rmdir } from "node:fs/promises";
+import { mkdir, writeFile, readdir, stat, chmod, rename, unlink, rmdir, rm } from "node:fs/promises";
 import { dirname, basename } from "node:path";
 import type { FileSystem } from "./FileSystem.ts";
 
@@ -87,6 +87,11 @@ export class RealFileSystem implements FileSystem {
 
   async chmod(path: string, mode: number): Promise<void> {
     await chmod(path, mode);
+  }
+
+  async removeDirRecursive(path: string): Promise<void> {
+    // `rm -rf` — force + recursive. `force: true` makes ENOENT idempotent.
+    await rm(path, { recursive: true, force: true });
   }
 
   async writeTextAtomic(path: string, content: string, opts: { mode?: number } = {}): Promise<void> {

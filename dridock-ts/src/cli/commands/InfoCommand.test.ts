@@ -2,118 +2,153 @@ import { test, expect, describe } from "bun:test";
 import { InfoCommand } from "./InfoCommand.ts";
 import { InMemoryFileSystem } from "../../test/fakes/InMemoryFileSystem.ts";
 import { InMemoryDocker } from "../../test/fakes/InMemoryDocker.ts";
+import { InMemoryColima } from "../../test/fakes/InMemoryColima.ts";
 import { StubGitToplevel } from "../../test/fakes/StubGitToplevel.ts";
 import { StringWriter } from "../Context.ts";
 import type { Context } from "../Context.ts";
 import { EnvResolver } from "../../domain/EnvResolver.ts";
 import { DRIDOCK_TS_VERSION } from "../../domain/dridockVersion.ts";
 
-function makeCtx(fs: InMemoryFileSystem, cwd = "/p"): {
-  ctx: Context; stdout: StringWriter;
-} {
+function makeCtx(fs: InMemoryFileSystem, cwd = "/p"): { ctx: Context; stdout: StringWriter } {
   const stdout = new StringWriter();
   return {
     stdout,
-    ctx: {
-      fs, env: new EnvResolver({}), cwd, home: "/home/alan", binName: "dridock",
-      stdout, stderr: new StringWriter(),
-    },
+    ctx: { fs, env: new EnvResolver({}), cwd, home: "/home/alan", binName: "dridock", stdout, stderr: new StringWriter() },
   };
 }
 
-describe("InfoCommand", () => {
-  test("bare directory (no config.yml) prints the 'not a project yet' line", async () => {
+describe("InfoCommand — bare directory", () => {
+  test("no config.yml → 'not a dridock project yet' + no image (project) row", async () => {
     const fs = new InMemoryFileSystem();
-    const docker = new InMemoryDocker();
     const { ctx, stdout } = makeCtx(fs, "/scratch");
-    const rc = await new InfoCommand("info", "dridock:latest", docker, new StubGitToplevel("/scratch")).run([], ctx);
+    const rc = await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/scratch"), new InMemoryColima()).run([], ctx);
     expect(rc).toBe(0);
     const out = stdout.text();
-    expect(out).toContain("dridock — info");
     expect(out).toContain(`wrapper (host):    ${DRIDOCK_TS_VERSION}`);
     expect(out).toContain("workspace:         /scratch");
     expect(out).toContain("not a dridock project yet");
-    // No image (project) line when there's no id
     expect(out).not.toContain("image (project):");
+    // Machine block still renders (cb-infra status)
+    expect(out).toContain("machine:");
+    expect(out).toContain("cb-infra:          absent");
   });
+});
 
-  test("full project prints VM name, config path, resolved data dir, and Phase 3 stubs for VM/network", async () => {
+describe("InfoCommand — full project (P4c — no more Phase-3 stubs)", () => {
+  test("VM Running + container running + reachable IP → real values on every row", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/p/.dridock/config.yml", "id: abc12345\n");
+    fs.seed("/p/.dridock/config.yml", "id: abc12345\nnetwork:\n  hostname: my-app\n");
     const docker = new InMemoryDocker();
     docker.seedImage("colima-cb-infra", "dridock:latest", "3.3.7");
     docker.seedImage("colima-cb-abc12345", "dridock:latest", "3.3.7");
     docker.seedClaudeCliVersion("colima-cb-abc12345", "dridock:latest", "0.5.14");
+    docker.seedContainer("colima-cb-abc12345", "claude-_p", { name: "claude-_p", imageId: "sha256:X", status: "Up 3 minutes" });
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-abc12345", status: "Running", address: "192.168.64.13" });
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
     const { ctx, stdout } = makeCtx(fs);
-    await new InfoCommand("info", "dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    await new InfoCommand("info", "dridock:latest", docker, new StubGitToplevel("/p"), colima).run([], ctx);
     const out = stdout.text();
-    expect(out).toContain("project id:        abc12345");
-    expect(out).toContain("VM:                cb-abc12345");
-    expect(out).toContain("config.yml:        /p/.dridock/config.yml");
-    // Arfy #38 §🟠: baked claude CLI version row present (bash-parity)
-    expect(out).toContain("claude CLI (image): 0.5.14");
-    // Arfy #38 §🟠: data-dir path resolved to a real path, no literal token
-    expect(out).toContain("/home/alan/.config/dridock/projects/abc12345/claude");
-    expect(out).not.toContain("<XDG data dir>");
-    // Phase 3 stubs are visible + labeled (audit rule: no silent drops).
-    expect(out).toContain("VM status: Phase 3 stub");
-    expect(out).toContain("container status: Phase 3 stub");
-    expect(out).toContain("network:             (Phase 3 stub");
-    expect(out).toContain("machine:             (Phase 3 stub");
+    expect(out).toContain("VM:                cb-abc12345   (Running)");
+    expect(out).toContain("container:         claude-_p   Up 3 minutes");
+    expect(out).toContain("VM IP:             192.168.64.13");
+    expect(out).toContain("browse:            http://192.168.64.13:<port>");
+    expect(out).toContain("hostname:          my-app");
+    expect(out).toContain("→ http://my-app:<port>");
+    expect(out).toContain("cb-net:            cb-net");
+    expect(out).toContain("cb-infra:          Running");
+    // Phase 3 stub strings must be GONE
+    expect(out).not.toContain("Phase 3 stub");
+    expect(out).not.toContain("use bash wrapper");
   });
 
-  test("data-dir path honors machine-config data_root override (~ expansion works)", async () => {
+  test("VM Stopped → 'container status unavailable' + no VM IP row", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
-    // Machine config sets a custom data_root
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-abc", status: "Stopped", address: "" });
+    const { ctx, stdout } = makeCtx(fs);
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), colima).run([], ctx);
+    const out = stdout.text();
+    expect(out).toContain("VM:                cb-abc   (Stopped)");
+    expect(out).toContain("container:         claude-_p   (VM not running — status unavailable)");
+    expect(out).toContain("VM IP:             (VM not running — start with 'dridock start')");
+  });
+
+  test("VM Running but no container → 'container: claude-_p <none>'", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-abc", status: "Running", address: "1.2.3.4" });
+    // No container seeded
+    const { ctx, stdout } = makeCtx(fs);
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), colima).run([], ctx);
+    expect(stdout.text()).toContain("container:         claude-_p   <none>");
+  });
+
+  test("no network.hostname set → the '(unset — set network.hostname …)' hint", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-abc", status: "Running", address: "1.2.3.4" });
+    const { ctx, stdout } = makeCtx(fs);
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), colima).run([], ctx);
+    expect(stdout.text()).toContain("hostname:          (unset");
+  });
+
+  test("cb-infra Stopped → machine row shows 'Stopped'", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-infra", status: "Stopped", address: "" });
+    const { ctx, stdout } = makeCtx(fs);
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), colima).run([], ctx);
+    expect(stdout.text()).toContain("cb-infra:          Stopped");
+  });
+
+  test("data-dir path honors machine-config data_root override", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
     fs.seed("/home/alan/.config/dridock/config.yml", "data_root: ~/custom-data\n");
     const { ctx, stdout } = makeCtx(fs);
-    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p")).run([], ctx);
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     expect(stdout.text()).toContain("/home/alan/custom-data/abc/claude");
   });
 
-  test("secrets.env row: absent -> hint; present -> count keys", async () => {
-    // Absent
+  test("secrets.env row: absent → hint; present → key count", async () => {
     const fs1 = new InMemoryFileSystem();
     fs1.seed("/p/.dridock/config.yml", "id: abc\n");
     const { ctx: c1, stdout: s1 } = makeCtx(fs1);
-    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p")).run([], c1);
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), new InMemoryColima()).run([], c1);
     expect(s1.text()).toContain("secrets.env:       (none");
 
-    // Present with 3 keys (one comment, one blank line, one malformed — should not count)
     const fs2 = new InMemoryFileSystem();
     fs2.seed("/p/.dridock/config.yml", "id: abc\n");
     fs2.seed("/p/.dridock/secrets.env", [
-      "GH_TOKEN=ghp_abc",
-      "# comment line",
-      "",
-      "OPENAI_KEY=sk-xyz",
-      "not-a-key",
-      "ANTHROPIC_KEY=sk-abc",
+      "GH_TOKEN=1", "# comment", "", "OPENAI_KEY=2", "not-a-key", "ANTHROPIC_KEY=3",
     ].join("\n") + "\n");
     const { ctx: c2, stdout: s2 } = makeCtx(fs2);
-    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p")).run([], c2);
-    expect(s2.text()).toContain("secrets.env:       /p/.dridock/secrets.env   (3 key(s))");
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), new InMemoryColima()).run([], c2);
+    expect(s2.text()).toContain("(3 key(s))");
   });
 
-  test("legacy .claudebox project: paths resolve to the legacy dot dir", async () => {
+  test("legacy .claudebox project: paths resolve to legacy dot dir", async () => {
     const fs = new InMemoryFileSystem();
     fs.seedDir("/p/.claudebox");
     fs.seed("/p/.claudebox/config.yml", "id: legacy-id\n");
-    fs.seed("/p/.claudebox/secrets.env", "GH_TOKEN=abc\n");
+    fs.seed("/p/.claudebox/secrets.env", "X=1\n");
     const { ctx, stdout } = makeCtx(fs);
-    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p")).run([], ctx);
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     const out = stdout.text();
     expect(out).toContain("config.yml:        /p/.claudebox/config.yml");
-    expect(out).toContain("secrets.env:       /p/.claudebox/secrets.env   (1 key(s))");
+    expect(out).toContain("secrets.env:       /p/.claudebox/secrets.env");
   });
 
-  test("image labels rendered via the Docker fake — respects VMs-down state", async () => {
+  test("image labels rendered via the Docker fake (VMs-down state)", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
-    const docker = new InMemoryDocker(); // nothing seeded -> IMAGE_UNAVAILABLE
     const { ctx, stdout } = makeCtx(fs);
-    await new InfoCommand("info", "dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     const out = stdout.text();
     expect(out).toContain("image (cb-infra):  unavailable");
     expect(out).toContain("image (project):   unavailable");

@@ -67,16 +67,33 @@ describe("DestroyCommand", () => {
     expect(stdout.text()).toContain("destroyed");
   });
 
-  test("--purge stubbed with rc 2 + stderr warning (data-dir purge is Phase 4)", async () => {
+  test("--purge → VM destroyed AND data dir rm -rf'd (P4c: fully ported)", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    // Seed the data dir with content — proves rm -rf actually removes it
+    fs.seed("/home/alan/.config/dridock/projects/abc/claude/session.json", "{}");
+    fs.seed("/home/alan/.config/dridock/projects/abc/claude/.features", "typescript\n");
     const colima = new InMemoryColima();
-    const { ctx, stderr } = makeCtx(fs);
+    colima.seedVm({ name: "cb-abc", status: "Running", address: "1.2.3.4" });
+    const { ctx, stdout } = makeCtx(fs);
     const rc = await new DestroyCommand(colima, new StubGitToplevel("/p")).run(["--purge"], ctx);
-    expect(rc).toBe(2);
-    expect(stderr.text()).toContain("not yet ported");
-    // VM destroy happened anyway (rc 2 flags that the --purge half wasn't done)
+    expect(rc).toBe(0);
     expect(colima.deletions).toEqual(["cb-abc"]);
+    expect(stdout.text()).toContain("purging data dir /home/alan/.config/dridock/projects/abc/claude");
+    // Data dir content actually gone
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/session.json")).toBe(false);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/.features")).toBe(false);
+  });
+
+  test("--purge idempotent when data dir doesn't exist (rm -rf semantics)", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    // NO data dir seeded
+    const colima = new InMemoryColima();
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new DestroyCommand(colima, new StubGitToplevel("/p")).run(["--purge"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("purged");
   });
 
   test("unknown arg → DridockError rc 1", async () => {

@@ -181,6 +181,19 @@ export class InMemoryFileSystem implements FileSystem {
     this.files.set(path, { ...entry, mode });
   }
 
+  async removeDirRecursive(path: string): Promise<void> {
+    // ENOENT-idempotent (matches `rm -rf` semantics). Delete every
+    // descendant file + directory.
+    if (!this.directories.has(path)) return;
+    const prefix = path.endsWith("/") ? path : `${path}/`;
+    for (const f of [...this.files.keys()]) {
+      if (f === path || f.startsWith(prefix)) this.files.delete(f);
+    }
+    for (const d of [...this.directories]) {
+      if (d === path || d.startsWith(prefix)) this.directories.delete(d);
+    }
+  }
+
   async writeTextAtomic(path: string, content: string, opts: { mode?: number } = {}): Promise<void> {
     // No temp/rename semantics in memory — the whole in-memory Map is a
     // single atomic reference. Just record the write.

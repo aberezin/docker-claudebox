@@ -39,6 +39,12 @@ export class InMemoryDocker implements Docker {
     this.runCaptures.set(`${image}\0${args.join(" ")}`, { rc, stdout });
   }
 
+  /** Fallback outcome for any runCapture whose args aren't seeded. Useful
+   *  for tests that don't want to match a long shell script byte-for-byte —
+   *  set this and every subsequent runCapture returns it. Default undefined =
+   *  fall through to rc 127. */
+  runCaptureFallback: { rc: number; stdout: string } | undefined;
+
   /* ── Docker interface impl ────────────────────────────────────────── */
 
   async imageVersion(context: string | undefined, image: string): Promise<ImageVersion> {
@@ -78,7 +84,7 @@ export class InMemoryDocker implements Docker {
   async runCapture(context: string | undefined, image: string, opts: RunCaptureOpts): Promise<{ rc: number; stdout: string }> {
     void context;
     this.runCalls.push({ context, image, opts });
-    return this.runCaptures.get(`${image}\0${opts.args.join(" ")}`) ?? { rc: 127, stdout: "" };
+    return this.runCaptures.get(`${image}\0${opts.args.join(" ")}`) ?? this.runCaptureFallback ?? { rc: 127, stdout: "" };
   }
 
   private key(context: string | undefined, image: string): string {

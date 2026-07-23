@@ -6,6 +6,7 @@ import { StringWriter } from "../Context.ts";
 import type { Context } from "../Context.ts";
 import { EnvResolver } from "../../domain/EnvResolver.ts";
 import { DridockError } from "../../domain/errors.ts";
+import { InMemoryDocker } from "../../test/fakes/InMemoryDocker.ts";
 
 /** Assemble a Context wired with in-memory fakes + a stubbed git toplevel. */
 function makeCtx(fs: InMemoryFileSystem, cwd = "/p"): {
@@ -34,7 +35,10 @@ describe("FeaturesCommand — list", () => {
     expect(out).toContain("enabled for this project (.dridock/config.yml → features:)");
     expect(out).toContain("  typescript\n");
     expect(out).toContain("  python\n");
-    expect(out).toContain("Phase 4");   // 'available' listing still stubbed pending Docker adapter
+    // 'available' listing is now ported (P4c) — but the InMemoryDocker
+    // returns rc 127 for unseeded runCapture, so the "cb-infra
+    // unavailable" branch fires here. Real docker → real content.
+    expect(out).toMatch(/available:|available \(baked/);
   });
 
   test("empty enabled list -> the 'add e.g. …' hint", async () => {
@@ -141,12 +145,45 @@ describe("FeaturesCommand — disable (Phase 3)", () => {
 });
 
 describe("FeaturesCommand — sub-verb dispatch", () => {
-  test("info still stubbed with rc=2 (Phase 4 — needs Docker cat)", async () => {
+  test("info <name> → runs docker cat on the manifest (P4c: fully ported)", async () => {
+    const fs = new InMemoryFileSystem();
+    const docker = new InMemoryDocker();
+    // Fallback: any runCapture returns the manifest content, sparing us
+    // matching the ~15-line shell script byte-for-byte.
+    docker.runCaptureFallback = { rc: 0, stdout: "--- manifest.yml ---\ndescription: TypeScript LSP\n" };
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p"), docker).run(["info", "typescript"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("--- manifest.yml ---");
+    expect(stdout.text()).toContain("description: TypeScript LSP");
+    // The docker call was routed through cb-infra with an sh entrypoint
+    expect(docker.runCalls[0]!.opts.entrypoint).toBe("sh");
+    expect(docker.runCalls[0]!.opts.args[1]).toContain("features/typescript");
+  });
+
+  test("info with no name → usage rc 1", async () => {
     const fs = new InMemoryFileSystem();
     const { ctx, stderr } = makeCtx(fs);
-    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["info", "typescript"], ctx);
-    expect(rc).toBe(2);
-    expect(stderr.text()).toContain("not yet ported");
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p"), new InMemoryDocker()).run(["info"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("usage: dridock features info");
+  });
+
+  test("info with bad name → rejected before docker", async () => {
+    const fs = new InMemoryFileSystem();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p"), new InMemoryDocker()).run(["info", "bad!"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("bad name");
+  });
+
+  test("info: docker rc != 0 → rc 1 + 'unknown feature or cb-infra image absent'", async () => {
+    const fs = new InMemoryFileSystem();
+    // Unseeded runCapture → rc 127
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new FeaturesCommand("features", new StubGitToplevel("/p"), new InMemoryDocker()).run(["info", "typescript"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("unknown feature");
   });
 
   test("unknown sub-verb -> DridockError rc=1", async () => {

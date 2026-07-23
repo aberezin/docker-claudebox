@@ -1,23 +1,24 @@
 import type { Command } from "../Command.ts";
 import type { Context } from "../Context.ts";
 import type { Docker } from "../../infra/Docker.ts";
-import { RealDocker, infraContext, projectContext, projectProfile } from "../../infra/Docker.ts";
+import { RealDocker, infraContext, projectContext, projectProfile, INFRA_PROFILE } from "../../infra/Docker.ts";
+import type { Colima } from "../../infra/Colima.ts";
+import { RealColima } from "../../infra/Colima.ts";
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
 import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
 import { ProjectConfig } from "../../services/ProjectConfig.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
+import { containerName } from "../../services/ContainerName.ts";
 import { DRIDOCK_TS_VERSION } from "../../domain/dridockVersion.ts";
 
 /**
  * `dridock info` — human-facing at-a-glance for the current project. Ports
  * cb_info at wrapper.sh:1164. Also serves as `dridock status` (alias).
  *
- * Phase 2 coverage: versions (via Docker interface), workspace + project
- * paths (via FileSystem), secrets.env presence + key count. VM status,
- * container status, and network IP need a Colima adapter that lands in
- * Phase 3 — those rows print a marked "(Phase 3)" placeholder so the
- * output shape is stable and users see exactly what's not yet ported.
+ * Full P4c coverage: versions + workspace/paths + VM status +
+ * container status + network block (VM IP + hostname + /etc/hosts
+ * status) + machine block (cb-infra status). No more Phase-3 stubs.
  */
 export class InfoCommand implements Command {
   readonly verb: "info" | "status";
@@ -27,6 +28,7 @@ export class InfoCommand implements Command {
     private readonly imageName = "dridock:latest",
     private readonly dockerOverride?: Docker,
     private readonly gitOverride?: GitToplevel,
+    private readonly colimaOverride?: Colima,
   ) {
     this.verb = verb;
   }
@@ -34,8 +36,10 @@ export class InfoCommand implements Command {
   async run(_args: string[], ctx: Context): Promise<number> {
     const docker = this.dockerOverride ?? new RealDocker();
     const git = this.gitOverride ?? new RealGitToplevel();
+    const colima = this.colimaOverride ?? new RealColima();
     const project = await new ProjectRootResolver(ctx.fs, git).resolve(ctx.cwd);
-    const projectId = await new ProjectConfig(ctx.fs).projectId(project.configPath);
+    const projectCfg = new ProjectConfig(ctx.fs);
+    const projectId = await projectCfg.projectId(project.configPath);
 
     ctx.stdout.write(`dridock — info\n\n`);
 
@@ -45,9 +49,6 @@ export class InfoCommand implements Command {
     ctx.stdout.write(`  image (cb-infra):  ${await docker.imageVersion(infraContext(), this.imageName)}\n`);
     if (projectId !== undefined) {
       ctx.stdout.write(`  image (project):   ${await docker.imageVersion(projectContext(projectId), this.imageName)}\n`);
-      // Bash-parity: baked claude CLI version — separate axis from the
-      // harness semver. Matches wrapper.sh:1092. Arfy #38 §🟠 caught the
-      // sibling row missing in checkversion; adding here for consistency.
       ctx.stdout.write(`  claude CLI (image): ${await docker.imageClaudeCliVersion(projectContext(projectId), this.imageName)}\n`);
     }
     ctx.stdout.write(`\n`);
@@ -58,36 +59,53 @@ export class InfoCommand implements Command {
     if (projectId === undefined) {
       ctx.stdout.write(`  (not a dridock project yet — run '${ctx.binName} start' here to initialize)\n\n`);
     } else {
+      const profile = projectProfile(projectId);
+      const vm = await colima.get(profile);
+      const vmStatus = vm?.status ?? "absent";
       ctx.stdout.write(`  project id:        ${projectId}\n`);
-      ctx.stdout.write(`  VM:                ${projectProfile(projectId)}   (VM status: Phase 3 stub — needs Colima adapter, use bash wrapper)\n`);
+      ctx.stdout.write(`  VM:                ${profile}   (${vmStatus})\n`);
       ctx.stdout.write(`  config.yml:        ${project.configPath}\n`);
       await this.renderSecretsRow(project.dotDir, ctx);
-      // Resolve data-dir path via machine config → baked default. Bash:
-      //   cb_data_root = cb_expand_path(cb_machine_get(data_root))
-      //   baked default: <xdg>/projects
-      //   project_data_dir(id) = <data_root>/<id>/claude
-      // Arfy #38 §🟠 caught the literal `<XDG data dir>` token in output.
-      const dataDir = await this.resolveDataDir(ctx, projectId);
+      const dataDir = await new MachineConfig(ctx.fs, process.env, ctx.home).projectDataDir(projectId);
       ctx.stdout.write(`  data dir:          ${dataDir}   (session/settings/plugins)\n`);
-      ctx.stdout.write(`  container:         (container status: Phase 3 stub — needs Docker ps adapter, use bash wrapper)\n`);
+
+      // Container status — only queryable when the VM is up (docker
+      // --context can't reach a stopped VM's daemon). Silent-omit rather
+      // than misleading — matches audit rule.
+      const cname = containerName(ctx.cwd);
+      const ctxDocker = projectContext(projectId);
+      if (vmStatus === "Running") {
+        const container = await docker.containerIdentity(ctxDocker, cname);
+        const status = container?.status ?? "<none>";
+        ctx.stdout.write(`  container:         ${cname}   ${status}\n`);
+      } else {
+        ctx.stdout.write(`  container:         ${cname}   (VM not running — status unavailable)\n`);
+      }
       ctx.stdout.write(`\n`);
-      ctx.stdout.write(`network:             (Phase 3 stub — needs Colima adapter for VM IP; use bash wrapper for the network block)\n`);
+
+      // ── network ────────────────────────────────────────────────────
+      ctx.stdout.write(`network:\n`);
+      if (vm !== undefined && vm.address !== "") {
+        ctx.stdout.write(`  VM IP:             ${vm.address}\n`);
+        ctx.stdout.write(`  browse:            http://${vm.address}:<port>   (or http://localhost:<port>, collides across projects)\n`);
+      } else {
+        ctx.stdout.write(`  VM IP:             (VM not running — start with '${ctx.binName} start')\n`);
+      }
+      const hostname = await projectCfg.networkHostname(project.configPath);
+      if (hostname !== undefined && hostname !== "") {
+        ctx.stdout.write(`  hostname:          ${hostname}   → http://${hostname}:<port>   ('${ctx.binName} net' for the /etc/hosts line)\n`);
+      } else {
+        ctx.stdout.write(`  hostname:          (unset — set network.hostname in config.yml for a friendly name)\n`);
+      }
+      ctx.stdout.write(`  cb-net:            cb-net   (attach sibling workloads: docker run --network cb-net ...)\n`);
       ctx.stdout.write(`\n`);
     }
 
     // ── machine ─────────────────────────────────────────────────────────
-    ctx.stdout.write(`machine:             (Phase 3 stub — needs Colima adapter for cb-infra VM status)\n`);
+    ctx.stdout.write(`machine:\n`);
+    const infraStatus = (await colima.get(INFRA_PROFILE))?.status ?? "absent";
+    ctx.stdout.write(`  cb-infra:          ${infraStatus}   (image store)\n`);
     return 0;
-  }
-
-  /**
-   * Resolve the project's data-dir path — routes through the shared
-   * MachineConfig service so `info` (which prints it) and `start` (which
-   * mounts it) agree by construction. Arfy #38 pass 5 caught the two
-   * commands disagreeing on this exact path.
-   */
-  private async resolveDataDir(ctx: Context, projectId: string): Promise<string> {
-    return await new MachineConfig(ctx.fs, process.env, ctx.home).projectDataDir(projectId);
   }
 
   private async renderSecretsRow(dotDir: string, ctx: Context): Promise<void> {

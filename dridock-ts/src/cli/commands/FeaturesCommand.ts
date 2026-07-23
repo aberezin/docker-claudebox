@@ -5,17 +5,17 @@ import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
 import { ProjectConfig } from "../../services/ProjectConfig.ts";
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
 import { RealGitToplevel } from "../../infra/GitToplevel.ts";
+import type { Docker } from "../../infra/Docker.ts";
+import { RealDocker, infraContext } from "../../infra/Docker.ts";
 
 /**
  * `dridock features <verb>` — the 3.0 rename of `profiles`. Ports the
  * corresponding bash `features)` case + cb_features_cmd at wrapper.sh:1430.
  *
- * Phase 2 shipped `list` (FS-only). Phase 3 adds `enable`/`disable`/`info`:
- *   enable/disable go through ProjectConfig.setFeatures → writeTextAtomic,
- *   so a crash mid-write can never leave a truncated config.yml (the
- *   3.3.6 Tier-1 #5 class of bug — silent-write-failure).
- *   info is stubbed for Phase 4 — needs to `docker run --rm cat
- *   /usr/local/lib/dridock/features/<name>/manifest.yml`.
+ * P4c completes the surface:
+ *   list — enabled (FS) + available (Docker cat on cb-infra image)
+ *   enable / disable — safe-rewrite via ProjectConfig.setFeatures
+ *   info <name> — Docker cat on the feature's manifest.yml
  */
 const FEATURE_NAME_REGEX = /^[A-Za-z0-9_-]+$/;
 
@@ -25,11 +25,13 @@ export class FeaturesCommand implements Command {
   constructor(
     verb: "features" | "profiles" = "features",
     private readonly gitOverride?: GitToplevel,
+    private readonly dockerOverride?: Docker,
+    private readonly imageName = "dridock:latest",
   ) {
     this.verb = verb;
   }
 
-  async run(args: string[], ctx: Context): Promise<number> {
+  async run(args: readonly string[], ctx: Context): Promise<number> {
     const sub = args[0] ?? "list";
 
     if (this.verb === "profiles") {
@@ -40,10 +42,7 @@ export class FeaturesCommand implements Command {
     if (sub === "-h" || sub === "--help") { this.printHelp(ctx); return 0; }
     if (sub === "enable") return await this.enable(args[1], ctx);
     if (sub === "disable") return await this.disable(args[1], ctx);
-    if (sub === "info") {
-      ctx.stderr.write(`dridock-ts (Phase 3): '${ctx.binName} features info' not yet ported — use the bash wrapper (needs Docker cat on image)\n`);
-      return 2;
-    }
+    if (sub === "info") return await this.info(args[1], ctx);
     throw new DridockError(`features: unknown sub-verb '${sub}' (try: ${ctx.binName} features --help)`);
   }
 
@@ -59,8 +58,92 @@ export class FeaturesCommand implements Command {
       ctx.stdout.write(`  (none — add e.g.  features: [typescript, python]  to ${project.dotName}/config.yml, or run '${ctx.binName} features enable typescript')\n`);
     }
     ctx.stdout.write(`\n`);
-    ctx.stdout.write(`available: (Phase 4 — 'available' listing needs Docker, use bash wrapper for the full list)\n\n`);
+
+    // Available — Docker cat on cb-infra's baked feature manifests
+    // (matches wrapper.sh:1320-1322 shell one-liner). Empty output when
+    // cb-infra is down / image absent — surfaced as "(cb-infra
+    // unavailable)" per audit rule.
+    const docker = this.dockerOverride ?? new RealDocker();
+    const shellScript = [
+      'for d in /usr/local/lib/dridock/features/*/; do',
+      '  [ -d "$d" ] || continue;',
+      '  n="$(basename "$d")";',
+      '  dsc="$(awk -F: \'/^description:/{sub(/^[^:]*:[[:space:]]*/,"" ); print; exit}\' "$d/manifest.yml" 2>/dev/null)";',
+      '  printf "%s\\t%s\\n" "$n" "${dsc:-—}";',
+      'done',
+      'for f in /usr/local/lib/dridock/profiles/*.sh /usr/local/lib/claudebox/profiles/*.sh; do',
+      '  [ -f "$f" ] || continue;',
+      '  printf "%s\\t(legacy 2.x profile) %s\\n" "$(basename "$f" .sh)" "$(sed -n "s/^# summary: //p" "$f" | head -1)";',
+      'done',
+    ].join(" ");
+    const captured = await docker.runCapture(infraContext(), this.imageName, {
+      entrypoint: "sh", args: ["-c", shellScript],
+    });
+    if (captured.rc !== 0 || captured.stdout.trim() === "") {
+      ctx.stdout.write(`available: (cb-infra unavailable or image absent — run '${ctx.binName} checkversion' to diagnose)\n\n`);
+    } else {
+      ctx.stdout.write(`available (baked in the image):\n`);
+      const rows: Array<[string, string]> = [];
+      for (const line of captured.stdout.split(/\r?\n/)) {
+        const t = line.trim();
+        if (t === "") continue;
+        const [name, description] = t.split("\t", 2) as [string, string];
+        rows.push([name, description ?? "—"]);
+      }
+      // Sort + dedupe by name (bash pipes through `sort -u -k1,1`)
+      rows.sort((a, b) => a[0].localeCompare(b[0]));
+      const seen = new Set<string>();
+      for (const [name, description] of rows) {
+        if (seen.has(name)) continue;
+        seen.add(name);
+        ctx.stdout.write(`  ${name.padEnd(14)} ${description}\n`);
+      }
+      ctx.stdout.write(`\n`);
+    }
     ctx.stdout.write(`enable / disable: '${ctx.binName} features enable <name>' / '${ctx.binName} features disable <name>'\n`);
+    return 0;
+  }
+
+  private async info(name: string | undefined, ctx: Context): Promise<number> {
+    if (name === undefined || name === "") {
+      ctx.stderr.write(`usage: ${ctx.binName} features info <name>\n`);
+      return 1;
+    }
+    if (!FEATURE_NAME_REGEX.test(name)) {
+      ctx.stderr.write(`features info: bad name '${name}' (allowed: A-Z a-z 0-9 _ -)\n`);
+      return 1;
+    }
+    const docker = this.dockerOverride ?? new RealDocker();
+    // Ports wrapper.sh:1338 — check `/usr/local/lib/dridock/features/<name>/`
+    // for manifest.yml + on.sh + off.sh + bake.sh; fall back to legacy
+    // `/usr/local/lib/dridock/profiles/<name>.sh` (2.x); else "unknown".
+    const shellScript = [
+      `d=/usr/local/lib/dridock/features/${name};`,
+      `if [ -f "$d/manifest.yml" ]; then`,
+      `  echo '--- manifest.yml ---';`,
+      `  cat "$d/manifest.yml";`,
+      `  for s in on.sh off.sh bake.sh; do`,
+      `    [ -f "$d/$s" ] && echo "--- $s ---" && head -20 "$d/$s";`,
+      `  done;`,
+      `else`,
+      `  legacy=/usr/local/lib/dridock/profiles/${name}.sh;`,
+      `  if [ -f "$legacy" ]; then`,
+      `    echo '(legacy 2.x profile — has no manifest)';`,
+      `    head -20 "$legacy";`,
+      `  else`,
+      `    echo "features info: unknown feature '${name}'" >&2;`,
+      `    exit 1;`,
+      `  fi;`,
+      `fi`,
+    ].join(" ");
+    const captured = await docker.runCapture(infraContext(), this.imageName, {
+      entrypoint: "sh", args: ["-c", shellScript],
+    });
+    if (captured.stdout !== "") ctx.stdout.write(captured.stdout);
+    if (captured.rc !== 0) {
+      ctx.stderr.write(`features info: unknown feature '${name}' or cb-infra image absent\n`);
+      return 1;
+    }
     return 0;
   }
 
@@ -105,8 +188,6 @@ export class FeaturesCommand implements Command {
     const remaining = existing.filter((f) => f !== name);
     await cfg.setFeatures(project.configPath, remaining);
     const remainingHint = remaining.length > 0 ? ` (remaining: ${remaining.join(", ")})` : "";
-    // Phase 4 will run off.sh in the container if it's up + remove the
-    // ~/.claude/.feature-<name> marker in the project's data dir.
     ctx.stdout.write(`  ✓ disabled feature '${name}'${remainingHint}. off.sh will run on next '${ctx.binName}' start.\n`);
     return 0;
   }
