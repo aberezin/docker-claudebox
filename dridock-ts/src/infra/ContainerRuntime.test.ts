@@ -31,6 +31,18 @@ describe("buildRunArgv — the docker run command line", () => {
     expect(argv).not.toContain("-it");
   });
 
+  test("attached mode: NEITHER -it NOR -d (bash prog mode — wrapper.sh:3288)", () => {
+    const argv = buildRunArgv({
+      context: "cx", containerName: "c", image: "i",
+      mounts: [], env: [], mode: "attached",
+      cmd: ["cmd"], publishPorts: [],
+    });
+    expect(argv).not.toContain("-it");
+    expect(argv).not.toContain("-d");
+    // Sanity: image + cmd still appended after run flags
+    expect(argv.indexOf("i")).toBeLessThan(argv.indexOf("cmd"));
+  });
+
   test("mounts render as -v with :ro suffix when opts.ro", () => {
     const argv = buildRunArgv({
       context: "cx", containerName: "c", image: "i",

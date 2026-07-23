@@ -21,8 +21,20 @@ export interface RunArgs {
   readonly env: readonly { readonly key: string; readonly value: string }[];
   readonly workdir?: string;
   readonly network?: string;
-  /** Detached vs interactive: `-it` (foreground) or `-d` (detached). */
-  readonly mode: "interactive" | "detached";
+  /**
+   * Three run shapes bash uses:
+   *   - "interactive": `-it`, allocates a TTY. Foreground. USE ONLY when
+   *     stdin is a real terminal — docker refuses `-i` on a non-TTY stdin
+   *     with `cannot attach stdin to a TTY-enabled container`. Interactive
+   *     claudebot only.
+   *   - "attached":    neither `-it` nor `-d`. Foreground, stdout/stderr
+   *     piped through, no TTY. THIS is what wrapper.sh:3288 uses for `-p`
+   *     mode so scripts/CI/pipes work. Arfy #38 part 3 caught the port
+   *     using "interactive" here — hard rc-1 failure in any non-TTY
+   *     context.
+   *   - "detached":    `-d`, returns immediately. Cron mode.
+   */
+  readonly mode: "interactive" | "attached" | "detached";
   /** Command + args to run inside the container. */
   readonly cmd: readonly string[];
   /** Extra `-p HOST:CONTAINER` port publishes. */
@@ -102,8 +114,11 @@ export class RealContainerRuntime implements ContainerRuntime {
 export function buildRunArgv(args: RunArgs): string[] {
   const argv: string[] = ["docker", "--context", args.context, "run"];
   argv.push("--name", args.containerName);
-  if (args.mode === "interactive") argv.push("-it");
-  else argv.push("-d");
+  switch (args.mode) {
+    case "interactive": argv.push("-it"); break;
+    case "detached":    argv.push("-d");  break;
+    case "attached":    break; // no -i / -t / -d — foreground, no TTY. See RunArgs.mode comment.
+  }
   if (args.network !== undefined) argv.push("--network", args.network);
   if (args.workdir !== undefined) argv.push("-w", args.workdir);
   if (args.envFile !== undefined) argv.push("--env-file", args.envFile);

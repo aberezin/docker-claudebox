@@ -143,6 +143,42 @@ describe("StartCommand — programmatic (-p) path", () => {
     expect(run.env).toContainEqual({ key: "DRIDOCK_CONTAINER_NAME", value: "claude-_p_prog" });
   });
 
+  test("Arfy #38 part 3: -p mode uses 'attached' (no -it, no -d), works headless", async () => {
+    // The bug: earlier "interactive" mode → `-it` → docker refuses when
+    // stdin isn't a TTY. Scripts, CI, `dridock -p '…' | jq`, and Arfy's
+    // own non-TTY test harness all hit rc 1 `cannot attach stdin to a
+    // TTY-enabled container`. Bash uses foreground-attached (no `-it`,
+    // no `-d`) — wrapper.sh:3288.
+    const fs = new InMemoryFileSystem();
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    const runtime = new InMemoryContainerRuntime();
+    seedReadyProject(fs, colima, docker);
+    const { ctx } = makeCtx(fs);
+    await new StartCommand("dridock:latest", colima, runtime, docker, new StubGitToplevel("/p")).run(["-p", "hi"], ctx);
+    const run = runtime.runs[0]!;
+    expect(run.mode).toBe("attached");
+    // Sanity-check the derived argv: neither `-it` nor `-d` (bash-parity).
+    const { buildRunArgv } = await import("../../infra/ContainerRuntime.ts");
+    const argv = buildRunArgv(run);
+    expect(argv).not.toContain("-it");
+    expect(argv).not.toContain("-d");
+  });
+
+  test("interactive mode still uses -it (unchanged for non-prog path)", async () => {
+    const fs = new InMemoryFileSystem();
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    const runtime = new InMemoryContainerRuntime();
+    seedReadyProject(fs, colima, docker);
+    const { ctx } = makeCtx(fs);
+    await new StartCommand("dridock:latest", colima, runtime, docker, new StubGitToplevel("/p")).run([], ctx);
+    const run = runtime.runs[0]!;
+    expect(run.mode).toBe("interactive");
+    const { buildRunArgv } = await import("../../infra/ContainerRuntime.ts");
+    expect(buildRunArgv(run)).toContain("-it");
+  });
+
   test("invalid flag → DridockError with 'Unknown flag' (not a silent pass-through)", async () => {
     const fs = new InMemoryFileSystem();
     const colima = new InMemoryColima();

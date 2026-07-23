@@ -40,14 +40,19 @@ export class ConsultCommand implements Command {
       return 0;
     }
 
+    // Pad ids to the widest id in the batch so the `[status]` column
+    // aligns across rows of different id widths. Bash uses printf
+    // widths for this. Arfy #38 part 3 caught the earlier tight
+    // rendering as differing from bash for mixed-width id sets
+    // (single-width batch looks identical; ≥2 widths reveal the diff).
+    const idWidth = threads.reduce((w, t) => Math.max(w, t.id.length), 0);
     ctx.stdout.write(`consults (${threads.length}) in ${home}:\n`);
     for (const t of threads) {
       const status = t.status !== "" ? t.status : "?";
       const title = t.title !== "" ? t.title : "(no title)";
-      // Tight columns — same shape as wrapper.sh:2474 printf `  %s  [%s]  %s`.
-      // Arfy #38 §🟠 caught the earlier fixed-width padding as a needless
-      // diff from bash.
-      ctx.stdout.write(`  ${t.id}  [${status}]  ${title}\n`);
+      // wrapper.sh:2474 shape: `  %s  [%s]  %s`, id right-padded to
+      // max width for column alignment.
+      ctx.stdout.write(`  ${t.id.padEnd(idWidth)}  [${status}]  ${title}\n`);
     }
     ctx.stdout.write(`\nshow:  ${ctx.binName} consult show <id>     approve/revise/reject: ${ctx.binName} consult <verb> <id>\n`);
     return 0;

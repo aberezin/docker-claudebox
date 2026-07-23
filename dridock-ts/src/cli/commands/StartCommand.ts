@@ -160,9 +160,12 @@ export class StartCommand implements Command {
       env: [{ key: "DRIDOCK_CONTAINER_NAME", value: cname }],
       workdir: ctx.cwd,
       network: "cb-net",
-      // Detached is bash's choice for programmatic — the wrapper attaches to
-      // logs then. MVP: interactive so the user sees the output directly.
-      mode: "interactive",
+      // Foreground-attached, NO TTY (matches wrapper.sh:3288). Prog mode
+      // must work headless — scripts, CI, `dridock -p '…' | jq`. `-it`
+      // fails hard the moment stdin isn't a real terminal: `cannot attach
+      // stdin to a TTY-enabled container`. Arfy #38 part 3 caught the
+      // earlier "interactive" MVP shortcut here.
+      mode: "attached",
       cmd: ["claude", "--dangerously-skip-permissions", ...validated.claudeArgs],
       publishPorts: [],
     };
