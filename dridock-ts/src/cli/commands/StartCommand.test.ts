@@ -304,9 +304,13 @@ describe("StartCommand — programmatic path with all fidelity", () => {
     expect(run.cmd).not.toContain("claude");
     expect(run.cmd).toContain("-p");
     expect(run.cmd).toContain("hello world");
-    // DRIDOCK_CONTAINER_NAME wired to the _prog variant (matches bash's per-run override at :3288)
+    // DRIDOCK_CONTAINER_NAME set to the _prog variant. Only ONE entry
+    // (baseRunArgs uses the role's cname directly — no need for the
+    // per-run override bash has at :3288 since bash's DOCKER_ARGS uses
+    // the interactive name).
     const containerNameEntries = run.env.filter((e) => e.key === "DRIDOCK_CONTAINER_NAME");
-    expect(containerNameEntries[containerNameEntries.length - 1]?.value).toBe("claude-_p_prog");
+    expect(containerNameEntries).toHaveLength(1);
+    expect(containerNameEntries[0]!.value).toBe("claude-_p_prog");
   });
 
   test("second -p reuses via _prog args sidecar + startAttached (no name collision)", async () => {

@@ -238,12 +238,13 @@ export class StartCommand implements Command {
       await sidecars.writeOneRole("args", "_prog", shellQuote(validated.claudeArgs) + "\n");
       return await runtime.startAttached(ctxDocker, cname);
     }
+    // baseRunArgs already sets DRIDOCK_CONTAINER_NAME to `cname` (the
+    // role's actual name), so no per-role override is needed. Bash's
+    // duplicate `-e` at :3288 is a leftover from DOCKER_ARGS using
+    // the INTERACTIVE name (:2817) — TS avoids that by computing cname
+    // per-invocation.
     const runArgs = this.buildRunArgs(ctxDocker, cname, id, ctx, "attached", validated.claudeArgs, dataDir, baseEnv, extraMounts, tmpfs);
-    // DRIDOCK_CONTAINER_NAME per-role, appended AFTER base env (matches bash :3288 `-e DRIDOCK_CONTAINER_NAME=$prog_name` after DOCKER_ARGS)
-    return await runtime.runInteractive({
-      ...runArgs,
-      env: [...runArgs.env, { key: "DRIDOCK_CONTAINER_NAME", value: cname }],
-    });
+    return await runtime.runInteractive(runArgs);
   }
 
   private buildRunArgs(
