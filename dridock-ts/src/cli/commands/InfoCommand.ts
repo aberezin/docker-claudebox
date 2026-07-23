@@ -4,6 +4,8 @@ import type { Docker } from "../../infra/Docker.ts";
 import { RealDocker, infraContext, projectContext, projectProfile, INFRA_PROFILE } from "../../infra/Docker.ts";
 import type { Colima } from "../../infra/Colima.ts";
 import { RealColima } from "../../infra/Colima.ts";
+import type { ContainerRuntime } from "../../infra/ContainerRuntime.ts";
+import { RealContainerRuntime } from "../../infra/ContainerRuntime.ts";
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
 import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
@@ -29,6 +31,7 @@ export class InfoCommand implements Command {
     private readonly dockerOverride?: Docker,
     private readonly gitOverride?: GitToplevel,
     private readonly colimaOverride?: Colima,
+    private readonly runtimeOverride?: ContainerRuntime,
   ) {
     this.verb = verb;
   }
@@ -70,13 +73,18 @@ export class InfoCommand implements Command {
       ctx.stdout.write(`  data dir:          ${dataDir}   (session/settings/plugins)\n`);
 
       // Container status — only queryable when the VM is up (docker
-      // --context can't reach a stopped VM's daemon). Silent-omit rather
-      // than misleading — matches audit rule.
+      // --context can't reach a stopped VM's daemon). Uses psFilter
+      // (which runs `docker ps --format '{{.Status}}'`) for the
+      // human-readable "Up 3 minutes" text rather than containerIdentity
+      // (which returns just "running"/"exited" from
+      // `.State.Status`). Arfy #38 P4c B2 caught the ugly "<none>"
+      // rendering — psFilter matches bash cb_info at :1193.
       const cname = containerName(ctx.cwd);
       const ctxDocker = projectContext(projectId);
       if (vmStatus === "Running") {
-        const container = await docker.containerIdentity(ctxDocker, cname);
-        const status = container?.status ?? "<none>";
+        const runtime = this.runtimeOverride ?? new RealContainerRuntime();
+        const container = await runtime.psFilter(ctxDocker, cname);
+        const status = container !== undefined ? container.status : "<none>";
         ctx.stdout.write(`  container:         ${cname}   ${status}\n`);
       } else {
         ctx.stdout.write(`  container:         ${cname}   (VM not running — status unavailable)\n`);

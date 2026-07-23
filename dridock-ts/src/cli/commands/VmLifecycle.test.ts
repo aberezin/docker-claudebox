@@ -79,10 +79,13 @@ describe("DestroyCommand", () => {
     const rc = await new DestroyCommand(colima, new StubGitToplevel("/p")).run(["--purge"], ctx);
     expect(rc).toBe(0);
     expect(colima.deletions).toEqual(["cb-abc"]);
-    expect(stdout.text()).toContain("purging data dir /home/alan/.config/dridock/projects/abc/claude");
-    // Data dir content actually gone
+    // Arfy #38 P4c B4 fix: purge now rms the PARENT projects/<id>/ dir,
+    // not just <id>/claude. Both the /claude subtree AND the parent
+    // must be gone.
+    expect(stdout.text()).toContain("purging data dir /home/alan/.config/dridock/projects/abc");
     expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/session.json")).toBe(false);
     expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/.features")).toBe(false);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc")).toBe(false);
   });
 
   test("--purge idempotent when data dir doesn't exist (rm -rf semantics)", async () => {
@@ -93,7 +96,8 @@ describe("DestroyCommand", () => {
     const { ctx, stdout } = makeCtx(fs);
     const rc = await new DestroyCommand(colima, new StubGitToplevel("/p")).run(["--purge"], ctx);
     expect(rc).toBe(0);
-    expect(stdout.text()).toContain("purged");
+    // Arfy #38 P4c B4 fix: message updated ("no per-project data dir to purge")
+    expect(stdout.text()).toContain("no per-project data dir to purge");
   });
 
   test("unknown arg → DridockError rc 1", async () => {

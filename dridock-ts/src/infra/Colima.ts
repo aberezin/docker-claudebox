@@ -218,6 +218,28 @@ export function isCbProfile(profile: string): boolean {
 }
 
 /**
+ * Resolve colima's LIMA_HOME — where per-profile lima instances and their
+ * datadisks live. Ports cb_lima_home at wrapper.sh:649: try
+ * $COLIMA_HOME/_lima, then <xdg>/colima/_lima, then $HOME/.colima/_lima.
+ * Returns undefined if none exists.
+ */
+export async function resolveLimaHome(
+  fs: { isDirectory(path: string): Promise<boolean> },
+  env: Record<string, string | undefined>,
+  home: string,
+): Promise<string | undefined> {
+  const candidates = [
+    env["COLIMA_HOME"] !== undefined ? `${env["COLIMA_HOME"]}/_lima` : undefined,
+    `${env["XDG_CONFIG_HOME"] ?? `${home}/.config`}/colima/_lima`,
+    `${home}/.colima/_lima`,
+  ];
+  for (const c of candidates) {
+    if (c !== undefined && (await fs.isDirectory(c))) return c;
+  }
+  return undefined;
+}
+
+/**
  * Count running project VMs (cb-* profiles, EXCLUDING cb-infra which is
  * the shared image-store). Ports cb_running_cb_count via cb_running_cb_profiles.
  */

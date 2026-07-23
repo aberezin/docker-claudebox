@@ -3,6 +3,7 @@ import { InfoCommand } from "./InfoCommand.ts";
 import { InMemoryFileSystem } from "../../test/fakes/InMemoryFileSystem.ts";
 import { InMemoryDocker } from "../../test/fakes/InMemoryDocker.ts";
 import { InMemoryColima } from "../../test/fakes/InMemoryColima.ts";
+import { InMemoryContainerRuntime } from "../../test/fakes/InMemoryContainerRuntime.ts";
 import { StubGitToplevel } from "../../test/fakes/StubGitToplevel.ts";
 import { StringWriter } from "../Context.ts";
 import type { Context } from "../Context.ts";
@@ -42,12 +43,17 @@ describe("InfoCommand — full project (P4c — no more Phase-3 stubs)", () => {
     docker.seedImage("colima-cb-infra", "dridock:latest", "3.3.7");
     docker.seedImage("colima-cb-abc12345", "dridock:latest", "3.3.7");
     docker.seedClaudeCliVersion("colima-cb-abc12345", "dridock:latest", "0.5.14");
-    docker.seedContainer("colima-cb-abc12345", "claude-_p", { name: "claude-_p", imageId: "sha256:X", status: "Up 3 minutes" });
     const colima = new InMemoryColima();
     colima.seedVm({ name: "cb-abc12345", status: "Running", address: "192.168.64.13" });
     colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    // Container status now flows via ContainerRuntime.psFilter (matches
+    // bash's `docker ps --format '{{.Status}}'` — human-readable "Up 3
+    // minutes" — instead of `.State.Status`'s "running"). Arfy #38 P4c
+    // B2 fix.
+    const runtime = new InMemoryContainerRuntime();
+    runtime.seedPs("claude-_p", { name: "claude-_p", status: "Up 3 minutes", image: "dridock:latest" });
     const { ctx, stdout } = makeCtx(fs);
-    await new InfoCommand("info", "dridock:latest", docker, new StubGitToplevel("/p"), colima).run([], ctx);
+    await new InfoCommand("info", "dridock:latest", docker, new StubGitToplevel("/p"), colima, runtime).run([], ctx);
     const out = stdout.text();
     expect(out).toContain("VM:                cb-abc12345   (Running)");
     expect(out).toContain("container:         claude-_p   Up 3 minutes");

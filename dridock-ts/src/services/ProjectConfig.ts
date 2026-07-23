@@ -109,12 +109,13 @@ export class ProjectConfig {
 export function parseTopLevelString(text: string, key: string): string | undefined {
   const re = new RegExp(`^\\s*${escapeRegex(key)}\\s*:\\s*(.*)$`);
   for (const rawLine of text.split(/\r?\n/)) {
-    // Skip indented (nested-child) lines; only top-level keys match. A key
-    // is "top-level" iff the line starts at column 0 (no leading whitespace).
     if (/^\s/.test(rawLine)) continue;
     const m = rawLine.match(re);
     if (!m) continue;
-    let v = m[1]!.replace(/\s+#.*$/, "").trim();
+    let v = m[1]!.trim();
+    // Bash-parity comment stripping (see parseNestedYaml for the same rule).
+    if (v.startsWith("#")) v = "";
+    else v = v.replace(/\s+#.*$/, "").trim();
     if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
       v = v.slice(1, -1);
     }
@@ -145,7 +146,16 @@ export function parseNestedYaml(text: string, parent: string, child: string): st
     if (!inParent) continue;
     const m = rawLine.match(childRe);
     if (!m) continue;
-    let v = m[1]!.replace(/\s+#.*$/, "").trim();
+    let v = m[1]!.trim();
+    // Bash `_cb_yaml_get` (wrapper.sh:167): if the value STARTS with `#`
+    // the whole line was just a comment on a blank-value key — treat as
+    // empty. Otherwise strip an inline ` #comment` suffix (space-hash).
+    // Arfy #38 P4c B1 caught the "hostname reads the inline comment
+    // when value is blank" bug here — the old `\s+#.*$` regex required
+    // whitespace-before-hash, which m[1] no longer has because the
+    // parent `:\s*` consumed it.
+    if (v.startsWith("#")) v = "";
+    else v = v.replace(/\s+#.*$/, "").trim();
     if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
     return v === "" ? undefined : v;
   }
