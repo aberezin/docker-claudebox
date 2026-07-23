@@ -228,15 +228,31 @@ flip the default.
 complete on `671f0d5` after eight Mac-side verification passes. See
 "Why real-Mac verification matters" above for the pattern.
 
-Branch state at sign-off: 27 commits ahead of master, 592 unit tests,
+Branch state at sign-off: 30 commits ahead of master, 602 unit tests,
 0 typecheck errors. Every verb from `Verbs.ts` has a real TS Command
 (34 Commands + 3 transparent bash-delegates for browser-bridge /
 host-agent / claude-dir per Alan's 2026-07-23 P4e ruling; Python
 daemons untouched — only the bash orchestration layer around them is
-delegated, with a memory-saved TODO to port that later). No user-
-visible "use bash wrapper" fallbacks anywhere.
+delegated). No user-visible "use bash wrapper" fallbacks anywhere.
 
-Ready to squash to master on Alan's call; nothing else outstanding.
+**Bash-wrapper retirement decision (2026-07-23)**: Alan ruled that the
+bash wrapper will be RETIRED soon rather than patched for future bugs.
+The #39 mcp-persist bug (which affects both bash + TS) got fixed
+TS-side only; bash is left as-is because it's on the way out.
+
+Concrete follow-ups this decision unlocks:
+1. **Port the bash orchestration for browser-bridge + host-agent to
+   TS** — was the P4e transparent-delegate compromise; now becomes P0
+   (retirement can't complete while the delegate still points at
+   bash). Python daemons themselves stay Python.
+2. **Flip the install.sh default** — `DRIDOCK_INSTALL_TS=1` currently
+   opt-in becomes the default; bash-wrapper install becomes opt-out
+   (or removed entirely).
+3. **Delete `wrapper.sh` + all `cb_*` bash helpers** once (1) is done
+   and the TS binary has been in production for a settling period.
+
+Ready to squash to master on Alan's call; the retirement roadmap
+above is what happens AFTER merge, not before.
 
 ## See also
 
