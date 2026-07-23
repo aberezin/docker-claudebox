@@ -224,10 +224,19 @@ The bash wrapper stays as the default binary; TS remains opt-in via
 `DRIDOCK_INSTALL_TS=1` until Phase 4b closes the remaining gaps and we
 flip the default.
 
-**Sign-off status (2026-07-23)**: Arfy signed off #38 on `af64a07` after
-six Mac-side verification passes. See "Why real-Mac verification matters"
-above for the pattern. Branch is ready to squash to master on Alan's
-call; nothing else outstanding.
+**Sign-off status (2026-07-23)**: Arfy signed off #38 through Phase 4
+complete on `671f0d5` after eight Mac-side verification passes. See
+"Why real-Mac verification matters" above for the pattern.
+
+Branch state at sign-off: 27 commits ahead of master, 592 unit tests,
+0 typecheck errors. Every verb from `Verbs.ts` has a real TS Command
+(34 Commands + 3 transparent bash-delegates for browser-bridge /
+host-agent / claude-dir per Alan's 2026-07-23 P4e ruling; Python
+daemons untouched — only the bash orchestration layer around them is
+delegated, with a memory-saved TODO to port that later). No user-
+visible "use bash wrapper" fallbacks anywhere.
+
+Ready to squash to master on Alan's call; nothing else outstanding.
 
 ## See also
 
