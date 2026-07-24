@@ -40,6 +40,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [convenience-scripts.md](design/convenience-scripts.md) | The container-side `cb-*` command convention + `cb-help`. |
 | [browser-testing.md](design/browser-testing.md) | `cb-browser` (headless/noVNC) and the opt-in CDP bridge to your real Chrome. |
 | [n-tier-networking.md](design/n-tier-networking.md) | The standard for addressing/binding/CORS in multi-tier apps (service-name vs rotating VM IP). |
+| [host-mcp-servers.md](design/host-mcp-servers.md) | Reaching an MCP server on the Mac host (IDE MCP servers) — the DNS-rebinding `Host`-header 403 and the L7 rewrite-proxy fix. |
 | [agent-to-agent.md](design/agent-to-agent.md) | The standard for agent↔agent comms — why **A2A** (not MCP, not ACP), and the waker problem it doesn't solve. |
 | [agent-coordination-hooks.md](design/agent-coordination-hooks.md) | The interim two-layer hook pattern (SessionStart catch-up + persistent Monitor) that carries Bear↔Arfy coordination via GitHub-as-bus until A2A + waker land. Protocol-agnostic. |
 | [disk-management.md](design/disk-management.md) | The standard for docker-disk under the per-project VM — prune discipline, `cb-df`, the ENOSPC/Write-tool escape. |

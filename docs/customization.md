@@ -122,6 +122,8 @@ dridock mcp add my-server -- npx -y @some/mcp-server
 
 This is how cron and Telegram modes reach external systems — drop your server config in `.mcp.json` (project) or `~/.claude.json` (global) and reference it from the instruction.
 
+**Reaching an MCP server on the Mac host** (e.g. a JetBrains IDE's built-in MCP server) has one trap: the container connects via `host.docker.internal`, but IDE servers 403 any non-localhost `Host` header (DNS-rebinding protection), which Claude Code misreads as an OAuth failure. The fix is a small Host-rewrite proxy, not `socat` — see [design/host-mcp-servers.md](design/host-mcp-servers.md).
+
 ## Plugins
 
 Claude Code plugins bundle slash commands, agents, hooks, MCP servers, and skills, and are declared **non-interactively** in `settings.json` — no `/plugin` commands required. Two keys drive it: `extraKnownMarketplaces` (register a marketplace) and `enabledPlugins` (turn plugins on). The dridock entrypoint manages `.claude.json` but leaves `settings.json` to you, so it won't clobber your config.
@@ -165,4 +167,5 @@ To add a plugin, put its marketplace under `extraKnownMarketplaces` and enable i
 - [environment-variables.md](environment-variables.md) — the full env-var surface.
 - [design/per-project-vm.md](design/per-project-vm.md) — per-project `~/.claude`, `init.d`, plugins.
 - [design/convenience-scripts.md](design/convenience-scripts.md) — adding `cb-*` helpers.
+- [design/host-mcp-servers.md](design/host-mcp-servers.md) — reaching an MCP server on the Mac host (the IDE `Host`-header 403 and its fix).
 - The top-level [`CLAUDE.md`](../CLAUDE.md).

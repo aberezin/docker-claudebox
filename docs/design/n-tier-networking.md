@@ -216,6 +216,7 @@ Where the harness plugs in: `$DRIDOCK_VM_IP` (fresh every run) feeds the API COR
 ## See also
 
 - [browser-testing.md](browser-testing.md) — `cb-browser shot`/`script`/`watch`/`cdp`; the Mac↔VM boundary this builds on.
+- [host-mcp-servers.md](host-mcp-servers.md) — reaching an MCP server on the Mac host across that same boundary (the IDE `Host`-header 403 and its fix).
 - [per-project-vm.md](per-project-vm.md) — the per-project Colima VM, the reachable `col0` IP, IP rotation, and `network.hostname`.
 - [framework-consult.md](framework-consult.md) — the consult channel that produced this standard.
 - [../../CLAUDE.md](../../CLAUDE.md) — the multi-tier DooD vision this enforces a common standard across.
