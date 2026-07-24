@@ -73,8 +73,9 @@ export class BootstrapCommand implements Command {
 
     const machine = new MachineConfig(ctx.fs, process.env, ctx.home);
     const svc = new BootstrapService({
-      fs: ctx.fs, host, machine,
+      fs: ctx.fs, host, machine, home: ctx.home,
       onNotice: (m) => ctx.stdout.write(m),
+      onWarn: (m) => ctx.stderr.write(m),
     });
     const outcome = await svc.run({
       root: ctx.cwd,

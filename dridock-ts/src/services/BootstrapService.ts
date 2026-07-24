@@ -1,6 +1,8 @@
 import type { FileSystem } from "../infra/FileSystem.ts";
 import type { HostCommandRunner } from "../infra/HostCommandRunner.ts";
 import type { MachineConfig } from "./MachineConfig.ts";
+import { parseTopLevelString } from "./ProjectConfig.ts";
+import { xdgRoot } from "../domain/paths.ts";
 import { cbNum } from "../domain/units.ts";
 
 /**
@@ -23,6 +25,13 @@ export interface BootstrapDeps {
   readonly fs: FileSystem;
   readonly host: HostCommandRunner;
   readonly machine: MachineConfig;
+  /** HOME — needed by the orphan-session scanner to resolve `<xdg>/projects/*`
+   *  when there's no explicit XDG_CONFIG_HOME (#42 facet 2). */
+  readonly home: string;
+  /** Where the orphan warning + config-preserved notice goes. Stderr in the
+   *  Command wiring; captured in tests. Separate from onNotice (stdout) so
+   *  warnings can't be swallowed by `dridock bootstrap > /dev/null`. */
+  readonly onWarn?: (message: string) => void;
   readonly onNotice: (message: string) => void;
 }
 
@@ -76,9 +85,15 @@ export class BootstrapService {
     await this.writeBrief(briefPath, opts);
     this.deps.onNotice(`  ✓ .dridock/BRIEF.md\n`);
 
-    // config.yml — always written (via a small template)
-    const id = await this.writeInitialConfig(opts.root);
-    this.deps.onNotice(`  ✓ .dridock/config.yml (gitignored)\n`);
+    // config.yml — preserve existing id if present (#42 facet 1) OR mint +
+    // write; on the mint path, warn about session dirs a fresh id would
+    // orphan (#42 facet 2). Bash-parity with cb_init_project_config's
+    // cb_project_id gate at wrapper.sh:504/523 that this port had lost.
+    const cfg = await this.writeInitialConfig(opts.root);
+    this.deps.onNotice(cfg.preserved
+      ? `  ✓ .dridock/config.yml (preserved existing id ${cfg.id})\n`
+      : `  ✓ .dridock/config.yml (gitignored)\n`);
+    const id = cfg.id;
 
     // gitignore always ensured
     await this.ensureGitignore(opts.root);
@@ -87,12 +102,26 @@ export class BootstrapService {
   }
 
   /**
-   * cb_init_project_config equivalent — writes `.dridock/config.yml` with
-   * a generated id + baked sizing (or machine-config defaults if set).
-   * Returns the project id it wrote.
+   * cb_init_project_config equivalent — either PRESERVES an existing real
+   * `id:` (bash-parity, wrapper.sh:504+523 gate), or mints a fresh id and
+   * writes `.dridock/config.yml`. Never clobbers an existing id.
+   *
+   * #42 regression: the pre-fix version always minted + always overwrote,
+   * silently orphaning the id-keyed `~/.claude` mount on any bootstrap
+   * re-run (lineage: #17, #30, #31, #32).
    */
-  private async writeInitialConfig(root: string): Promise<string> {
+  private async writeInitialConfig(root: string): Promise<{ id: string; preserved: boolean }> {
     const configPath = `${root}/.dridock/config.yml`;
+    const existing = await this.deps.fs.readTextOrUndefined(configPath);
+    const existingId = existing !== undefined ? parseTopLevelString(existing, "id") : undefined;
+    // Preserve any REAL existing id — anything that isn't the sentinel
+    // "auto" or empty. Same shape as ProjectConfig.projectId's read-side.
+    if (existingId !== undefined && existingId !== "auto" && existingId !== "") {
+      return { id: existingId, preserved: true };
+    }
+    // About to mint — check whether a fresh id would orphan sibling
+    // session dirs under a different existing id (#42 facet 2).
+    await this.warnIfSessionsWillBeOrphaned(root);
     const id = this.idGen();
     const cpu = cbNumOr(await this.deps.machine.machineDefault("vm.default_cpu"), 4);
     const memory = await this.deps.machine.machineDefault("vm.default_memory") ?? "8GiB";
@@ -109,7 +138,48 @@ network:
 # features: []            # opt-in tool bundles, e.g. [typescript, python] — list them: 'dridock features'
 `;
     await this.deps.fs.writeTextAtomic(configPath, content, { mode: 0o644 });
-    return id;
+    return { id, preserved: false };
+  }
+
+  /**
+   * #42 facet 2 — the defense-in-depth check.
+   *
+   * The per-project `~/.claude` mount, VMs, secrets, and sessions are all
+   * keyed on the project's `id:`. A fresh id points every one of those at
+   * an empty dir. If session state already exists under a DIFFERENT id at
+   * `<xdg>/projects/<other-id>/claude/projects/<cwd-slug>/`, minting a new
+   * id silently orphans it — the exact incident #42 documents.
+   *
+   * Same slug convention Claude Code uses: absolute cwd with `/` → `-`
+   * (leading `/` becomes leading `-`). Matches `~/.claude/projects/<slug>/`.
+   *
+   * Warning-only. Bootstrap continues; the user decides whether to abort
+   * and adopt the existing id or proceed with a fresh one. An interactive
+   * adopt prompt would need stdin plumbing that this path doesn't have.
+   */
+  private async warnIfSessionsWillBeOrphaned(root: string): Promise<void> {
+    const xdg = await xdgRoot(this.deps.fs, process.env, this.deps.home);
+    const projectsRoot = `${xdg}/projects`;
+    if (!(await this.deps.fs.isDirectory(projectsRoot))) return;
+    const slug = root.replaceAll("/", "-");
+    const orphanCandidates: string[] = [];
+    try {
+      const ids = await this.deps.fs.listDir(projectsRoot);
+      for (const id of ids) {
+        const sessionDir = `${projectsRoot}/${id}/claude/projects/${slug}`;
+        if (await this.deps.fs.isDirectory(sessionDir)) orphanCandidates.push(id);
+      }
+    } catch { /* projectsRoot exists per isDirectory() but listDir raced or perms — best-effort */ }
+    if (orphanCandidates.length === 0) return;
+    const warn = this.deps.onWarn ?? this.deps.onNotice;
+    warn(`⚠️  bootstrap: minting a NEW project id will silently orphan existing session state under another id:\n`);
+    for (const id of orphanCandidates) {
+      warn(`     ${projectsRoot}/${id}/claude/projects/${slug}\n`);
+    }
+    warn(`   To adopt an existing id instead of orphaning: abort now, then set\n`);
+    warn(`     id: <one-of-the-above>\n`);
+    warn(`   in .dridock/config.yml (creating that file if needed) and re-run bootstrap.\n`);
+    warn(`   Continuing with a fresh id anyway — the orphaned state stays on disk (recoverable).\n`);
   }
 
   /**
