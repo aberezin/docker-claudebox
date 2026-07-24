@@ -26,6 +26,27 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.4.1] — 2026-07-24 _(fork)_
+
+### Fixed — `dridock-ts host-agent up` unable to find `host-agent.py` out-of-box (Arfy #44)
+
+`HostAgentCommand.defaultPyCandidates` derived the sibling-file search
+from `process.argv[0]`. Under `bun build --compile`, `argv[0]` points
+at the `/$bunfs/…` virtual FS root Bun mounts for the embedded
+bundle — NOT the real install dir. So `<dir(argv[0])>/host-agent.py`
+missed the co-installed `host-agent.py` at `~/.local/bin/host-agent.py`
+and every user hit `❌ host-agent.py not found`, forcing the
+`DRIDOCK_HOST_AGENT_PY` override. `up` was effectively dead
+out-of-box.
+
+Fix: use `process.execPath` (the real launched-from path, valid in
+the compiled binary too). Browser-bridge dodged this because it
+writes `forward.py` inline rather than resolving a shipped file.
+
+Verified live on the compiled binary: with `dridock-ts` +
+`host-agent.py` co-located, sibling lookup now hits and the daemon
+starts.
+
 ## [3.4.0] — 2026-07-24 _(fork)_
 
 ### Added — TypeScript+Bun wrapper (`dridock-ts`), opt-in

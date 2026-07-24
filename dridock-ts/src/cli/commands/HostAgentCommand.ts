@@ -82,17 +82,29 @@ export class HostAgentCommand implements Command {
   /**
    * Ports cb_host_agent_py at wrapper.sh:1682. Resolution order:
    *   1. DRIDOCK_HOST_AGENT_PY env
-   *   2. sibling of the invoked binary (dirname(argv[0])/host-agent.py)
+   *   2. sibling of the invoked binary (dirname(execPath)/host-agent.py)
    *   3. `<share>/claudebox/host-agent.py` (install.sh's install target
    *      when in a non-standard prefix — matches bash's fallback)
+   *
+   * Arfy caught (#44 verify 2026-07-24) that using `process.argv[0]`
+   * here breaks host-agent out-of-box for the compiled binary: under
+   * `bun build --compile`, argv[0] points at the `/$bunfs/…` virtual
+   * FS root that Bun mounts for the embedded bundle — NOT the real
+   * install dir on the host. The sibling `host-agent.py` lookup then
+   * misses the co-installed file (~/.local/bin/host-agent.py) and
+   * every user needs the DRIDOCK_HOST_AGENT_PY override to make host-
+   * agent work. `process.execPath` returns the real launched-from
+   * path even in the compiled binary — the correct signal here.
+   * Browser-bridge dodged this because it writes forward.py inline
+   * rather than resolving a shipped file.
    */
   private defaultPyCandidates(): readonly string[] {
     const cands: string[] = [];
     const envOverride = process.env["DRIDOCK_HOST_AGENT_PY"];
     if (envOverride !== undefined && envOverride !== "") cands.push(envOverride);
-    const argv0 = process.argv[0];
-    if (argv0 !== undefined && argv0 !== "") {
-      const dir = argv0.substring(0, argv0.lastIndexOf("/"));
+    const execPath = process.execPath;
+    if (execPath !== undefined && execPath !== "") {
+      const dir = execPath.substring(0, execPath.lastIndexOf("/"));
       if (dir !== "") {
         cands.push(`${dir}/host-agent.py`);
         cands.push(`${dir}/../share/claudebox/host-agent.py`);
