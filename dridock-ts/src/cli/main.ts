@@ -32,9 +32,10 @@ import { SetupTokenCommand, DoctorCommand } from "./commands/ThrowawayCommands.t
 import { McpCommand, AuthCommand } from "./commands/ProjectPassthroughCommand.ts";
 import { HarnessCommand } from "./commands/HarnessCommand.ts";
 import { BootstrapCommand } from "./commands/BootstrapCommand.ts";
-import { BashDelegateCommand } from "./commands/BashDelegateCommand.ts";
 import { ClaudeDirCommand } from "./commands/ClaudeDirCommand.ts";
 import { CronModeCommand, cronModeRequested } from "./commands/CronModeCommand.ts";
+import { BrowserBridgeCommand } from "./commands/BrowserBridgeCommand.ts";
+import { HostAgentCommand } from "./commands/HostAgentCommand.ts";
 import { HelpCommand } from "./commands/HelpCommand.ts";
 import { findNoDridockMarker, formatNoDridockRefusal, shouldCheckNoDridock } from "../services/NoDridockGuard.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
@@ -86,14 +87,14 @@ function buildRegistry(): CommandRegistry {
   registry.register(new McpCommand());
   registry.register(new HarnessCommand());
   registry.register(new BootstrapCommand());
-  // P4e transparent delegates (Python daemons untouched; only the bash
-  // orchestration layer is being reused). See
-  // project_ts_browserbridge_hostagent_full_port_todo memory for the
-  // eventual full-TS port.
-  registry.register(new BashDelegateCommand("browser-bridge"));
-  registry.register(new BashDelegateCommand("host-agent"));
-  // claude-dir was a bash-delegate through 3.3.7; ported inline 2026-07-24
-  // to unblock bash-wrapper retirement step 3 (deleting wrapper.sh).
+  // Native TS implementations (2026-07-24) of the last three verbs that
+  // used to be BashDelegates through 3.4.0. Python daemons underneath
+  // (browser-bridge's forward.py + host-agent.py) are unchanged; only
+  // the bash *orchestration* around them ported. wrapper.sh retirement
+  // is now unblocked on the bash-side (bash still ships these until
+  // the deletion cycle).
+  registry.register(new BrowserBridgeCommand());
+  registry.register(new HostAgentCommand());
   registry.register(new ClaudeDirCommand());
   registry.register(new HelpCommand());
   return registry;
