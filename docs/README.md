@@ -42,6 +42,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [n-tier-networking.md](design/n-tier-networking.md) | The standard for addressing/binding/CORS in multi-tier apps (service-name vs rotating VM IP). |
 | [host-mcp-servers.md](design/host-mcp-servers.md) | Reaching an MCP server on the Mac host (IDE MCP servers) — the DNS-rebinding `Host`-header 403 and the L7 rewrite-proxy fix. |
 | [agent-to-agent.md](design/agent-to-agent.md) | The standard for agent↔agent comms — why **A2A** (not MCP, not ACP), and the waker problem it doesn't solve. |
+| [agent-teams.md](design/agent-teams.md) | Spec for teams of **named** agents — the `Sender:` / `Sender->Recipient:` message header, identity/roster, the watcher delivery predicate, and channel routing. |
 | [agent-coordination-hooks.md](design/agent-coordination-hooks.md) | The interim two-layer hook pattern (SessionStart catch-up + persistent Monitor) that carries Bear↔Arfy coordination via GitHub-as-bus until A2A + waker land. Protocol-agnostic. |
 | [disk-management.md](design/disk-management.md) | The standard for docker-disk under the per-project VM — prune discipline, `cb-df`, the ENOSPC/Write-tool escape. |
 | [git-and-api-auth.md](design/git-and-api-auth.md) | The SSH-for-git / tokens-for-API-only split (#10) — provider-agnostic, no credential-helper hijack. |
