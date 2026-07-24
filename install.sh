@@ -119,6 +119,68 @@ else
 fi
 rm -f "$WRAPPER_TMP"
 
+# Optional: also build + install the parallel TypeScript rewrite (`dridock-ts` in the
+# same INSTALL_DIR). Off by default — set DRIDOCK_INSTALL_TS=1 to opt in. Bash
+# wrapper remains the canonical `dridock`; the TS binary is available side-by-side
+# as `dridock-ts` for users who want to try it. Requires bun (installer offered).
+# See docs/design/typescript-rewrite.md for what verbs the TS binary handles vs
+# what still needs the bash wrapper.
+if [ -n "${DRIDOCK_INSTALL_TS:-}" ]; then
+	if [ ! -d "$SCRIPT_DIR/dridock-ts" ]; then
+		echo "⚠  DRIDOCK_INSTALL_TS=1 set but $SCRIPT_DIR/dridock-ts is missing — skipping TS binary install."
+	else
+		if ! command -v bun >/dev/null 2>&1; then
+			echo "⚠  DRIDOCK_INSTALL_TS=1 set but 'bun' is not installed."
+			echo "   Install it (https://bun.sh — curl -fsSL https://bun.sh/install | bash) and re-run install.sh."
+			echo "   Skipping TS binary install for now (bash wrapper is fine on its own)."
+		else
+			echo "🔨 Compiling dridock-ts (TypeScript rewrite) → single binary..."
+			(cd "$SCRIPT_DIR/dridock-ts" && bun install --frozen-lockfile >/dev/null 2>&1 || true; bun run build) || {
+				echo "⚠  TS binary build failed — bash wrapper installed OK, continuing."
+			}
+			TS_BIN="$SCRIPT_DIR/dridock-ts/bin/dridock"
+			if [ -x "$TS_BIN" ]; then
+				echo "📝 Installing dridock-ts to $INSTALL_DIR/dridock-ts..."
+				if [ -w "$INSTALL_DIR" ]; then
+					install -m 755 "$TS_BIN" "$INSTALL_DIR/dridock-ts"
+				elif command -v sudo >/dev/null 2>&1; then
+					sudo install -m 755 "$TS_BIN" "$INSTALL_DIR/dridock-ts"
+				fi
+				# #41 — on macOS, `bun build --compile` produces an adhoc
+				# linker-signed Mach-O. Overwriting the installed binary
+				# in place (upgrade path) invalidates the cached cdhash
+				# for that inode → AMFI SIGKILLs every subsequent
+				# invocation with rc 137 ("Killed: 9"). First-install to a
+				# fresh path is fine; it's the SECOND install.sh run that
+				# breaks. Re-signing ad-hoc restores a valid signature.
+				# No cert, no sudo — same signature type bun emits.
+				if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
+					# House rule (CLAUDE.md:105): a step that skips or fails
+					# silently must print a stderr line the user will see
+					# AND surface a rc a caller can act on. Bare `|| true`
+					# would swallow both; here we let codesign's own stderr
+					# through (so the user sees "codesign: ...") and follow
+					# with a one-liner recovery hint keyed on that failure.
+					_dts_cs_rc=0
+					if [ -w "$INSTALL_DIR/dridock-ts" ]; then
+						codesign --force --sign - "$INSTALL_DIR/dridock-ts" || _dts_cs_rc=$?
+					elif command -v sudo >/dev/null 2>&1; then
+						sudo codesign --force --sign - "$INSTALL_DIR/dridock-ts" || _dts_cs_rc=$?
+					fi
+					if [ "$_dts_cs_rc" -ne 0 ]; then
+						echo "⚠️  codesign re-sign failed (rc=$_dts_cs_rc). If dridock-ts now dies with 'Killed: 9', run:" >&2
+						echo "    codesign --force --sign - $INSTALL_DIR/dridock-ts" >&2
+					fi
+					unset _dts_cs_rc
+				fi
+				echo "   ✓ dridock-ts installed side-by-side with the bash wrapper."
+				echo "   Try it: 'dridock-ts version', 'dridock-ts features list', 'dridock-ts checkversion'."
+				echo "   See docs/design/typescript-rewrite.md for what it handles vs what still needs bash."
+			fi
+		fi
+	fi
+fi
+
 # Install host-agent.py next to the wrapper (the wrapper resolves it there) — the opt-in
 # Mac agent for `dridock host-agent up` (Approach 2). Best-effort; skip if absent.
 if [ -f "$SCRIPT_DIR/host-agent.py" ]; then
