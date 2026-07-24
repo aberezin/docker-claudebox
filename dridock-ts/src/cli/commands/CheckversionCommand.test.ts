@@ -230,8 +230,10 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
     expect(out).toContain(`binary: ${DRIDOCK_TS_VERSION}`);
     expect(out).toContain(`source: 3.9.99`);
     expect(out).toContain(`⚠️  STALE binary`);
-    expect(out).toContain(`Rebuild:`);
-    expect(out).toContain(`./install.sh`);
+    // The one-liner install-sh path — Arfy caught (2026-07-24 on #41 verify)
+    // that a naked `./install.sh` won't rebuild TS (gated behind the env
+    // flag at install.sh:128), so the hint must carry the flag.
+    expect(out).toContain(`DRIDOCK_INSTALL_TS=1 ./install.sh`);
   });
 
   test("baked > VERSION → ℹ️ binary NEWER (older checkout, no rebuild since)", async () => {

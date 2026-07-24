@@ -143,8 +143,15 @@ export class CheckversionCommand implements Command {
     }
     if (cmp === "lt") {
       ctx.stdout.write(`⚠️  STALE binary — source tree is newer than the binary you're running.\n`);
-      ctx.stdout.write(`    Rebuild:  cd dridock-ts && bun build --compile src/cli/main.ts --outfile bin/dridock\n`);
-      ctx.stdout.write(`    Then re-install:  ./install.sh   (installs from dridock-ts/bin/dridock)\n`);
+      // One-liner (rebuild + install + codesign re-sign all in one, no stale window):
+      //   `install.sh` gates the TS build+install behind DRIDOCK_INSTALL_TS=1
+      //   (see install.sh:128) — plain `./install.sh` alone will NOT rebuild
+      //   TS-side, keeping the stale binary in place. Spelling out a manual
+      //   `bun build …` would drift from `package.json`'s canonical flags
+      //   (missing --minify/--sourcemap) AND skip the #41 codesign re-sign
+      //   install.sh does after the copy — so we point at the canonical path.
+      //   Caught by Arfy on #41 verify (2026-07-24).
+      ctx.stdout.write(`    Rebuild + reinstall (one step):  DRIDOCK_INSTALL_TS=1 ./install.sh\n`);
     } else {
       // baked > source: binary was built off a newer checkout than the
       // one currently on disk. Rare (e.g. after `git checkout` to an
