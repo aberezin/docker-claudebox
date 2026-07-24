@@ -36,6 +36,7 @@ import { BashDelegateCommand } from "./commands/BashDelegateCommand.ts";
 import { ClaudeDirCommand } from "./commands/ClaudeDirCommand.ts";
 import { CronModeCommand, cronModeRequested } from "./commands/CronModeCommand.ts";
 import { HelpCommand } from "./commands/HelpCommand.ts";
+import { findNoDridockMarker, formatNoDridockRefusal, shouldCheckNoDridock } from "../services/NoDridockGuard.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
 import { DridockError } from "../domain/errors.ts";
@@ -134,11 +135,31 @@ async function main(): Promise<number> {
   const ctx = buildContext(binaryArg);
 
   try {
+    const fs = new RealFileSystem();
+
+    // .nodridock opt-out — MUST run before any project-touching side
+    // effect (auto-migrate reads/writes .dridock; cron/start spawn
+    // containers). Fires for cron mode + any project-scoped verb; safe,
+    // non-project verbs (help/version/completion/framework-bugs/consult/
+    // report-bug) skip the check so users can `dridock help` from
+    // anywhere including a marked-off tree.
+    if (shouldCheckNoDridock(userArgs, process.env)) {
+      const marker = await findNoDridockMarker(fs, ctx.cwd, ctx.home);
+      if (marker !== undefined) {
+        const verbLabel = cronModeRequested(process.env)
+          ? "start"          // cron dispatch masquerades as start; own label for the message
+          : (userArgs[0] ?? "start");
+        for (const line of formatNoDridockRefusal(marker, verbLabel, ctx.binName)) {
+          ctx.stderr.write(line);
+        }
+        return 1;
+      }
+    }
+
     // Auto-migrate: legacy `.claudebox/`-only project → `.dridock/`. Ports
     // cb_auto_migrate at wrapper.sh:2105. Silent no-op when: opt-out env
     // set, .claudebox absent, or .dridock already present. Runs BEFORE
     // dispatch so verbs read from the correct dot dir.
-    const fs = new RealFileSystem();
     const project = await new ProjectRootResolver(fs, new RealGitToplevel()).resolve(ctx.cwd);
     await autoMigrateIfNeeded(project.root, {
       fs, probe: new RealProcessProbe(), clock: new RealClock(),
