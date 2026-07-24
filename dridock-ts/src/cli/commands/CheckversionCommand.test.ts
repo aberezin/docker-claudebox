@@ -222,13 +222,16 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
 
   test("VERSION > baked → ⚠️ STALE binary + rebuild hint, rc 0", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/repo/VERSION", "3.9.99\n"); // pretend source is way ahead
+    // Use a MAJOR-dominant sentinel so this test can't rot when the baked
+    // version bumps (before 4.0.0 the fixture was "3.9.99"; the 4.0 bump
+    // broke it — pin high enough that even a hypothetical 999.x.x won't).
+    fs.seed("/repo/VERSION", "9999.0.0\n");
     const { ctx, stdout } = makeCtx(fs, "/repo");
     const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["--binary"], ctx);
     expect(rc).toBe(0);
     const out = stdout.text();
     expect(out).toContain(`binary: ${DRIDOCK_TS_VERSION}`);
-    expect(out).toContain(`source: 3.9.99`);
+    expect(out).toContain(`source: 9999.0.0`);
     expect(out).toContain(`⚠️  STALE binary`);
     // The one-liner install-sh path — Arfy caught (2026-07-24 on #41 verify)
     // that a naked `./install.sh` won't rebuild TS (gated behind the env

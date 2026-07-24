@@ -20,6 +20,15 @@ if ! command -v colima &>/dev/null; then
 	exit 1
 fi
 
+# Bun is required — the wrapper is now a bun-compiled TypeScript binary as of 4.0.0.
+# (Pre-4.0.0 shipped a bash `wrapper.sh` as the default and TS was opt-in via
+# DRIDOCK_INSTALL_TS=1. See CHANGELOG for 4.0.0 for the retirement + rollback path.)
+if ! command -v bun >/dev/null 2>&1; then
+	echo "❌ bun is not installed — required to build the dridock binary from source."
+	echo "   Install it (https://bun.sh — curl -fsSL https://bun.sh/install | bash) and re-run install.sh."
+	exit 1
+fi
+
 echo "📁 Creating ~/.claude directory..."
 mkdir -p ~/.claude
 
@@ -41,7 +50,7 @@ else
 fi
 
 # This fork builds the image LOCALLY and never pulls from a registry. It must be
-# run from a checkout of the repo (the Dockerfile and wrapper.sh live next to it).
+# run from a checkout of the repo (the Dockerfile and dridock-ts/ live next to it).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/null}")" 2>/dev/null && pwd)"
 
 IMAGE_NAME="${DRIDOCK_IMAGE_NAME:-${CLAUDEBOX_IMAGE_NAME:-dridock}}"
@@ -57,6 +66,11 @@ if [ ! -f "$SCRIPT_DIR/Dockerfile" ]; then
 	echo "❌ Dockerfile not found in $SCRIPT_DIR."
 	echo "   This fork builds a local image and does not pull from Docker Hub —"
 	echo "   run install.sh from a checkout of the repo, not piped from curl."
+	exit 1
+fi
+
+if [ ! -d "$SCRIPT_DIR/dridock-ts" ]; then
+	echo "❌ dridock-ts/ not found in $SCRIPT_DIR — is this a valid dridock checkout?"
 	exit 1
 fi
 
@@ -86,115 +100,92 @@ if ! docker --context "$CB_INFRA_CTX" build --build-arg DRIDOCK_VERSION="$DRIDOC
 	exit 1
 fi
 
-# install wrapper.sh from this checkout
-WRAPPER_TMP="$(mktemp /tmp/claude-wrapper-XXXXXX.sh)"
-if [ -f "$SCRIPT_DIR/wrapper.sh" ]; then
-	echo "📝 Using local wrapper.sh..."
-	cp "$SCRIPT_DIR/wrapper.sh" "$WRAPPER_TMP"
-else
-	echo "❌ wrapper.sh not found in $SCRIPT_DIR"
-	rm -f "$WRAPPER_TMP"
+# Compile the dridock TypeScript wrapper (a single ~95MB standalone binary via
+# `bun build --compile`) and install it as `$BIN_NAME`. Since 4.0.0 this IS the
+# dridock wrapper — the bash wrapper.sh has been removed (see #47 + CHANGELOG for
+# rollback path via v3.4.1).
+echo "🔨 Compiling dridock (TypeScript wrapper) → single binary..."
+(cd "$SCRIPT_DIR/dridock-ts" && bun install --frozen-lockfile >/dev/null 2>&1 || true; bun run build) || {
+	echo "❌ dridock TS build failed."
 	exit 1
-fi
-
-if [ ! -s "$WRAPPER_TMP" ]; then
-	echo "❌ wrapper.sh is empty — download failed"
-	rm -f "$WRAPPER_TMP"
+}
+TS_BIN="$SCRIPT_DIR/dridock-ts/bin/dridock"
+if [ ! -x "$TS_BIN" ]; then
+	echo "❌ dridock binary not found at $TS_BIN after build."
 	exit 1
 fi
 
 echo "📝 Installing $BIN_NAME to $BIN_PATH..."
 mkdir -p "$INSTALL_DIR" 2>/dev/null
 if [ -w "$INSTALL_DIR" ]; then
-	install -m 755 "$WRAPPER_TMP" "$BIN_PATH"
+	install -m 755 "$TS_BIN" "$BIN_PATH"
 elif command -v sudo >/dev/null 2>&1; then
 	echo "⚠️  $INSTALL_DIR isn't writable; falling back to sudo."
-	echo "    (set CLAUDEBOX_INSTALL_DIR to a user-writable dir like ~/.local/bin to avoid sudo)"
-	sudo mkdir -p "$INSTALL_DIR" && sudo install -m 755 "$WRAPPER_TMP" "$BIN_PATH"
+	echo "    (set DRIDOCK_INSTALL_DIR to a user-writable dir like ~/.local/bin to avoid sudo)"
+	sudo mkdir -p "$INSTALL_DIR" && sudo install -m 755 "$TS_BIN" "$BIN_PATH"
 else
 	echo "❌ $INSTALL_DIR isn't writable and sudo is unavailable."
-	echo "   Set CLAUDEBOX_INSTALL_DIR to a writable directory and re-run."
-	rm -f "$WRAPPER_TMP"
+	echo "   Set DRIDOCK_INSTALL_DIR to a writable directory and re-run."
 	exit 1
 fi
-rm -f "$WRAPPER_TMP"
 
-# Optional: also build + install the parallel TypeScript rewrite (`dridock-ts` in the
-# same INSTALL_DIR). Off by default — set DRIDOCK_INSTALL_TS=1 to opt in. Bash
-# wrapper remains the canonical `dridock`; the TS binary is available side-by-side
-# as `dridock-ts` for users who want to try it. Requires bun (installer offered).
-# See docs/design/typescript-rewrite.md for what verbs the TS binary handles vs
-# what still needs the bash wrapper.
-if [ -n "${DRIDOCK_INSTALL_TS:-}" ]; then
-	if [ ! -d "$SCRIPT_DIR/dridock-ts" ]; then
-		echo "⚠  DRIDOCK_INSTALL_TS=1 set but $SCRIPT_DIR/dridock-ts is missing — skipping TS binary install."
-	else
-		if ! command -v bun >/dev/null 2>&1; then
-			echo "⚠  DRIDOCK_INSTALL_TS=1 set but 'bun' is not installed."
-			echo "   Install it (https://bun.sh — curl -fsSL https://bun.sh/install | bash) and re-run install.sh."
-			echo "   Skipping TS binary install for now (bash wrapper is fine on its own)."
-		else
-			echo "🔨 Compiling dridock-ts (TypeScript rewrite) → single binary..."
-			(cd "$SCRIPT_DIR/dridock-ts" && bun install --frozen-lockfile >/dev/null 2>&1 || true; bun run build) || {
-				echo "⚠  TS binary build failed — bash wrapper installed OK, continuing."
-			}
-			TS_BIN="$SCRIPT_DIR/dridock-ts/bin/dridock"
-			if [ -x "$TS_BIN" ]; then
-				echo "📝 Installing dridock-ts to $INSTALL_DIR/dridock-ts..."
-				if [ -w "$INSTALL_DIR" ]; then
-					install -m 755 "$TS_BIN" "$INSTALL_DIR/dridock-ts"
-				elif command -v sudo >/dev/null 2>&1; then
-					sudo install -m 755 "$TS_BIN" "$INSTALL_DIR/dridock-ts"
-				fi
-				# #41 — on macOS, `bun build --compile` produces an adhoc
-				# linker-signed Mach-O. Overwriting the installed binary
-				# in place (upgrade path) invalidates the cached cdhash
-				# for that inode → AMFI SIGKILLs every subsequent
-				# invocation with rc 137 ("Killed: 9"). First-install to a
-				# fresh path is fine; it's the SECOND install.sh run that
-				# breaks. Re-signing ad-hoc restores a valid signature.
-				# No cert, no sudo — same signature type bun emits.
-				if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
-					# House rule (CLAUDE.md:105): a step that skips or fails
-					# silently must print a stderr line the user will see
-					# AND surface a rc a caller can act on. Bare `|| true`
-					# would swallow both; here we let codesign's own stderr
-					# through (so the user sees "codesign: ...") and follow
-					# with a one-liner recovery hint keyed on that failure.
-					_dts_cs_rc=0
-					if [ -w "$INSTALL_DIR/dridock-ts" ]; then
-						codesign --force --sign - "$INSTALL_DIR/dridock-ts" || _dts_cs_rc=$?
-					elif command -v sudo >/dev/null 2>&1; then
-						sudo codesign --force --sign - "$INSTALL_DIR/dridock-ts" || _dts_cs_rc=$?
-					fi
-					if [ "$_dts_cs_rc" -ne 0 ]; then
-						echo "⚠️  codesign re-sign failed (rc=$_dts_cs_rc). If dridock-ts now dies with 'Killed: 9', run:" >&2
-						echo "    codesign --force --sign - $INSTALL_DIR/dridock-ts" >&2
-					fi
-					unset _dts_cs_rc
-				fi
-				echo "   ✓ dridock-ts installed side-by-side with the bash wrapper."
-				echo "   Try it: 'dridock-ts version', 'dridock-ts features list', 'dridock-ts checkversion'."
-				echo "   See docs/design/typescript-rewrite.md for what it handles vs what still needs bash."
-			fi
-		fi
+# #41 — on macOS, `bun build --compile` produces an adhoc linker-signed Mach-O.
+# Overwriting the installed binary in place (upgrade path) invalidates the cached
+# cdhash for that inode → AMFI SIGKILLs every subsequent invocation with rc 137
+# ("Killed: 9"). First-install to a fresh path is fine; it's the SECOND install.sh
+# run that breaks. Re-signing ad-hoc restores a valid signature. No cert, no sudo —
+# same signature type bun emits.
+if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
+	# House rule (CLAUDE.md:105): a step that skips or fails silently must print a
+	# stderr line the user will see AND surface a rc a caller can act on. Bare
+	# `|| true` would swallow both; here we let codesign's own stderr through (so
+	# the user sees "codesign: ...") and follow with a one-liner recovery hint.
+	_cs_rc=0
+	if [ -w "$BIN_PATH" ]; then
+		codesign --force --sign - "$BIN_PATH" || _cs_rc=$?
+	elif command -v sudo >/dev/null 2>&1; then
+		sudo codesign --force --sign - "$BIN_PATH" || _cs_rc=$?
 	fi
+	if [ "$_cs_rc" -ne 0 ]; then
+		echo "⚠️  codesign re-sign failed (rc=$_cs_rc). If $BIN_NAME now dies with 'Killed: 9', run:" >&2
+		echo "    codesign --force --sign - $BIN_PATH" >&2
+	fi
+	unset _cs_rc
 fi
 
-# Install host-agent.py next to the wrapper (the wrapper resolves it there) — the opt-in
-# Mac agent for `dridock host-agent up` (Approach 2). Best-effort; skip if absent.
+# Clean up the pre-4.0.0 side-by-side `dridock-ts` binary if it exists at a
+# different path than the new canonical `$BIN_PATH`. Pre-4.0.0 install.sh
+# installed `dridock` (bash) + optionally `dridock-ts` (TS) side-by-side; 4.0.0
+# collapses to just `$BIN_NAME` (TS binary, default `dridock`). Leaving the
+# stale `dridock-ts` on PATH is the exact stale-binary footgun that bit Arfy
+# on #40 — same binary name, different age, silent divergence. Removing it
+# forces muscle memory (and any scripts) to update to the canonical name.
+# Arfy called this out on #47 pre-build.
+_STALE_TS="$INSTALL_DIR/dridock-ts"
+if [ -e "$_STALE_TS" ] && [ "$_STALE_TS" != "$BIN_PATH" ]; then
+	if [ -w "$_STALE_TS" ] || [ -w "$INSTALL_DIR" ]; then rm -f "$_STALE_TS"
+	elif command -v sudo >/dev/null 2>&1; then sudo rm -f "$_STALE_TS"; fi
+	if [ ! -e "$_STALE_TS" ]; then
+		echo "🧹 Removed stale side-by-side $_STALE_TS (4.0.0 collapses to just '$BIN_NAME')."
+	else
+		echo "   ⚠ Could not remove stale $_STALE_TS — remove it manually so scripts don't run the old binary." >&2
+	fi
+fi
+unset _STALE_TS
+
+# Install host-agent.py next to the wrapper (`dridock host-agent` resolves it there via
+# process.execPath — see #44). The opt-in Mac agent for `dridock host-agent up`
+# (Approach 2). Best-effort; skip if absent.
 if [ -f "$SCRIPT_DIR/host-agent.py" ]; then
 	if [ -w "$INSTALL_DIR" ]; then install -m 755 "$SCRIPT_DIR/host-agent.py" "$INSTALL_DIR/host-agent.py"
 	elif command -v sudo >/dev/null 2>&1; then sudo install -m 755 "$SCRIPT_DIR/host-agent.py" "$INSTALL_DIR/host-agent.py"; fi
-	echo "📝 Installed host-agent.py to $INSTALL_DIR (for 'dridock host-agent')"
+	echo "📝 Installed host-agent.py to $INSTALL_DIR (for '$BIN_NAME host-agent')"
 fi
 
-# Install the shared env-rename map (#16, 3.2.1) into the XDG data dir. The wrapper
-# reads it at source-time to alias renamed CLAUDEBOX_* env vars to their DRIDOCK_*
-# canonical names. Same file is baked into the container image at
-# /usr/local/lib/dridock/env-rename.map for the entrypoint's own symmetric aliaser.
-# Best-effort; skipping only breaks legacy-name compat (all in-file reads use the
-# canonical names). See docs/design/env-var-rename.md.
+# Install the shared env-rename map (#16, 3.2.1) into the XDG data dir. Same file
+# is baked into the container image at /usr/local/lib/dridock/env-rename.map for
+# the entrypoint's symmetric aliaser (CLAUDEBOX_* ↔ DRIDOCK_* legacy compat).
+# Best-effort. See docs/design/env-var-rename.md.
 if [ -f "$SCRIPT_DIR/env-rename.map" ]; then
 	DRIDOCK_SHARE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/dridock"
 	if mkdir -p "$DRIDOCK_SHARE_DIR" 2>/dev/null && install -m 644 "$SCRIPT_DIR/env-rename.map" "$DRIDOCK_SHARE_DIR/env-rename.map" 2>/dev/null; then
@@ -203,8 +194,8 @@ if [ -f "$SCRIPT_DIR/env-rename.map" ]; then
 fi
 
 # Install the /dridock Claude Code skill (human status glance) into the user's global
-# skills dir, so /dridock works in any project. Skip with CLAUDEBOX_SKIP_SKILL=1
-# (kept as the alias name for one deprecation cycle).
+# skills dir, so /dridock works in any project. Skip with DRIDOCK_SKIP_SKILL=1
+# (CLAUDEBOX_SKIP_SKILL still accepted for one deprecation cycle).
 if [ -z "${DRIDOCK_SKIP_SKILL:-${CLAUDEBOX_SKIP_SKILL:-}}" ] && [ -d "$SCRIPT_DIR/skills" ]; then
 	SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
 	if mkdir -p "$SKILLS_DIR" 2>/dev/null && cp -R "$SCRIPT_DIR/skills/." "$SKILLS_DIR/" 2>/dev/null; then
@@ -216,12 +207,10 @@ fi
 # and source them from your rc. Skip with DRIDOCK_SKIP_SHELL_HELPERS=1 (legacy
 # CLAUDEBOX_SKIP_SHELL_HELPERS accepted for one deprecation cycle).
 if [ -z "${DRIDOCK_SKIP_SHELL_HELPERS:-${CLAUDEBOX_SKIP_SHELL_HELPERS:-}}" ] && [ -f "$SCRIPT_DIR/claudebox-shell.sh" ]; then
-	# SHARE_DIR resolution mirrors wrapper.sh's cb_xdg_dir pattern for the .config/
-	# sibling: prefer the DRIDOCK_ override, then the legacy CLAUDEBOX_ override, then
-	# the ~/.local/share/dridock/ default (3.0+). Legacy ~/.local/share/claudebox/ is
-	# NEVER auto-migrated — user might have their own files there. If both dirs
-	# co-exist post-upgrade, we install to dridock/ and print a one-liner recommending
-	# cleanup.
+	# Prefer DRIDOCK_ override, then legacy CLAUDEBOX_ override, then default
+	# ~/.local/share/dridock/. Legacy ~/.local/share/claudebox/ is NEVER
+	# auto-migrated. If both dirs co-exist post-upgrade, we install to dridock/
+	# and print a one-liner recommending cleanup.
 	_LEGACY_SHARE="$HOME/.local/share/claudebox"
 	SHARE_DIR="${DRIDOCK_SHARE_DIR:-${CLAUDEBOX_SHARE_DIR:-$HOME/.local/share/dridock}}"
 	mkdir -p "$SHARE_DIR"
@@ -246,9 +235,7 @@ if [ -z "${DRIDOCK_SKIP_SHELL_HELPERS:-${CLAUDEBOX_SKIP_SHELL_HELPERS:-}}" ] && 
 fi
 
 # Bash completion (#13, 2.24.0). Drop the completion script into the XDG-standard
-# path where bash-completion picks it up automatically. Non-fatal: if the wrapper
-# doesn't ship `completion bash` yet (rare fresh-clone case), or the dir isn't
-# writable, we skip with a note. zsh users with `bashcompinit` loaded pick this up too.
+# path where bash-completion picks it up automatically. Non-fatal.
 COMPLETION_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/bash-completion/completions"
 if mkdir -p "$COMPLETION_DIR" 2>/dev/null; then
 	if "$BIN_PATH" completion bash > "$COMPLETION_DIR/$BIN_NAME" 2>/dev/null; then

@@ -8,7 +8,7 @@
 // which would be nicer, but during the compiled-binary build the relative
 // resolution differs and the shape is fussy. Sticking with an explicit
 // constant until Phase 5 introduces a build script that inlines VERSION.)
-export const DRIDOCK_TS_VERSION = "3.4.1";
+export const DRIDOCK_TS_VERSION = "4.0.0";
 
 /**
  * Minimum claude CLI version that recognizes `--remote-control` (aka

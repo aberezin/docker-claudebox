@@ -446,18 +446,21 @@ if [ -d "$_cdir" ] && [ -n "${DRIDOCK_PROJECT_ID:-}" ]; then
 fi
 
 # (A2) Framework-Claude surfacing — if THIS claudebot is developing the harness itself
-# (workspace fingerprint = a wrapper.sh containing DRIDOCK_VERSION= at its root, OR
-# DRIDOCK_HARNESS_DEV=1 opt-in, or the legacy alias DRIDOCK_FRAMEWORK_DEV=1), also inject a note listing cross-project consults
-# awaiting a framework draft AND framework-bug reports not yet marked reviewed. This is
-# the review flow the host `dridock consult list` / `dridock framework-bugs list`
-# surfaces to a human on the Mac — mirrored here so a framework-dev claudebot working
-# from INSIDE a container catches waiting work at startup instead of missing it (there
-# is no host wrapper in here). Skipped for every normal claudebot.
+# (workspace fingerprint = a `dridock-ts/src/domain/dridockVersion.ts` file at the
+# workspace root — unique to this repo, replaces the pre-4.0.0 `wrapper.sh` + grep
+# check that broke when wrapper.sh was deleted), OR DRIDOCK_HARNESS_DEV=1 opt-in,
+# OR the legacy alias DRIDOCK_FRAMEWORK_DEV=1), also inject a note listing cross-
+# project consults awaiting a framework draft AND framework-bug reports not yet
+# marked reviewed. This is the review flow the host `dridock consult list` /
+# `dridock framework-bugs list` surfaces to a human on the Mac — mirrored here so
+# a framework-dev claudebot working from INSIDE a container catches waiting work
+# at startup instead of missing it (there is no host wrapper in here). Skipped
+# for every normal claudebot.
 FRAMEWORK_NOTE=""
 _is_fwdev=0
 case "${DRIDOCK_HARNESS_DEV:-${DRIDOCK_FRAMEWORK_DEV:-}}" in 1|true|yes|on) _is_fwdev=1 ;; esac
-if [ "$_is_fwdev" = 0 ] && [ -n "${DRIDOCK_WORKSPACE:-}" ] && [ -f "$DRIDOCK_WORKSPACE/wrapper.sh" ]; then
-	grep -q '^DRIDOCK_VERSION=' "$DRIDOCK_WORKSPACE/wrapper.sh" 2>/dev/null && _is_fwdev=1
+if [ "$_is_fwdev" = 0 ] && [ -n "${DRIDOCK_WORKSPACE:-}" ] && [ -f "$DRIDOCK_WORKSPACE/dridock-ts/src/domain/dridockVersion.ts" ]; then
+	_is_fwdev=1
 fi
 if [ "$_is_fwdev" = 1 ]; then
 	_fwc_dir="${DRIDOCK_CONSULT_DIR:-/home/claude/framework-consult}"

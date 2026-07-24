@@ -26,6 +26,94 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.0.0] — 2026-07-24 _(fork)_
+
+### Removed — bash `wrapper.sh` (BREAKING; closes #47)
+
+The ~3300-line host bash wrapper is deleted. Since 3.4.0 the TypeScript
+port shipped as an opt-in `dridock-ts` binary alongside; since 3.4.1
+Arfy live-verified all 12 macOS cases green (browser-bridge + host-agent
+end-to-end included). 4.0.0 collapses the two:
+
+- `wrapper.sh` — **deleted** (~3300 lines).
+- `DRIDOCK_INSTALL_TS=1` — **deleted** (opt-in flag is meaningless now;
+  TS is the only install path). Setting it is a no-op.
+- The `dridock` binary is now the TypeScript wrapper (compiled via
+  `bun build --compile`, ~95MB standalone Mach-O / ELF). Same verbs,
+  same sidecar contract, same DOCKER_ARGS shape — the host↔container
+  IPC is unchanged from 3.4.1's TS wrapper, so a project bootstrapped
+  under any 3.x wrapper resumes cleanly under 4.0.0.
+
+### install.sh changes
+
+- `./install.sh` now requires `bun` (the TS wrapper is compiled at
+  install time). Fails fast with an install hint if bun is missing.
+- Compiles + installs the TS binary as `$BIN_NAME` (default `dridock`).
+- Codesign re-sign on macOS (from #41) still runs — path is now
+  `$BIN_PATH` so both fresh install and upgrade paths get a valid
+  cdhash. Arfy pre-flagged this on #47 as the #1 4.0.0 install
+  risk — verified matched in the new install.sh.
+- Cleans up any stale `dridock-ts` from a prior side-by-side install
+  (the 3.4.x opt-in flow left `dridock` = bash and `dridock-ts` = TS
+  on PATH together; 4.0.0 collapses to just `dridock` so keeping
+  the old `dridock-ts` around is a stale-binary footgun). Prints
+  `🧹 Removed stale side-by-side …` when it happens.
+
+### Deleted tests
+
+Wrapper-side test files under `tests/` are gone (they exercised bash
+`wrapper.sh` semantics that no longer exist):
+`test_wrapper.sh`, `test_cbvm.sh`, `test_cbconfig.sh`, `test_cbnet.sh`,
+`test_bootstrap.sh`, `test_rename_completeness.sh`, `test_programmatic.sh`,
+`test_install.sh`, `test_e2e.sh`.
+
+Container-side + daemon tests kept and unchanged:
+`test_api.sh`, `test_build.sh`, `test_cron.sh`, `test_cron_telegram.sh`,
+`test_e2e_telegram.sh`, `test_entrypoint.sh`, `test_env_rename_compat.sh`,
+`test_report_bug.sh`.
+
+The TS unit suite (`bun test` under `dridock-ts/`) is where wrapper
+tests live now — 720+ tests / 0 fail at time of release.
+
+### entrypoint.sh — framework-dev fingerprint
+
+Pre-4.0.0 the entrypoint detected "this container is developing the
+harness itself" by checking for `wrapper.sh` at the workspace root +
+grepping for `DRIDOCK_VERSION=`. With `wrapper.sh` deleted the check
+becomes a false-negative for exactly the case it was written to catch.
+Replaced with a presence check for
+`dridock-ts/src/domain/dridockVersion.ts` — a file that only exists in
+the harness repo. Semantics unchanged (still gates the
+framework-consults + framework-bugs auto-injection).
+
+### Rollback path
+
+If 4.0.0 surfaces a problem you can't work around, this is the
+documented one-liner to get back to a working install:
+
+```bash
+git checkout v3.4.1 && ./install.sh
+```
+
+3.4.1 shipped bash-default + TS-opt-in (the last dual-install state).
+Both wrappers speak the same host↔container IPC, so a session
+resumed under 4.0.0 and then rolled back to v3.4.1 (bash) still
+continues cleanly.
+
+### Upgrade
+
+Existing 3.4.x users on macOS: rebuild `bun` first if not installed
+(`curl -fsSL https://bun.sh/install | bash`), then `./install.sh`.
+Existing sessions preserved (id-keyed `~/.claude` mount is untouched
+by the binary swap; verified on Arfy's gammaray with 9 live jsonls
+under project id `51cb139f`).
+
+### Related
+
+- #47 — this release's tracking epic.
+- #44 — Arfy's 12/12 sign-off on 3.4.1 that unblocked this.
+- #46 / #45 — agent-teams + reusable watcher (orthogonal, next).
+
 ## [3.4.1] — 2026-07-24 _(fork)_
 
 ### Fixed — `dridock-ts host-agent up` unable to find `host-agent.py` out-of-box (Arfy #44)

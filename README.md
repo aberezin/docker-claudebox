@@ -92,7 +92,7 @@ export DRIDOCK_MINIMAL=1 && ./install.sh
 # or: export DRIDOCK_BIN_NAME=claude && ./install.sh
 ```
 
-The installer must run from a checkout of the repo — it needs the `Dockerfile` and `wrapper.sh` beside it, and it will not pipe from `curl` since there is no registry image to fall back to.
+The installer must run from a checkout of the repo — it needs the `Dockerfile` and `dridock-ts/` (the wrapper source) beside it, and it will not pipe from `curl` since there is no registry image to fall back to. `install.sh` also requires [`bun`](https://bun.sh) to compile the wrapper to a single ~95 MB standalone binary.
 
 ### Manual setup
 
@@ -111,8 +111,10 @@ ssh-keygen -t ed25519 -C "claude@claude.ai" -f "$HOME/.ssh/claudebox/id_ed25519"
 make build
 # or minimal: make build-minimal
 
-# 4. install the wrapper script as a command (no sudo — user-writable dir)
-mkdir -p ~/.local/bin && install -m 755 wrapper.sh ~/.local/bin/dridock
+# 4. build + install the wrapper binary as a command (no sudo — user-writable dir)
+(cd dridock-ts && bun install --frozen-lockfile && bun run build)
+mkdir -p ~/.local/bin && install -m 755 dridock-ts/bin/dridock ~/.local/bin/dridock
+# on macOS: codesign --force --sign - ~/.local/bin/dridock   (see CHANGELOG #41)
 # make sure ~/.local/bin is on your PATH (add to ~/.zshrc if needed)
 ```
 
