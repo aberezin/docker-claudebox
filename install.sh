@@ -146,6 +146,21 @@ if [ -n "${DRIDOCK_INSTALL_TS:-}" ]; then
 				elif command -v sudo >/dev/null 2>&1; then
 					sudo install -m 755 "$TS_BIN" "$INSTALL_DIR/dridock-ts"
 				fi
+				# #41 — on macOS, `bun build --compile` produces an adhoc
+				# linker-signed Mach-O. Overwriting the installed binary
+				# in place (upgrade path) invalidates the cached cdhash
+				# for that inode → AMFI SIGKILLs every subsequent
+				# invocation with rc 137 ("Killed: 9"). First-install to a
+				# fresh path is fine; it's the SECOND install.sh run that
+				# breaks. Re-signing ad-hoc restores a valid signature.
+				# No cert, no sudo — same signature type bun emits.
+				if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
+					if [ -w "$INSTALL_DIR/dridock-ts" ]; then
+						codesign --force --sign - "$INSTALL_DIR/dridock-ts" 2>/dev/null || true
+					elif command -v sudo >/dev/null 2>&1; then
+						sudo codesign --force --sign - "$INSTALL_DIR/dridock-ts" 2>/dev/null || true
+					fi
+				fi
 				echo "   ✓ dridock-ts installed side-by-side with the bash wrapper."
 				echo "   Try it: 'dridock-ts version', 'dridock-ts features list', 'dridock-ts checkversion'."
 				echo "   See docs/design/typescript-rewrite.md for what it handles vs what still needs bash."
