@@ -8,6 +8,7 @@ import type { ContainerRuntime, RunArgs, PsRow } from "../../infra/ContainerRunt
 export class InMemoryContainerRuntime implements ContainerRuntime {
   readonly runs: RunArgs[] = [];
   readonly starts: Array<{ context: string; container: string }> = [];
+  readonly backgroundStarts: Array<{ context: string; container: string }> = [];
   readonly stops: Array<{ context: string; container: string }> = [];
   readonly execs: Array<{ context: string; container: string; cmd: readonly string[] }> = [];
   private readonly psRows = new Map<string, PsRow>();
@@ -27,6 +28,11 @@ export class InMemoryContainerRuntime implements ContainerRuntime {
   async startAttached(context: string, containerName: string): Promise<number> {
     this.starts.push({ context, container: containerName });
     return this.nextRc.get(`start:${containerName}`) ?? 0;
+  }
+
+  async startBackground(context: string, containerName: string): Promise<number> {
+    this.backgroundStarts.push({ context, container: containerName });
+    return this.nextRc.get(`start-bg:${containerName}`) ?? 0;
   }
 
   async stop(context: string, containerName: string): Promise<void> {

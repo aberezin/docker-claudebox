@@ -26,6 +26,9 @@ import { AuthSecretsProvisioner } from "../../services/AuthSecretsProvisioner.ts
 import { collectEnvPassthrough, collectMountPassthrough } from "../../services/EnvMountPassthrough.ts";
 import { BridgeStateReader } from "../../services/BridgeStateReader.ts";
 import { xdgRoot } from "../../domain/paths.ts";
+import { CLAUDE_CLI_REMOTE_CONTROL_FLOOR } from "../../domain/dridockVersion.ts";
+import { Version } from "../../domain/Version.ts";
+import { IMAGE_UNAVAILABLE, IMAGE_UNSTAMPED } from "../../infra/Docker.ts";
 
 /**
  * `dridock start` — the main launch verb. Full port; no bash fallback.
@@ -203,6 +206,15 @@ export class StartCommand implements Command {
 
     // ── mode dispatch ─────────────────────────────────────────────────
     if (isProg) return await this.runProgrammatic(validated!, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec);
+    // (#17) --remote-control against an image whose claude CLI predates
+    // the flag: claude ignores unknown flags silently (exit 0), so the
+    // session starts, looks healthy, RC never activates, no signal ever
+    // surfaces. Warn loudly BEFORE starting the container. Interactive-
+    // only (bash-parity — programmatic `-p` doesn't use RC). Non-fatal:
+    // everything else works, so we continue after the warning.
+    if (hasRemoteControlFlag(args)) {
+      await warnIfRemoteControlBelowFloor(docker, ctxDocker, this.imageName, ctx.stderr);
+    }
     return await this.runInteractive(args, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec);
   }
 
@@ -299,6 +311,51 @@ function resolveTmpfs(env: Record<string, string | undefined>): readonly string[
   if (raw === undefined || raw === "") return [];
   const size = raw === "1" || raw === "true" || raw === "yes" || raw === "on" ? "2g" : raw;
   return [`/tmp:size=${size},exec,mode=1777`];
+}
+
+/**
+ * True when the argv contains the `--remote-control` flag (or the `--rc`
+ * short form), including the `--flag=value` shape. Exported for tests.
+ *
+ * The exact-match on `--remote-control` (not a `startsWith`) is
+ * deliberate — old CLIs carry a `--remote-control-session-name-prefix`
+ * option that must NOT trigger this guard. Same reason bash pads with
+ * spaces at wrapper.sh:3351.
+ */
+export function hasRemoteControlFlag(args: readonly string[]): boolean {
+  for (const arg of args) {
+    if (arg === "--remote-control" || arg === "--rc") return true;
+    if (arg.startsWith("--remote-control=") || arg.startsWith("--rc=")) return true;
+  }
+  return false;
+}
+
+/**
+ * The #17 guard body — queries the project image's baked claude CLI
+ * version and emits a warning if it's below the RC floor. Returns
+ * void because bash continues after warning (RC just won't activate;
+ * everything else works). Exported for direct unit tests.
+ */
+export async function warnIfRemoteControlBelowFloor(
+  docker: import("../../infra/Docker.ts").Docker,
+  ctxDocker: string,
+  imageName: string,
+  stderr: import("../Context.ts").TextWriter,
+): Promise<void> {
+  const cliVersion = await docker.imageClaudeCliVersion(ctxDocker, imageName);
+  // "unavailable" (image absent / docker call failed) — say nothing;
+  // VmEnsure would already have failed loudly if this was actionable.
+  // "unstamped" — same silence for the same reason.
+  if (cliVersion === IMAGE_UNAVAILABLE || cliVersion === IMAGE_UNSTAMPED || cliVersion === "") return;
+  const observed = Version.parseLoose(cliVersion);
+  const floor = Version.parseLoose(CLAUDE_CLI_REMOTE_CONTROL_FLOOR);
+  if (observed.compareTo(floor) !== "lt") return;
+  stderr.write(`⚠️  --remote-control: this project's image ships Claude Code ${cliVersion}, which has no\n`);
+  stderr.write(`    --remote-control flag (needs >= ${CLAUDE_CLI_REMOTE_CONTROL_FLOOR}). claude IGNORES unknown flags\n`);
+  stderr.write(`    silently, so the session will start and Remote Control just won't activate.\n`);
+  stderr.write(`    The CLI is baked into the image and can't self-update. Fix:\n`);
+  stderr.write(`      make build     # bump Dockerfile ARG CLAUDE_VERSION first if it's still old\n`);
+  stderr.write(`    Continuing anyway — everything except Remote Control works normally.\n`);
 }
 
 // Injectable deps for tests.

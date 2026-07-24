@@ -33,6 +33,8 @@ import { McpCommand, AuthCommand } from "./commands/ProjectPassthroughCommand.ts
 import { HarnessCommand } from "./commands/HarnessCommand.ts";
 import { BootstrapCommand } from "./commands/BootstrapCommand.ts";
 import { BashDelegateCommand } from "./commands/BashDelegateCommand.ts";
+import { ClaudeDirCommand } from "./commands/ClaudeDirCommand.ts";
+import { CronModeCommand, cronModeRequested } from "./commands/CronModeCommand.ts";
 import { HelpCommand } from "./commands/HelpCommand.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
@@ -89,7 +91,9 @@ function buildRegistry(): CommandRegistry {
   // eventual full-TS port.
   registry.register(new BashDelegateCommand("browser-bridge"));
   registry.register(new BashDelegateCommand("host-agent"));
-  registry.register(new BashDelegateCommand("claude-dir"));   // read-only bash helper — same delegation
+  // claude-dir was a bash-delegate through 3.3.7; ported inline 2026-07-24
+  // to unblock bash-wrapper retirement step 3 (deleting wrapper.sh).
+  registry.register(new ClaudeDirCommand());
   registry.register(new HelpCommand());
   return registry;
 }
@@ -141,6 +145,14 @@ async function main(): Promise<number> {
       env: process.env, home: ctx.home,
       onNotice: (m) => ctx.stderr.write(m),
     });
+
+    // Cron mode intercept — bash triggers on DRIDOCK_MODE_CRON regardless
+    // of the first positional arg (wrapper.sh:3070), so this MUST run
+    // before verb dispatch. `stop` becomes "stop the cron container",
+    // anything else spawns / resumes the detached _cron container.
+    if (cronModeRequested(process.env)) {
+      return await new CronModeCommand().run(userArgs, ctx);
+    }
 
     return await registry.dispatch(userArgs, ctx);
   } catch (err) {

@@ -85,6 +85,13 @@ export interface ContainerRuntime {
   /** `docker start -ai` — reattach to an existing stopped container. */
   startAttached(context: string, containerName: string): Promise<number>;
 
+  /** `docker start <name>` (NO `-a`) — resurrect an existing detached
+   *  container (e.g. cron daemon) and return once it's up. Distinct from
+   *  `startAttached` (interactive claudebot) because a detached container
+   *  must not tie the calling shell to its stdio — matches bash's
+   *  wrapper.sh:3105 `"${DOCKER[@]}" start "$cron_name"` (no `-ai`). */
+  startBackground(context: string, containerName: string): Promise<number>;
+
   /** `docker stop <name>` — SIGTERM then SIGKILL. Ignores "not found". */
   stop(context: string, containerName: string): Promise<void>;
 
@@ -104,6 +111,17 @@ export class RealContainerRuntime implements ContainerRuntime {
 
   async startAttached(context: string, containerName: string): Promise<number> {
     const proc = Bun.spawn(["docker", "--context", context, "start", "-ai", containerName], {
+      stdio: ["inherit", "inherit", "inherit"],
+    });
+    return await proc.exited;
+  }
+
+  async startBackground(context: string, containerName: string): Promise<number> {
+    // `docker start <name>` (no `-a`) prints the container name and
+    // returns as soon as the daemon accepts the start — the container
+    // keeps running detached. Used by the cron dispatch to resurrect
+    // an existing `_cron` container.
+    const proc = Bun.spawn(["docker", "--context", context, "start", containerName], {
       stdio: ["inherit", "inherit", "inherit"],
     });
     return await proc.exited;
