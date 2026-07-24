@@ -90,7 +90,10 @@ describe("StartCommand — #42 tightening: pre-launch orphan-session sanity chec
       const { ctx, stderr } = makeCtx(fs);
       const rc = await cmd.run([], ctx);
       expect(rc).toBe(0);
-      expect(stderr.text()).toBe("");
+      // #48 status lines write to stderr on every launch; assert no
+      // orphan warning fired rather than expecting stderr fully empty.
+      expect(stderr.text()).not.toContain("you're launching id");
+      expect(stderr.text()).not.toContain("session state under OTHER project id");
       expect(runtime.runs.length).toBe(1);
     } finally {
       if (savedXdg === undefined) delete process.env["XDG_CONFIG_HOME"];
@@ -131,11 +134,57 @@ describe("StartCommand — #42 tightening: pre-launch orphan-session sanity chec
       const { ctx, stderr } = makeCtx(fs);
       const rc = await cmd.run([], ctx);
       expect(rc).toBe(0);
-      expect(stderr.text()).toBe("");
+      // #48 status lines write to stderr; assert no orphan warning fired.
+      expect(stderr.text()).not.toContain("session state under OTHER project id");
     } finally {
       if (savedXdg === undefined) delete process.env["XDG_CONFIG_HOME"];
       else process.env["XDG_CONFIG_HOME"] = savedXdg;
     }
+  });
+});
+
+describe("StartCommand — #48 liveness status lines on stderr", () => {
+  test("warm-path (VM up, container exists) → 🚀 entry + 🔄 attach lines", async () => {
+    const { fs, runtime, cmd } = seedProjectVmRunning();
+    // Seed the interactive container as already-present so runInteractive
+    // hits the attach branch (not the fresh-run branch).
+    runtime.seedPs("claude-_p", { name: "claude-_p", status: "Exited (0) 2 hours ago", image: "dridock:latest" });
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await cmd.run([], ctx);
+    expect(rc).toBe(0);
+    const err = stderr.text();
+    expect(err).toContain(`🚀 dridock start (project: abc)`);
+    expect(err).toContain(`🔄 attaching to container claude-_p`);
+    // Warm-path skips the "VM ready" line to avoid narration noise.
+    expect(err).not.toContain(`VM cb-abc ready`);
+    // Attach branch — startAttached called, no fresh run.
+    expect(runtime.runs).toEqual([]);
+    expect(runtime.starts).toHaveLength(1);
+  });
+
+  test("cold-path (VM absent) → 🚀 entry + ✓ VM ready + 🔧 starting", async () => {
+    const { colima, runtime, cmd, fs } = seedProjectWithInfra();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await cmd.run([], ctx);
+    expect(rc).toBe(0);
+    // Confirm colima did start (cold path).
+    expect(colima.starts.map((s) => s.profile)).toContain("cb-abc");
+    const err = stderr.text();
+    expect(err).toContain(`🚀 dridock start (project: abc)`);
+    expect(err).toContain(`✓ VM cb-abc ready`);
+    expect(err).toContain(`🔧 starting container claude-_p`);
+    expect(runtime.runs).toHaveLength(1);
+  });
+
+  test("programmatic (-p) fresh spawn → 🔧 with '-p mode' suffix", async () => {
+    const { runtime, cmd, fs } = seedProjectVmRunning();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await cmd.run(["-p", "hello"], ctx);
+    expect(rc).toBe(0);
+    const err = stderr.text();
+    expect(err).toContain(`🚀 dridock start (project: abc)`);
+    expect(err).toContain(`🔧 starting container claude-_p_prog (-p mode)`);
+    expect(runtime.runs).toHaveLength(1);
   });
 });
 

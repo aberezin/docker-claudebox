@@ -77,6 +77,14 @@ export class StartCommand implements Command {
       ctx.stderr.write(`no dridock project here — run '${ctx.binName} bootstrap' to scaffold ${project.dotName}/config.yml first.\n`);
       return 1;
     }
+    // Liveness signal — the biggest UX complaint on 4.0.0 was that
+    // `dridock start` printed NOTHING until claude appeared, which felt
+    // hung on a warm-path launch (VM up, container exists → sub-second
+    // to claude UI) and *really* hung on a cold-path reseed (15-45s of
+    // silent `docker save | docker load`). See #48. This line gives
+    // the user immediate confirmation dridock received the command;
+    // subsequent phase lines below narrate the slow ones.
+    ctx.stderr.write(`🚀 dridock start (project: ${id})\n`);
     // #42 tightening — every launch sanity-checks its id against sibling
     // session dirs. Catches "config.yml's id got clobbered onto an empty
     // dir; the real sessions live under some OTHER id" (the exact incident
@@ -118,8 +126,17 @@ export class StartCommand implements Command {
         return 1;
       case "started":
         if (vmOutcome.warned) ctx.stderr.write(`⚠️  running near VM limit — starting anyway.\n`);
+        // Colima's own output streamed above during the cold start
+        // (RealColima.start inherits stdio). This is the confirmation
+        // line so the user knows the VM is now reachable and dridock
+        // is moving on to the container.
+        ctx.stderr.write(`✓ VM ${projectProfile(id)} ready (${vmOutcome.ip})\n`);
         break;
-      case "already-running": break;
+      case "already-running":
+        // Skip the "already running" narration — warm-path launches
+        // are dominated by the container spawn line below; adding a
+        // VM confirmation here is noise for the common case.
+        break;
     }
     const vmIp = vmOutcome.kind === "started" || vmOutcome.kind === "already-running" ? vmOutcome.ip : "";
 
@@ -160,8 +177,15 @@ export class StartCommand implements Command {
     // ── ContainerRefresher: recreate if image drifted ────────────────
     const ctxDocker = projectContext(id);
     const refresher = new ContainerRefresher(docker);
-    await refresher.maybeRefresh(ctxDocker, cnameBase, this.imageName);
-    if (isProg) await refresher.maybeRefresh(ctxDocker, containerName(ctx.cwd, "programmatic"), this.imageName);
+    if (await refresher.maybeRefresh(ctxDocker, cnameBase, this.imageName)) {
+      ctx.stderr.write(`🔄 recreating container ${cnameBase} (image drifted)\n`);
+    }
+    if (isProg) {
+      const progName = containerName(ctx.cwd, "programmatic");
+      if (await refresher.maybeRefresh(ctxDocker, progName, this.imageName)) {
+        ctx.stderr.write(`🔄 recreating container ${progName} (image drifted)\n`);
+      }
+    }
 
     // ── --update sidecar (for `dridock -p '…' --update`) ─────────────
     if (validated?.wantsUpdate) {
@@ -244,7 +268,11 @@ export class StartCommand implements Command {
     }
 
     const existing = await runtime.psFilter(ctxDocker, cname);
-    if (existing !== undefined) return await runtime.startAttached(ctxDocker, cname);
+    if (existing !== undefined) {
+      ctx.stderr.write(`🔄 attaching to container ${cname}\n`);
+      return await runtime.startAttached(ctxDocker, cname);
+    }
+    ctx.stderr.write(`🔧 starting container ${cname}\n`);
     const runArgs = this.buildRunArgs(ctxDocker, cname, id, ctx, "interactive", [], dataDir, baseEnv, extraMounts, tmpfs);
     return await runtime.runInteractive(runArgs);
   }
@@ -259,6 +287,7 @@ export class StartCommand implements Command {
     const existing = await runtime.psFilter(ctxDocker, cname);
     if (existing !== undefined) {
       await sidecars.writeOneRole("args", "_prog", shellQuote(validated.claudeArgs) + "\n");
+      ctx.stderr.write(`🔄 attaching to container ${cname} (-p mode)\n`);
       return await runtime.startAttached(ctxDocker, cname);
     }
     // baseRunArgs already sets DRIDOCK_CONTAINER_NAME to `cname` (the
@@ -266,6 +295,7 @@ export class StartCommand implements Command {
     // duplicate `-e` at :3288 is a leftover from DOCKER_ARGS using
     // the INTERACTIVE name (:2817) — TS avoids that by computing cname
     // per-invocation.
+    ctx.stderr.write(`🔧 starting container ${cname} (-p mode)\n`);
     const runArgs = this.buildRunArgs(ctxDocker, cname, id, ctx, "attached", validated.claudeArgs, dataDir, baseEnv, extraMounts, tmpfs);
     return await runtime.runInteractive(runArgs);
   }

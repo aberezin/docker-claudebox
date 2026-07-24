@@ -137,7 +137,8 @@ describe("StartCommand — --remote-control end-to-end integration", () => {
     const { ctx, stderr } = makeCtx(fs);
     const rc = await cmd.run(["--remote-control"], ctx);
     expect(rc).toBe(0);
-    expect(stderr.text()).toBe("");
+    // #48 status lines are on stderr; assert only that the RC-floor warning is absent.
+    expect(stderr.text()).not.toContain("this project's image ships Claude Code");
     expect(runtime.runs.length).toBe(1);
   });
 
@@ -146,7 +147,7 @@ describe("StartCommand — --remote-control end-to-end integration", () => {
     const { ctx, stderr } = makeCtx(fs);
     const rc = await cmd.run([], ctx);
     expect(rc).toBe(0);
-    expect(stderr.text()).toBe("");
+    expect(stderr.text()).not.toContain("this project's image ships Claude Code");
     expect(runtime.runs.length).toBe(1);
   });
 
@@ -155,6 +156,6 @@ describe("StartCommand — --remote-control end-to-end integration", () => {
     const { ctx, stderr } = makeCtx(fs);
     const rc = await cmd.run(["--remote-control-session-name-prefix=foo"], ctx);
     expect(rc).toBe(0);
-    expect(stderr.text()).toBe("");
+    expect(stderr.text()).not.toContain("this project's image ships Claude Code");
   });
 });
