@@ -21,3 +21,8 @@ pyrightconfig.json
 /.dridock/secrets.env
 /.claudebox/config.yml
 /.claudebox/secrets.env
+# claude-code auto-mutates settings.local.json on every command (appending
+# to permissions.allow) — tracking it means a perpetually-dirty tree that
+# blocks ff-only pulls and rebases. The rest of .claude/ (hooks, settings.json,
+# skills) is legitimately tracked. See #43.
+/.claude/settings.local.json
