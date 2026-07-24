@@ -93,18 +93,26 @@ better, for three concrete reasons this team hit in practice:
 ## 3. The watcher contract (folds in #45)
 
 Each agent runs a **watcher** built on the reusable 3-layer pattern specified in #45
-(**live** persistent poll + **catch-up** on session start + **arm-nag** self-heal). This spec
-pins the **delivery predicate** the watcher applies to each parsed event:
+(**live** persistent poll + **catch-up** on session start + a **heartbeat** the catch-up layer
+checks for staleness to detect a silently-dead watcher). This spec pins the **delivery
+predicate** for **header-bearing (comment-kind) events** — the case this convention governs:
 
 ```
 surface(event) :=
-      sender(event) != selfName                    # never echo my own posts
+      eventHash(event) ∉ delivered                 # cross-layer dedup (live + catch-up overlap)
+  AND sender(event) != selfName                    # never echo my own posts
   AND ( recipients(event) is empty                 # broadcast → everyone but the sender
         OR selfName ∈ recipients(event) )          # directed → only the named recipients
 ```
 
+**Branches on event kind.** The rule above assumes a header. #45's stateful sources
+(`consult`, `bug-report`) also emit **state-change events** with *no* header — those deliver by
+*subscription* (`self watches this source AND the ref is relevant to self`), not by sender/
+recipient. The full two-branch predicate + the event schema, cursor, dedup, and heartbeat
+contract live in **#45**; this section governs only the header/comment case.
+
 - The human's watcher (if any) is the human reading the tracker — Alan is surfaced by
-  `recipients ∋ Alan`, but no automated arm-nag applies to a person.
+  `recipients ∋ Alan`, but no automated watcher/heartbeat applies to a person.
 - The header lives **in the message body**, so this predicate is **transport-agnostic** — it
   works identically whether the message arrived over GitHub, `cb-consult`, `cb-report-bug`, or a
   future A2A channel (the *source adapters* of #45).
