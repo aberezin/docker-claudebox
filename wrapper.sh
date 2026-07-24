@@ -12,7 +12,7 @@
 # host version against the image the project's claudebot runs and warns on drift.
 # Kept in sync with the VERSION file (tests/test_cbvm.sh asserts they match). The fork
 # runs its OWN semver line. See docs/versioning.md and docs/design/3.0-migration.md.
-DRIDOCK_VERSION="3.3.7"
+DRIDOCK_VERSION="3.4.0"
 
 # The name the user actually typed to invoke us. Both `dridock` and legacy
 # `claudebox` symlink to this wrapper (install.sh's --bin-name), so help

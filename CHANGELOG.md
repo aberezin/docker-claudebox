@@ -26,6 +26,144 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [3.4.0] — 2026-07-24 _(fork)_
+
+### Added — TypeScript+Bun wrapper (`dridock-ts`), opt-in
+
+A from-scratch TypeScript port of the ~3300-line bash `wrapper.sh`, compiled
+to a single ~95 MB standalone binary via `bun build --compile`. Ships
+side-by-side with the bash wrapper; installed opt-in via
+`DRIDOCK_INSTALL_TS=1 ./install.sh`. Host↔image IPC contract unchanged —
+same sidecars, env, `DOCKER_ARGS` — so a project can be launched by
+either wrapper interchangeably.
+
+Every wrapper.sh verb has a real TS command (no user-visible "use bash
+wrapper" fallbacks). The two remaining `BashDelegateCommand`s
+(`browser-bridge`, `host-agent`) transparently exec the bash wrapper for
+their orchestration; the underlying Python daemons are untouched. Full
+native port of those two is the last item before `wrapper.sh` deletion.
+
+Verified by Arfy across ~10 Mac-side passes on branch
+`wrapper-typescript-rewrite` (preserved for history at `c5cc4cd`):
+`#38` (P4 sign-off end-to-end), `#39` (mcp/auth persist fix — TS-only),
+`#40` (mcp workspace-key fix), `#41` (macOS install-time codesign
+re-sign), `#42` (project-id preservation + orphan-session warnings).
+
+Feature-parity closures beyond bash:
+- `--effort` value validator (`#31` class silent-drop)
+- `--remote-control` CLI-floor guard (`#17` class — warns when the
+  project image's baked claude CLI predates the flag, rather than
+  silently ignoring it)
+- Programmatic `-p` argv allowlist enforced BEFORE any side effect
+- `checkversion --binary` stale-binary check (compare compiled
+  binary's baked version against `VERSION` at git toplevel)
+
+Design foundations (`docs/design/typescript-rewrite.md`): composition-
+root Context+Command pattern, discriminated-union outcomes that make
+the audit rule mechanically enforceable, adapter interfaces (FileSystem,
+Docker, Colima, Limactl, ContainerRuntime, HostGit, GitToplevel,
+ProcessProbe, Clock, Pinger, HostCommandRunner, DiskProbe) with
+InMemory/Stub fakes for zero-disk unit tests. **685 unit tests / 0
+fail** at time of merge.
+
+### Added — `.nodridock` opt-out marker
+
+Per-directory kill-switch. Drop a `.nodridock` file in any directory
+and `dridock-ts` refuses to `start` / `bootstrap` / cron-dispatch
+there OR in any subdirectory (walk stops at `$HOME` inclusive; nearest
+marker wins).
+
+Allows cleanup + inspection so a user can still `dridock stop|down|
+destroy|info|checkversion|help|version` an existing project inside a
+newly-marked tree. Unknown verbs fall through to the registry's own
+error rather than being shadowed by the guard.
+
+Blast-radius protection: "never run dridock in `~/finance/`" or "not
+in this repo" is a real ask that shouldn't require remembering paths.
+Gitignore the marker if you want the protection to be machine-local.
+Bash wrapper does NOT honor `.nodridock` — this is a TS-only feature
+since bash is retiring.
+
+### Fixed — `#42` bootstrap regeneration silently orphaned per-project state (BOTH facets)
+
+`BootstrapService.writeInitialConfig` always minted a fresh id +
+always overwrote `.dridock/config.yml`. No exists-guard for `id:`.
+Bash's `cb_init_project_config` gate at wrapper.sh:504/523 was lost in
+the port. Result: any `dridock-ts bootstrap` re-run on an existing
+project regenerated the id, repointing the id-keyed `~/.claude` mount
+at an empty dir — every session, secret, and VM handle silently
+orphaned under the old id. Alan hit this live (`69adc719` → `edd5b620`,
+31.7 MB of session state under the old id, unmounted).
+
+Two facets fixed:
+
+1. **Preserve existing id.** `writeInitialConfig` now reads
+   `config.yml` first, early-returns `{id, preserved: true}` when
+   `id:` is present and not the `auto` sentinel. Bash-parity restored;
+   user-edited vm sizing / hostname / features preserved on re-run.
+
+2. **Loud orphan-session warning on any launch.** New shared
+   `OrphanSessionScanner` service walks
+   `<xdg>/projects/<id>/claude/projects/<cwd-slug>/`, filters `ownId`,
+   skips empty dirs. Called from `BootstrapService` (pre-mint),
+   `StartCommand` (post-id-resolve, pre-Docker), and `CronModeCommand`
+   (fresh spawn). Warning-only + non-blocking: bash-parity, user
+   decides whether to abort and adopt an existing id.
+
+Lineage: same "never silently discard user state" class as `#17`,
+`#30`, `#31`, `#32` — reproduced inside what should have been a
+one-shot bootstrap.
+
+### Fixed — `#43` `.claude/settings.local.json` gitignored
+
+Claude Code auto-mutates `settings.local.json` on every command
+(appending Bash patterns to `permissions.allow`), so tracking it means
+a perpetually-dirty tree that blocks `git checkout origin/master` and
+`git merge --ff-only`. Docs already stated the intent (`gitignored,
+zero harness footprint`) but the repo's `.gitignore` never had the
+rule. Scoped to the single file — the rest of `.claude/` (hooks,
+`settings.json`, skills) is legitimately tracked.
+
+### Fixed — `#39` `mcp add` / `auth login` didn't persist (BOTH bash + TS class; TS-only fix per bash-retirement)
+
+`--entrypoint claude` bypassed `entrypoint.sh`, so `HOME` defaulted to
+`/root` and `claude mcp add` wrote to `/root/.claude.json` — outside
+the per-project mount AND ephemeral with `--rm`. Fix on the TS side:
+new `ProjectPassthroughCommand` explicitly sets `HOME=/home/claude` +
+`CLAUDE_CONFIG_DIR=/home/claude/.claude` + `-w <cwd>` (`#40`) so
+`claude` writes to the mounted project dir under the real workspace
+path. Bash retains the bug and won't be fixed — retiring soon.
+
+### Fixed — `#40` `mcp add` keyed server under `/workspace` not real cwd (TS)
+
+`--entrypoint claude` also bypassed `entrypoint.sh`'s `cd
+$WORKSPACE_DIR`, so local-scope `mcp add` keyed under
+`.projects["/workspace"]` instead of the real workspace path.
+Claudebot then read the real-path key and never saw the added server.
+Fix: `docker run -w <ctx.cwd>` on the passthrough.
+
+### Fixed — `#41` macOS `Killed: 9` on in-place TS binary upgrade
+
+`bun build --compile` produces an adhoc linker-signed Mach-O.
+Overwriting the installed binary in place invalidates its cached
+cdhash → AMFI `SIGKILL`s every subsequent invocation. `install.sh`
+now runs `codesign --force --sign -` after the copy on Darwin
+(and surfaces a stderr warning + recovery hint if `codesign` itself
+fails — CLAUDE.md:105 house rule).
+
+### Upgrade
+
+`./install.sh` picks up the bash wrapper as before. `DRIDOCK_INSTALL_TS=1
+./install.sh` additionally builds + installs the TS binary as
+`dridock-ts` alongside `dridock`. The bash wrapper remains the default
+installed binary; the install-default flip to TS is planned for a
+subsequent release after the browser-bridge + host-agent bash
+orchestration lands in native TS (the last remaining
+`BashDelegateCommand`s).
+
+Existing projects: no action needed. Existing sessions preserved
+regardless of which wrapper you use.
+
 ## [3.3.7] — 2026-07-22 _(fork)_
 
 ### Fixed
