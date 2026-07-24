@@ -2,7 +2,7 @@ import type { FileSystem } from "../infra/FileSystem.ts";
 import type { HostCommandRunner } from "../infra/HostCommandRunner.ts";
 import type { MachineConfig } from "./MachineConfig.ts";
 import { parseTopLevelString } from "./ProjectConfig.ts";
-import { xdgRoot } from "../domain/paths.ts";
+import { scanOrphans, formatMintWarning } from "./OrphanSessionScanner.ts";
 import { cbNum } from "../domain/units.ts";
 
 /**
@@ -142,44 +142,23 @@ network:
   }
 
   /**
-   * #42 facet 2 — the defense-in-depth check.
+   * #42 facet 2 — pre-mint half of the defense-in-depth check.
    *
-   * The per-project `~/.claude` mount, VMs, secrets, and sessions are all
-   * keyed on the project's `id:`. A fresh id points every one of those at
-   * an empty dir. If session state already exists under a DIFFERENT id at
-   * `<xdg>/projects/<other-id>/claude/projects/<cwd-slug>/`, minting a new
-   * id silently orphans it — the exact incident #42 documents.
-   *
-   * Same slug convention Claude Code uses: absolute cwd with `/` → `-`
-   * (leading `/` becomes leading `-`). Matches `~/.claude/projects/<slug>/`.
-   *
-   * Warning-only. Bootstrap continues; the user decides whether to abort
-   * and adopt the existing id or proceed with a fresh one. An interactive
-   * adopt prompt would need stdin plumbing that this path doesn't have.
+   * Delegates to the shared [[OrphanSessionScanner]] so `BootstrapService`
+   * (this), `StartCommand`, and `CronModeCommand` all use the same logic
+   * and stay in lockstep. Only fires on the mint path (writeInitialConfig
+   * calls this immediately before `this.idGen()`); preserve-id path
+   * skips it — no mint = no orphan risk.
    */
   private async warnIfSessionsWillBeOrphaned(root: string): Promise<void> {
-    const xdg = await xdgRoot(this.deps.fs, process.env, this.deps.home);
-    const projectsRoot = `${xdg}/projects`;
-    if (!(await this.deps.fs.isDirectory(projectsRoot))) return;
-    const slug = root.replaceAll("/", "-");
-    const orphanCandidates: string[] = [];
-    try {
-      const ids = await this.deps.fs.listDir(projectsRoot);
-      for (const id of ids) {
-        const sessionDir = `${projectsRoot}/${id}/claude/projects/${slug}`;
-        if (await this.deps.fs.isDirectory(sessionDir)) orphanCandidates.push(id);
-      }
-    } catch { /* projectsRoot exists per isDirectory() but listDir raced or perms — best-effort */ }
-    if (orphanCandidates.length === 0) return;
+    const orphans = await scanOrphans(
+      { fs: this.deps.fs, env: process.env, home: this.deps.home },
+      root,
+      undefined,   // no own id yet — we're about to mint
+    );
+    if (orphans.length === 0) return;
     const warn = this.deps.onWarn ?? this.deps.onNotice;
-    warn(`⚠️  bootstrap: minting a NEW project id will silently orphan existing session state under another id:\n`);
-    for (const id of orphanCandidates) {
-      warn(`     ${projectsRoot}/${id}/claude/projects/${slug}\n`);
-    }
-    warn(`   To adopt an existing id instead of orphaning: abort now, then set\n`);
-    warn(`     id: <one-of-the-above>\n`);
-    warn(`   in .dridock/config.yml (creating that file if needed) and re-run bootstrap.\n`);
-    warn(`   Continuing with a fresh id anyway — the orphaned state stays on disk (recoverable).\n`);
+    for (const line of formatMintWarning(orphans)) warn(line);
   }
 
   /**

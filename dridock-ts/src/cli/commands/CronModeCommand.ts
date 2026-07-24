@@ -16,6 +16,7 @@ import { ImageEnsureService } from "../../services/ImageEnsureService.ts";
 import { containerName } from "../../services/ContainerName.ts";
 import { collectEnvPassthrough, collectMountPassthrough } from "../../services/EnvMountPassthrough.ts";
 import { xdgRoot } from "../../domain/paths.ts";
+import { scanOrphans, formatLaunchWarning } from "../../services/OrphanSessionScanner.ts";
 
 /**
  * `DRIDOCK_MODE_CRON=1 dridock [stop]` — long-running cron daemon
@@ -54,6 +55,16 @@ export class CronModeCommand implements Command {
     const colima = this.deps.colima ?? new RealColima();
     const docker = this.deps.docker ?? new RealDocker();
     const runtime = this.deps.runtime ?? new RealContainerRuntime();
+
+    // #42 tightening — every launch sanity-checks its id (same as
+    // StartCommand). `stop` skips this: stopping the local cron daemon
+    // is orthogonal to session-state ownership, so no need to nag.
+    if (args[0] !== "stop") {
+      const orphans = await scanOrphans({ fs: ctx.fs, env: process.env, home: ctx.home }, ctx.cwd, id);
+      if (orphans.length > 0) {
+        for (const line of formatLaunchWarning(id, orphans)) ctx.stderr.write(line);
+      }
+    }
 
     // `stop` sub-branch — mirrors wrapper.sh:3074-3084.
     if (args[0] === "stop") {

@@ -79,6 +79,66 @@ describe("StartCommand — guards", () => {
   });
 });
 
+describe("StartCommand — #42 tightening: pre-launch orphan-session sanity check", () => {
+  test("current id owns dir + no orphans → NO warning, launch proceeds", async () => {
+    const savedXdg = process.env["XDG_CONFIG_HOME"];
+    process.env["XDG_CONFIG_HOME"] = "/home/alan/.config";
+    try {
+      const { fs, runtime, cmd } = seedProjectVmRunning();
+      // Seed only the OWN dir — that's not an orphan of itself.
+      fs.seed("/home/alan/.config/dridock/projects/abc/claude/projects/-p/session.jsonl", "{}");
+      const { ctx, stderr } = makeCtx(fs);
+      const rc = await cmd.run([], ctx);
+      expect(rc).toBe(0);
+      expect(stderr.text()).toBe("");
+      expect(runtime.runs.length).toBe(1);
+    } finally {
+      if (savedXdg === undefined) delete process.env["XDG_CONFIG_HOME"];
+      else process.env["XDG_CONFIG_HOME"] = savedXdg;
+    }
+  });
+
+  test("foreign id has sessions for this cwd → stderr warning + launch STILL proceeds (bash-parity, no block)", async () => {
+    const savedXdg = process.env["XDG_CONFIG_HOME"];
+    process.env["XDG_CONFIG_HOME"] = "/home/alan/.config";
+    try {
+      const { fs, runtime, cmd } = seedProjectVmRunning();
+      // Own id: abc. Foreign id 69adc719 has sessions for /p.
+      fs.seed("/home/alan/.config/dridock/projects/69adc719/claude/projects/-p/leftover.jsonl", "{}");
+      fs.seed("/home/alan/.config/dridock/projects/69adc719/claude/projects/-p/leftover2.jsonl", "{}");
+      const { ctx, stderr } = makeCtx(fs);
+      const rc = await cmd.run([], ctx);
+      expect(rc).toBe(0); // NOT blocked
+      const warn = stderr.text();
+      expect(warn).toContain(`you're launching id abc`);
+      expect(warn).toContain(`/home/alan/.config/dridock/projects/69adc719/claude/projects/-p`);
+      expect(warn).toContain(`(2 entries)`);
+      expect(warn).toContain(`Continuing with id abc anyway`);
+      expect(runtime.runs.length).toBe(1);
+    } finally {
+      if (savedXdg === undefined) delete process.env["XDG_CONFIG_HOME"];
+      else process.env["XDG_CONFIG_HOME"] = savedXdg;
+    }
+  });
+
+  test("foreign dir exists but is empty → NO warning (clobber-remnant not signal)", async () => {
+    const savedXdg = process.env["XDG_CONFIG_HOME"];
+    process.env["XDG_CONFIG_HOME"] = "/home/alan/.config";
+    try {
+      const { fs, cmd } = seedProjectVmRunning();
+      // Empty dir under a foreign id — should be skipped by the scanner.
+      await fs.mkdirRecursive("/home/alan/.config/dridock/projects/deadbeef/claude/projects/-p");
+      const { ctx, stderr } = makeCtx(fs);
+      const rc = await cmd.run([], ctx);
+      expect(rc).toBe(0);
+      expect(stderr.text()).toBe("");
+    } finally {
+      if (savedXdg === undefined) delete process.env["XDG_CONFIG_HOME"];
+      else process.env["XDG_CONFIG_HOME"] = savedXdg;
+    }
+  });
+});
+
 describe("StartCommand — VM cold-start (P4b — no more bash stub)", () => {
   test("VM absent + cb-infra ready → colima start invoked, image seeded, container run", async () => {
     const { colima, docker, runtime, cmd, fs } = seedProjectWithInfra();

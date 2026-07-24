@@ -29,6 +29,7 @@ import { xdgRoot } from "../../domain/paths.ts";
 import { CLAUDE_CLI_REMOTE_CONTROL_FLOOR } from "../../domain/dridockVersion.ts";
 import { Version } from "../../domain/Version.ts";
 import { IMAGE_UNAVAILABLE, IMAGE_UNSTAMPED } from "../../infra/Docker.ts";
+import { scanOrphans, formatLaunchWarning } from "../../services/OrphanSessionScanner.ts";
 
 /**
  * `dridock start` — the main launch verb. Full port; no bash fallback.
@@ -75,6 +76,16 @@ export class StartCommand implements Command {
     if (id === undefined) {
       ctx.stderr.write(`no dridock project here — run '${ctx.binName} bootstrap' to scaffold ${project.dotName}/config.yml first.\n`);
       return 1;
+    }
+    // #42 tightening — every launch sanity-checks its id against sibling
+    // session dirs. Catches "config.yml's id got clobbered onto an empty
+    // dir; the real sessions live under some OTHER id" (the exact incident
+    // #42 documents from the user side). Warning-only: bash-parity, we
+    // continue with the configured id; user decides whether to abort +
+    // adopt an existing one. Called BEFORE any container/VM side effect.
+    const startOrphans = await scanOrphans({ fs: ctx.fs, env: process.env, home: ctx.home }, ctx.cwd, id);
+    if (startOrphans.length > 0) {
+      for (const line of formatLaunchWarning(id, startOrphans)) ctx.stderr.write(line);
     }
 
     // ── mode detect + programmatic validation (BEFORE any side effect) ─
