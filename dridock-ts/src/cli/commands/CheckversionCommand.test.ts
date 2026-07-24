@@ -203,3 +203,104 @@ describe("CheckversionCommand — silent-arg family (the 3.3.x audit rule)", () 
     expect(stdout.text()).toContain(IMAGE_UNAVAILABLE);
   });
 });
+
+describe("CheckversionCommand --binary — stale-binary check (Arfy filed after #40)", () => {
+  test("baked version === VERSION file → ✅ in sync, rc 0, no docker calls", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/VERSION", `${DRIDOCK_TS_VERSION}\n`);
+    const docker = new InMemoryDocker();
+    const { ctx, stdout } = makeCtx(fs, "/repo/sub/dir");
+    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/repo")).run(["--binary"], ctx);
+    expect(rc).toBe(0);
+    const out = stdout.text();
+    expect(out).toContain(`binary: ${DRIDOCK_TS_VERSION}`);
+    expect(out).toContain(`source: ${DRIDOCK_TS_VERSION}`);
+    expect(out).toContain(`✅ in sync`);
+    // No docker touched — --binary is a pure local diagnostic.
+    expect(docker.runCalls).toEqual([]);
+  });
+
+  test("VERSION > baked → ⚠️ STALE binary + rebuild hint, rc 0", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/VERSION", "3.9.99\n"); // pretend source is way ahead
+    const { ctx, stdout } = makeCtx(fs, "/repo");
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["--binary"], ctx);
+    expect(rc).toBe(0);
+    const out = stdout.text();
+    expect(out).toContain(`binary: ${DRIDOCK_TS_VERSION}`);
+    expect(out).toContain(`source: 3.9.99`);
+    expect(out).toContain(`⚠️  STALE binary`);
+    expect(out).toContain(`Rebuild:`);
+    expect(out).toContain(`./install.sh`);
+  });
+
+  test("baked > VERSION → ℹ️ binary NEWER (older checkout, no rebuild since)", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/VERSION", "0.0.1\n");
+    const { ctx, stdout } = makeCtx(fs, "/repo");
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["--binary"], ctx);
+    expect(rc).toBe(0);
+    const out = stdout.text();
+    expect(out).toContain(`ℹ️  binary is NEWER than source`);
+    expect(out).toContain(`older-ref`);
+  });
+
+  test("not in a git repo → informational, rc 0 (opportunistic verb, not an error)", async () => {
+    const fs = new InMemoryFileSystem();
+    const { ctx, stdout } = makeCtx(fs, "/tmp");
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel(undefined)).run(["--binary"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain(`<not in a git repo`);
+    expect(stdout.text()).toContain(`run this from a dridock checkout`);
+  });
+
+  test("git repo but no VERSION at toplevel → rc 1, stderr says 'not a dridock source tree'", async () => {
+    const fs = new InMemoryFileSystem();
+    // No VERSION seeded — toplevel exists per StubGit, but the FS has nothing there.
+    const { ctx, stdout, stderr } = makeCtx(fs, "/some/other/repo");
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/some/other/repo")).run(["--binary"], ctx);
+    expect(rc).toBe(1);
+    expect(stdout.text()).toContain(`<not a dridock checkout>`);
+    expect(stderr.text()).toContain(`/some/other/repo/VERSION not found`);
+    expect(stderr.text()).toContain(`run this from a dridock checkout`);
+  });
+
+  test("VERSION with trailing newline / leading `v` parses tolerantly", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/VERSION", `v${DRIDOCK_TS_VERSION}\n\n`);
+    const { ctx, stdout } = makeCtx(fs, "/repo");
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["--binary"], ctx);
+    expect(rc).toBe(0);
+    // parseLoose strips the `v`; treats as equal
+    expect(stdout.text()).toContain(`✅ in sync`);
+  });
+
+  test("--binary + --all → DridockError (mutually exclusive)", async () => {
+    const fs = new InMemoryFileSystem();
+    const { ctx } = makeCtx(fs);
+    try {
+      await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["--binary", "--all"], ctx);
+      throw new Error("expected DridockError");
+    } catch (e) {
+      expect(e).toBeInstanceOf(DridockError);
+      expect((e as DridockError).message).toContain("mutually exclusive");
+    }
+  });
+
+  test("-b short form → same as --binary", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/VERSION", `${DRIDOCK_TS_VERSION}\n`);
+    const { ctx, stdout } = makeCtx(fs, "/repo");
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["-b"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain(`✅ in sync`);
+  });
+
+  test("--help mentions --binary", async () => {
+    const fs = new InMemoryFileSystem();
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p")).run(["--help"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain(`--binary`);
+  });
+});

@@ -155,11 +155,23 @@ if [ -n "${DRIDOCK_INSTALL_TS:-}" ]; then
 				# breaks. Re-signing ad-hoc restores a valid signature.
 				# No cert, no sudo — same signature type bun emits.
 				if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
+					# House rule (CLAUDE.md:105): a step that skips or fails
+					# silently must print a stderr line the user will see
+					# AND surface a rc a caller can act on. Bare `|| true`
+					# would swallow both; here we let codesign's own stderr
+					# through (so the user sees "codesign: ...") and follow
+					# with a one-liner recovery hint keyed on that failure.
+					_dts_cs_rc=0
 					if [ -w "$INSTALL_DIR/dridock-ts" ]; then
-						codesign --force --sign - "$INSTALL_DIR/dridock-ts" 2>/dev/null || true
+						codesign --force --sign - "$INSTALL_DIR/dridock-ts" || _dts_cs_rc=$?
 					elif command -v sudo >/dev/null 2>&1; then
-						sudo codesign --force --sign - "$INSTALL_DIR/dridock-ts" 2>/dev/null || true
+						sudo codesign --force --sign - "$INSTALL_DIR/dridock-ts" || _dts_cs_rc=$?
 					fi
+					if [ "$_dts_cs_rc" -ne 0 ]; then
+						echo "⚠️  codesign re-sign failed (rc=$_dts_cs_rc). If dridock-ts now dies with 'Killed: 9', run:" >&2
+						echo "    codesign --force --sign - $INSTALL_DIR/dridock-ts" >&2
+					fi
+					unset _dts_cs_rc
 				fi
 				echo "   ✓ dridock-ts installed side-by-side with the bash wrapper."
 				echo "   Try it: 'dridock-ts version', 'dridock-ts features list', 'dridock-ts checkversion'."
