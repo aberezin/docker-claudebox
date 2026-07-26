@@ -117,6 +117,16 @@ contract live in **#45**; this section governs only the header/comment case.
   works identically whether the message arrived over GitHub, `cb-consult`, `cb-report-bug`, or a
   future A2A channel (the *source adapters* of #45).
 
+> **HARD RULE — where the predicate runs is a security boundary, not a convenience.**
+> The predicate must run **before the event reaches the model**. For a **pull** transport (a
+> polling watcher) that is the watcher itself. For a **push** transport (a Claude Code *channel*,
+> which injects a `<channel>` tag straight into the session — see #49), the predicate MUST run in
+> the **receiver, before it calls `mcp.notification()`** — an ungated channel is a direct
+> prompt-injection vector (anyone who can reach the endpoint puts text in front of the agent). So
+> **every source-adapter that pushes via a channel MUST sender-gate** (`sender != self`,
+> `recipient ∈ {self, broadcast}`) *before* pushing, regardless of any auth the channel transport
+> itself offers. Safety lives in the receiver, never in the transport.
+
 ```mermaid
 flowchart LR
     A["Arfy posts<br/>'Arfy->Bear: verified #42'"] --> GH["GitHub issue comment"]
