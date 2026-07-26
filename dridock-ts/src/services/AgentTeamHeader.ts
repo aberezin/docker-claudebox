@@ -102,16 +102,20 @@ export function parseHeader(body: string): ParsedHeader | undefined {
 /**
  * Delivery predicate for header-bearing (comment-kind) events. Returns
  * `true` iff the event should be surfaced to `selfName`. Non-header
- * bodies (parseHeader returned undefined) are NOT delivered — they
- * don't carry attribution and the whole point of the header is
- * being addressable in the first place.
+ * bodies (parseHeader returned undefined, or WatcherEvent.header is
+ * null) are NOT delivered — they don't carry attribution and the
+ * whole point of the header is being addressable in the first place.
  *
  * Dedup is the CALLER's responsibility — this function is stateless
  * per spec §3's split between the pure predicate and the watcher's
  * dedup store.
+ *
+ * Accepts both `undefined` (parseHeader's absence signal) and `null`
+ * (WatcherEvent.header's absence signal) to match how both call sites
+ * express "no header" in their own types.
  */
-export function surfacesForAgent(header: ParsedHeader | undefined, selfName: string): boolean {
-  if (header === undefined) return false;
+export function surfacesForAgent(header: ParsedHeader | undefined | null, selfName: string): boolean {
+  if (header === undefined || header === null) return false;
   if (header.legacy) {
     // Legacy shape: no sender to compare against selfName, so no self-
     // echo suppression is possible. Fall back to the recipient-only
