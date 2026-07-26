@@ -150,8 +150,15 @@ The header convention is **stable across transports** — only the *carrier* cha
 - **Now:** GitHub issues/comments (the #24 bulletin board).
 - **Next:** A2A (#27) as a real agent↔agent transport; `cb-consult` possibly collapses into it
   (transport + approval-gate policy + standards convention — see #45 Part 2).
-- The **waker problem** (delivering to an agent with no live session) is a property of the
-  *transport/watcher layer*, shared by every source — not solved per-channel.
+- The **waker problem** (an event arrives while an agent has no live session) is a property of the
+  *transport/watcher layer*, shared by every source — not solved per-channel. **For local agents
+  (Arfy on the Mac, Bear in a container) "waker" means *notify the human, not auto-resume the
+  agent*.** The best native primitive is a **Routine** (cloud, GitHub-event-triggered) that fires a
+  **push notification to the human**; the human then opens/`dridock start`s the session and the
+  **catch-up layer** surfaces the event. A Routine spawns a *fresh cloud session* and cannot drive
+  local Colima/Docker/Chrome, so it can never resume a local agent — the human stays the resume
+  step for anything needing the local environment. True out-of-session auto-resume is out of scope
+  (tracked in #27). See #45 for the build-vs-adopt analysis.
 
 ## 6. Migration from the current convention
 
