@@ -53,6 +53,12 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [developing-in-a-claudebox.md](design/developing-in-a-claudebox.md) | Runbook: the dev loop for editing/building/testing the harness *inside* a dridock container (dogfooding). |
 | [framework-bug-reporting.md](design/framework-bug-reporting.md) | `cb-report-bug` — claudebot flags harness bugs to the host. |
 
+## Decision records (ADR)
+
+| ADR | Decision |
+|---|---|
+| [adr/0001-watcher-delivery-layer.md](adr/0001-watcher-delivery-layer.md) | Watcher delivery layer: ship polling now, **defer Claude Code Channels** until GA (preserves the #49 Channels analysis + the remaining tests to run before adoption). |
+
 ## See also
 
 - [README](../README.md) — install, quick start, what's inside the image.
