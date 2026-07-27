@@ -184,15 +184,20 @@ Today's posts use recipient-only `**→ Arfy:**`. Cutting over to sender-first:
 
 ## What Bear builds (implementation checklist)
 
-- [ ] `.dridock/agents.yml` roster schema + loader; `DRIDOCK_AGENT_NAME` plumbing (entrypoint /
-      sidecar), so an agent knows its own name.
-- [ ] A header **parser** (shared lib) implementing §2's grammar, tolerant of markdown/whitespace.
-- [ ] The reusable **watcher** (#45) with the §3 delivery predicate and dual-accept (#6) during
-      migration.
-- [ ] A `cb-team` / `dridock team` helper: `whoami`, `roster`, `post` (prepends the correct
-      header), `watch` (arms the watcher for this agent).
-- [ ] Update `agent-coordination-hooks.md` + the host catch-up/nag scripts to the new header,
-      then remove the legacy alternation at cut-over.
+- [x] `.dridock/agents.yml` roster schema + loader; `DRIDOCK_AGENT_NAME` plumbing (via env, with
+      single-agent-roster fallback).
+- [x] A header **parser** (shared lib) implementing §2's grammar, tolerant of markdown/whitespace.
+- [x] The reusable **watcher** (#45) with the §3 delivery predicate and dual-accept (#6) during
+      migration. Landed as `WatcherEvent` + `WatcherStore` (count-based dedup ring + cursor)
+      + `GithubWatchSource` + `runOneTick` orchestrator.
+- [x] A `cb-team` / `dridock team` helper: `whoami`, `roster`, `post` (prepends the correct
+      header), `watch` (live loop with heartbeat + `--once` for SessionStart catch-up).
+- [x] `SessionStart` hook (`.claude/hooks/team-watch-session-start.sh`) — runs `dridock team
+      watch --once` to catch up pending events at session start, plus a staleness warning
+      keyed off the live-loop heartbeat file. Registered in `.claude/settings.json`.
+- [ ] Update `agent-coordination-hooks.md` and remove the legacy alternation at cut-over.
+      Arfy's host-side hand-rolled scripts (bespoke catch-up + Monitor + arm-nag) supersede
+      themselves with the above; formal doc-side cut-over is what's left.
 
 ## See also
 
