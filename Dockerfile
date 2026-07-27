@@ -122,7 +122,7 @@ COPY dridock-ts/ /build/dridock-ts/
 WORKDIR /build/dridock-ts
 RUN bun install --frozen-lockfile && \
     mkdir -p /out && \
-    bun build --compile src/cli/main.ts --outfile /out/dridock-ts
+    bun build --compile src/cli/main.ts --outfile /out/dridock
 
 # ── harness ──────────────────────────────────────────────────────────────────────
 # The VOLATILE layer: entrypoint + Python daemons + cb-* helpers + profiles + CHANGELOG.
@@ -175,10 +175,13 @@ COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 COPY --from=harness /h/lib/env-rename.map /usr/local/lib/dridock/env-rename.map
-# Compiled dridock-ts for the team verbs (the shim routes to it) — see the
-# dridock-ts-build stage above and `dridock` (shim) for the routing.
-COPY --from=dridock-ts-build /out/dridock-ts /usr/local/lib/dridock/dridock-ts
-RUN chmod +x /usr/local/lib/dridock/dridock-ts
+# Compiled dridock binary for the team verbs (the shim routes to it) — see the
+# dridock-ts-build stage above and `dridock` (shim) for the routing. Kept off
+# $PATH at /usr/local/lib/dridock/ so the shim at /usr/local/bin/dridock owns
+# the user-visible `dridock` name (routes container-safe verbs here + host-only
+# verbs to a "run on Mac" message).
+COPY --from=dridock-ts-build /out/dridock /usr/local/lib/dridock/dridock
+RUN chmod +x /usr/local/lib/dridock/dridock
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION
@@ -307,8 +310,8 @@ COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 COPY --from=harness /h/lib/env-rename.map /usr/local/lib/dridock/env-rename.map
-COPY --from=dridock-ts-build /out/dridock-ts /usr/local/lib/dridock/dridock-ts
-RUN chmod +x /usr/local/lib/dridock/dridock-ts
+COPY --from=dridock-ts-build /out/dridock /usr/local/lib/dridock/dridock
+RUN chmod +x /usr/local/lib/dridock/dridock
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION
