@@ -1,10 +1,33 @@
 # Agent coordination hooks — the GitHub-as-bus interim
 
-How two Claude sessions coordinating on the same repo (currently a Bear in-container
-principal engineer + an Arfy on-Mac senior QA on `aberezin/docker-claudebox`) exchange
-messages **before** the [A2A + waker transport](agent-to-agent.md) is in place — using
-GitHub issue comments as the message bus and a two-layer hook design to close the gap
-that "a session that isn't running can't be notified" would otherwise leave.
+> **STATUS (2026-07-27): the hand-rolled scripts described below are RETIRED — superseded by the
+> native `dridock team` watcher (#46).** This two-layer hook design was the interim; #46 shipped it
+> as a first-class feature. The host cut-over is done. **See [Current setup](#current-setup--native-dridock-team-watcher) for what actually runs today.** The detailed sections
+> further down are preserved as the *rationale* the native implementation embodies (fail-loud,
+> whitelist-not-blacklist, per-layer watermark semantics) — still the authoritative "why".
+
+How two Claude sessions coordinating on the same repo (a Bear in-container principal engineer +
+an Arfy on-Mac senior QA on `aberezin/docker-claudebox`) exchange messages **before** the
+[A2A + waker transport](agent-to-agent.md) is in place — using GitHub issue comments as the
+message bus, to close the gap that "a session that isn't running can't be notified" would
+otherwise leave.
+
+## Current setup — native `dridock team` watcher
+
+Since #46, the two layers below are **native `dridock` verbs + a committed hook**, not per-machine
+scripts. What runs today:
+
+| Piece | Native mechanism |
+|---|---|
+| **Team roster** | `.dridock/agents.yml` (committed) — names + roles + `github_repo`. `dridock team` skips silently without it. |
+| **Self-identity** | `DRIDOCK_AGENT_NAME` (Arfy sets it via the gitignored `.claude/settings.local.json` `env`; Bear's container sets `=Bear`). Required — a multi-agent roster has no single-agent fallback. |
+| **Header + delivery** | `dridock team post` composes the `Sender->Recipient:` header; the parser + delivery predicate (`AgentTeamHeader.ts`, spec [agent-teams.md](agent-teams.md) §2/§3) do sender-first filtering with legacy `→ Name:` dual-accept. |
+| **Catch-up (between sessions)** | committed hook `.claude/hooks/team-watch-session-start.sh` → `dridock team watch --once` on SessionStart + a **heartbeat-staleness nudge** (replaces the old catch-up script *and* the arm-nag). |
+| **Live (in-session)** | `dridock team watch` (a terminal loop for a human) / for an agent, a `Monitor` running `dridock team watch --once \| grep '←'` each poll — shares the cursor/dedup/**heartbeat** under `~/.config/dridock/watch-cursors/`. Still re-armed per session (a Monitor dies on teardown). |
+
+Requires the #46 `dridock` installed; on a pre-#46 binary the hook degrades to a silent no-op
+(the roster gate fails on "unknown verb"). The bespoke scripts are archived at
+`~/.claude/retired-bear-arfy-scripts/`.
 
 ## Summary
 
