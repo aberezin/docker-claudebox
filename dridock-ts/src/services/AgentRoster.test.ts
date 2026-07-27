@@ -4,6 +4,7 @@ import {
   loadRoster,
   resolveSelfName,
   formatResolveError,
+  soleAgentByEnvironment,
 } from "./AgentRoster.ts";
 import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 
@@ -176,6 +177,44 @@ describe("resolveSelfName — env-first with single-agent fallback", () => {
   test("env set but NOT in roster → error listing valid names", () => {
     const r = resolveSelfName({ DRIDOCK_AGENT_NAME: "Ghost" }, roster);
     expect(r).toEqual({ kind: "env-not-in-roster", envValue: "Ghost", rosterNames: ["Bear", "Arfy"] });
+  });
+});
+
+describe("soleAgentByEnvironment — for StartCommand auto-inject", () => {
+  test("single agent with matching environment → returns that name", () => {
+    const r = {
+      agents: [
+        { name: "Bear", environment: "container" as const },
+        { name: "Arfy", environment: "host-macos" as const },
+      ],
+    };
+    expect(soleAgentByEnvironment(r, "container")).toBe("Bear");
+    expect(soleAgentByEnvironment(r, "host-macos")).toBe("Arfy");
+  });
+
+  test("zero matches → undefined", () => {
+    const r = { agents: [{ name: "Solo", environment: "container" as const }] };
+    expect(soleAgentByEnvironment(r, "does-not-exist")).toBeUndefined();
+  });
+
+  test("multiple matches → undefined (ambiguous, skip auto-inject)", () => {
+    const r = {
+      agents: [
+        { name: "Bear1", environment: "container" as const },
+        { name: "Bear2", environment: "container" as const },
+      ],
+    };
+    expect(soleAgentByEnvironment(r, "container")).toBeUndefined();
+  });
+
+  test("agents with no environment field → not counted", () => {
+    const r = {
+      agents: [
+        { name: "Bear", environment: "container" as const },
+        { name: "Anon" }, // no environment
+      ],
+    };
+    expect(soleAgentByEnvironment(r, "container")).toBe("Bear");
   });
 });
 

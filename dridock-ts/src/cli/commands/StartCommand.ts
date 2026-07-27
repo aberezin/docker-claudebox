@@ -30,6 +30,7 @@ import { CLAUDE_CLI_REMOTE_CONTROL_FLOOR } from "../../domain/dridockVersion.ts"
 import { Version } from "../../domain/Version.ts";
 import { IMAGE_UNAVAILABLE, IMAGE_UNSTAMPED } from "../../infra/Docker.ts";
 import { scanOrphans, formatLaunchWarning } from "../../services/OrphanSessionScanner.ts";
+import { loadRoster, soleAgentByEnvironment } from "../../services/AgentRoster.ts";
 
 /**
  * `dridock start` — the main launch verb. Full port; no bash fallback.
@@ -220,6 +221,26 @@ export class StartCommand implements Command {
     const gitName = await hostGit.configGet("user.name") ?? "";
     const gitEmail = await hostGit.configGet("user.email") ?? "";
 
+    // ── DRIDOCK_AGENT_NAME auto-inject (#46 QOL) ──────────────────────
+    // If the project has an agents.yml with exactly one agent whose
+    // `environment: container`, propagate that name into the container as
+    // DRIDOCK_AGENT_NAME. Skips when:
+    //   - no roster (non-team project)
+    //   - zero or >1 container agents in roster (ambiguous → user sets
+    //     DRIDOCK_ENV_DRIDOCK_AGENT_NAME explicitly)
+    //   - user already forwarded a value via DRIDOCK_ENV_DRIDOCK_AGENT_NAME
+    //     (envPassthrough collected below wins — it'll appear later in
+    //     baseEnv, and Docker's last-`-e`-wins semantics preserve the
+    //     user's override)
+    // Without this, Bear inside the container gets rc≠0 on `dridock team
+    // whoami` and the team-watch hook can't route messages to him.
+    let autoAgentName: string | undefined;
+    const rosterPath = `${project.dotDir}/agents.yml`;
+    try {
+      const roster = await loadRoster(ctx.fs, rosterPath);
+      if (roster !== undefined) autoAgentName = soleAgentByEnvironment(roster, "container");
+    } catch { /* malformed roster — TeamCommand will surface the error; don't crash start */ }
+
     // ── Build the run env (all -e pairs) ─────────────────────────────
     const baseEnv: RunArgs["env"] = [
       { key: "DRIDOCK_GIT_NAME", value: gitName },
@@ -231,9 +252,10 @@ export class StartCommand implements Command {
       ...(cdpUrl !== "" ? [{ key: "DRIDOCK_HOST_CDP_URL", value: cdpUrl }] : []),
       ...(vmIp !== "" ? [{ key: "DRIDOCK_VM_IP", value: vmIp }] : []),
       ...(hostname !== "" ? [{ key: "DRIDOCK_HOSTNAME", value: hostname }] : []),
-      ...(process.env["DEBUG"] === "true" ? [{ key: "DEBUG", value: "true" }] : []),
-      ...(process.env["DRIDOCK_DEFAULT_PLUGINS"] !== undefined
-        ? [{ key: "DRIDOCK_DEFAULT_PLUGINS", value: process.env["DRIDOCK_DEFAULT_PLUGINS"] }] : []),
+      ...(autoAgentName !== undefined ? [{ key: "DRIDOCK_AGENT_NAME", value: autoAgentName }] : []),
+      ...(ctx.env.raw()["DEBUG"] === "true" ? [{ key: "DEBUG", value: "true" }] : []),
+      ...(ctx.env.raw()["DRIDOCK_DEFAULT_PLUGINS"] !== undefined
+        ? [{ key: "DRIDOCK_DEFAULT_PLUGINS", value: ctx.env.raw()["DRIDOCK_DEFAULT_PLUGINS"] }] : []),
       ...envPassthrough.envAdditions,
     ];
     // tmpfs opt-in

@@ -492,6 +492,59 @@ describe("StartCommand — validator rejections still fire before any side effec
   });
 });
 
+describe("StartCommand — DRIDOCK_AGENT_NAME auto-inject from agents.yml", () => {
+  test("roster with sole `environment: container` agent → injected as -e DRIDOCK_AGENT_NAME", async () => {
+    const { fs, runtime, cmd } = seedProjectVmRunning();
+    fs.seed("/p/.dridock/agents.yml",
+      "agents:\n  - name: Bear\n    environment: container\n  - name: Arfy\n    environment: host-macos\nhuman: Alan\n");
+    const { ctx } = makeCtx(fs);
+    await cmd.run([], ctx);
+    const run = runtime.runs[0]!;
+    expect(run.env).toContainEqual({ key: "DRIDOCK_AGENT_NAME", value: "Bear" });
+  });
+
+  test("no roster (non-team project) → no DRIDOCK_AGENT_NAME injected (silent skip)", async () => {
+    const { runtime, cmd, fs } = seedProjectVmRunning();
+    // No agents.yml seeded → soleAgentByEnvironment can't find one.
+    const { ctx } = makeCtx(fs);
+    await cmd.run([], ctx);
+    const run = runtime.runs[0]!;
+    expect(run.env.some((e) => e.key === "DRIDOCK_AGENT_NAME")).toBe(false);
+  });
+
+  test("multiple container agents in roster → skip auto-inject (ambiguous)", async () => {
+    const { fs, runtime, cmd } = seedProjectVmRunning();
+    fs.seed("/p/.dridock/agents.yml",
+      "agents:\n  - name: Bear1\n    environment: container\n  - name: Bear2\n    environment: container\n");
+    const { ctx } = makeCtx(fs);
+    await cmd.run([], ctx);
+    const run = runtime.runs[0]!;
+    // Zero DRIDOCK_AGENT_NAME entries from auto-inject; user must set
+    // DRIDOCK_ENV_DRIDOCK_AGENT_NAME explicitly in the multi-container-agent case.
+    expect(run.env.some((e) => e.key === "DRIDOCK_AGENT_NAME")).toBe(false);
+  });
+
+  test("roster with zero container agents → skip auto-inject", async () => {
+    const { fs, runtime, cmd } = seedProjectVmRunning();
+    fs.seed("/p/.dridock/agents.yml", "agents:\n  - name: Arfy\n    environment: host-macos\n");
+    const { ctx } = makeCtx(fs);
+    await cmd.run([], ctx);
+    const run = runtime.runs[0]!;
+    expect(run.env.some((e) => e.key === "DRIDOCK_AGENT_NAME")).toBe(false);
+  });
+
+  test("malformed agents.yml → start still succeeds; auto-inject skipped (TeamCommand surfaces the parse error separately)", async () => {
+    const { fs, runtime, cmd } = seedProjectVmRunning();
+    // Missing 'name:' on the agent item → parseRoster throws.
+    fs.seed("/p/.dridock/agents.yml", "agents:\n  - role: eng\n");
+    const { ctx } = makeCtx(fs);
+    const rc = await cmd.run([], ctx);
+    expect(rc).toBe(0);   // start doesn't die on a bad roster
+    const run = runtime.runs[0]!;
+    expect(run.env.some((e) => e.key === "DRIDOCK_AGENT_NAME")).toBe(false);
+  });
+});
+
 describe("shellQuote — bash %q parity", () => {
   test("simple args", () => expect(shellQuote(["-p", "hello"])).toBe("'-p' 'hello'"));
   test("embedded single quote", () => expect(shellQuote(["it's"])).toBe(`'it'\\''s'`));

@@ -62,6 +62,19 @@ export async function loadRoster(fs: FileSystem, configPath: string): Promise<Ro
 }
 
 /**
+ * Return the sole agent whose `environment` matches `env`, or `undefined`
+ * if zero or more than one match. Used by `StartCommand` to auto-inject
+ * `DRIDOCK_AGENT_NAME` at container spawn time when the roster has a
+ * single `environment: container` agent (spec §1's canonical shape for
+ * Bear+Arfy-style teams). Zero or multiple → skip auto-inject; the user
+ * has to set `DRIDOCK_ENV_DRIDOCK_AGENT_NAME` explicitly.
+ */
+export function soleAgentByEnvironment(roster: Roster, env: string): string | undefined {
+  const matches = roster.agents.filter((a) => a.environment === env);
+  return matches.length === 1 ? matches[0]!.name : undefined;
+}
+
+/**
  * Resolve the agent name for THIS runtime — either from
  * `DRIDOCK_AGENT_NAME` env (authoritative when set) or by falling back
  * to a single-agent roster (unambiguous).
