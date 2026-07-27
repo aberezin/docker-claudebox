@@ -200,7 +200,7 @@ export class TeamCommand implements Command {
     // by construction — the container's XDG is bind-mounted from
     // <xdg>/projects/<id>/claude/). Host (Arfy on Mac): `<xdg>/watch-cursors/`
     // (machine-wide). Same code, different meaning by runtime.
-    const stateDir = opts.stateDir ?? `${await xdgRoot(ctx.fs, process.env, ctx.home)}/watch-cursors`;
+    const stateDir = opts.stateDir ?? `${await xdgRoot(ctx.fs, ctx.env.raw(), ctx.home)}/watch-cursors`;
 
     const runner = this.deps.host ?? new RealHostCommandRunner();
     const source = new GithubWatchSource(runner, repo);

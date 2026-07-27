@@ -44,6 +44,27 @@ export class EnvResolver {
   }
 
   /**
+   * The underlying env record — for callers that need a raw env map
+   * rather than the tiered `.get()` lookup. Two audiences:
+   *
+   *   1. Path resolvers (`xdgRoot`, `stateHome`) that read
+   *      **`XDG_CONFIG_HOME`** — an untiered var with no
+   *      `DRIDOCK_XDG_CONFIG_HOME` alternative. `.get("XDG_CONFIG_HOME")`
+   *      would return undefined because it prefixes with `DRIDOCK_`.
+   *   2. Deps that carry env forward to services with their own env
+   *      contracts (MachineConfig, BridgeStateReader, OrphanSessionScanner,
+   *      GithubWatchSource).
+   *
+   * Adding this method closes #51: pre-fix, those 17 call sites read
+   * `process.env` directly, bypassing the injected `ctx.env` and letting
+   * a real `XDG_CONFIG_HOME` leak into every test (fine on Linux where
+   * XDG is unset, 29 test failures on macOS).
+   */
+  raw(): Record<string, string | undefined> {
+    return this.env;
+  }
+
+  /**
    * Boolean truthy check ("1" / "true" / "yes" / "on" — matches the bash
    * `case "..." in 1|true|yes|on)` idiom used throughout wrapper.sh).
    */

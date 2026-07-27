@@ -60,7 +60,7 @@ export class CronModeCommand implements Command {
     // StartCommand). `stop` skips this: stopping the local cron daemon
     // is orthogonal to session-state ownership, so no need to nag.
     if (args[0] !== "stop") {
-      const orphans = await scanOrphans({ fs: ctx.fs, env: process.env, home: ctx.home }, ctx.cwd, id);
+      const orphans = await scanOrphans({ fs: ctx.fs, env: ctx.env.raw(), home: ctx.home }, ctx.cwd, id);
       if (orphans.length > 0) {
         for (const line of formatLaunchWarning(id, orphans)) ctx.stderr.write(line);
       }
@@ -117,13 +117,13 @@ export class CronModeCommand implements Command {
     }
 
     // Fresh spawn — `docker run -d`.
-    const machine = new MachineConfig(ctx.fs, process.env, ctx.home);
+    const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
     const dataDir = await machine.projectDataDir(id);
     await ctx.fs.mkdirRecursive(dataDir);
 
     const envPassthrough = collectEnvPassthrough(process.env);
     const mountPassthrough = collectMountPassthrough(process.env);
-    const xdg = await xdgRoot(ctx.fs, process.env, ctx.home);
+    const xdg = await xdgRoot(ctx.fs, ctx.env.raw(), ctx.home);
     await ctx.fs.mkdirRecursive(`${xdg}/framework-bugs`);
     await ctx.fs.mkdirRecursive(`${xdg}/consult`);
 

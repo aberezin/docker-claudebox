@@ -91,7 +91,7 @@ export class StartCommand implements Command {
     // #42 documents from the user side). Warning-only: bash-parity, we
     // continue with the configured id; user decides whether to abort +
     // adopt an existing one. Called BEFORE any container/VM side effect.
-    const startOrphans = await scanOrphans({ fs: ctx.fs, env: process.env, home: ctx.home }, ctx.cwd, id);
+    const startOrphans = await scanOrphans({ fs: ctx.fs, env: ctx.env.raw(), home: ctx.home }, ctx.cwd, id);
     if (startOrphans.length > 0) {
       for (const line of formatLaunchWarning(id, startOrphans)) ctx.stderr.write(line);
     }
@@ -141,7 +141,7 @@ export class StartCommand implements Command {
     const vmIp = vmOutcome.kind === "started" || vmOutcome.kind === "already-running" ? vmOutcome.ip : "";
 
     // ── Resolve per-project data dir + sidecar writer ─────────────────
-    const machine = new MachineConfig(ctx.fs, process.env, ctx.home);
+    const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
     const dataDir = await machine.projectDataDir(id);
     await ctx.fs.mkdirRecursive(dataDir);
     const cnameBase = containerName(ctx.cwd); // matches wrapper.sh's `container_name`
@@ -162,7 +162,7 @@ export class StartCommand implements Command {
     const mountPassthrough = collectMountPassthrough(process.env);
 
     // CDP + host-agent sidecars — always written (empty when the bridge is down).
-    const bridges = new BridgeStateReader(ctx.fs, process.env, ctx.home, probe);
+    const bridges = new BridgeStateReader(ctx.fs, ctx.env.raw(), ctx.home, probe);
     const cdpUrl = await bridges.cdpUrl(id);
     await sidecars.writeAllRoles("cdp", cdpUrl === "" ? "" : `DRIDOCK_HOST_CDP_URL=${cdpUrl}\n`);
     const ha = await bridges.hostAgentState();
@@ -210,7 +210,7 @@ export class StartCommand implements Command {
     }
 
     // ── Framework-bugs + consult mount paths (host-side) ─────────────
-    const xdg = await xdgRoot(ctx.fs, process.env, ctx.home);
+    const xdg = await xdgRoot(ctx.fs, ctx.env.raw(), ctx.home);
     const fwbugsDir = `${xdg}/framework-bugs`;
     const consultDir = `${xdg}/consult`;
     await ctx.fs.mkdirRecursive(fwbugsDir);
@@ -319,8 +319,8 @@ export class StartCommand implements Command {
         { host: ctx.cwd, container: ctx.cwd },
         { host: "/var/run/docker.sock", container: "/var/run/docker.sock" },
         // Framework-bugs + consult — always mounted (empty dirs are fine)
-        { host: `${(process.env["XDG_CONFIG_HOME"] ?? `${ctx.home}/.config`)}/dridock/framework-bugs`, container: "/home/claude/framework-bugs" },
-        { host: `${(process.env["XDG_CONFIG_HOME"] ?? `${ctx.home}/.config`)}/dridock/consult`, container: "/home/claude/framework-consult" },
+        { host: `${(ctx.env.raw()["XDG_CONFIG_HOME"] ?? `${ctx.home}/.config`)}/dridock/framework-bugs`, container: "/home/claude/framework-bugs" },
+        { host: `${(ctx.env.raw()["XDG_CONFIG_HOME"] ?? `${ctx.home}/.config`)}/dridock/consult`, container: "/home/claude/framework-consult" },
         // Extra mounts from DRIDOCK_MOUNT_* passthrough
         ...extraMounts,
       ],

@@ -57,7 +57,7 @@ export class MigrateCommand implements Command {
     const clock = this.clockOverride ?? new RealClock();
     const resolver = new ProjectRootResolver(ctx.fs, git);
     const initialProject = await resolver.resolve(ctx.cwd);
-    const xdgBase = configHome(process.env, ctx.home);
+    const xdgBase = configHome(ctx.env.raw(), ctx.home);
 
     ctx.stdout.write(`migrate: ${initialProject.root}\n`);
 
@@ -118,7 +118,7 @@ export class MigrateCommand implements Command {
           // Silent — matches bash's `[ -f ... ] || return 0` branches.
           break;
         case "applied":
-          ctx.stdout.write(`  ✓ ${r.item}: ${prettyPath(r.outcome.from)} → ${prettyPath(r.outcome.to)}`);
+          ctx.stdout.write(`  ✓ ${r.item}: ${prettyPath(r.outcome.from, ctx.home)} → ${prettyPath(r.outcome.to, ctx.home)}`);
           if (r.outcome.note !== undefined) ctx.stdout.write(`  (${r.outcome.note})`);
           ctx.stdout.write(`\n`);
           break;
@@ -127,7 +127,7 @@ export class MigrateCommand implements Command {
           if (collided > 0) {
             ctx.stderr.write(`  ⚠ ${r.item}: SPLIT-BRAIN merged — ${r.outcome.cleanCount} clean, ${collided} collision(s) kept side-by-side (suffix ${r.outcome.collidedSuffix}).\n`);
           } else {
-            ctx.stdout.write(`  ✓ ${r.item}: ${prettyPath(r.outcome.from)} → ${prettyPath(r.outcome.to)}  (merged ${r.outcome.cleanCount} entries into existing dridock/)\n`);
+            ctx.stdout.write(`  ✓ ${r.item}: ${prettyPath(r.outcome.from, ctx.home)} → ${prettyPath(r.outcome.to, ctx.home)}  (merged ${r.outcome.cleanCount} entries into existing dridock/)\n`);
           }
           break;
         }
@@ -158,7 +158,6 @@ export class MigrateCommand implements Command {
   }
 }
 
-function prettyPath(p: string): string {
-  const home = process.env["HOME"];
-  return home !== undefined && p.startsWith(home) ? `~${p.slice(home.length)}` : p;
+function prettyPath(p: string, home: string): string {
+  return home !== "" && p.startsWith(home) ? `~${p.slice(home.length)}` : p;
 }

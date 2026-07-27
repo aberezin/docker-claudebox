@@ -28,6 +28,12 @@ export interface BootstrapDeps {
   /** HOME — needed by the orphan-session scanner to resolve `<xdg>/projects/*`
    *  when there's no explicit XDG_CONFIG_HOME (#42 facet 2). */
   readonly home: string;
+  /** Env — read by the orphan-session scanner for XDG_CONFIG_HOME.
+   *  Threaded from `ctx.env.raw()` at the command layer (fixes #51
+   *  test-hygiene bug: pre-fix, this service read `process.env`
+   *  directly, bypassing the injected test env and leaking a real
+   *  XDG_CONFIG_HOME into tests on macOS). */
+  readonly env: Record<string, string | undefined>;
   /** Where the orphan warning + config-preserved notice goes. Stderr in the
    *  Command wiring; captured in tests. Separate from onNotice (stdout) so
    *  warnings can't be swallowed by `dridock bootstrap > /dev/null`. */
@@ -152,7 +158,7 @@ network:
    */
   private async warnIfSessionsWillBeOrphaned(root: string): Promise<void> {
     const orphans = await scanOrphans(
-      { fs: this.deps.fs, env: process.env, home: this.deps.home },
+      { fs: this.deps.fs, env: this.deps.env, home: this.deps.home },
       root,
       undefined,   // no own id yet — we're about to mint
     );

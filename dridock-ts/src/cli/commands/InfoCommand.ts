@@ -69,7 +69,7 @@ export class InfoCommand implements Command {
       ctx.stdout.write(`  VM:                ${profile}   (${vmStatus})\n`);
       ctx.stdout.write(`  config.yml:        ${project.configPath}\n`);
       await this.renderSecretsRow(project.dotDir, ctx);
-      const dataDir = await new MachineConfig(ctx.fs, process.env, ctx.home).projectDataDir(projectId);
+      const dataDir = await new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home).projectDataDir(projectId);
       ctx.stdout.write(`  data dir:          ${dataDir}   (session/settings/plugins)\n`);
 
       // Container status — only queryable when the VM is up (docker
