@@ -1,0 +1,12 @@
+# .dridock/agents.yml — the team working on dridock itself.
+# Consumed by `dridock team` (whoami/roster/post/watch) + the SessionStart
+# team-watch hook. See docs/design/agent-teams.md.
+github_repo: aberezin/docker-claudebox
+agents:
+  - name: Bear
+    role: principal-engineer
+    environment: container        # runs inside the dridock container
+  - name: Arfy
+    role: senior-qa
+    environment: host-macos        # runs on the Mac; drives real Colima/Docker/Chrome
+human: Alan
