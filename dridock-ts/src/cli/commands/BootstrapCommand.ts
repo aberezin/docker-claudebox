@@ -71,9 +71,9 @@ export class BootstrapCommand implements Command {
       : parsed.workspace ? "workspace"
       : "greenfield";
 
-    const machine = new MachineConfig(ctx.fs, process.env, ctx.home);
+    const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
     const svc = new BootstrapService({
-      fs: ctx.fs, host, machine, home: ctx.home,
+      fs: ctx.fs, host, machine, home: ctx.home, env: ctx.env.raw(),
       onNotice: (m) => ctx.stdout.write(m),
       onWarn: (m) => ctx.stderr.write(m),
     });

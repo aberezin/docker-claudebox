@@ -36,6 +36,7 @@ import { ClaudeDirCommand } from "./commands/ClaudeDirCommand.ts";
 import { CronModeCommand, cronModeRequested } from "./commands/CronModeCommand.ts";
 import { BrowserBridgeCommand } from "./commands/BrowserBridgeCommand.ts";
 import { HostAgentCommand } from "./commands/HostAgentCommand.ts";
+import { TeamCommand } from "./commands/TeamCommand.ts";
 import { HelpCommand } from "./commands/HelpCommand.ts";
 import { findNoDridockMarker, formatNoDridockRefusal, shouldCheckNoDridock } from "../services/NoDridockGuard.ts";
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
@@ -96,6 +97,7 @@ function buildRegistry(): CommandRegistry {
   registry.register(new BrowserBridgeCommand());
   registry.register(new HostAgentCommand());
   registry.register(new ClaudeDirCommand());
+  registry.register(new TeamCommand());
   registry.register(new HelpCommand());
   return registry;
 }

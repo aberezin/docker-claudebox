@@ -60,7 +60,7 @@ export class ReportBugCommand implements Command {
     const ts = clock.timestamp();
     const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
     const filename = `${projectId}-${ts}-${slug}.md`;
-    const home = await stateHome(ctx.fs, process.env, ctx.home, "framework-bugs");
+    const home = await stateHome(ctx.fs, ctx.env.raw(), ctx.home, "framework-bugs");
     await ctx.fs.mkdirRecursive(home);
     const content = `# ${title}\n\n**Layer:** ${layer}\n**Project:** ${projectId}\n**Timestamp:** ${ts}\n\n${body}\n`;
     await ctx.fs.writeText(`${home}/${filename}`, content, { mode: 0o644 });

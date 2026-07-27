@@ -7,12 +7,15 @@ import type { Context } from "../Context.ts";
 import { EnvResolver } from "../../domain/EnvResolver.ts";
 import { DridockError } from "../../domain/errors.ts";
 
-function makeCtx(fs: InMemoryFileSystem, cwd = "/repo"): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
+function makeCtx(fs: InMemoryFileSystem, opts: string | { cwd?: string; env?: Record<string, string | undefined> } = {}): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
+  // Back-compat: `makeCtx(fs, "/custom-cwd")` still works (arg was a
+  // plain string before #51's env-through-ctx refactor).
+  const o = typeof opts === "string" ? { cwd: opts } : opts;
   const stdout = new StringWriter();
   const stderr = new StringWriter();
   return {
     stdout, stderr,
-    ctx: { fs, env: new EnvResolver({}), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
+    ctx: { fs, env: new EnvResolver(o.env ?? {}), cwd: o.cwd ?? "/repo", home: "/home/alan", binName: "dridock", stdout, stderr },
   };
 }
 
@@ -441,20 +444,15 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
   });
 
   test("XDG_CONFIG_HOME override respected (scanner reads the same root MachineConfig writes to)", async () => {
-    const savedXdg = process.env["XDG_CONFIG_HOME"];
-    process.env["XDG_CONFIG_HOME"] = "/custom/xdg";
-    try {
-      const fs = new InMemoryFileSystem();
-      fs.seed("/custom/xdg/dridock/projects/aa112233/claude/projects/-repo/s.jsonl", "{}");
-      const host = new StubHostCommandRunner();
-      host.seedCommand(`git -C '/repo' init -q`, 0, "");
-      const cmd = new BootstrapCommand(host, async () => "");
-      const { ctx, stderr } = makeCtx(fs);
-      await cmd.run(["intent"], ctx);
-      expect(stderr.text()).toContain(`/custom/xdg/dridock/projects/aa112233/claude/projects/-repo`);
-    } finally {
-      if (savedXdg === undefined) delete process.env["XDG_CONFIG_HOME"];
-      else process.env["XDG_CONFIG_HOME"] = savedXdg;
-    }
+    const fs = new InMemoryFileSystem();
+    fs.seed("/custom/xdg/dridock/projects/aa112233/claude/projects/-repo/s.jsonl", "{}");
+    const host = new StubHostCommandRunner();
+    host.seedCommand(`git -C '/repo' init -q`, 0, "");
+    const cmd = new BootstrapCommand(host, async () => "");
+    // #51: env now flows through ctx, not process.env. No more
+    // snapshot/restore dance — pass XDG_CONFIG_HOME in via makeCtx.
+    const { ctx, stderr } = makeCtx(fs, { env: { XDG_CONFIG_HOME: "/custom/xdg" } });
+    await cmd.run(["intent"], ctx);
+    expect(stderr.text()).toContain(`/custom/xdg/dridock/projects/aa112233/claude/projects/-repo`);
   });
 });

@@ -81,7 +81,7 @@ export abstract class ProjectPassthroughCommand implements Command {
     }
 
     // Resolve per-project data dir + build the throwaway RunArgs
-    const machine = new MachineConfig(ctx.fs, process.env, ctx.home);
+    const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
     const dataDir = await machine.projectDataDir(id);
     await ctx.fs.mkdirRecursive(dataDir);
     const cname = `${containerName(ctx.cwd)}_${this.verb}_${Date.now()}`;

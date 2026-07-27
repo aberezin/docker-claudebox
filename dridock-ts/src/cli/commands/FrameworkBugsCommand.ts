@@ -24,7 +24,7 @@ export class FrameworkBugsCommand implements Command {
   }
 
   private async list(ctx: Context): Promise<number> {
-    const home = await stateHome(ctx.fs, process.env, ctx.home, "framework-bugs");
+    const home = await stateHome(ctx.fs, ctx.env.raw(), ctx.home, "framework-bugs");
     if (!(await ctx.fs.isDirectory(home))) {
       ctx.stdout.write(`no framework bug reports (${home} doesn't exist)\n`);
       return 0;
@@ -47,7 +47,7 @@ export class FrameworkBugsCommand implements Command {
   }
 
   private async clear(ctx: Context): Promise<number> {
-    const home = await stateHome(ctx.fs, process.env, ctx.home, "framework-bugs");
+    const home = await stateHome(ctx.fs, ctx.env.raw(), ctx.home, "framework-bugs");
     if (!(await ctx.fs.isDirectory(home))) return 0;
     const entries = await ctx.fs.listDir(home);
     let n = 0;

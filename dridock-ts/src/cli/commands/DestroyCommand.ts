@@ -108,7 +108,7 @@ export class DestroyCommand implements Command {
     // containing `claude/` AND anything else the entrypoint dropped
     // there). Arfy #38 P4c B4 caught the previous version only rm'd
     // `<id>/claude`, leaving an empty `<id>/` parent.
-    const machine = new MachineConfig(ctx.fs, process.env, ctx.home);
+    const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
     const claudeDir = await machine.projectDataDir(id);
     // projectDataDir returns `.../<id>/claude` — strip the trailing
     // `/claude` to get the parent.

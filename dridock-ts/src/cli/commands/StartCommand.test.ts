@@ -13,12 +13,15 @@ import { EnvResolver } from "../../domain/EnvResolver.ts";
 import { DridockError } from "../../domain/errors.ts";
 import { infraContext } from "../../infra/Docker.ts";
 
-function makeCtx(fs: InMemoryFileSystem, cwd = "/p"): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
+function makeCtx(fs: InMemoryFileSystem, opts: string | { cwd?: string; env?: Record<string, string | undefined> } = {}): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
+  // Back-compat: `makeCtx(fs, "/custom-cwd")` still works (arg was a
+  // plain string before the #51 env-through-ctx refactor).
+  const o = typeof opts === "string" ? { cwd: opts } : opts;
   const stdout = new StringWriter();
   const stderr = new StringWriter();
   return {
     stdout, stderr,
-    ctx: { fs, env: new EnvResolver({}), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
+    ctx: { fs, env: new EnvResolver(o.env ?? {}), cwd: o.cwd ?? "/p", home: "/home/alan", binName: "dridock", stdout, stderr },
   };
 }
 
@@ -255,21 +258,24 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
 
   test("auth sidecars written for all three roles under the data dir", async () => {
     const { fs, cmd } = seedProjectVmRunning();
-    const { ctx } = makeCtx(fs);
-    // Set the env values the auth sidecar reads
-    process.env["ANTHROPIC_API_KEY"] = "sk-ant-test-abc";
-    process.env["CLAUDE_CODE_OAUTH_TOKEN"] = "oauth-test-xyz";
-    try {
-      await cmd.run([], ctx);
-      for (const suffix of ["", "_prog", "_cron"]) {
-        const path = `/home/alan/.config/dridock/projects/abc/claude/.claude-_p${suffix}-auth`;
-        expect(await fs.readText(path)).toContain("ANTHROPIC_API_KEY=sk-ant-test-abc");
-        expect(await fs.readText(path)).toContain("CLAUDE_CODE_OAUTH_TOKEN=oauth-test-xyz");
-        expect(fs.modeOf(path)).toBe(0o600);
-      }
-    } finally {
-      delete process.env["ANTHROPIC_API_KEY"];
-      delete process.env["CLAUDE_CODE_OAUTH_TOKEN"];
+    // #51: inject the auth values via ctx.env instead of process.env.
+    // Pre-fix leak (caught by Arfy on the #51 re-verify): a real host
+    // env with CLAUDEBOX_NO_API_KEY=1 (dridock-dev machines set this
+    // so an ANTHROPIC_API_KEY doesn't shadow the claude.ai OAuth
+    // login) would blank the field before writing, failing the
+    // assertion. Isolated env kills the leak.
+    const { ctx } = makeCtx(fs, {
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test-abc",
+        CLAUDE_CODE_OAUTH_TOKEN: "oauth-test-xyz",
+      },
+    });
+    await cmd.run([], ctx);
+    for (const suffix of ["", "_prog", "_cron"]) {
+      const path = `/home/alan/.config/dridock/projects/abc/claude/.claude-_p${suffix}-auth`;
+      expect(await fs.readText(path)).toContain("ANTHROPIC_API_KEY=sk-ant-test-abc");
+      expect(await fs.readText(path)).toContain("CLAUDE_CODE_OAUTH_TOKEN=oauth-test-xyz");
+      expect(fs.modeOf(path)).toBe(0o600);
     }
   });
 

@@ -34,7 +34,7 @@ export class ConsultCommand implements Command {
 
   async run(args: readonly string[], ctx: Context): Promise<number> {
     const sub = args[0] ?? "list";
-    const home = await stateHome(ctx.fs, process.env, ctx.home, "consult");
+    const home = await stateHome(ctx.fs, ctx.env.raw(), ctx.home, "consult");
     const store = new ConsultStore(ctx.fs, home, this.clockOverride ?? new RealClock());
 
     switch (sub) {

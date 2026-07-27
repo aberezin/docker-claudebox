@@ -30,7 +30,8 @@ export class ClaudeDirCommand implements Command {
       // Only the FALLBACK path needs a project — the env override branch
       // bypasses project detection entirely, matching bash's `if [ -n
       // "$_dd" ]; then printf …; else _cbid=… fi` shape.
-      const envOverride = process.env["DRIDOCK_DATA_DIR"] ?? process.env["CLAUDE_DATA_DIR"];
+      const rawEnv = ctx.env.raw();
+      const envOverride = rawEnv["DRIDOCK_DATA_DIR"] ?? rawEnv["CLAUDE_DATA_DIR"];
       if (envOverride !== undefined && envOverride !== "") {
         ctx.stdout.write(`${envOverride}\n`);
         return 0;
@@ -38,7 +39,7 @@ export class ClaudeDirCommand implements Command {
       ctx.stderr.write(`no dridock project here (${project.dotName}/config.yml missing)\n`);
       return 1;
     }
-    const dataDir = await new MachineConfig(ctx.fs, process.env, ctx.home).projectDataDir(id);
+    const dataDir = await new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home).projectDataDir(id);
     ctx.stdout.write(`${dataDir}\n`);
     return 0;
   }
