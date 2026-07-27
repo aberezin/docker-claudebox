@@ -148,7 +148,7 @@ export class StartCommand implements Command {
     const sidecars = new SidecarWriter(ctx.fs, dataDir, cnameBase);
 
     // ── Provision every sidecar the entrypoint reads ──────────────────
-    const auth = new AuthSecretsProvisioner(ctx.fs, sidecars, process.env, dataDir);
+    const auth = new AuthSecretsProvisioner(ctx.fs, sidecars, ctx.env.raw(), dataDir);
     await auth.writeAuthSidecars();
     await auth.writeSecretsSidecars(`${project.dotDir}/secrets.env`);
     const features = await projectCfg.features(project.configPath);
