@@ -75,6 +75,20 @@ agents:
     const r = parseRoster(`agents:\n  - name: Bear\nhuman: # optional\n`);
     expect(r.human).toBeUndefined();
   });
+
+  test("github_repo top-level key parses (added #46.d.3b for `team watch`)", () => {
+    const r = parseRoster(`agents:\n  - name: Bear\ngithub_repo: aberezin/docker-claudebox\n`);
+    expect(r.githubRepo).toBe("aberezin/docker-claudebox");
+  });
+
+  test("github_repo can appear before or after agents, and is optional", () => {
+    const before = parseRoster(`github_repo: owner/name\nagents:\n  - name: Bear\n`);
+    const after = parseRoster(`agents:\n  - name: Bear\ngithub_repo: owner/name\n`);
+    const none = parseRoster(`agents:\n  - name: Bear\n`);
+    expect(before.githubRepo).toBe("owner/name");
+    expect(after.githubRepo).toBe("owner/name");
+    expect(none.githubRepo).toBeUndefined();
+  });
 });
 
 describe("parseRoster — fail-loud on malformed input", () => {

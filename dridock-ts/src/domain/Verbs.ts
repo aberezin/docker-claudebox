@@ -72,7 +72,7 @@ export const VERBS = {
   mcp:              { summary: "run `claude mcp …` in a throwaway container",       class: "throwaway",    needsProject: false } as const,
   "report-bug":     { summary: "file a framework bug report",                       class: "framework",    needsProject: false } as const,
   df:               { summary: "at-a-glance VM disk usage",                         class: "readonly",     needsProject: false } as const,
-  team:             { summary: "named-agent team: whoami/roster/post (agent-teams.md)", class: "state-mgmt", needsProject: true, subcommands: ["whoami", "roster", "post"] as const } as const,
+  team:             { summary: "named-agent team: whoami/roster/post/watch (agent-teams.md)", class: "state-mgmt", needsProject: true, subcommands: ["whoami", "roster", "post", "watch"] as const } as const,
 } as const satisfies Record<string, VerbSpec>;
 
 export type Verb = keyof typeof VERBS;

@@ -33,6 +33,11 @@ export interface Agent {
 export interface Roster {
   readonly agents: readonly Agent[];
   readonly human?: string;
+  /** Optional watch config — the GitHub repo `dridock team watch`
+   *  polls for this team's messages. Format: `owner/name`. If unset,
+   *  `team watch` requires `--repo` on the command line. Added for
+   *  #46.d.3b; distinct from `.dridock/config.yml` `id`/`vm`/etc. */
+  readonly githubRepo?: string;
 }
 
 export interface RosterResolveResult {
@@ -150,6 +155,7 @@ export function parseRoster(text: string): Roster {
   const lines = text.split(/\r?\n/);
   const agents: Agent[] = [];
   let human: string | undefined;
+  let githubRepo: string | undefined;
   let inAgents = false;
   let currentAgent: Partial<Agent> | undefined;
 
@@ -188,8 +194,11 @@ export function parseRoster(text: string): Roster {
       } else if (key === "human") {
         human = value === "" ? undefined : value;
         inAgents = false;
+      } else if (key === "github_repo") {
+        githubRepo = value === "" ? undefined : value;
+        inAgents = false;
       } else {
-        throw new Error(`agents.yml: line ${i + 1}: unknown top-level key '${key}' (allowed: agents, human)`);
+        throw new Error(`agents.yml: line ${i + 1}: unknown top-level key '${key}' (allowed: agents, human, github_repo)`);
       }
       continue;
     }
@@ -231,7 +240,11 @@ export function parseRoster(text: string): Roster {
     }
     seen.add(a.name);
   }
-  return { agents, ...(human !== undefined ? { human } : {}) };
+  return {
+    agents,
+    ...(human !== undefined ? { human } : {}),
+    ...(githubRepo !== undefined ? { githubRepo } : {}),
+  };
 }
 
 function setAgentField(agent: Partial<Agent>, key: string, value: string, lineNum: number): void {
