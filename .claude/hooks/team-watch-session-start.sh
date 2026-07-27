@@ -8,12 +8,17 @@
 # The heartbeat file the live layer writes each poll is what this hook
 # checks for staleness → suggests re-arming.
 #
-# Works in BOTH environments per the same convention as
-# `consult-session-start.sh`:
-#   - Mac / host: `dridock team watch --once` + `~/.config/dridock/watch-cursors/github.heartbeat`
-#   - Container:  no dridock binary in the container (yet — dridock-ts is a HOST
-#                 wrapper). Silent no-op until a container-side helper lands
-#                 or dridock-ts is baked into the image.
+# Works in BOTH environments — the `dridock` command exists in both:
+#   - Mac / host:  dridock-ts binary installed via install.sh
+#   - Container:   the baked shim at /usr/local/bin/dridock, which routes
+#                  `team` subverbs to the bun-compiled dridock-ts at
+#                  /usr/local/lib/dridock/dridock-ts (see Dockerfile
+#                  `dridock-ts-build` stage). Path is unified; hook is one
+#                  code path.
+# Heartbeat + cursor state live under `$XDG_CONFIG_HOME/dridock/watch-cursors/`
+# on both sides (container's XDG is bind-mounted from
+# `<xdg>/projects/<id>/claude/` on the host, so heartbeat state is per-project
+# in-container and machine-wide on the host — both correct for their scope).
 #
 # Idempotent — stays silent when: (a) no team roster in $PWD, (b) no pending
 # messages, and (c) heartbeat is fresh (or an already-active live loop is
@@ -23,16 +28,11 @@
 # terminal decision (long-running). It NUDGES the user to arm it.
 set -u
 
-# ─── environment detection ────────────────────────────────────────────
-if [ -f /.dockerenv ]; then
-    # Container: no dridock wrapper here (host binary). Nothing to run
-    # inside the container yet — this hook exists to slot in cleanly
-    # once a container-side team-watch helper lands (or dridock-ts gets
-    # baked into the image).
-    exit 0
-fi
-
-# Host: skip silently if the wrapper isn't on PATH.
+# ─── graceful no-op: skip silently if `dridock` isn't on PATH ────────
+# Works for both host (installed via install.sh) and container (baked
+# shim). Pre-4.x installs where `team` isn't yet a verb also fall
+# through cleanly at the roster gate below — `dridock team roster`
+# returns rc≠0 on those.
 if ! command -v dridock >/dev/null 2>&1; then
     exit 0
 fi

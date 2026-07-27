@@ -254,8 +254,10 @@ export class StartCommand implements Command {
       ...(hostname !== "" ? [{ key: "DRIDOCK_HOSTNAME", value: hostname }] : []),
       ...(autoAgentName !== undefined ? [{ key: "DRIDOCK_AGENT_NAME", value: autoAgentName }] : []),
       ...(ctx.env.raw()["DEBUG"] === "true" ? [{ key: "DEBUG", value: "true" }] : []),
-      ...(ctx.env.raw()["DRIDOCK_DEFAULT_PLUGINS"] !== undefined
-        ? [{ key: "DRIDOCK_DEFAULT_PLUGINS", value: ctx.env.raw()["DRIDOCK_DEFAULT_PLUGINS"] }] : []),
+      ...((): { key: string; value: string }[] => {
+        const v = ctx.env.raw()["DRIDOCK_DEFAULT_PLUGINS"];
+        return v !== undefined ? [{ key: "DRIDOCK_DEFAULT_PLUGINS", value: v }] : [];
+      })(),
       ...envPassthrough.envAdditions,
     ];
     // tmpfs opt-in

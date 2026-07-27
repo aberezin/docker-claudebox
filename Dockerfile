@@ -99,6 +99,31 @@ RUN mkdir -p /claude && \
 # workspace
 WORKDIR /workspace
 
+# ── dridock-ts compile ──────────────────────────────────────────────────────────
+# Bun-compiled standalone binary for the in-container verbs that need the real TS
+# implementation (currently just `team` and its subverbs, via the shim's routing —
+# see the `dridock` script). Kept as its own stage so it doesn't touch the toolchain
+# layers in `full`; only edits under `dridock-ts/` bust this layer. The final `full`
+# image ends up ~90 MB heavier (the compiled binary) — worth it so an in-container
+# claudebot can run `dridock team whoami` / `watch --once` for real, not just via a
+# shell reimpl. Skipped by the `minimal` target (no team-watch there yet).
+FROM ubuntu:24.04 AS dridock-ts-build
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl unzip ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+# Install bun (used at build time only; not shipped in the final image).
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH=/root/.bun/bin:$PATH
+# Copy only the dridock-ts subtree — edits under other dirs (docs, tests/, wrapper
+# scripts, README) do NOT invalidate this cache layer. `bun install --frozen-lockfile`
+# needs package.json + bun.lock only; the compile pulls in src/.
+COPY dridock-ts/ /build/dridock-ts/
+WORKDIR /build/dridock-ts
+RUN bun install --frozen-lockfile && \
+    mkdir -p /out && \
+    bun build --compile src/cli/main.ts --outfile /out/dridock-ts
+
 # ── harness ──────────────────────────────────────────────────────────────────────
 # The VOLATILE layer: entrypoint + Python daemons + cb-* helpers + profiles + CHANGELOG.
 # These change on nearly every commit, so they're staged HERE (a cheap ubuntu stage, no
@@ -150,6 +175,10 @@ COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 COPY --from=harness /h/lib/env-rename.map /usr/local/lib/dridock/env-rename.map
+# Compiled dridock-ts for the team verbs (the shim routes to it) — see the
+# dridock-ts-build stage above and `dridock` (shim) for the routing.
+COPY --from=dridock-ts-build /out/dridock-ts /usr/local/lib/dridock/dridock-ts
+RUN chmod +x /usr/local/lib/dridock/dridock-ts
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION
@@ -278,6 +307,8 @@ COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 COPY --from=harness /h/lib/env-rename.map /usr/local/lib/dridock/env-rename.map
+COPY --from=dridock-ts-build /out/dridock-ts /usr/local/lib/dridock/dridock-ts
+RUN chmod +x /usr/local/lib/dridock/dridock-ts
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION

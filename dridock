@@ -36,6 +36,8 @@ CONTAINER-SIDE (runnable here; these delegate to their `cb-*` implementation):
   dridock report-bug "<title>"    file a framework bug report from claudebot (cb-report-bug)
   dridock browser <sub>           browser-test a workload (cb-browser: shot|script|watch|cdp)
   dridock df                      VM disk snapshot (cb-df)
+  dridock team <sub>              agent-teams: whoami / roster / post / watch — runs the bun-
+                                  compiled dridock-ts (baked in-image; no Colima access needed)
   dridock help | --help | -h      this help
 
 HOST-SIDE (run these on your Mac; not runnable here — the wrapper needs Colima/docker-context):
@@ -70,6 +72,19 @@ case "${1:-}" in
     df)               shift; exec cb-df "$@" ;;
     help|--help|-h)   _help ;;
     "")               _help ;;
+
+    # ── in-container TS binary: verbs safe to run without colima/docker ───────
+    # Delegate to the bun-compiled dridock-ts baked at
+    # /usr/local/lib/dridock/dridock-ts (see Dockerfile `dridock-ts-build` stage).
+    # Only verbs that don't need host-only Colima/Docker access — the TS binary
+    # itself would fail on those with an unhelpful colima error inside a
+    # container. team/watch (with all subverbs) reads .dridock/agents.yml +
+    # optionally `gh api`; no colima. Similarly `dridock-ts version` is a
+    # trivial string print.
+    team)
+        _ts=/usr/local/lib/dridock/dridock-ts
+        [ -x "$_ts" ] || _die "dridock: $_ts missing — rebuild image (make build)"
+        shift; exec "$_ts" team "$@" ;;
 
     # ── host-side verbs: not runnable here, print a targeted message ──────────
     start|stop|down|destroy|bootstrap|migrate|info|status|vm|ip|net|features|profiles|\
