@@ -1,6 +1,6 @@
 ---
 name: dridock
-description: Show a human-friendly summary of the dridock project in the current directory — versions (wrapper / cb-infra / project image), the paths that matter (config.yml, secrets.env, per-project data dir), VM + container status, and network (VM IP, hostname, cb-net). Use when the user runs /dridock or asks about their dridock setup, paths, data dir, VM, IP, or harness version.
+description: Show a human-friendly summary of the dridock project in the current directory — versions (wrapper / cb-infra / project image), the colima profile + VM status, the paths that matter (config.yml, secrets.env, per-project data dir), container status, and network (VM IP, hostname, cb-net). Use when the user runs /dridock or asks about their dridock setup, paths, data dir, colima profile, VM, IP, or harness version.
 ---
 
 # dridock — project status
@@ -20,7 +20,14 @@ directory and relay it. It's fast and safe (reads state; never boots a VM or pol
    (versions, project paths, VM/container, network, machine paths) — present it
    as-is or lightly summarize; don't re-derive the values yourself.
 
-3. Handle the common cases:
+3. **Always surface the colima profile explicitly** in your summary — it's the
+   `VM:` line in the dashboard, formatted `cb-<project-id>` (e.g. `cb-51cb139f`).
+   Users routinely need it for `colima ssh -p <profile>`, `docker --context
+   colima-<profile>`, `limactl shell <profile>`, or reading `dridock vm usage`
+   output. If a status line is showing the profile too, cross-reference so the
+   user sees they match.
+
+4. Handle the common cases:
    - **"not a dridock project yet"** → this directory has no `.dridock/config.yml` (or its legacy 2.x sibling `.claudebox/config.yml`). Tell the user to `cd` into a dridock project, or run `dridock` here to initialize one.
    - **`dridock: command not found`** → the wrapper isn't installed/on PATH; point
      them at `./install.sh` in the harness repo. (A pre-3.0 install shipped the
