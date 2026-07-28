@@ -18,9 +18,20 @@ RUN apt-get update && apt-get install -y \
     software-properties-common lsb-release jq \
     && rm -rf /var/lib/apt/lists/*
 
-# node.js (needed for claude CLI)
-RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - && \
-    apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
+# node.js (needed for claude CLI) — from the official nodejs.org tarball,
+# arch-detected (same pattern as the Go install below). NodeSource's setup
+# scripts started 403'ing (setup_lts.x/setup_22.x) and setup_20.x silently
+# falls back to Ubuntu's npm-less node 18 (2026-07), so bypass NodeSource.
+RUN NODE_VERSION=20.20.2 && \
+    ARCH="$(dpkg --print-architecture)" && \
+    case "$ARCH" in \
+      arm64) NODE_ARCH=arm64 ;; \
+      amd64) NODE_ARCH=x64 ;; \
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.gz" \
+      | tar -xz -C /usr/local --strip-components=1 && \
+    node --version && npm --version
 
 # python3 + api server deps (needed for CLAUDE_MODE_API)
 RUN apt-get update && apt-get install -y \
