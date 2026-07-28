@@ -24,6 +24,13 @@ fi
 # ── walk up looking for .dridock/config.yml ──────────────────────────
 dir="$cwd"
 while [ "$dir" != "/" ] && [ -n "$dir" ]; do
+    # dridock disabled in this tree (.nodridock, e.g. the harness repo itself,
+    # or any session running natively on the Mac) → no colima VM to surface.
+    # Checked BEFORE config.yml so a repo that has both (like docker-claudebox)
+    # stays silent. Marker protects every subdir, so a hit anywhere up = silent.
+    if [ -f "$dir/.nodridock" ]; then
+        exit 0
+    fi
     if [ -f "$dir/.dridock/config.yml" ]; then
         id=$(sed -nE 's/^id:[[:space:]]*([A-Za-z0-9_-]+).*$/\1/p' "$dir/.dridock/config.yml" | head -1)
         if [ -n "$id" ] && [ "$id" != "auto" ]; then
