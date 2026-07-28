@@ -26,6 +26,88 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.1.0] — 2026-07-28 _(fork)_
+
+### Added — colima profile surfaced in Claude Code + `/dridock` skill
+
+The colima profile a claudebot is running under is now visible without
+running any command:
+
+- **`/dridock` skill** — new instruction "always surface the colima profile
+  explicitly" so a self-report names `colima ssh -p <profile>`,
+  `docker --context colima-<profile>`, `limactl shell <profile>`,
+  `dridock vm usage` explicitly rather than assuming default.
+- **Claude Code statusLine** — new `.claude/statusline-dridock.sh` walks up
+  from `.cwd` looking for `.dridock/config.yml` and renders the project's
+  `id:` field as `🚢 cb-<id>` in cyan. Reads YAML directly (no shell-out),
+  sub-ms, silent when: no dridock project, `id: auto` sentinel,
+  `.nodridock` marker file present (harness repo, native Mac sessions),
+  or any error. Wired via `.claude/settings.json` `statusLine.command`.
+
+### Added — `DRIDOCK_AGENT_NAME` auto-inject at container spawn (#46)
+
+The container-side agent-teams flow (`dridock team whoami`) needs
+`DRIDOCK_AGENT_NAME` set to know who "I" is. Manually plumbing it via
+`DRIDOCK_ENV_DRIDOCK_AGENT_NAME` was a footgun — silently unset by
+default → `whoami` failed with a confusing error.
+
+`StartCommand` now reads `.dridock/agents.yml` at spawn and, if there is
+**exactly one** agent with `environment: container`, injects its `name`
+as `DRIDOCK_AGENT_NAME` (via the standard `-e` mechanism, ordered BEFORE
+user `DRIDOCK_ENV_*` forwards so the user override wins per Docker
+last-`-e` semantics). Skipped cleanly (no error, no warning) when: no
+roster, zero container agents, multiple container agents (ambiguous), or
+malformed YAML.
+
+- New helper: `soleAgentByEnvironment(roster, env)` in `AgentRoster.ts`
+  (returns `undefined` for both zero and >1 matches — sole-match
+  semantics).
+- 5 new StartCommand tests cover all four skip paths + the happy path.
+
+### Added — `dridock` binary baked into the container image (#46)
+
+`dridock team` and its subverbs (`whoami`, `roster`, `post`, `watch`) now
+run **in-container**, not only on the Mac host. This unblocks the
+SessionStart hook's container-side path — the `/.dockerenv` skip that
+turned it into a silent no-op is deleted; hook now runs the same
+`dridock team watch --once` catch-up + arm-nag on both sides.
+
+- New Dockerfile build stage `dridock-ts-build` (Ubuntu 24.04 + bun)
+  compiles the TS source (`dridock-ts/`) to a standalone Linux binary
+  via `bun build --compile`. Same output shape as the host binary.
+- Compiled binary is COPY'd into both `minimal` and `full` targets at
+  `/usr/local/lib/dridock/dridock` — deliberately off `$PATH` so the
+  existing `/usr/local/bin/dridock` shim owns the user-visible name.
+- Shim (baked `dridock`) adds a `team)` case routing to the binary,
+  keeping all other verbs on their existing `cb-*` implementations
+  (`consult`, `report-bug`, `browser`, `df`) or the "run on Mac"
+  message for host-only verbs. Help text updated.
+- `.claude/hooks/team-watch-session-start.sh` unified to a single
+  code path — the `/.dockerenv` early-exit block is removed; the hook
+  now uses `command -v dridock` as its guard on both sides.
+
+The source directory keeps its `dridock-ts` name (unambiguous reference
+to the TypeScript port); the compiled binary is plain `dridock` (no
+"-ts" holdover for the artifact users type).
+
+### Fixed — statusline silent when `.nodridock` disables dridock in the tree
+
+Statusline was printing `cb-<id>` from any `.dridock/config.yml` found
+walking up — even in the harness repo itself (which has `.nodridock`)
+or a native Mac session with no colima VM, surfacing bogus VM ids that
+had no VM behind them. Now checks for `.nodridock` before `config.yml`
+(marker protects every subdir).
+
+### Notes
+
+MINOR bump justified per CLAUDE.md: **new forwarded env var**
+(`DRIDOCK_AGENT_NAME`) is a host↔container IPC contract change, and a
+new container-side surface (`dridock team ...`) is a runnable-verb
+addition. Rebuild path: `make build` + `dridock down` + `dridock start`
+(image tag update + container recreate — `./install.sh` alone does not
+rebuild the image; `dridock start` on an existing container reuses the
+old image bits).
+
 ## [4.0.1] — 2026-07-28 _(fork)_
 
 ### Fixed — image build: NodeSource install broken → nodejs.org tarball (#53)
