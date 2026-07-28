@@ -58,7 +58,9 @@ STALE_SECS="${DRIDOCK_WATCH_STALE_SECS:-300}"
 
 warn_stale() {
     echo "⚠ dridock team watch: live loop appears not running ($1)."
-    echo "  Arm it: 'dridock team watch' in a terminal (Ctrl-C to stop; state persisted)."
+    echo "  Arm it via your Monitor tool: 'dridock team watch' (persistent)."
+    echo "  Each event will land as a chat notification. Catch-up runs (--once) do NOT stream live events;"
+    echo "  a terminal-tab watcher does NOT route events to this Claude session — its stdout goes nowhere useful."
     echo ""
 }
 
