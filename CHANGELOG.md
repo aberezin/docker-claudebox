@@ -26,6 +26,27 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.0.1] — 2026-07-28 _(fork)_
+
+### Fixed — image build: NodeSource install broken → nodejs.org tarball (#53)
+
+`deb.nodesource.com/setup_lts.x` and `setup_22.x` now return 403 (NodeSource
+deprecated the setup scripts); `setup_20.x` returns 200 but silently regressed
+to Ubuntu's node 18 with npm split out (missing) → the base node layer fails
+on any cache miss and the later `npm install -g` layer dies exit 127. Any
+attempt to `make build` / `./install.sh` a fresh dridock:latest against a
+cold Docker cache fails.
+
+Replaces the NodeSource install in `Dockerfile` with the official nodejs.org
+tarball (node 20.20.2, arch-detected `arm64`/`x64`, same pattern as the Go
+install). Verified: full `./install.sh` image build green, node + npm
+present, `dridock` installs.
+
+Fix commit: `1cab835` (landed on master by Arfy). Retroactive PATCH bump
+added afterward — without it, `dridock checkversion` cannot distinguish
+the broken July-24 4.0.0 image (still ships the 403-ing NodeSource line)
+from the fixed one, since both would carry the same version label.
+
 ## [4.0.0] — 2026-07-24 _(fork)_
 
 ### Removed — bash `wrapper.sh` (BREAKING; closes #47)
