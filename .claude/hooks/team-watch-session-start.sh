@@ -11,10 +11,11 @@
 # Works in BOTH environments — the `dridock` command exists in both:
 #   - Mac / host:  dridock-ts binary installed via install.sh
 #   - Container:   the baked shim at /usr/local/bin/dridock, which routes
-#                  `team` subverbs to the bun-compiled dridock-ts at
-#                  /usr/local/lib/dridock/dridock-ts (see Dockerfile
-#                  `dridock-ts-build` stage). Path is unified; hook is one
-#                  code path.
+#                  `team` subverbs to the bun-compiled binary at
+#                  /usr/local/lib/dridock/dridock (see Dockerfile
+#                  `dridock-ts-build` stage — the source dir keeps its
+#                  `dridock-ts` name; the compiled binary is plain `dridock`).
+#                  Path is unified; hook is one code path.
 # Heartbeat + cursor state live under `$XDG_CONFIG_HOME/dridock/watch-cursors/`
 # on both sides (container's XDG is bind-mounted from
 # `<xdg>/projects/<id>/claude/` on the host, so heartbeat state is per-project
