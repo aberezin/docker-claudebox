@@ -117,44 +117,39 @@ value of `$DRIDOCK_AGENT_NAME`).
 | `<agent>.jsonl.session-cursors.json` | SessionStart + UPS  | `{session_id: last_drained_byte_offset}` — per-session drain cursor. |
 | `<agent>.jsonl.respawn-stamp`     | UPS                   | Unix epoch of last respawn attempt (for 60s backoff). |
 
-Host + container both use the same path convention (`$HOME/.config/dridock/...`),
-but note the persistence caveat below.
+## State persistence
 
-## State persistence (known gap)
+Persistence works on both sides, but the mechanism is asymmetric:
 
-**The container's `$HOME/.config` is not currently bind-mounted from
-the host.** Only `~/.claude`, `~/.ssh`, `~/framework-bugs`,
-`~/framework-consult` are (verified via `mount | grep home/claude` in
-a running container as of 2026-07-29).
+- **Host (macOS)**: `~/.config` is machine-wide; state at
+  `~/.config/dridock/inbox/<agent>.jsonl` (and the sibling
+  cursors/pidfile/log) persists across Claude Code restarts and Mac
+  reboots as an ordinary file.
+- **Container**: the container's `~/.config` is on the ephemeral
+  container FS (only `~/.claude`, `~/.ssh`, `~/framework-bugs`,
+  `~/framework-consult` are bind-mounted). Fix (#58, v4.2.1):
+  `entrypoint.sh` sets `XDG_CONFIG_HOME=/home/claude/.claude/xdg-config`
+  at boot — a subdir of the already-bind-mounted `~/.claude/`. Every
+  XDG-consuming subsystem in-container (team-watch state, `gh` config,
+  bun cache, etc.) automatically persists across
+  `dridock down && dridock start` recreates via the existing mount, no
+  new mount or code changes required.
 
-Consequence for delivery: the fetcher's cursor state at
-`<xdg>/dridock/watch-cursors/github.state.json` lives on the ephemeral
-container FS and is wiped when the container is recreated
-(`dridock down && dridock start` post `make build`). On next spawn the
-fetcher hits `GithubWatchSource.ts:54` with an empty cursor → maps to
-`nowIso()` → **events posted during the container-down window are
-lost.** The heartbeat file, dedup ring, and inbox itself share the
-same fate.
+So the on-disk paths differ slightly (`~/.config/dridock/...` on host vs
+`~/.claude/xdg-config/dridock/...` in container), but both are stable
+per-agent locations that survive teardown. The **agreement is
+functional, not path-level** — documented explicitly here rather than
+claiming they're identical.
 
-The inbox spool being non-persistent doesn't help either: even if the
-cursor survived, an ephemeral inbox means SessionStart's drain cursor
-in `<inbox>.session-cursors.json` is also fresh, so a first-boot
-session sees an empty drain regardless.
-
-Two orthogonal fixes possible:
-
-1. **Move state under `~/.claude/`** (bind-mounted → persists). Cleanest
-   for the fetcher-only use case — inbox, cursor, pidfile, log all
-   under `~/.claude/dridock/inbox/`. Requires updating `xdgRoot()` or
-   introducing a dedicated state-dir env var.
-2. **Add `~/.config` to the entrypoint's bind-mount set.** Broader
-   fix — every claudebot workload storing state under XDG_CONFIG_HOME
-   gains persistence for free. Bigger surface + coordination cost.
-
-Tracked as a follow-up. Until then: **do not treat the team-bus as a
-guaranteed message queue across container rebuilds.** The dedup ring
-still prevents double-delivery within a session, but events posted
-during a rebuild window are unrecoverable.
+**Loud fresh-start signal**: when the fetcher spawns with an empty
+cursor (first-ever install, or state-loss for any reason),
+`TeamCommand.runWatch` prints a `⚠️ FRESH START — no prior cursor`
+warning to stderr → the fetcher's log file. Historical events posted
+before that timestamp are NOT replayed (the alternative — deep
+backfill of a potentially huge inbox — is worse). The warning makes
+the "starting fresh" case visible instead of silent, so operators can
+tell the difference between "empty inbox because nothing was posted"
+and "empty inbox because state was reset."
 
 ## Fetcher lifecycle
 

@@ -21,10 +21,10 @@ import type { WatcherSource } from "./WatcherEvent.ts";
  * ```
  * Path is caller-controlled via `basePath`. In practice both host and
  * container use `<xdg>/watch-cursors/` today (see TeamCommand.ts:runWatch).
- * KNOWN GAP: the container's `<xdg>` (`$HOME/.config`) is NOT bind-mounted
- * from the host currently, so a container recreate loses cursor state and
- * events posted during the down window are dropped (fetcher restarts at
- * `nowIso()`). Persistence fix tracked as a follow-up on #56.
+ * Persistence: on host, `~/.config` is machine-wide; in-container
+ * (post-#58) `entrypoint.sh` sets `XDG_CONFIG_HOME=/home/claude/.claude/xdg-config`,
+ * a subdir of the bind-mounted `~/.claude/`, so state survives
+ * `dridock down && dridock start` recreates.
  *
  * All operations are best-effort — a corrupt state file is treated as
  * absent (initial state) rather than throwing. Rationale: watcher

@@ -225,16 +225,14 @@ export class TeamCommand implements Command {
       return 1;
     }
 
-    // Resolve state dir. Both host + container use `<xdg>/watch-cursors/`.
-    // KNOWN GAP (see agent-teams-delivery.md "State persistence" section
-    // + follow-up issue): the container's `<xdg>` (`$HOME/.config`) is
-    // NOT currently bind-mounted from the host — only `~/.claude`,
-    // `~/.ssh`, `~/framework-bugs`, `~/framework-consult` are. So a
-    // container recreate wipes the fetcher's cursor, and any events
-    // posted during the down window are lost (fetcher restarts at
-    // nowIso() per GithubWatchSource.ts). Fix requires either moving
-    // state under `~/.claude/` or adding a `~/.config` bind mount —
-    // tracked as a follow-up.
+    // Resolve state dir. Both host + container use `<xdg>/watch-cursors/`,
+    // where `<xdg>` = `$XDG_CONFIG_HOME/dridock` (falls back to
+    // `~/.config/dridock` if unset). Host: XDG_CONFIG_HOME is unset by
+    // default → `~/.config/dridock/watch-cursors/`, machine-wide. Container
+    // (post-#58): entrypoint.sh sets XDG_CONFIG_HOME to
+    // `/home/claude/.claude/xdg-config` — a subdir of the bind-mounted
+    // `~/.claude/` — so state PERSISTS across container recreates. Same
+    // code path both sides; the container's environment does the redirect.
     const stateDir = opts.stateDir ?? `${await xdgRoot(ctx.fs, ctx.env.raw(), ctx.home)}/watch-cursors`;
 
     const runner = this.deps.host ?? new RealHostCommandRunner();
@@ -279,6 +277,23 @@ export class TeamCommand implements Command {
 
     // Surface config so the user sees what's running.
     ctx.stderr.write(`👀 team watch: self=${selfName}, repo=${repo}, interval=${opts.intervalMs}ms${opts.once ? " (once)" : ""}${opts.inbox !== undefined ? `, inbox=${opts.inbox}` : ""}\n`);
+
+    // FRESH-START warning (Arfy's #56 mitigation, landed with #58): if the
+    // persisted cursor is empty, this is the first spawn (post-install or
+    // post-state-loss). `GithubWatchSource.poll("")` maps to `nowIso()` so
+    // historical events are NOT replayed. Make that loud on stderr —
+    // otherwise the log looks identical to a clean resume, and any events
+    // posted before this timestamp are gone with no signal. Only bother in
+    // --inbox (fetcher) mode: a `--once` SessionStart catch-up has its own
+    // "no cursors file yet" note printed from the hook.
+    if (opts.inbox !== undefined && !opts.once) {
+      const initialState = await store.load();
+      if (initialState.cursor === "") {
+        ctx.stderr.write(`⚠️  team watch: FRESH START — no prior cursor at ${stateDir}.\n`);
+        ctx.stderr.write(`    Historical events posted before this spawn will NOT be delivered.\n`);
+        ctx.stderr.write(`    Persistence begins now; subsequent restarts pick up where this run left off.\n`);
+      }
+    }
 
     // Single-tick mode (SessionStart catch-up).
     if (opts.once) {

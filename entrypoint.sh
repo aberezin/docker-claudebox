@@ -742,6 +742,34 @@ _dridock_alias_env() {
 }
 _dridock_alias_env
 
+# ── XDG_CONFIG_HOME → ~/.claude/xdg-config (persistence, #58) ────────────────
+# Fix for the silent-event-loss-on-rebuild class Arfy caught in #56 review
+# after v4.2.0 shipped: the container's default $HOME/.config lives on the
+# EPHEMERAL container FS, not on any bind mount. Verified: `mount | grep
+# home/claude` in a running 4.2.0 container lists .claude, .ssh,
+# framework-bugs, framework-consult — never .config. So anything under
+# XDG_CONFIG_HOME/dridock/ (team-watch cursors, inbox, heartbeat, session
+# cursors, pidfiles, logs, respawn stamps) was WIPED on every
+# `dridock down + dridock start` post `make build`, and the fetcher
+# restarted at nowIso() with zero signal that events posted during the
+# down window were dropped.
+#
+# The fix here is minimal: re-point XDG_CONFIG_HOME at a subdir of the
+# already-bind-mounted ~/.claude/. No new mount, no code changes elsewhere,
+# no half-host-half-container confusion (Arfy's argument on #58 against
+# adding a ~/.config bind mount outright — see the "persistence" section
+# in docs/design/agent-teams-delivery.md). Host is unaffected; this export
+# is container-only.
+#
+# Every XDG-consuming subsystem in-container (dridock team watch state, gh
+# CLI config, bun cache, etc.) benefits from persistence for free. Chown
+# to claude:claude so the setpriv'd child owns it — mkdir here runs as
+# root and would default to root:root without an explicit chown.
+mkdir -p /home/claude/.claude/xdg-config
+chown -R claude:claude /home/claude/.claude/xdg-config 2>/dev/null || true
+export XDG_CONFIG_HOME=/home/claude/.claude/xdg-config
+dbg "XDG_CONFIG_HOME=$XDG_CONFIG_HOME (persistence via ~/.claude bind mount, #58)"
+
 # mode env vars — CLAUDEBOX_MODE_* canonical, CLAUDE_MODE_* legacy fallback
 _mode_api="${DRIDOCK_MODE_API:-${CLAUDE_MODE_API:-}}"
 _mode_api_port="${DRIDOCK_MODE_API_PORT:-${CLAUDE_MODE_API_PORT:-8080}}"

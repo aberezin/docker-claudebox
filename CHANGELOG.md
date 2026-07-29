@@ -26,6 +26,61 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.2.1] — 2026-07-30 _(fork)_
+
+### Fixed — container team-watch state now persists across recreate (#58)
+
+Follow-up to v4.2.0's reliable-delivery release. Arfy caught the gap
+during host-side verification: the container's `~/.config` is on the
+ephemeral container FS (only `~/.claude`, `~/.ssh`,
+`~/framework-bugs`, `~/framework-consult` are bind-mounted — verified
+via `mount | grep home/claude`). So the fetcher's cursor, dedup ring,
+inbox, heartbeat, pidfile, log, session-cursors, and respawn-stamp
+were ALL wiped on every `dridock down && dridock start` post
+`make build`, and the next fetcher spawn hit `nowIso()` with zero
+signal that events posted during the down window were dropped —
+undermining the "reliable-by-construction" promise of v4.2.0.
+
+Fix — single line in `entrypoint.sh`:
+
+```sh
+export XDG_CONFIG_HOME=/home/claude/.claude/xdg-config
+```
+
+Re-points the container's XDG config root at a subdir of the already-
+bind-mounted `~/.claude/`. Zero code changes elsewhere: every XDG-
+consuming subsystem in-container (team-watch state, `gh` CLI config,
+bun cache, etc.) automatically gains persistence via the existing
+mount. No new bind mount, no half-host-half-container confusion
+(Arfy's objection to Option B on #58), no TS refactor to introduce a
+dedicated state-home helper. The `mkdir -p` + `chown claude:claude`
+ahead of the export ensure the dir exists with the right ownership
+before setpriv drops to the claude user.
+
+Host is unaffected — this export is container-only.
+
+**Path asymmetry documented**: on host, state remains at
+`~/.config/dridock/...`; in container it's now at
+`~/.claude/xdg-config/dridock/...`. The delivery-model spec
+(`docs/design/agent-teams-delivery.md`) makes this explicit rather
+than claiming the paths agree by construction (as an earlier version
+of the doc incorrectly did).
+
+**Also — loud fresh-start signal (Arfy's mitigation on #56)**:
+`TeamCommand.runWatch` now prints a `⚠️ FRESH START — no prior cursor`
+warning to stderr → the fetcher's log file when the persisted cursor
+is empty (first-ever install, or state-loss for any reason). Same
+CLAUDE.md-rule fix Arfy applied elsewhere in this review chain:
+silent skip becomes visible signal.
+
+### Notes
+
+PATCH bump per CLAUDE.md — bug fix for silent event loss on container
+recreate. No IPC contract change: same inbox JSONL format, same hook
+handoff, same fetcher lifecycle verbs. Only the on-disk location of
+state moves (in-container), and only via env-var indirection that
+existing code was already honoring.
+
 ## [4.2.0] — 2026-07-29 _(fork)_
 
 ### Added — reliable-by-construction team-bus delivery (container-side; #56)
