@@ -43,6 +43,17 @@ if ! dridock team roster >/dev/null 2>&1; then
     exit 0
 fi
 
+# ─── version gate: `--inbox` needs 4.2.0+ ────────────────────────────
+# A branch checkout without ./install.sh arms these hooks against a
+# pre-4.2.0 binary. --inbox mode + fetcher verbs aren't there yet;
+# spawning would immediately crash with "unexpected argument".
+# Refuse loudly and instruct the fix (Arfy's related-#1 finding on #56).
+if dridock team fetcher status --inbox /dev/null 2>&1 | grep -q "unknown subcommand"; then
+    echo "⚠ team-watch: installed dridock binary predates 4.2.0 (missing 'fetcher' verb) — skipping this hook."
+    echo "  Fix: on the host, git pull + ./install.sh; in-container, make build + dridock down + dridock start."
+    exit 0
+fi
+
 # ─── read Claude's SessionStart JSON payload for session_id ────────────
 # Payload shape: {"session_id":"...","hook_event_name":"SessionStart",
 #                 "cwd":"...","source":"startup|resume|clear"}
@@ -70,19 +81,34 @@ _cursors="$_inbox.session-cursors.json"
 mkdir -p "$(dirname "$_inbox")"
 
 # ─── Step 1: fetcher liveness → spawn if dead/missing ────────────────
+# Two-part liveness (spec #56 open loop #4): kill -0 AND ps cmdline
+# match. After a reboot the recorded pid is very likely held by an
+# unrelated process → kill -0 succeeds → without cmdline check we'd
+# green-light silent starvation. Match on "dridock team watch" AND the
+# specific inbox path (unique per agent+env by construction).
+_check_fetcher_alive() {
+    local pid="$1"
+    [ -n "$pid" ] || return 1
+    kill -0 "$pid" 2>/dev/null || return 1
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF "dridock team watch" || return 1
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF "$_inbox" || return 1
+    return 0
+}
+
 _spawn_fetcher=0
 if [ -f "$_pid" ]; then
     _pidval="$(cat "$_pid" 2>/dev/null || true)"
-    if [ -n "$_pidval" ] && kill -0 "$_pidval" 2>/dev/null; then
-        : # alive — nothing to do
+    if _check_fetcher_alive "$_pidval"; then
+        : # alive AND cmdline matches — nothing to do
     else
-        # Stale pidfile → the previous fetcher died. Surface the log's
-        # last line so an immediate-crash loop is diagnosable, then
-        # respawn.
+        # Stale pidfile → the previous fetcher died OR the pid was
+        # reused by an unrelated process (reboot / wraparound).
+        # Surface log's last line so an immediate-crash loop is
+        # diagnosable, then respawn.
         if [ -f "$_log" ]; then
             _last_log="$(tail -n 1 "$_log" 2>/dev/null || true)"
             if [ -n "$_last_log" ]; then
-                echo "⚠ team fetcher: previous fetcher died (pid $_pidval no longer alive). Last log line: $_last_log"
+                echo "⚠ team fetcher: previous fetcher gone (pid $_pidval not alive or cmdline mismatch). Last log line: $_last_log"
                 echo "  Full log: $_log"
             fi
         fi
@@ -97,7 +123,27 @@ if [ "$_spawn_fetcher" = 1 ]; then
     # Detach fully: stdin from /dev/null, stdout+stderr to log, subshell
     # + disown so this hook can exit while the fetcher lives on.
     ( nohup dridock team watch --inbox "$_inbox" >>"$_log" 2>&1 & disown ) >/dev/null 2>&1 || true
-    echo "🚀 team fetcher: spawned (nohup, detached). log=$_log"
+
+    # Verify the spawn actually took (Arfy's nit #1): a subshell + &
+    # returns immediately regardless of the child's fate, so we need to
+    # check pidfile appeared + pid matches expected cmdline before
+    # claiming "spawned". If the child died at startup (missing binary,
+    # rejected flag, permission), surface the log so it's obvious.
+    sleep 1
+    _spawn_pid="$(cat "$_pid" 2>/dev/null || true)"
+    if _check_fetcher_alive "$_spawn_pid"; then
+        echo "🚀 team fetcher: spawned (nohup, detached, pid=$_spawn_pid). log=$_log"
+    else
+        echo "⚠ team fetcher: spawn attempted but pid not alive OR cmdline mismatch."
+        if [ -f "$_log" ]; then
+            _tail_log="$(tail -n 3 "$_log" 2>/dev/null || true)"
+            if [ -n "$_tail_log" ]; then
+                echo "  Last log lines:"
+                printf '%s\n' "$_tail_log" | sed 's/^/    /'
+            fi
+        fi
+        echo "  log=$_log"
+    fi
 fi
 
 # ─── Step 2: drain unread inbox slice into SessionStart context ──────
