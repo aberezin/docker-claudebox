@@ -137,12 +137,11 @@ Command interface addition).
 
 ### Fixed — catch-up drain silently dropped events (#56 review round)
 
-Late-review blocker Arfy caught by reproducing the catch-up leg with
+Late-review blockers Arfy caught by reproducing the catch-up leg with
 a real gap-event: a message that landed in her inbox while her
 session was down was NOT surfaced on resume, and the state file was
-overwritten in a way that erased the evidence.
-
-Two structural bugs in `team-watch-session-start.sh`, both fixed:
+overwritten in a way that erased the evidence. Four related bugs in
+`team-watch-session-start.sh`, all fixed:
 
 - **Cursor advanced unconditionally.** The cursors-file write ran on
   every hook invocation regardless of whether drain actually emitted
@@ -156,8 +155,29 @@ Two structural bugs in `team-watch-session-start.sh`, both fixed:
   **stdout** as agent context; stderr is not surfaced. The one loud
   signal designed for exactly the "we defaulted to EOF, catch-up was
   skipped" case was invisible to the party that needed it. Fixed by
-  emitting the note on stdout, with follow-up hints on how to inspect
-  or replay.
+  emitting the note on stdout.
+- **Unknown session_id fallback was infinite-skip.** With the previous
+  two fixes, an unknown session_id defaulted to EOF, skipped drain,
+  and left no cursor entry — so the next run of the same session
+  re-evaluated as unknown and skipped again. Gap events surfaced
+  loudly but never actually got delivered. Fixed by inferring
+  `_last_offset` from `max(existing cursor offsets)` when the
+  session_id is unknown but the cursors file has other entries —
+  Arfy's option (d): catch up from wherever the newest known consumer
+  last got to. Self-heals a new session_id with no replay-all and no
+  new verb. Empty cursors file (truly no evidence) still defaults to
+  EOF + loud note.
+- **The recovery hint pointed at a broken path.** The previous hint —
+  "remove cursors and re-arm to replay" — landed right back in the
+  `[ ! -f cursors ]` branch that defaults to EOF. Zero events
+  replayed, and worse, the agent that followed the hint concluded
+  there was nothing to see. Same green-light-on-broken-path class as
+  the originals. Replaced with an actual working command:
+  `cat $INBOX | jq -s '.'`.
+
+Also: cursors file is now bounded at the last 10 entries by insertion
+order — max() under option (d) scans the file so a runaway entry
+count is real tail latency.
 
 ### Notes
 
