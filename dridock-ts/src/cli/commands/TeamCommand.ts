@@ -11,6 +11,7 @@ import { GithubWatchSource } from "../../services/GithubWatchSource.ts";
 import { WatcherStore } from "../../services/WatcherStore.ts";
 import { runOneTick, type WatcherSink, type WatcherTickSummary } from "../../services/WatcherLoop.ts";
 import { makeInboxSink, inboxPathFor, pidfileFor, logfileFor } from "../../services/InboxSink.ts";
+import { isPidAlive, RealProcessProbe, type ProcessProbe } from "../../services/PidLiveness.ts";
 import { xdgRoot } from "../../domain/paths.ts";
 
 /**
@@ -384,7 +385,7 @@ export class TeamCommand implements Command {
       ctx.stdout.write(`fetcher: pidfile at ${pidPath} is malformed (${pidText.trim()})\n`);
       return 1;
     }
-    const alive = isPidAlive(pid, inboxPath);
+    const alive = isPidAlive(pid, inboxPath, this.deps.probe ?? new RealProcessProbe());
     ctx.stdout.write(`fetcher: ${alive ? "alive" : "DEAD (stale pidfile — pid not alive OR cmdline mismatch)"} (pid=${pid})\n`);
     ctx.stdout.write(`  inbox: ${inboxPath}\n`);
     ctx.stdout.write(`  log:   ${logPath}\n`);
@@ -413,7 +414,7 @@ export class TeamCommand implements Command {
     // If the recorded pid is alive but doesn't match our fetcher (pid
     // wraparound / reboot), SIGTERM'ing it would kill an unrelated
     // process. Treat mismatch as stale pidfile, not a live fetcher.
-    if (!isPidAlive(pid, inboxPath)) {
+    if (!isPidAlive(pid, inboxPath, this.deps.probe ?? new RealProcessProbe())) {
       ctx.stderr.write(`team fetcher stop: pid ${pid} is not our fetcher (dead or cmdline mismatch); removing stale pidfile.\n`);
       try { await ctx.fs.removeFile(pidPath); } catch { /* best-effort */ }
       return 0;
@@ -515,6 +516,10 @@ export interface TeamCommandDeps {
   readonly host: HostCommandRunner;
   /** Injected in tests to skip real 30s sleeps between poll ticks. */
   readonly sleep: (ms: number) => Promise<void>;
+  /** Injected in tests for `dridock team fetcher status|stop` — the
+   *  cmdline-verifying pid-liveness probe (spec #56 open loop #4).
+   *  Prod default is [[RealProcessProbe]] (spawns `ps -p <pid>`). */
+  readonly probe: ProcessProbe;
 }
 
 interface WatchOpts {
@@ -541,52 +546,6 @@ function stripHeaderFromSummary(summary: string): string {
 
 async function defaultSleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
-}
-
-/** Liveness probe with cmdline verification (spec #56 open loop #4:
- *  don't confuse a wrapped-around PID owned by an unrelated process
- *  for our fetcher — that's the exact silent-starvation-with-green-
- *  light class this hook exists to prevent).
- *
- *  Two-part check:
- *    1. `kill(pid, 0)` — cheap "does anything live under this pid?"
- *    2. `ps -p <pid> -o command=` — verify the cmdline contains BOTH
- *       "dridock team watch" (the tool) AND `expectedCmdlineContains`
- *       (the inbox path — unique per agent+env by construction).
- *
- *  When `expectedCmdlineContains` is omitted (edge case: caller only
- *  wants a bare-pid check), part 2 is skipped. Note: an EPERM from
- *  `kill(pid, 0)` is NOT treated as alive here — post-reboot pid
- *  wraparound where our recorded pid is now owned by root reads as
- *  EPERM; without cmdline confirmation we'd have a green light on
- *  starvation. Better a false-dead (respawn) than a false-alive
- *  (silent starvation). */
-function isPidAlive(pid: number, expectedCmdlineContains?: string): boolean {
-  try {
-    process.kill(pid, 0);
-  } catch {
-    return false;
-  }
-  if (expectedCmdlineContains === undefined) return true;
-  try {
-    // spawnSync from bun / node.js child_process — either works. Bun.spawnSync
-    // is available at runtime; use it directly to avoid an import dance.
-    const bun = (globalThis as { Bun?: { spawnSync?: (args: string[]) => { stdout: Uint8Array; exitCode: number } } }).Bun;
-    if (bun?.spawnSync !== undefined) {
-      const res = bun.spawnSync(["ps", "-p", String(pid), "-o", "command="]);
-      if (res.exitCode !== 0) return false;
-      const cmdline = new TextDecoder().decode(res.stdout);
-      return cmdline.includes("dridock team watch") && cmdline.includes(expectedCmdlineContains);
-    }
-    // Fallback for the Node test-runner case: use execSync from child_process.
-    // Loaded lazily so the Bun path stays zero-import in the common case.
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { execSync } = require("node:child_process") as { execSync: (cmd: string, opts: { encoding: string }) => string };
-    const cmdline = execSync(`ps -p ${pid} -o command=`, { encoding: "utf-8" });
-    return cmdline.includes("dridock team watch") && cmdline.includes(expectedCmdlineContains);
-  } catch {
-    return false;
-  }
 }
 
 /** Read stdin exhaustively into a string. Returns "" if stdin is a TTY
