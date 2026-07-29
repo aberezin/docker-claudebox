@@ -199,6 +199,18 @@ export class InMemoryFileSystem implements FileSystem {
     // single atomic reference. Just record the write.
     await this.writeText(path, content, opts);
   }
+
+  async appendText(path: string, content: string): Promise<void> {
+    const existing = this.files.get(path)?.content ?? "";
+    const mode = this.files.get(path)?.mode;
+    this.files.set(path, { content: existing + content, mode });
+    this.recordedWrites.push({ path, content, mode });
+    let dir = dirnameOf(path);
+    while (dir && dir !== "/" && dir !== ".") {
+      this.directories.add(dir);
+      dir = dirnameOf(dir);
+    }
+  }
 }
 
 /** Local `dirname` — avoids importing node:path so this file is trivially portable. */

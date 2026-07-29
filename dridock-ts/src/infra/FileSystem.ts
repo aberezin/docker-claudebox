@@ -60,4 +60,14 @@ export interface FileSystem {
    * permission bits (defaults to 0o644; migrators pass 0o600 for secrets).
    */
   writeTextAtomic(path: string, content: string, opts?: { mode?: number }): Promise<void>;
+
+  /**
+   * Append UTF-8 content to a file, creating it (with parent dirs) if
+   * missing. NOT atomic per-write — the caller passes content that's
+   * safe to interleave (a single newline-terminated JSONL record is the
+   * intended shape, and POSIX writes shorter than PIPE_BUF are atomic
+   * for the read side). Used by the `--inbox` fetcher mode of
+   * `dridock team watch` to spool events to a per-agent inbox file.
+   */
+  appendText(path: string, content: string): Promise<void>;
 }

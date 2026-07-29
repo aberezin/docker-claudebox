@@ -26,6 +26,95 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.2.0] — 2026-07-29 _(fork)_
+
+### Added — reliable-by-construction team-bus delivery (container-side; #56)
+
+The gap #56 exposed: `dridock team watch` was sound as a primitive but
+getting its output into a Claude session was per-session ritual with
+silent failure modes (session opens with no live layer, terminal watcher
+dies when the terminal is used, terminal watcher starves the agent via
+shared cursor, session-scoped Monitor dies with session). This release
+lands the container-side of the redesign (host-side is Arfy's parallel
+build).
+
+**New fetcher mode**: `dridock team watch --inbox <path>` writes one
+JSONL line per surfaced event to a per-agent inbox file
+(`{observedAt, source, kind, ref, sender, recipients, summary,
+fingerprint, url}`) instead of stdout. Same GitHub polling, cursor, and
+dedup as stdout mode — different sink. State files: pidfile at
+`<path>.pid`, stderr log at `<path>.log`, per-session drain offsets at
+`<path>.session-cursors.json`. SIGTERM = clean shutdown (removes pidfile).
+
+**Per-agent inbox files kill the starvation class**: Bear writes to
+`Bear.jsonl`, Arfy to `Arfy.jsonl`. Different files, different fds,
+different cursors — a human `tail -F`ing an inbox never advances any
+agent's delivery state.
+
+**New verb `dridock team fetcher <status|stop|log>`** — lifecycle
+inspection and control for the detached fetcher. status returns rc=0
+alive, rc=1 stale-pidfile-or-dead, rc=2 no-pidfile. stop = SIGTERM +
+cleanup. log = last N lines of the stderr log. Default inbox path
+(convention: `<xdg-dridock>/inbox/<agent>.jsonl`), override with
+`--inbox <path>`.
+
+**SessionStart hook rewritten** (`.claude/hooks/team-watch-session-start.sh`)
+to spawn/verify fetcher + drain inbox slice into session context +
+print the exact Monitor arm command with the substituted post-drain
+offset. Drain uses `<inbox>.session-cursors.json` keyed by Claude
+Code's `session_id` (stable across resume — Alan confirmed). Unknown
+session_id defaults to CURRENT EOF with a loud stderr note; never
+replay-all, never silent EOF (spec #56 open loop #3).
+
+**Handoff-race safe** (spec #56 open loop #1): the Monitor's tail
+starts at `current_EOF + 1` — the drain covered up-to-EOF, the tail
+covers EOF-onwards. The `[X, Y)` events-in-flight class is closed by
+construction.
+
+**New UserPromptSubmit hook**
+(`.claude/hooks/team-watch-user-prompt-submit.sh`) fires per user
+prompt to make silent-degrade impossible mid-session:
+- **Fetcher liveness**: if pidfile is stale/missing → surface last log
+  line + respawn (60s backoff — a crash-looping fetcher doesn't burn
+  one spawn per turn).
+- **Consumer liveness**: if inbox has grown past this session's drain
+  offset AND no `tail -F` process is consuming the inbox →
+  self-healing: print the delta events in-line + re-print the arm
+  command with the fresh offset. Turns "landed but nobody read it"
+  into a visible in-session event.
+
+**New FileSystem primitive** `appendText(path, content)` — used by the
+inbox sink to append JSONL lines (POSIX O_APPEND guarantees per-write
+atomicity below PIPE_BUF, so records don't interleave).
+
+### Design
+
+Full design + evolution: [issue #56](https://github.com/aberezin/docker-claudebox/issues/56)
+(Arfy filed with 4 candidate directions; Bear + Alan analysis
+converged on a lighter-than-proposed shape: nohup-detached fetcher +
+inbox file, SessionStart hook self-arms, no launchd/systemd, no
+wrapper script). Arfy verified the design pre-build with 5 blocking
+concerns — all resolved in this release (drain→arm race, consumer
+ritual, session offset stability, orphan class, loud-fail spawn).
+
+### Ownership split
+
+- **Container-side** (this release, Bear): TS source (inbox mode +
+  fetcher verbs + FileSystem.appendText), in-container hook scripts,
+  `.claude/settings.json` registration.
+- **Host-side** (Arfy's parallel build, tracked on #56): macOS
+  SessionStart wiring in `.claude/settings.local.json`, macOS
+  inbox-path convention verification, host-native `tail -F` behavior
+  check.
+
+### Notes
+
+MINOR bump per CLAUDE.md — new IPC contract (per-agent inbox files +
+session-cursors state file) between the fetcher and its consumers
+(hook drain, Monitor tail). Same host binary + container binary as
+4.1.0 (shared dridock-ts source), so the host and container both pick
+up the fetcher verbs from one `./install.sh` + `make build`.
+
 ## [4.1.0] — 2026-07-28 _(fork)_
 
 ### Added — colima profile surfaced in Claude Code + `/dridock` skill

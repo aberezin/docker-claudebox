@@ -1,4 +1,4 @@
-import { mkdir, writeFile, readdir, stat, chmod, rename, unlink, rmdir, rm } from "node:fs/promises";
+import { mkdir, writeFile, readdir, stat, chmod, rename, unlink, rmdir, rm, appendFile } from "node:fs/promises";
 import { dirname, basename } from "node:path";
 import type { FileSystem } from "./FileSystem.ts";
 
@@ -25,6 +25,14 @@ export class RealFileSystem implements FileSystem {
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content, "utf8");
     if (opts.mode !== undefined) await chmod(path, opts.mode);
+  }
+
+  async appendText(path: string, content: string): Promise<void> {
+    await mkdir(dirname(path), { recursive: true });
+    // O_APPEND on POSIX guarantees each write is placed at the current
+    // end-of-file atomically vs other appenders, so JSONL records don't
+    // interleave. `appendFile` uses that under the hood.
+    await appendFile(path, content, "utf8");
   }
 
   async exists(path: string): Promise<boolean> {

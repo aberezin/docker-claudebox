@@ -10,6 +10,7 @@ import { formatHeader } from "../../services/AgentTeamHeader.ts";
 import { GithubWatchSource } from "../../services/GithubWatchSource.ts";
 import { WatcherStore } from "../../services/WatcherStore.ts";
 import { runOneTick, type WatcherSink, type WatcherTickSummary } from "../../services/WatcherLoop.ts";
+import { makeInboxSink, inboxPathFor, pidfileFor, logfileFor } from "../../services/InboxSink.ts";
 import { xdgRoot } from "../../domain/paths.ts";
 
 /**
@@ -47,8 +48,8 @@ export class TeamCommand implements Command {
       this.printUsage(ctx);
       return sub === "-h" || sub === "--help" ? 0 : 1;
     }
-    if (sub !== "whoami" && sub !== "roster" && sub !== "post" && sub !== "watch") {
-      ctx.stderr.write(`❌ team: unknown subcommand '${sub}' (allowed: whoami, roster, post, watch)\n`);
+    if (sub !== "whoami" && sub !== "roster" && sub !== "post" && sub !== "watch" && sub !== "fetcher") {
+      ctx.stderr.write(`❌ team: unknown subcommand '${sub}' (allowed: whoami, roster, post, watch, fetcher)\n`);
       return 1;
     }
 
@@ -82,6 +83,7 @@ export class TeamCommand implements Command {
 
     if (sub === "whoami") return this.runWhoami(resolved.selfName, resolved.source, ctx);
     if (sub === "watch") return await this.runWatch(args.slice(1), resolved.selfName, roster, ctx);
+    if (sub === "fetcher") return await this.runFetcher(args.slice(1), resolved.selfName, ctx);
     return await this.runPost(args.slice(1), resolved.selfName, roster, ctx);
   }
 
@@ -207,40 +209,43 @@ export class TeamCommand implements Command {
     const store = new WatcherStore(ctx.fs, stateDir, "github");
     const heartbeatPath = `${stateDir}/github.heartbeat`;
 
-    const sink: WatcherSink = {
-      onEvent: (event) => {
-        // stdout — one line per surfaced event. `tail -f`-friendly.
-        const time = event.observedAt.slice(11, 19); // HH:MM:SS
-        const sender = event.header?.sender ?? "<legacy>";
-        // Strip the header prefix from the summary so the display line
-        // doesn't repeat "Arfy->Bear: verified — Arfy: verified".
-        const summary = stripHeaderFromSummary(event.summary);
-        ctx.stdout.write(`[${time}] ${event.ref} ← ${sender}: ${summary}\n`);
-      },
-      onPollFailed: (source, reason) => {
-        // stderr — user-visible warning without polluting the event stream.
-        ctx.stderr.write(`⚠️  team watch: ${source} poll failed: ${reason}\n`);
-      },
-      onTickComplete: async (summary) => {
-        // Heartbeat file — the liveness signal a session-start hook reads
-        // to detect a silently-dead watcher. Best-effort; if writing
-        // fails we don't crash the loop.
-        try {
-          await ctx.fs.writeText(heartbeatPath, JSON.stringify({
-            ...summary,
-            atIso: new Date().toISOString(),
-            self: selfName,
-            repo,
-          }));
-        } catch { /* best-effort */ }
-        if (process.env["DEBUG"] === "true") {
-          ctx.stderr.write(`  tick: ${summary.kind}, seen=${summary.seen}, surfaced=${summary.surfaced}, ${summary.elapsedMs}ms\n`);
-        }
-      },
-    };
+    // Sink selection: `--inbox` = fetcher mode (JSONL append to per-agent
+    // file, spawned detached by SessionStart hook, spec #56); default =
+    // stdout display line (--once for SessionStart catchup, or a human
+    // running the loop in a terminal). Both keep the heartbeat + poll-
+    // failed semantics identical so the SessionStart nag still fires.
+    const sink: WatcherSink = opts.inbox !== undefined
+      ? makeInboxSink({
+          fs: ctx.fs,
+          inboxPath: opts.inbox,
+          selfName,
+          repo,
+          heartbeatPath,
+          stderr: ctx.stderr,
+        })
+      : this.makeStdoutSink(ctx, heartbeatPath, selfName, repo);
+
+    // Fetcher mode (--inbox + LIVE loop, not --once): write pidfile so
+    // `dridock team fetcher status/stop` can find us, and remove it on
+    // clean shutdown. Pidfile format is one line with just the PID —
+    // cheapest possible parse. Written BEFORE the first tick so an
+    // immediate crash still leaves a pidfile the liveness check can
+    // detect+diagnose (stale pid → kill -0 fails → hook reports "died at
+    // boot, see log"). --once mode skips the pidfile: it exits quickly
+    // and isn't the durable background process fetcher-status watches for.
+    if (opts.inbox !== undefined && !opts.once) {
+      try {
+        await ctx.fs.mkdirRecursive(opts.inbox.substring(0, opts.inbox.lastIndexOf("/")));
+        await ctx.fs.writeText(pidfileFor(opts.inbox), `${process.pid}\n`);
+      } catch (e) {
+        ctx.stderr.write(`⚠️  team watch: failed to write pidfile ${pidfileFor(opts.inbox)}: ${e instanceof Error ? e.message : String(e)}\n`);
+        // Continue anyway — the fetcher can still run without a pidfile;
+        // status/stop verbs just won't find it. Loud, not fatal.
+      }
+    }
 
     // Surface config so the user sees what's running.
-    ctx.stderr.write(`👀 team watch: self=${selfName}, repo=${repo}, interval=${opts.intervalMs}ms${opts.once ? " (once)" : ""}\n`);
+    ctx.stderr.write(`👀 team watch: self=${selfName}, repo=${repo}, interval=${opts.intervalMs}ms${opts.once ? " (once)" : ""}${opts.inbox !== undefined ? `, inbox=${opts.inbox}` : ""}\n`);
 
     // Single-tick mode (SessionStart catch-up).
     if (opts.once) {
@@ -248,7 +253,8 @@ export class TeamCommand implements Command {
       return 0;
     }
 
-    // Live loop. SIGINT/SIGTERM → save state (already done per-tick) + exit clean.
+    // Live loop. SIGINT/SIGTERM → save state (already done per-tick) +
+    // remove pidfile (fetcher mode) + exit clean.
     const stopSignal = { stopped: false };
     const handleStop = (): void => {
       if (stopSignal.stopped) return;
@@ -267,7 +273,174 @@ export class TeamCommand implements Command {
     } finally {
       process.removeListener("SIGINT", handleStop);
       process.removeListener("SIGTERM", handleStop);
+      if (opts.inbox !== undefined) {
+        try { await ctx.fs.removeFile(pidfileFor(opts.inbox)); } catch { /* best-effort */ }
+      }
     }
+    return 0;
+  }
+
+  /** Default stdout sink — display-line format, one line per event.
+   *  Used when `--inbox` is NOT set (SessionStart catch-up via --once,
+   *  or a human running the loop in a terminal). */
+  private makeStdoutSink(
+    ctx: Context,
+    heartbeatPath: string,
+    selfName: string,
+    repo: string,
+  ): WatcherSink {
+    return {
+      onEvent: (event) => {
+        const time = event.observedAt.slice(11, 19); // HH:MM:SS
+        const sender = event.header?.sender ?? "<legacy>";
+        // Strip the header prefix from the summary so the display line
+        // doesn't repeat "Arfy->Bear: verified — Arfy: verified".
+        const summary = stripHeaderFromSummary(event.summary);
+        ctx.stdout.write(`[${time}] ${event.ref} ← ${sender}: ${summary}\n`);
+      },
+      onPollFailed: (source, reason) => {
+        ctx.stderr.write(`⚠️  team watch: ${source} poll failed: ${reason}\n`);
+      },
+      onTickComplete: async (summary: WatcherTickSummary) => {
+        try {
+          await ctx.fs.writeText(heartbeatPath, JSON.stringify({
+            ...summary,
+            atIso: new Date().toISOString(),
+            self: selfName,
+            repo,
+          }));
+        } catch { /* best-effort */ }
+        if (process.env["DEBUG"] === "true") {
+          ctx.stderr.write(`  tick: ${summary.kind}, seen=${summary.seen}, surfaced=${summary.surfaced}, ${summary.elapsedMs}ms\n`);
+        }
+      },
+    };
+  }
+
+  /**
+   * `dridock team fetcher <status|stop|log>` — lifecycle inspection +
+   * control for the `--inbox` mode's detached background fetcher (spec
+   * #56, `docs/design/agent-teams-delivery.md`).
+   *
+   * Default inbox path is convention-based (`<xdg>/dridock/inbox/<agent>.jsonl`);
+   * override with `--inbox <path>`. status returns rc=0 if a fetcher is
+   * running, rc=1 if pidfile exists but process is dead (stale), rc=2 if
+   * no pidfile at all. stop = SIGTERM + pidfile cleanup. log = tail the
+   * stderr log next to the inbox.
+   */
+  private async runFetcher(args: readonly string[], selfName: string, ctx: Context): Promise<number> {
+    const sub = args[0];
+    if (sub === undefined || sub === "" || sub === "-h" || sub === "--help") {
+      ctx.stderr.write(`usage: ${ctx.binName} team fetcher <status|stop|log> [--inbox <path>] [--lines N]\n`);
+      ctx.stderr.write(`  Inspect + control the detached team-watch fetcher spawned by the SessionStart hook.\n`);
+      return sub === "-h" || sub === "--help" ? 0 : 1;
+    }
+    if (sub !== "status" && sub !== "stop" && sub !== "log") {
+      ctx.stderr.write(`❌ team fetcher: unknown subcommand '${sub}' (allowed: status, stop, log)\n`);
+      return 1;
+    }
+
+    // Parse --inbox override + --lines (log only). Everything else = error.
+    let inbox: string | undefined;
+    let lines = 40;
+    for (let i = 1; i < args.length; i++) {
+      const a = args[i];
+      if (a === "--inbox" && args[i + 1] !== undefined) { inbox = args[i + 1]; i++; continue; }
+      if (a?.startsWith("--inbox=")) { inbox = a.slice("--inbox=".length); continue; }
+      if (a === "--lines" && args[i + 1] !== undefined) {
+        const n = Number(args[i + 1]);
+        if (!Number.isFinite(n) || n < 1) {
+          ctx.stderr.write(`❌ team fetcher: --lines must be a positive number, got '${args[i + 1]}'\n`);
+          return 1;
+        }
+        lines = n;
+        i++;
+        continue;
+      }
+      ctx.stderr.write(`❌ team fetcher: unexpected argument '${a}'\n`);
+      return 1;
+    }
+
+    // Convention default: <xdg-dridock>/inbox/<selfName>.jsonl.
+    const inboxPath = inbox ?? inboxPathFor(await xdgRoot(ctx.fs, ctx.env.raw(), ctx.home), selfName);
+    const pidPath = pidfileFor(inboxPath);
+    const logPath = logfileFor(inboxPath);
+
+    if (sub === "status") return await this.runFetcherStatus(inboxPath, pidPath, logPath, ctx);
+    if (sub === "stop")   return await this.runFetcherStop(inboxPath, pidPath, ctx);
+    return await this.runFetcherLog(logPath, lines, ctx);
+  }
+
+  private async runFetcherStatus(inboxPath: string, pidPath: string, logPath: string, ctx: Context): Promise<number> {
+    const pidText = await ctx.fs.readTextOrUndefined(pidPath);
+    if (pidText === undefined) {
+      ctx.stdout.write(`fetcher: not running (no pidfile at ${pidPath})\n`);
+      ctx.stdout.write(`  inbox: ${inboxPath}\n`);
+      ctx.stdout.write(`  log:   ${logPath}\n`);
+      return 2;
+    }
+    const pid = Number(pidText.trim());
+    if (!Number.isFinite(pid) || pid <= 0) {
+      ctx.stdout.write(`fetcher: pidfile at ${pidPath} is malformed (${pidText.trim()})\n`);
+      return 1;
+    }
+    const alive = isPidAlive(pid);
+    ctx.stdout.write(`fetcher: ${alive ? "alive" : "DEAD (stale pidfile)"} (pid=${pid})\n`);
+    ctx.stdout.write(`  inbox: ${inboxPath}\n`);
+    ctx.stdout.write(`  log:   ${logPath}\n`);
+    // Last stderr line for a quick health cue — trivial when dead.
+    const logText = await ctx.fs.readTextOrUndefined(logPath);
+    if (logText !== undefined && logText.trim() !== "") {
+      const lastLine = logText.trimEnd().split("\n").at(-1) ?? "";
+      ctx.stdout.write(`  last log line: ${lastLine}\n`);
+    }
+    return alive ? 0 : 1;
+  }
+
+  private async runFetcherStop(inboxPath: string, pidPath: string, ctx: Context): Promise<number> {
+    const pidText = await ctx.fs.readTextOrUndefined(pidPath);
+    if (pidText === undefined) {
+      ctx.stderr.write(`team fetcher stop: no pidfile at ${pidPath} — nothing to stop.\n`);
+      return 2;
+    }
+    const pid = Number(pidText.trim());
+    if (!Number.isFinite(pid) || pid <= 0) {
+      ctx.stderr.write(`team fetcher stop: pidfile at ${pidPath} is malformed (${pidText.trim()}) — removing it.\n`);
+      try { await ctx.fs.removeFile(pidPath); } catch { /* best-effort */ }
+      return 1;
+    }
+    // SIGTERM lets the fetcher's own SIGTERM handler flush state +
+    // remove the pidfile. If it's already dead, kill() throws ESRCH; treat
+    // as success (goal achieved) and clean up the stale pidfile ourselves.
+    try {
+      process.kill(pid, "SIGTERM");
+      ctx.stdout.write(`team fetcher stop: sent SIGTERM to pid ${pid} (inbox=${inboxPath}).\n`);
+      return 0;
+    } catch (e) {
+      // ESRCH means the process is already gone. Anything else is a real
+      // failure (permission, etc.) — surface it.
+      const msg = e instanceof Error ? e.message : String(e);
+      if (msg.includes("ESRCH") || msg.includes("no such process")) {
+        ctx.stderr.write(`team fetcher stop: pid ${pid} is already gone; removing stale pidfile.\n`);
+        try { await ctx.fs.removeFile(pidPath); } catch { /* best-effort */ }
+        return 0;
+      }
+      ctx.stderr.write(`team fetcher stop: failed to signal pid ${pid}: ${msg}\n`);
+      return 1;
+    }
+  }
+
+  private async runFetcherLog(logPath: string, lines: number, ctx: Context): Promise<number> {
+    const text = await ctx.fs.readTextOrUndefined(logPath);
+    if (text === undefined) {
+      ctx.stderr.write(`team fetcher log: no log file at ${logPath}\n`);
+      return 2;
+    }
+    const all = text.split("\n");
+    // Preserve original line ordering; slice last N. Trim trailing empty
+    // line from split so output isn't a stray blank at end.
+    const tail = all.slice(-lines - 1).filter((l, i, arr) => !(i === arr.length - 1 && l === ""));
+    ctx.stdout.write(`${tail.join("\n")}\n`);
     return 0;
   }
 
@@ -289,7 +462,9 @@ export class TeamCommand implements Command {
         continue;
       }
       if (a === "--state-dir" && args[i + 1] !== undefined) { opts.stateDir = args[i + 1]; i++; continue; }
-      ctx.stderr.write(`❌ team watch: unexpected argument '${a}' (allowed: --once, --repo <owner/name>, --interval <ms>, --state-dir <path>)\n`);
+      if (a === "--inbox" && args[i + 1] !== undefined) { opts.inbox = args[i + 1]; i++; continue; }
+      if (a?.startsWith("--inbox=")) { opts.inbox = a.slice("--inbox=".length); continue; }
+      ctx.stderr.write(`❌ team watch: unexpected argument '${a}' (allowed: --once, --repo <owner/name>, --interval <ms>, --state-dir <path>, --inbox <path>)\n`);
       return undefined;
     }
     // Env var overrides — DRIDOCK_WATCH_POLL_INTERVAL_MS is the flag that
@@ -317,6 +492,12 @@ export class TeamCommand implements Command {
     ctx.stderr.write(`                        (SessionStart hook). --repo owner/name overrides\n`);
     ctx.stderr.write(`                        the roster's github_repo. Ctrl-C persists state\n`);
     ctx.stderr.write(`                        and exits cleanly.\n`);
+    ctx.stderr.write(`                        --inbox <path> = fetcher mode: append JSONL to\n`);
+    ctx.stderr.write(`                        per-agent inbox file instead of stdout (spec #56).\n`);
+    ctx.stderr.write(`                        Spawned detached by SessionStart hook; pidfile at\n`);
+    ctx.stderr.write(`                        <path>.pid, stderr log at <path>.log.\n`);
+    ctx.stderr.write(`  fetcher <sub>         inspect/control the --inbox fetcher lifecycle:\n`);
+    ctx.stderr.write(`                        status | stop | log [--lines N] [--inbox <path>]\n`);
   }
 }
 
@@ -332,6 +513,10 @@ interface WatchOpts {
   intervalMs: number;
   repo?: string;
   stateDir?: string;
+  /** When set, switch from stdout display sink to append-JSONL fetcher
+   *  sink writing to this per-agent inbox file. Spawned detached by
+   *  the SessionStart hook (spec: #56). */
+  inbox?: string;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 30_000;
@@ -347,6 +532,21 @@ function stripHeaderFromSummary(summary: string): string {
 
 async function defaultSleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
+}
+
+/** Signal-0 liveness probe. `kill(pid, 0)` sends no signal but returns
+ *  ESRCH if the process doesn't exist and EPERM if it does but we can't
+ *  signal it (still counts as alive). Anything else is treated as dead
+ *  to be safe. */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("EPERM")) return true; // exists, we lack permission — still alive
+    return false;
+  }
 }
 
 /** Read stdin exhaustively into a string. Returns "" if stdin is a TTY
