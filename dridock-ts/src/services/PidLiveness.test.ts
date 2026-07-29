@@ -93,12 +93,19 @@ describe("isPidAlive — cmdline verification (the whole point of #56 #4)", () =
     expect(isPidAlive(1234, OUR_INBOX, probe)).toBe(true);
   });
 
-  test("empty expectedCmdlineContains string matches everything (edge case, don't do this)", () => {
-    // `"".includes("")` returns true — an empty substring is a
-    // wildcard. Callers must pass a non-empty string; not enforced
-    // here but documented so nobody thinks it's a bug.
-    const probe = new FakeProbe(new Set([1234]), new Map([[1234, "totally unrelated"]]));
-    expect(isPidAlive(1234, "", probe)).toBe(false); // fails on "dridock team watch" hardcode still
+  test("empty expectedCmdlineContains → false, even against a real fetcher cmdline", () => {
+    // Empty string is a wildcard under `.includes("")`. If we let it
+    // through, an empty caller substring paired with a "dridock team
+    // watch" cmdline would return true — a false-positive-alive on
+    // ANY dridock fetcher regardless of which agent's inbox we asked
+    // about. Same shape as the 3 bugs #56 review found: an
+    // under-specified check returning green. Reject at the boundary.
+    // Arfy's residual nit on #56, worth pinning.
+    const probe = new FakeProbe(new Set([1234]), new Map([[1234, OUR_CMDLINE]]));
+    expect(isPidAlive(1234, "", probe)).toBe(false);
+    // And with an unrelated cmdline — same rule.
+    const probe2 = new FakeProbe(new Set([1234]), new Map([[1234, "totally unrelated"]]));
+    expect(isPidAlive(1234, "", probe2)).toBe(false);
   });
 });
 

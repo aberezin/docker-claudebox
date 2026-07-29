@@ -61,6 +61,15 @@ export function isPidAlive(
 ): boolean {
   if (!probe.isRunning(pid)) return false;
   if (expectedCmdlineContains === undefined) return true;
+  // Empty-string is a wildcard under `.includes("")` — every cmdline
+  // "matches" it, which turns the "does this pid belong to our
+  // fetcher?" gate into a false-positive-alive on any pid with a
+  // "dridock team watch" cmdline (or any pid at all if paired with an
+  // undefined+"" caller path). The whole shape of these bugs (#56
+  // review findings) is "an under-specified check trusts the wrong
+  // signal and returns green" — refuse the empty case at the boundary
+  // rather than pin it as expected behavior. Arfy's residual on #56.
+  if (expectedCmdlineContains === "") return false;
   const cmdline = probe.getCommandLine(pid);
   if (cmdline === undefined) return false;
   return cmdline.includes("dridock team watch") && cmdline.includes(expectedCmdlineContains);
