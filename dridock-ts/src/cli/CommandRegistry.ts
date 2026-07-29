@@ -67,6 +67,20 @@ export class CommandRegistry {
         const help = this.commands.get("help" as Verb);
         if (help !== undefined) return await help.run(argv.slice(1), ctx);
       }
+      // -v / --version → route to VersionCommand explicitly BEFORE
+      // falling through to `start`. Rationale (spec #57): the version
+      // is metadata about the installed binary — asking for it must not
+      // require a project dir. Without this intercept, `dridock -v`
+      // in any non-project cwd fell through to `start`, which then
+      // errored with "no dridock project here — run 'dridock
+      // bootstrap' or 'cd' into one." The version query worked from
+      // inside a project (start's flow tolerated it) but never from
+      // outside — making it impossible to check the installed version
+      // for e.g. host↔image drift diagnosis. Now works from anywhere.
+      if (verb === "-v" || verb === "--version") {
+        const version = this.commands.get("version" as Verb);
+        if (version !== undefined) return await version.run(argv.slice(1), ctx);
+      }
       const start = this.commands.get("start" as Verb);
       if (start === undefined) {
         // Fresh compile-registry case — nothing to fall through to.

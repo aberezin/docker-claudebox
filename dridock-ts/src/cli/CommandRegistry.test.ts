@@ -112,6 +112,54 @@ describe("CommandRegistry — dispatch table", () => {
     expect(rc).toBe(0);
     expect(helpCalled).toBe(true);
   });
+
+  // Spec #57: -v / --version must route to `version` and never through
+  // `start`. The bug: since flags fell through to `start`, asking for
+  // the installed version from any non-project cwd errored with "no
+  // dridock project here" — making the version query impossible to
+  // run for e.g. host↔image drift diagnosis (Arfy's exact case
+  // during #56 review).
+  test("-v at top level → routes to version command, NOT start", async () => {
+    const registry = new CommandRegistry();
+    let versionCalled = false;
+    let startCalled = false;
+    registry.register({ verb: "start", run: async () => { startCalled = true; return 0; } });
+    registry.register({ verb: "version", run: async () => { versionCalled = true; return 0; } });
+    const ctx = makeCtx();
+    const rc = await registry.dispatch(["-v"], ctx);
+    expect(rc).toBe(0);
+    expect(versionCalled).toBe(true);
+    expect(startCalled).toBe(false); // the bug was start being called instead
+  });
+
+  test("--version at top level → routes to version command, NOT start", async () => {
+    const registry = new CommandRegistry();
+    let versionCalled = false;
+    let startCalled = false;
+    registry.register({ verb: "start", run: async () => { startCalled = true; return 0; } });
+    registry.register({ verb: "version", run: async () => { versionCalled = true; return 0; } });
+    const ctx = makeCtx();
+    const rc = await registry.dispatch(["--version"], ctx);
+    expect(rc).toBe(0);
+    expect(versionCalled).toBe(true);
+    expect(startCalled).toBe(false);
+  });
+
+  test("-v with version command NOT registered → falls through to start (dev/test edge case)", async () => {
+    // Preserves the pre-fix behavior for registries that don't have
+    // version registered (a shape that only appears in tests /
+    // partial-composition scenarios). Production `buildRegistry()`
+    // always registers version, so this branch is never hit in the
+    // real binary — but the fallthrough matches how `--help` behaves
+    // in the same situation.
+    const registry = new CommandRegistry();
+    let receivedArgs: readonly string[] = [];
+    registry.register({ verb: "start", run: async (args) => { receivedArgs = args; return 0; } });
+    const ctx = makeCtx();
+    const rc = await registry.dispatch(["-v"], ctx);
+    expect(rc).toBe(0);
+    expect(receivedArgs).toEqual(["-v"]);
+  });
 });
 
 describe("CommandRegistry — register + has", () => {

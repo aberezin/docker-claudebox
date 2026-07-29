@@ -54,6 +54,18 @@ export class TeamCommand implements Command {
       return 1;
     }
 
+    // Centralized --help intercept for subverbs (spec #59 part 1). A
+    // `<verb> --help` request is metadata about the command — it must
+    // not require a project dir OR a roster to be resolvable. Any
+    // subverb call with -h/--help in its args prints the subverb's
+    // full usage and returns 0 BEFORE the roster load below runs. This
+    // is the fix for the misleading "unexpected argument '--help'"
+    // error Arfy hit on team post; every subverb gets it in one place.
+    if (args.slice(1).some((a) => a === "-h" || a === "--help")) {
+      this.printSubverbUsage(sub, ctx);
+      return 0;
+    }
+
     // All three subcommands need the roster loaded. Resolve project +
     // roster path first; missing roster is a distinct clear error.
     const git = this.deps.git ?? new RealGitToplevel();
@@ -168,6 +180,20 @@ export class TeamCommand implements Command {
       // between header and body.
       ctx.stdout.write(`${header} ${body.startsWith("\n") ? body.trimStart() : body}`);
       if (!body.endsWith("\n")) ctx.stdout.write(`\n`);
+    }
+
+    // TTY-detect hint (spec #59 part 3): when stdout is a terminal —
+    // i.e. nothing is piping the composed message into `gh issue
+    // comment` — the operator very likely thinks they just SENT the
+    // message. They didn't; `team post` is compose-only. Print one
+    // stderr line so the mistake is caught at the exact moment it's
+    // made, not later when someone points out the message never
+    // arrived. Same failure shape as #56's silent-degrade class.
+    const isTTY = this.deps.stdoutIsTTY?.() ?? (process.stdout.isTTY === true);
+    if (isTTY) {
+      ctx.stderr.write(`⚠ team post is COMPOSE-ONLY — nothing was sent.\n`);
+      ctx.stderr.write(`  Pipe the output into gh(1) to actually post, e.g.:\n`);
+      ctx.stderr.write(`    ... | ${ctx.binName} team post --to Arfy | gh issue comment <n> --repo owner/name --body-file -\n`);
     }
     return 0;
   }
@@ -493,6 +519,75 @@ export class TeamCommand implements Command {
     return opts;
   }
 
+  /** Print the specific subverb's full usage text. Called by the
+   *  centralized --help intercept in run() so `team <sub> --help`
+   *  reaches HERE instead of the subverb's arg parser. */
+  private printSubverbUsage(sub: string, ctx: Context): void {
+    const bin = ctx.binName;
+    switch (sub) {
+      case "whoami":
+        ctx.stdout.write(`usage: ${bin} team whoami\n`);
+        ctx.stdout.write(`  Print THIS runtime's agent name (from DRIDOCK_AGENT_NAME env, or the\n`);
+        ctx.stdout.write(`  single-agent roster fallback if the roster has exactly one agent).\n`);
+        ctx.stdout.write(`  Prints the name on stdout (pipe-clean: SELF=$(dridock team whoami)) and a\n`);
+        ctx.stdout.write(`  short "(from X)" diagnostic on stderr.\n`);
+        return;
+      case "roster":
+        ctx.stdout.write(`usage: ${bin} team roster\n`);
+        ctx.stdout.write(`  Print the whole team from .dridock/agents.yml — agents (name, role,\n`);
+        ctx.stdout.write(`  environment) plus the human. Read-only; roster edits go through\n`);
+        ctx.stdout.write(`  bootstrap or a hand-edit.\n`);
+        return;
+      case "post":
+        ctx.stdout.write(`usage: ${bin} team post [--to A,B]\n`);
+        ctx.stdout.write(`  COMPOSE-ONLY: prepend the "Sender[->A,B]:" header to stdin and write\n`);
+        ctx.stdout.write(`  the result to stdout. Broadcast when --to is omitted. Does NOT hit the\n`);
+        ctx.stdout.write(`  network — pipe into gh(1) to actually post:\n`);
+        ctx.stdout.write(`\n`);
+        ctx.stdout.write(`      echo "hi" | ${bin} team post --to Arfy | \\\n`);
+        ctx.stdout.write(`          gh issue comment 46 --repo owner/name --body-file -\n`);
+        ctx.stdout.write(`\n`);
+        ctx.stdout.write(`  Recipient names must be in the roster (agents + human); typos are\n`);
+        ctx.stdout.write(`  rejected before composing.\n`);
+        return;
+      case "watch":
+        ctx.stdout.write(`usage: ${bin} team watch [--once] [--repo owner/name] [--interval <ms>]\n`);
+        ctx.stdout.write(`                        [--state-dir <path>] [--inbox <path>]\n`);
+        ctx.stdout.write(`  Poll GitHub for messages addressed to self; surface each survived event.\n`);
+        ctx.stdout.write(`  Default sink is stdout (one line per event, tail-friendly). --inbox\n`);
+        ctx.stdout.write(`  switches to JSONL append into a per-agent inbox file (fetcher mode,\n`);
+        ctx.stdout.write(`  spawned detached by the SessionStart hook — spec #56).\n`);
+        ctx.stdout.write(`\n`);
+        ctx.stdout.write(`  --once           one catchup tick then exit (SessionStart hook).\n`);
+        ctx.stdout.write(`  --repo <r>       override roster's github_repo.\n`);
+        ctx.stdout.write(`  --interval <ms>  poll interval (default 30000, min 1000).\n`);
+        ctx.stdout.write(`  --state-dir <p>  cursor + dedup ring state dir (default <xdg>/watch-cursors).\n`);
+        ctx.stdout.write(`  --inbox <p>      append JSONL events to <p> instead of stdout (fetcher mode).\n`);
+        ctx.stdout.write(`                   Pidfile at <p>.pid, log at <p>.log, session cursors at\n`);
+        ctx.stdout.write(`                   <p>.session-cursors.json.\n`);
+        ctx.stdout.write(`\n`);
+        ctx.stdout.write(`  Env: DRIDOCK_WATCH_POLL_INTERVAL_MS overrides --interval.\n`);
+        ctx.stdout.write(`  Ctrl-C persists state and exits cleanly.\n`);
+        return;
+      case "fetcher":
+        ctx.stdout.write(`usage: ${bin} team fetcher <status|stop|log> [--inbox <path>] [--lines N]\n`);
+        ctx.stdout.write(`  Inspect + control the detached team-watch fetcher spawned by the\n`);
+        ctx.stdout.write(`  SessionStart hook (spec #56).\n`);
+        ctx.stdout.write(`\n`);
+        ctx.stdout.write(`  status  print pid + alive/dead + inbox + log + last stderr line.\n`);
+        ctx.stdout.write(`          rc=0 alive, rc=1 dead-or-cmdline-mismatch, rc=2 no pidfile.\n`);
+        ctx.stdout.write(`  stop    cmdline-verify then SIGTERM the pid, remove pidfile.\n`);
+        ctx.stdout.write(`  log     tail of stderr log (default 40 lines; --lines N to override).\n`);
+        ctx.stdout.write(`\n`);
+        ctx.stdout.write(`  --inbox <p>  override the convention-default inbox path\n`);
+        ctx.stdout.write(`               (<xdg>/dridock/inbox/<agent>.jsonl).\n`);
+        return;
+      default:
+        // Should be unreachable — subverb allowlist gates run() before this.
+        this.printUsage(ctx);
+    }
+  }
+
   private printUsage(ctx: Context): void {
     ctx.stderr.write(`usage: ${ctx.binName} team <subcommand>\n`);
     ctx.stderr.write(`  Named-agent team collaboration (docs/design/agent-teams.md).\n`);
@@ -526,6 +621,12 @@ export interface TeamCommandDeps {
    *  cmdline-verifying pid-liveness probe (spec #56 open loop #4).
    *  Prod default is [[RealProcessProbe]] (spawns `ps -p <pid>`). */
   readonly probe: ProcessProbe;
+  /** Injected in tests to force `dridock team post`'s TTY-detect
+   *  branch on/off deterministically. Prod default reads
+   *  `process.stdout.isTTY`. Spec: #59 part 3 — a compose-only run
+   *  with no consumer prints an actionable hint on stderr so the user
+   *  knows the message wasn't actually sent. */
+  readonly stdoutIsTTY: () => boolean;
 }
 
 interface WatchOpts {

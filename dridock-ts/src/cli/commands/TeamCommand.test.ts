@@ -485,3 +485,148 @@ describe("TeamCommand.watch (live loop) — env-var + arg mechanics", () => {
     expect(stderr.text()).toContain("interval=5000ms");
   });
 });
+
+// Spec #59 part 1 — `dridock team <sub> --help` should print that
+// subverb's usage instead of erroring. Also: --help must NOT require
+// a project dir OR a resolvable roster (help is metadata about the
+// command, not a state query). Every subverb + no roster present.
+describe("TeamCommand — subverb --help intercept (spec #59 part 1)", () => {
+  test("team post --help → post usage on stdout, rc=0, no roster needed", async () => {
+    // No seedProject() call — proves --help doesn't need a roster.
+    const { ctx, stdout, stderr } = makeCtx(new InMemoryFileSystem());
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["post", "--help"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("usage: dridock team post");
+    expect(stdout.text()).toContain("COMPOSE-ONLY");
+    expect(stdout.text()).toContain("pipe into gh(1)");
+    // Not the misleading "unexpected argument '--help'" error.
+    expect(stderr.text()).not.toContain("unexpected argument");
+  });
+
+  test("team post -h (short form) → same intercept", async () => {
+    const { ctx, stdout } = makeCtx(new InMemoryFileSystem());
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["post", "-h"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("usage: dridock team post");
+  });
+
+  test("team post --to Arfy --help → intercept fires even with other args present", async () => {
+    // --help anywhere in the args wins — user typed a whole command
+    // then remembered to ask for help.
+    const { ctx, stdout } = makeCtx(new InMemoryFileSystem());
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "body").run(["post", "--to", "Arfy", "--help"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("usage: dridock team post");
+    // The message body must NOT be composed — help wins.
+    expect(stdout.text()).not.toContain("Bear->Arfy: body");
+  });
+
+  test("team watch --help → watch usage on stdout, includes --inbox", async () => {
+    const { ctx, stdout } = makeCtx(new InMemoryFileSystem());
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["watch", "--help"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("usage: dridock team watch");
+    expect(stdout.text()).toContain("--inbox");
+    expect(stdout.text()).toContain("fetcher mode");
+  });
+
+  test("team fetcher --help → fetcher usage on stdout, lists status/stop/log", async () => {
+    const { ctx, stdout } = makeCtx(new InMemoryFileSystem());
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["fetcher", "--help"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("usage: dridock team fetcher");
+    expect(stdout.text()).toContain("status");
+    expect(stdout.text()).toContain("stop");
+    expect(stdout.text()).toContain("log");
+  });
+
+  test("team fetcher status --help → fetcher usage (aggregate covers sub-subverbs)", async () => {
+    const { ctx, stdout } = makeCtx(new InMemoryFileSystem());
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["fetcher", "status", "--help"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("usage: dridock team fetcher");
+  });
+
+  test("team whoami --help → whoami usage on stdout", async () => {
+    const { ctx, stdout } = makeCtx(new InMemoryFileSystem());
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["whoami", "--help"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("usage: dridock team whoami");
+  });
+
+  test("team roster --help → roster usage on stdout", async () => {
+    const { ctx, stdout } = makeCtx(new InMemoryFileSystem());
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["roster", "--help"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("usage: dridock team roster");
+  });
+});
+
+// Spec #59 part 3 — TTY-detect for `team post`. When stdout is a
+// terminal (nothing consuming the composed output), print a stderr
+// hint so the operator sees "compose-only" at the exact moment of
+// the mistake. Same silent-degrade class as #56 findings.
+describe("TeamCommand.post — TTY-detect hint (spec #59 part 3)", () => {
+  test("stdout is TTY → stderr hint fires + shows the pipe pattern", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs);
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), stdoutIsTTY: () => true },
+      async () => "hello\n",
+    ).run(["post", "--to", "Arfy"], ctx);
+    expect(rc).toBe(0);
+    // Compose still happens — the hint is informational, not an error.
+    expect(stdout.text()).toBe("Bear->Arfy: hello\n");
+    // But stderr now tells the operator this was compose-only.
+    expect(stderr.text()).toContain("COMPOSE-ONLY");
+    expect(stderr.text()).toContain("nothing was sent");
+    expect(stderr.text()).toContain("gh issue comment");
+  });
+
+  test("stdout is NOT TTY (piped) → no hint (silent success is correct)", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs);
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), stdoutIsTTY: () => false },
+      async () => "hello\n",
+    ).run(["post", "--to", "Arfy"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toBe("Bear->Arfy: hello\n");
+    // stderr must NOT contain the hint — a piped invocation is the
+    // correct pattern and would be noise every time.
+    expect(stderr.text()).not.toContain("COMPOSE-ONLY");
+    expect(stderr.text()).not.toContain("nothing was sent");
+  });
+
+  test("TTY hint also fires on broadcast (no --to)", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs);
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), stdoutIsTTY: () => true },
+      async () => "broadcast\n",
+    ).run(["post"], ctx);
+    expect(rc).toBe(0);
+    expect(stderr.text()).toContain("COMPOSE-ONLY");
+  });
+
+  test("TTY hint fires even for empty stdin (header-only compose)", async () => {
+    // Someone running `dridock team post --to Arfy` interactively and
+    // expecting SOMETHING to happen — the hint tells them nothing did.
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs);
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), stdoutIsTTY: () => true },
+      async () => "",
+    ).run(["post", "--to", "Arfy"], ctx);
+    expect(rc).toBe(0);
+    expect(stderr.text()).toContain("COMPOSE-ONLY");
+  });
+});
