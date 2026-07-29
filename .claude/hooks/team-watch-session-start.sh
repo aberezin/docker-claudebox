@@ -175,17 +175,29 @@ elif ! command -v jq >/dev/null 2>&1; then
     _drain_note="jq not available → defaulting to current EOF"
 fi
 
-# Emit drain contents (byte range) if there's anything new.
+# Emit drain contents (byte range) if there's anything new. Track
+# whether we actually drained so the cursor advance below only fires
+# on the drain-emitted path — Arfy's blocking finding on #56/#59:
+# advancing the cursor unconditionally means a run that skipped
+# catch-up still marks the skipped window as consumed, silently
+# dropping the events AND erasing the evidence that would identify
+# which branch ran.
+_drain_fired=0
 if [ "$_inbox_size" -gt "$_last_offset" ] && [ -f "$_inbox" ]; then
     _delta=$((_inbox_size - _last_offset))
     echo ""
     echo "─── team-inbox catch-up: $_delta bytes since offset $_last_offset ───"
     tail -c "+$((_last_offset + 1))" "$_inbox" | head -c "$_delta"
     echo "─── end catch-up ───"
+    _drain_fired=1
 fi
 
-# Update the cursors file to current EOF (advance the drain offset).
-if [ -n "$_session_id" ] && command -v jq >/dev/null 2>&1; then
+# Update the cursors file — ONLY when drain actually fired. On a skip
+# (whether because there was nothing new, or because the unknown-
+# session fallback set _last_offset=EOF), leave the cursor entry
+# untouched. A subsequent hook run then re-evaluates from real state
+# instead of the previous run's misleading "cursor at EOF" write.
+if [ "$_drain_fired" = 1 ] && [ -n "$_session_id" ] && command -v jq >/dev/null 2>&1; then
     if [ ! -f "$_cursors" ]; then echo '{}' > "$_cursors"; fi
     _tmp="$(mktemp)"
     if jq --arg id "$_session_id" --argjson off "$_inbox_size" '. + {($id): $off}' "$_cursors" > "$_tmp" 2>/dev/null; then
@@ -195,9 +207,18 @@ if [ -n "$_session_id" ] && command -v jq >/dev/null 2>&1; then
     fi
 fi
 
-# Loud stderr note (never silent EOF).
+# Loud note when we defaulted to EOF (never silent skip). Emit on
+# STDOUT — Claude Code injects SessionStart stdout as session context;
+# stderr is not surfaced. Arfy's blocking finding: the one loud signal
+# for exactly this case was going to a channel the agent never reads.
 if [ -n "$_drain_note" ]; then
-    echo "⚠ team-inbox drain: $_drain_note" >&2
+    echo ""
+    echo "⚠ team-inbox drain: $_drain_note"
+    if [ "$_inbox_size" -gt 0 ]; then
+        echo "  Inbox contains $_inbox_size bytes; you can inspect with:"
+        echo "    less $_inbox"
+        echo "  or replay from the beginning by removing $_cursors and re-arming."
+    fi
 fi
 
 # ─── Step 3: print the exact Monitor arm command ─────────────────────

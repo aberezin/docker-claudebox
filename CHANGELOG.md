@@ -107,6 +107,58 @@ ritual, session offset stability, orphan class, loud-fail spawn).
   inbox-path convention verification, host-native `tail -F` behavior
   check.
 
+### Fixed — CLI usability findings from #56 review round
+
+Three related fixes Arfy caught during / after the #56 delivery-model
+review, batched into this release:
+
+- **#57**: `dridock -v` / `--version` now works outside a project
+  dir. Was falling through to `start` and erroring with "no dridock
+  project here" — made host↔image version drift diagnosis impossible
+  from any non-project cwd. Fixed by intercepting `-v`/`--version` in
+  `CommandRegistry.dispatch`'s flag branch and routing to
+  `VersionCommand` explicitly.
+- **#59 part 1**: `dridock team <sub> --help` now prints per-subverb
+  usage instead of erroring with "unexpected argument '--help'".
+  Centralized `-h`/`--help` handling in `TeamCommand.run()` before
+  the subverb's own arg parser runs; also before the roster load
+  (help is metadata, must not require a project).
+- **#59 part 3**: `dridock team post` now prints a stderr hint when
+  stdout is a TTY (no consumer piping into `gh`): `⚠ team post is
+  COMPOSE-ONLY — nothing was sent. Pipe the output into gh(1) …`.
+  Turns the silent compose-and-return-0 failure Arfy hit into a
+  visible-at-the-moment-of-mistake signal.
+
+Deferred to their own branches (per plan): #59 part 2 (make `team
+post` actually send OR rename to `team compose` — user-facing
+contract decision), #58 (container XDG persistence — needs host-side
+verify pass), #60 (CLI-wide `--help` audit + centralized dispatcher +
+Command interface addition).
+
+### Fixed — catch-up drain silently dropped events (#56 review round)
+
+Late-review blocker Arfy caught by reproducing the catch-up leg with
+a real gap-event: a message that landed in her inbox while her
+session was down was NOT surfaced on resume, and the state file was
+overwritten in a way that erased the evidence.
+
+Two structural bugs in `team-watch-session-start.sh`, both fixed:
+
+- **Cursor advanced unconditionally.** The cursors-file write ran on
+  every hook invocation regardless of whether drain actually emitted
+  a block, so a run that skipped catch-up (delta 0, or the unknown-
+  session fallback that defaults `_last_offset=EOF`) still marked
+  the skipped window as consumed. Fixed by gating the cursor advance
+  on `_drain_fired=1` — only advance when we actually printed the
+  events. A skip now leaves the cursor untouched, so a subsequent
+  hook run re-evaluates from real state.
+- **Loud drain note went to stderr.** Claude Code injects SessionStart
+  **stdout** as agent context; stderr is not surfaced. The one loud
+  signal designed for exactly the "we defaulted to EOF, catch-up was
+  skipped" case was invisible to the party that needed it. Fixed by
+  emitting the note on stdout, with follow-up hints on how to inspect
+  or replay.
+
 ### Notes
 
 MINOR bump per CLAUDE.md — new IPC contract (per-agent inbox files +
