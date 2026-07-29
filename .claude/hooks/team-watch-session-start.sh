@@ -152,6 +152,22 @@ if [ -f "$_inbox" ]; then
     _inbox_size=$(stat -c %s "$_inbox" 2>/dev/null || stat -f %z "$_inbox" 2>/dev/null || echo 0)
 fi
 
+# Integer validator — treats anything non-decimal-digit as invalid.
+# Used to guard offsets read from the cursors file: a corrupt file
+# (string values, non-object shape, partial write, future schema) can
+# yield "abc" or "object" instead of an integer, which then explodes in
+# `-gt`/`-le` arithmetic downstream. Arfy caught this on #56 review:
+# without validation, garbage lands in the drain-note ("catch-up from
+# max known offset abc") AND the arithmetic error goes to stderr — the
+# channel we already established the agent can't see. Same
+# trust-the-wrong-signal shape as the review-round originals.
+_is_uint() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 # Determine last drain offset for this session.
 #
 # Fallback strategy for unknown session_id (Arfy's option (d) on #56):
@@ -165,18 +181,35 @@ fi
 #     guess that replays the entire inbox at a fresh agent.
 #   - No session_id in payload / no jq → EOF (same as pre-(d) — no id
 #     to key inference on).
+#   - Cursors file CORRUPT (any offset isn't a positive integer) →
+#     EOF, loudly recommend `rm` (legitimate here — unlike the old
+#     replay hint, discarding a corrupt file IS the right recovery).
 _last_offset=0
 _drain_note=""
 if [ -n "$_session_id" ] && [ -f "$_cursors" ] && command -v jq >/dev/null 2>&1; then
     _lookup="$(jq -r --arg id "$_session_id" '.[$id] // empty' "$_cursors" 2>/dev/null || true)"
     if [ -n "$_lookup" ] && [ "$_lookup" != "null" ]; then
-        _last_offset="$_lookup"
+        if _is_uint "$_lookup"; then
+            _last_offset="$_lookup"
+        else
+            _last_offset="$_inbox_size"
+            _drain_note="cursors file CORRUPT — session_id '$_session_id' has non-integer offset '$_lookup'. Defaulting to current EOF. Recover: rm $_cursors"
+        fi
     else
         # Unknown session id → option (d): infer from max of existing offsets.
         _max_known="$(jq -r '. | to_entries | map(.value) | if length > 0 then max else empty end' "$_cursors" 2>/dev/null || true)"
         if [ -n "$_max_known" ] && [ "$_max_known" != "null" ]; then
-            _last_offset="$_max_known"
-            _drain_note="unknown session_id '$_session_id' → catch-up from max known offset $_max_known (newest prior consumer)"
+            if _is_uint "$_max_known"; then
+                _last_offset="$_max_known"
+                _drain_note="unknown session_id '$_session_id' → catch-up from max known offset $_max_known (newest prior consumer)"
+            else
+                # max() returning a string means the cursors file
+                # isn't the shape we expect (either offset values are
+                # strings, or the top-level isn't an object so
+                # to_entries produced junk).
+                _last_offset="$_inbox_size"
+                _drain_note="cursors file CORRUPT — max() returned non-integer '$_max_known'. Defaulting to current EOF. Recover: rm $_cursors"
+            fi
         else
             _last_offset="$_inbox_size"
             _drain_note="unknown session_id '$_session_id', no prior entries → defaulting to current EOF (no evidence to infer from)"
@@ -221,6 +254,17 @@ fi
 # supervisor process's lifetime, but we still want it bounded — max()
 # under option (d) scans the file so a runaway entry count is real
 # tail latency.
+#
+# LOAD-BEARING INVARIANT (Arfy caught this on #56 review): the max()
+# fallback is safe against pruning ONLY because the write and the
+# prune are ONE jq expression, and the new entry (always current EOF
+# of an append-only inbox) is appended LAST. That guarantees the
+# newest entry is always the maximum, so evicting the oldest can
+# never lower the running max. If you EVER add a standalone GC pass,
+# a `fetcher gc` verb, or any repair path that prunes without also
+# writing a fresh EOF entry, this invariant BREAKS silently and
+# reintroduces exactly the "prune loses max → new session_id gets a
+# too-low offset → replays already-seen events" regression.
 if [ "$_drain_fired" = 1 ] && [ -n "$_session_id" ] && command -v jq >/dev/null 2>&1; then
     if [ ! -f "$_cursors" ]; then echo '{}' > "$_cursors"; fi
     _tmp="$(mktemp)"

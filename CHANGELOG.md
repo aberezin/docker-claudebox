@@ -179,6 +179,16 @@ Also: cursors file is now bounded at the last 10 entries by insertion
 order — max() under option (d) scans the file so a runaway entry
 count is real tail latency.
 
+Also: offsets read from the cursors file are validated as unsigned
+integers before use (Arfy caught this on second-pass repro). A corrupt
+cursors file with string values, non-object shape, or partial-write
+garbage now trips a "CORRUPT" branch that defaults to EOF + a stdout
+note recommending `rm <cursors>` (legit here — unlike the old replay
+hint, discarding a corrupt file IS the right recovery). Without
+validation, garbage lands in the drain-note ("catch-up from max known
+offset abc") AND the arithmetic error goes to stderr — same trust-
+the-wrong-signal shape as the other review-round findings.
+
 ### Notes
 
 MINOR bump per CLAUDE.md — new IPC contract (per-agent inbox files +
