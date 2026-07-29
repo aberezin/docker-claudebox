@@ -26,3 +26,6 @@ pyrightconfig.json
 # blocks ff-only pulls and rebases. The rest of .claude/ (hooks, settings.json,
 # skills) is legitimately tracked. See #43.
 /.claude/settings.local.json
+
+# bun build --compile temp droppings (0-byte, mode 000)
+dridock-ts/.*.bun-build

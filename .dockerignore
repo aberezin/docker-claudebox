@@ -8,3 +8,8 @@ base/
 desc.txt
 git-update.sh
 docker-compose.dev.yaml
+
+# bun build --compile leaves 0-byte, mode-000 temp files in dridock-ts/ (one per
+# build). They are unreadable even by their owner, so including them in the build
+# context fails the sender with "failed to xattr ...: permission denied".
+*.bun-build
