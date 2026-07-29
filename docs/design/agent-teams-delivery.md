@@ -117,9 +117,44 @@ value of `$DRIDOCK_AGENT_NAME`).
 | `<agent>.jsonl.session-cursors.json` | SessionStart + UPS  | `{session_id: last_drained_byte_offset}` — per-session drain cursor. |
 | `<agent>.jsonl.respawn-stamp`     | UPS                   | Unix epoch of last respawn attempt (for 60s backoff). |
 
-Host + container agree on these paths by construction — the container's
-XDG is bind-mounted from `<xdg>/projects/<id>/claude/`, so per-agent
-files stay per-agent on both sides.
+Host + container both use the same path convention (`$HOME/.config/dridock/...`),
+but note the persistence caveat below.
+
+## State persistence (known gap)
+
+**The container's `$HOME/.config` is not currently bind-mounted from
+the host.** Only `~/.claude`, `~/.ssh`, `~/framework-bugs`,
+`~/framework-consult` are (verified via `mount | grep home/claude` in
+a running container as of 2026-07-29).
+
+Consequence for delivery: the fetcher's cursor state at
+`<xdg>/dridock/watch-cursors/github.state.json` lives on the ephemeral
+container FS and is wiped when the container is recreated
+(`dridock down && dridock start` post `make build`). On next spawn the
+fetcher hits `GithubWatchSource.ts:54` with an empty cursor → maps to
+`nowIso()` → **events posted during the container-down window are
+lost.** The heartbeat file, dedup ring, and inbox itself share the
+same fate.
+
+The inbox spool being non-persistent doesn't help either: even if the
+cursor survived, an ephemeral inbox means SessionStart's drain cursor
+in `<inbox>.session-cursors.json` is also fresh, so a first-boot
+session sees an empty drain regardless.
+
+Two orthogonal fixes possible:
+
+1. **Move state under `~/.claude/`** (bind-mounted → persists). Cleanest
+   for the fetcher-only use case — inbox, cursor, pidfile, log all
+   under `~/.claude/dridock/inbox/`. Requires updating `xdgRoot()` or
+   introducing a dedicated state-dir env var.
+2. **Add `~/.config` to the entrypoint's bind-mount set.** Broader
+   fix — every claudebot workload storing state under XDG_CONFIG_HOME
+   gains persistence for free. Bigger surface + coordination cost.
+
+Tracked as a follow-up. Until then: **do not treat the team-bus as a
+guaranteed message queue across container rebuilds.** The dedup ring
+still prevents double-delivery within a session, but events posted
+during a rebuild window are unrecoverable.
 
 ## Fetcher lifecycle
 

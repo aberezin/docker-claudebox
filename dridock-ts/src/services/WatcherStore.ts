@@ -12,16 +12,19 @@ import type { WatcherSource } from "./WatcherEvent.ts";
  *      without dedup). Count-based cap, not time-TTL, so a paused
  *      laptop + clock drift can't silently expire an in-flight entry.
  *
- * On-disk layout under `<xdg>/projects/<id>/watch-cursors/<source>.state.json`:
+ * On-disk layout under `<baseDir>/<source>.state.json`:
  * ```json
  * {
  *   "cursor": "<opaque adapter string>",
  *   "delivered": ["hash1", "hash2", …up to CAP…]
  * }
  * ```
- * Container-side path per my #45 answer to Q3 (per-project); host-side
- * scanning agents (Arfy) use `~/.config/dridock/watch-cursors/<source>.state.json`
- * — the CALLER passes the right directory in `basePath`.
+ * Path is caller-controlled via `basePath`. In practice both host and
+ * container use `<xdg>/watch-cursors/` today (see TeamCommand.ts:runWatch).
+ * KNOWN GAP: the container's `<xdg>` (`$HOME/.config`) is NOT bind-mounted
+ * from the host currently, so a container recreate loses cursor state and
+ * events posted during the down window are dropped (fetcher restarts at
+ * `nowIso()`). Persistence fix tracked as a follow-up on #56.
  *
  * All operations are best-effort — a corrupt state file is treated as
  * absent (initial state) rather than throwing. Rationale: watcher
@@ -42,7 +45,8 @@ export class WatcherStore {
   constructor(
     private readonly fs: FileSystem,
     /** Absolute directory under which per-source state files live.
-     *  Container: `<xdg>/projects/<id>/watch-cursors/`. Host: `<xdg>/watch-cursors/`. */
+     *  Both host + container currently use `<xdg>/watch-cursors/` (see
+     *  the header for the persistence caveat on the container side). */
     private readonly baseDir: string,
     private readonly source: WatcherSource,
     private readonly cap: number = DEFAULT_DEDUP_CAP,

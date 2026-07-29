@@ -199,10 +199,16 @@ export class TeamCommand implements Command {
       return 1;
     }
 
-    // Resolve state dir. Container: `<xdg>/watch-cursors/` (per-project
-    // by construction — the container's XDG is bind-mounted from
-    // <xdg>/projects/<id>/claude/). Host (Arfy on Mac): `<xdg>/watch-cursors/`
-    // (machine-wide). Same code, different meaning by runtime.
+    // Resolve state dir. Both host + container use `<xdg>/watch-cursors/`.
+    // KNOWN GAP (see agent-teams-delivery.md "State persistence" section
+    // + follow-up issue): the container's `<xdg>` (`$HOME/.config`) is
+    // NOT currently bind-mounted from the host — only `~/.claude`,
+    // `~/.ssh`, `~/framework-bugs`, `~/framework-consult` are. So a
+    // container recreate wipes the fetcher's cursor, and any events
+    // posted during the down window are lost (fetcher restarts at
+    // nowIso() per GithubWatchSource.ts). Fix requires either moving
+    // state under `~/.claude/` or adding a `~/.config` bind mount —
+    // tracked as a follow-up.
     const stateDir = opts.stateDir ?? `${await xdgRoot(ctx.fs, ctx.env.raw(), ctx.home)}/watch-cursors`;
 
     const runner = this.deps.host ?? new RealHostCommandRunner();
