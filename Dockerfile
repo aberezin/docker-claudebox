@@ -34,10 +34,17 @@ RUN NODE_VERSION=20.20.2 && \
     node --version && npm --version
 
 # python3 + api server deps (needed for CLAUDE_MODE_API)
+# ⚠️  `mcp<2` is a REAL PIN, not caution. mcp 2.0.0 removed `mcp.server.fastmcp`
+# (renamed to `mcp.server.mcpserver`), and `api_server.py` imports FastMCP from the
+# old path at MODULE SCOPE — so the whole API server died on import, taking the REST
+# and OpenAI surfaces down with it even though neither touches MCP (#62). Nothing in
+# this repo changed; upstream published a major and the next rebuild picked it up.
+# Removing this pin without porting the FastMCP usage re-breaks API mode entirely.
+# The other five deps are still unpinned and can fail the same way — see #62.
 RUN apt-get update && apt-get install -y \
     python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir --break-system-packages --ignore-installed fastapi uvicorn python-telegram-bot pyyaml mcp croniter
+    && pip3 install --no-cache-dir --break-system-packages --ignore-installed fastapi uvicorn python-telegram-bot pyyaml "mcp<2" croniter
 
 # docker (needed for docker-in-docker)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \

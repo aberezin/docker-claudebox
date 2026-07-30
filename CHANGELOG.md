@@ -26,6 +26,37 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.2.3] — 2026-07-30 _(fork)_
+
+### Fixed — API mode was completely broken in the shipped image (#62)
+
+`Dockerfile:40` installed the daemon deps unpinned, and `mcp` resolved to
+**2.0.0**, which removed `mcp.server.fastmcp` (renamed `mcp.server.mcpserver`).
+`api_server.py:1141` imports `FastMCP` from the old path at **module scope**, so
+the server died on import and the container exited(1) — taking the REST and
+OpenAI-compatible surfaces down with it, despite neither touching MCP.
+
+No repo change caused this. Upstream published a major and the next rebuild
+picked it up, so the image broke without a single commit.
+
+Pinned `mcp<2` (resolves to 1.29.0). Verified on a rebuilt image:
+
+```
+FastMCP import OK
+/health   {"status":"ok"}
+/status   {"busyWorkspaces":[],"runs":[]}
+/mcp      307 (mounted)
+```
+
+This also accounts for 31 of the 34 tests failing on master — every
+`test_api_*` case was this one bug (#63).
+
+**Still open on #62:** the other five deps (`fastapi`, `uvicorn`,
+`python-telegram-bot`, `pyyaml`, `croniter`) remain unpinned and can fail the
+same way. Deferred deliberately — the suite that would catch a bad pin is
+itself unreliable (#63), so pinning five unverifiable versions risks more than
+it prevents.
+
 ## [4.2.2] — 2026-07-30 _(fork)_
 
 ### Changed — Dockerfile restructured for build-cache stability
