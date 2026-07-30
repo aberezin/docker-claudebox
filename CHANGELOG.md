@@ -94,6 +94,25 @@ inbox is bounded so drain-all is safe. `no session_id` / `no jq` /
 `corrupt cursors` branches keep EOF default (can't advance cursor
 without id + jq, so draining would infinite-replay every hook run).
 
+### Fixed — SessionStart drain: no-jq check moved above no-cursors-file check
+
+Arfy's Finding 1 on `83d65e0` (non-blocking, latent): the previous
+ordering placed `[ ! -f "$_cursors" ] → drain-from-0` BEFORE
+`! command -v jq → EOF`. So a no-cursors-file + no-jq environment
+would take the drain-from-0 branch, then silently fail to write the
+cursor (which needs jq), and every subsequent hook run would find the
+same state and replay the full inbox — permanent, not decaying,
+because without jq nothing can ever write the file that would break
+the loop.
+
+Not reachable in current environments (jq is baked at
+`/usr/bin/jq` in the Dockerfile and present on macOS 15+), but the
+defense pattern belongs intact. Fix: swap the two branches so no-jq
+returns EOF unconditionally, and drain-from-0 is only reachable when
+the cursor write below is guaranteed to succeed. Invariant now
+structural, not aspirational: every branch that sets `_last_offset=0`
+is downstream of the jq check.
+
 ### Notes
 
 PATCH bump per CLAUDE.md — bug fix for silent event loss on container

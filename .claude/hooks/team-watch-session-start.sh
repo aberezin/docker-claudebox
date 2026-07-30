@@ -213,7 +213,12 @@ _is_uint() {
 #     bounded per-agent inbox is safe and self-establishes the cursor
 #     for subsequent runs.
 #   - No session_id / no jq → EOF (can't write cursor, so draining
-#     would replay every hook run — worse than skip).
+#     would replay every hook run — worse than skip). ORDERING NOTE:
+#     the no-jq check runs BEFORE the no-cursors-file check so that
+#     drain-from-0 is only reachable when jq is present (Arfy's
+#     Finding 1 on 83d65e0). Otherwise no-jq + no-cursors-file would
+#     take the drain-from-0 branch, fail to write the cursor, and
+#     replay forever.
 #   - Cursors file CORRUPT → EOF + rm hint (discarding IS correct
 #     recovery).
 _last_offset=0
@@ -255,6 +260,16 @@ if [ -n "$_session_id" ] && [ -f "$_cursors" ] && command -v jq >/dev/null 2>&1;
 elif [ -z "$_session_id" ]; then
     _last_offset="$_inbox_size"
     _drain_note="no session_id in hook payload → defaulting to current EOF"
+elif ! command -v jq >/dev/null 2>&1; then
+    # Placed BEFORE the no-cursors-file branch so drain-from-0 is only
+    # ever reachable when the cursor write below can actually succeed
+    # (Arfy's Finding 1 on 83d65e0). Without jq, the cursor-file write
+    # silently no-ops — so if drain-from-0 fired here, the next run
+    # would find the same "no cursors" state and drain from 0 again,
+    # forever. Invariant made structural: every branch that sets
+    # _last_offset=0 is downstream of this check.
+    _last_offset="$_inbox_size"
+    _drain_note="jq not available → defaulting to current EOF (cursor write would silently fail; drain-from-0 would loop forever)"
 elif [ ! -f "$_cursors" ]; then
     # First-ever hook run on this agent (or after `rm <cursors>`
     # recovery). Under 4.2.1 the inbox persists, so anything accumulated
@@ -263,12 +278,10 @@ elif [ ! -f "$_cursors" ]; then
     # infinite-EOF-default loop that made Arfy's #58 gap-event repro
     # fail (drain skipped → cursor never written → next hook run also
     # sees "no cursors file" → same skip). Under a bounded per-agent
-    # inbox this is safe.
+    # inbox this is safe. jq availability guaranteed by the earlier
+    # branch.
     _last_offset=0
     _drain_note="no cursors file yet → draining full inbox (first-ever session on this agent; establishes persistent state)"
-elif ! command -v jq >/dev/null 2>&1; then
-    _last_offset="$_inbox_size"
-    _drain_note="jq not available → defaulting to current EOF"
 fi
 
 # Emit drain contents (byte range) if there's anything new. Track
