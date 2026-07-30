@@ -26,6 +26,50 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.2.2] — 2026-07-30 _(fork)_
+
+### Changed — Dockerfile restructured for build-cache stability
+
+No functional change. Bumping the pinned Claude CLI used to be one of the
+most expensive edits in the repo: `ARG CLAUDE_VERSION` lived at the tail of
+`base`, and `full` is `FROM base` followed by nine apt/toolchain blocks — so
+a one-line pin change invalidated `base` and every toolchain layer
+downstream of it, forcing a full reinstall of Go, pyenv, the DB clients and
+the rest.
+
+- **Claude CLI moved to a dedicated `claude-cli` builder stage**, COPY'd into
+  `minimal` and `full` as one of their last layers. A `CLAUDE_VERSION` bump
+  now rebuilds that stage plus three small COPY layers per variant; the
+  toolchain stays `CACHED`.
+  - The stage installs under `/home/claude`, not the default `/root`.
+    `~/.local/bin/claude` is an **absolute** symlink into
+    `~/.local/share/claude/versions/<v>`, so building under any other `$HOME`
+    would ship a dangling symlink. A `claude --version` smoke step in the
+    stage fails the build rather than shipping one.
+  - It is deliberately **not** a stage the variants inherit from
+    (`FROM claude-cli`). That would put it back upstream of full's toolchain
+    and recreate the problem being fixed.
+  - `/claude/.claude.json` (the outside-the-mount seed the entrypoint copies
+    from) is a byproduct of `claude install --yes`, so it moved to the same
+    stage.
+- **`full`'s nine apt blocks reordered by volatility**, least-likely-to-change
+  first, with a header comment stating the rule — adding a package to an
+  early block invalidates all nine, so new tooling belongs in the last block
+  it plausibly fits. `cli tools` (the modern-CLI bundle that actually grows)
+  is now last; `archive tools` is first. Blocks stay separate `RUN`s on
+  purpose: merging speeds a cold build but destroys the granularity the
+  ordering depends on.
+
+One-time cost: the first build after this change rebuilds `full` completely.
+Every subsequent CLI bump is cheap.
+
+### Fixed — release docs pointed at a file retired in 4.0.0
+
+`docs/versioning.md` still told releasers to bump `DRIDOCK_VERSION` in
+`wrapper.sh`, which was removed in 4.0.0 when the host layer became
+`dridock-ts`. Now names `dridock-ts/src/domain/dridockVersion.ts`, matching
+CLAUDE.md.
+
 ## [4.2.1] — 2026-07-30 _(fork)_
 
 ### Fixed — container team-watch state now persists across recreate (#58)

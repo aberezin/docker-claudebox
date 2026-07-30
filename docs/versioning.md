@@ -49,7 +49,7 @@ one but not the other — you get subtle, confusing breakage. The version makes 
 
 ## Release steps
 
-1. Bump **`VERSION`** and the `DRIDOCK_VERSION` constant in **`wrapper.sh`** to the
+1. Bump **`VERSION`** and the `DRIDOCK_TS_VERSION` constant in **`dridock-ts/src/domain/dridockVersion.ts`** to the
    same value (the sync test enforces this).
 2. Add a **`CHANGELOG.md`** entry under a new `## [X.Y.Z] — <date>` heading — one
    entry per bump (see the changelog policy below).

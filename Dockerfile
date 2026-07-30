@@ -61,27 +61,19 @@ claude ALL=(ALL) NOPASSWD:ALL
 EOF
 RUN chmod 440 /etc/sudoers.d/claude-nopass
 
-# claude CLI native install (can self-update)
-USER claude
-# ⚠️  FLOOR, not decoration. `DISABLE_AUTOUPDATER=1` below + the entrypoint's
-# `.autoUpdates = false` patch mean the container NEVER moves off this pin — whatever
-# is baked here is what every claudebot runs, forever, until someone bumps this line.
-# Consequence (#17): Claude Code SILENTLY IGNORES unknown flags (exit 0, no warning),
-# so any feature-gating flag dridock forwards to a too-old CLI is accepted and dropped
-# with zero diagnostics. 2.1.123 predated Remote Control entirely — no `--remote-control`
-# flag, no `remote-control` subcommand — so `dridock start --remote-control` "worked"
-# and RC was never activated. Remote Control needs >= 2.1.206 (its full error surface;
-# see https://code.claude.com/docs/en/remote-control). Keep this reasonably current, and
-# when raising it, re-check the entrypoint's `--remote-control` capability probe.
-ARG CLAUDE_VERSION=2.1.215
-RUN curl -fsSL https://claude.ai/install.sh | bash -s -- $CLAUDE_VERSION && \
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.profile && \
-    ~/.local/bin/claude install --yes 2>/dev/null || true
+# claude CLI — the ENV contract only. The install itself lives in the `claude-cli`
+# builder stage below and is COPY'd into each variant as one of its LAST layers.
+# Why it isn't here: `full` is `FROM base` and then runs nine apt/toolchain blocks,
+# so anything at the tail of `base` sits UPSTREAM of them — bumping CLAUDE_VERSION
+# would invalidate the entire toolchain and turn a one-line pin change into a full
+# rebuild. These two ENVs never change with the version, so they stay cache-stable
+# here. Same reasoning as `ARG DRIDOCK_VERSION` being last in each variant.
 ENV PATH="/home/claude/.local/bin:$PATH"
 ENV DISABLE_AUTOUPDATER=1
-
-# back to root for entrypoint
-USER root
+# Login shells: Ubuntu's skel .profile already adds ~/.local/bin when it exists, but
+# that block is conditional on the dir being present at shell start. Keep the explicit
+# export (version-independent, so it stays cached) to preserve pre-4.2.2 behavior.
+RUN echo 'export PATH="$HOME/.local/bin:$PATH"' >> /home/claude/.profile
 
 # ⚠️  HEADS UP (people & bots): anything you bake into /home/claude/.claude here is
 # SHADOWED AT RUNTIME. The wrapper bind-mounts a per-project host dir over
@@ -92,12 +84,52 @@ USER root
 # mount (the /claude pattern below), or write/install it in entrypoint.sh. Do NOT add
 # `COPY ... /home/claude/.claude/...` expecting it to appear at runtime; it won't.
 #
-# copy default claude config to /claude (OUTSIDE the mount) for the entrypoint to seed
-RUN mkdir -p /claude && \
-    cp /home/claude/.claude.json /claude/.claude.json
+# The /claude seed itself is produced by the `claude-cli` stage (it's a byproduct of
+# `claude install --yes`) and COPY'd into each variant alongside the CLI.
 
 # workspace
 WORKDIR /workspace
+
+# ── claude CLI (builder) ───────────────────────────────────────────────────────
+# Installed here and COPY'd into each variant LAST so a version bump costs this stage
+# + three small COPY layers per variant, instead of invalidating `base` and every apt
+# block in `full` downstream of it.
+#
+# MUST install under /home/claude: `~/.local/bin/claude` is an ABSOLUTE symlink into
+# `~/.local/share/claude/versions/<v>`, so building under any other $HOME (e.g. /root)
+# would leave it dangling once COPY'd to /home/claude. Verified: the installer runs
+# fine as root with $HOME redirected, and the resulting tree is a static ELF plus that
+# symlink — self-contained and relocatable.
+#
+# Do NOT promote this to a stage that `full`/`minimal` inherit from (`FROM claude-cli`).
+# That would put it upstream of full's toolchain layers again and undo the whole point.
+#
+# ⚠️  FLOOR, not decoration. `DISABLE_AUTOUPDATER=1` in `base` + the entrypoint's
+# `.autoUpdates = false` patch mean the container NEVER moves off this pin — whatever
+# is baked here is what every claudebot runs, forever, until someone bumps this line.
+# Consequence (#17): Claude Code SILENTLY IGNORES unknown flags (exit 0, no warning),
+# so any feature-gating flag dridock forwards to a too-old CLI is accepted and dropped
+# with zero diagnostics. 2.1.123 predated Remote Control entirely — no `--remote-control`
+# flag, no `remote-control` subcommand — so `dridock start --remote-control` "worked"
+# and RC was never activated. Remote Control needs >= 2.1.206 (its full error surface;
+# see https://code.claude.com/docs/en/remote-control). Keep this reasonably current, and
+# when raising it, re-check the entrypoint's `--remote-control` capability probe.
+FROM ubuntu:24.04 AS claude-cli
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+ENV HOME=/home/claude
+RUN mkdir -p /home/claude
+ARG CLAUDE_VERSION=2.1.215
+RUN curl -fsSL https://claude.ai/install.sh | bash -s -- $CLAUDE_VERSION && \
+    ~/.local/bin/claude install --yes 2>/dev/null || true
+# /claude is the OUTSIDE-the-mount seed the entrypoint copies from at runtime (see the
+# HEADS UP block in `base`). Built here because .claude.json is an install byproduct.
+RUN mkdir -p /claude && \
+    cp /home/claude/.claude.json /claude/.claude.json
+# Fail loudly at build time rather than shipping an image whose `claude` is a dangling
+# symlink — the failure mode this stage's path constraint exists to prevent.
+RUN /home/claude/.local/bin/claude --version
 
 # ── dridock-ts compile ──────────────────────────────────────────────────────────
 # Bun-compiled standalone binary for the in-container verbs that need the real TS
@@ -182,6 +214,10 @@ COPY --from=harness /h/lib/env-rename.map /usr/local/lib/dridock/env-rename.map
 # verbs to a "run on Mac" message).
 COPY --from=dridock-ts-build /out/dridock /usr/local/lib/dridock/dridock
 RUN chmod +x /usr/local/lib/dridock/dridock
+# claude CLI — LAST (see the identical block in `full`).
+COPY --from=claude-cli --chown=claude:claude /home/claude/.local/ /home/claude/.local/
+COPY --from=claude-cli --chown=claude:claude /home/claude/.claude.json /home/claude/.claude.json
+COPY --from=claude-cli /claude/ /claude/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION
@@ -190,6 +226,19 @@ ENTRYPOINT ["/home/claude/entrypoint.sh"]
 # ── full ───────────────────────────────────────────────────────────────────────
 FROM base AS full
 ENV DRIDOCK_IMAGE_VARIANT=full
+
+# ⚠️  THESE BLOCKS ARE ORDERED BY VOLATILITY — least-likely-to-change FIRST.
+# Docker invalidates every layer after the first changed one, so adding a package to
+# an early block rebuilds all nine. Adding one to the LAST block rebuilds only it.
+# When you add tooling, put it in the latest block it plausibly belongs to, and add
+# new blocks at the END. Don't re-sort alphabetically or by topic — the order IS the
+# cache strategy. Kept as separate RUNs on purpose: merging them would speed a cold
+# build but collapse the granularity this ordering depends on.
+
+# archive tools — three packages that have not changed since the fork began
+RUN apt-get update && apt-get install -y \
+    unzip zip tar \
+    && rm -rf /var/lib/apt/lists/*
 
 # build tools
 RUN apt-get update && apt-get install -y \
@@ -201,25 +250,10 @@ RUN apt-get update && apt-get install -y \
     python3 python3-pip python-is-python3 \
     && rm -rf /var/lib/apt/lists/*
 
-# editors and terminal
+# pyenv dependencies — fixed by pyenv's documented build requirements, not by us
 RUN apt-get update && apt-get install -y \
-    nano vim htop tmux \
-    && rm -rf /var/lib/apt/lists/*
-
-# archive tools
-RUN apt-get update && apt-get install -y \
-    unzip zip tar \
-    && rm -rf /var/lib/apt/lists/*
-
-# networking tools
-RUN apt-get update && apt-get install -y \
-    net-tools iputils-ping dnsutils \
-    && rm -rf /var/lib/apt/lists/*
-
-# cli tools
-RUN apt-get update && apt-get install -y \
-    tree fd-find ripgrep bat eza silversearcher-ag \
-    shellcheck shfmt httpie gh \
+    libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+    libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # c/c++ tools
@@ -227,15 +261,25 @@ RUN apt-get update && apt-get install -y \
     clang-format valgrind gdb strace ltrace \
     && rm -rf /var/lib/apt/lists/*
 
-# database clients
+# networking tools
+RUN apt-get update && apt-get install -y \
+    net-tools iputils-ping dnsutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# editors and terminal
+RUN apt-get update && apt-get install -y \
+    nano vim htop tmux \
+    && rm -rf /var/lib/apt/lists/*
+
+# database clients — grows when a project needs a new engine's client
 RUN apt-get update && apt-get install -y \
     sqlite3 postgresql-client default-mysql-client redis-tools \
     && rm -rf /var/lib/apt/lists/*
 
-# pyenv dependencies
+# cli tools — MOST VOLATILE, keep last. New dev CLIs land here.
 RUN apt-get update && apt-get install -y \
-    libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
-    libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev libffi-dev liblzma-dev \
+    tree fd-find ripgrep bat eza silversearcher-ag \
+    shellcheck shfmt httpie gh \
     && rm -rf /var/lib/apt/lists/*
 
 # go 1.26.1
@@ -312,6 +356,11 @@ COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 COPY --from=harness /h/lib/env-rename.map /usr/local/lib/dridock/env-rename.map
 COPY --from=dridock-ts-build /out/dridock /usr/local/lib/dridock/dridock
 RUN chmod +x /usr/local/lib/dridock/dridock
+# claude CLI — LAST, so a CLAUDE_VERSION bump rebuilds only these three COPY layers and
+# the claude-cli stage, never the toolchain above. Keep it after the harness COPYs.
+COPY --from=claude-cli --chown=claude:claude /home/claude/.local/ /home/claude/.local/
+COPY --from=claude-cli --chown=claude:claude /home/claude/.claude.json /home/claude/.claude.json
+COPY --from=claude-cli /claude/ /claude/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION
