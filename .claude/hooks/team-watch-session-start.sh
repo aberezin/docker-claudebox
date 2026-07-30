@@ -120,6 +120,19 @@ else
 fi
 
 if [ "$_spawn_fetcher" = 1 ]; then
+    # Capture log size BEFORE we spawn — nohup appends (`>>`), the log
+    # is never truncated or rotated, and every previous fetcher lifetime
+    # left its config-line + any FRESH START warning behind. If we grep
+    # the whole file for THIS spawn's output, a stale FRESH START from a
+    # long-dead fetcher gets re-announced forever — asserting the
+    # opposite of the truth on every subsequent spawn (Arfy's #58 repro
+    # on 27a4a01). Slice by byte-offset instead, matching the drain +
+    # Monitor-arm idiom already used elsewhere in this hook.
+    _log_size_before=0
+    if [ -f "$_log" ]; then
+        _log_size_before=$(stat -c %s "$_log" 2>/dev/null || stat -f %z "$_log" 2>/dev/null || echo 0)
+    fi
+
     # Detach fully: stdin from /dev/null, stdout+stderr to log, subshell
     # + disown so this hook can exit while the fetcher lives on.
     ( nohup dridock team watch --inbox "$_inbox" >>"$_log" 2>&1 & disown ) >/dev/null 2>&1 || true
@@ -133,18 +146,16 @@ if [ "$_spawn_fetcher" = 1 ]; then
     _spawn_pid="$(cat "$_pid" 2>/dev/null || true)"
     if _check_fetcher_alive "$_spawn_pid"; then
         echo "🚀 team fetcher: spawned (nohup, detached, pid=$_spawn_pid). log=$_log"
-        # Surface any FRESH START warning from the fetcher's log to
-        # session context — Arfy's #58 review finding: `TeamCommand.runWatch`
-        # writes the "no prior cursor, historical events not delivered"
-        # warning to stderr → nohup redirect → log file. Without this
-        # relay, the warning exists but is invisible on the happy path
-        # (log's tail is only echoed by the DEAD-fetcher branch). Same
-        # channel-mistake class we spent an hour removing from the drain
-        # path; catching it here at the spawn path too.
-        if [ -f "$_log" ] && grep -qF "FRESH START" "$_log" 2>/dev/null; then
+        # Surface any FRESH START warning from THIS spawn's log output
+        # (bytes appended after `_log_size_before`). Rule: a diagnostic
+        # must be derived from the CURRENT run's state, not from
+        # accumulated state that merely contains it (Arfy's #58 pattern
+        # observation — the third instance tonight of right-signal /
+        # wrong-provenance).
+        if [ -f "$_log" ] && tail -c "+$((_log_size_before + 1))" "$_log" 2>/dev/null | grep -qF "FRESH START"; then
             echo ""
             # 4 lines: the warning header + 3 body lines from TeamCommand.
-            grep -A3 -F "FRESH START" "$_log" 2>/dev/null | head -4
+            tail -c "+$((_log_size_before + 1))" "$_log" 2>/dev/null | grep -A3 -F "FRESH START" | head -4
         fi
     else
         echo "⚠ team fetcher: spawn attempted but pid not alive OR cmdline mismatch."
