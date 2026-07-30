@@ -86,6 +86,31 @@ dbg "WORKSPACE_DIR=$WORKSPACE_DIR"
 # claudebot, INCLUDING existing-repo projects that already have their own CLAUDE.md, and it
 # always reflects the current harness (fixes the old once-per-project staleness). We never
 # touch the project's ./CLAUDE.md. See docs/design/framework-guidance.md.
+# Ensure ~/.claude EXISTS before anything writes into it (#64). The wrapper normally
+# bind-mounts a host dir over this path, so it's present for every `dridock` invocation
+# — but a container started WITHOUT that mount has no such directory, and every write
+# below fails. That's not hypothetical: it's the "spawn an API sibling from a workload"
+# pattern (#62) and the DooD goal this fork is built around.
+#
+# Pre-4.2.2 the directory happened to exist in the image because `claude install --yes`
+# ran as the `claude` user in `base` and created it as a side effect. 4.2.2 moved the
+# CLI install to a builder stage and COPYs only `.local/` + `.claude.json`, so the
+# accident went away and the mountless case started failing (#64).
+#
+# Fixed here rather than by re-adding it to the Dockerfile: the entrypoint already owns
+# runtime seeding of ~/.claude (see the HEADS UP block in the Dockerfile), and doing it
+# here holds regardless of image contents or mount state. Re-adding a baked directory
+# would restore the same accident this bug came from.
+#
+# Deliberately NOT `|| true` — if we cannot create the config dir, the CLAUDE.md and
+# system-hint injection below silently does nothing and the claudebot runs without its
+# framework guidance. Say so loudly instead of degrading in silence.
+if ! mkdir -p /home/claude/.claude; then
+	echo "dridock: FAILED to create /home/claude/.claude — framework guidance (CLAUDE.md, system-hint) will NOT be injected" >&2
+fi
+chown claude:claude /home/claude/.claude 2>/dev/null \
+	|| echo "dridock: chown /home/claude/.claude FAILED — claude user may be unable to write its own config" >&2
+
 CLAUDE_MD_USER="/home/claude/.claude/CLAUDE.md"
 dbg "writing framework guidance to user memory (variant: ${CLAUDE_IMAGE_VARIANT:-full})"
 {

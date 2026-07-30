@@ -26,6 +26,49 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.2.4] — 2026-07-30 _(fork)_
+
+### Fixed — mountless containers skipped framework-guidance injection (#64)
+
+**Regression from 4.2.2.** `entrypoint.sh` writes `~/.claude/CLAUDE.md`,
+`~/.claude/system-hint.txt` and `~/.claude/.harness-version` without ensuring
+the directory exists. It normally does — the wrapper bind-mounts a host dir
+over it — so this was invisible on every `dridock` invocation.
+
+Before 4.2.2 the directory also existed *in the image*, because
+`claude install --yes` ran as the `claude` user inside `base` and created it as
+a side effect. 4.2.2 moved the CLI install into a builder stage and COPYs only
+`.local/` + `.claude.json`, so that accident went away — and containers started
+**without** the mount began failing:
+
+```
+entrypoint.sh: line 394: /home/claude/.claude/CLAUDE.md: No such file or directory
+entrypoint.sh: line 401: /home/claude/.claude/system-hint.txt: No such file or directory
+entrypoint.sh: line 423: /home/claude/.claude/.harness-version: No such file or directory
+```
+
+It reads as cosmetic — the daemon starts anyway — but the files were genuinely
+never written, so a mountless claudebot ran with **no framework guidance and no
+tool inventory**. That's the "spawn an API sibling from a workload" pattern
+(#62) and the DooD model this fork is built around.
+
+`entrypoint.sh` now creates and chowns the directory before first use. Fixed
+there rather than by re-baking it into the image: the entrypoint already owns
+runtime seeding of `~/.claude`, and a baked directory would restore the same
+accident this bug came from. The `mkdir` is deliberately **not** `|| true` — a
+failure now prints what will not be injected instead of degrading silently.
+
+Verified on a rebuilt image, both paths:
+
+| | mountless | mounted |
+|---|---|---|
+| entrypoint stderr | clean | clean |
+| `CLAUDE.md` | written (19417 b) | written |
+| `system-hint.txt` | written (998 b) | written |
+| `.harness-version` | written | written |
+
+Found by Bear during the #62 dogfood.
+
 ## [4.2.3] — 2026-07-30 _(fork)_
 
 ### Fixed — API mode was completely broken in the shipped image (#62)
