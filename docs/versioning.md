@@ -63,6 +63,40 @@ one but not the other — you get subtle, confusing breakage. The version makes 
    `install -m 755 wrapper.sh ~/.local/bin/dridock`). `dridock checkversion`
    should then read **in sync**.
 
+## Branch naming — `<issue#>-<slug>`
+
+Work branches are named for the **GitHub issue they close**, issue number first:
+
+```
+62-mcp-pin-api-mode
+58-container-xdg-persistence
+56-container-side
+46-agent-teams
+```
+
+The number goes first so `git branch -r` sorts and greps by issue, and so anyone
+looking at a branch can find the *why* without reading the diff. The slug is a short
+kebab-case hint, not a description — the issue holds the detail.
+
+Rules:
+
+- **One issue per branch.** If a fix spans two issues, either they're really one issue
+  (merge them) or they're really two branches. Bundling means neither issue's history
+  is reviewable on its own.
+- **File the issue first.** A branch with no issue number has nowhere to record the
+  problem statement, the options considered, or the verification — see
+  [Filing an issue](#filing-an-issue) below.
+- **Reference the issue in every commit** on the branch (`fix(#62): …`), so the fix is
+  traceable from `git log` alone once the branch is gone.
+
+Two pre-3.0 branches (`wrapper-typescript-rewrite`, `dridock-skill-statusline`) predate
+this convention. Don't take them as precedent.
+
+Merging is **fast-forward** where possible (`git merge --ff-only`); check with
+`git merge-base --is-ancestor origin/master <branch>` before assuming it isn't.
+Note that landing anything on `master` while a long-lived branch is open puts that
+branch out of FF range, so prefer to hold unrelated commits until it merges.
+
 ## Changelog policy
 
 Every version bump gets a `CHANGELOG.md` entry. Detailed fork changes **between the
