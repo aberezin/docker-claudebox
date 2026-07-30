@@ -541,13 +541,22 @@ EOF
 test_cron_overlap_protection() {
     _cron_setup_dirs
     local cron_file="$CRON_TMP/cron.yaml"
-    # Instruction that's slow enough that the next 10s boundary lands
-    # while the previous run is still active. Haiku on a long-ish prompt
-    # reliably takes 5-10s+.
+    # Overlap is forced by a SHORT INTERVAL, not by hoping the job is slow (#63).
+    #
+    # This previously used `*/10` and relied on "haiku reliably takes 5-10s+". That
+    # premise decayed: on the run that exposed it, 3 jobs fired and all 3 FINISHED
+    # inside their window, so no overlap ever occurred and cron.py was correct to
+    # log nothing — while the test reported "overlap protection isn't logging".
+    # Model latency drifts (downward), so any threshold phrased as "the model is
+    # slower than the interval" rots silently.
+    #
+    # A 2s interval is below the floor of a round-trip to any model, so the next
+    # boundary lands mid-run essentially always. Test what's being tested — that
+    # cron.py refuses to start a second concurrent run — rather than racing it.
     cat > "$cron_file" <<EOF
 jobs:
   - name: slowjob
-    schedule: "*/10 * * * * *"
+    schedule: "*/2 * * * * *"
     model: $TEST_MODEL
     instruction: |
       Please count from 1 to 20 in English words, one per line. Take your time.
@@ -576,27 +585,41 @@ EOF
     local logs fires overlap_msgs
     logs=$(docker logs "$cname" 2>&1)
     fires=$(find "$CRON_TMP/home/.claude/cron/history" -type d -name '20*-slowjob' 2>/dev/null | wc -l | tr -d ' ')
-    # cron.py skip-on-overlap prints something like "still running, skipping"
-    # or "overlapping". Case-insensitive across common phrasings.
-    overlap_msgs=$(echo "$logs" | grep -icE 'skip.*(still|running|overlap|previous|active)' || true)
+    # Match what cron.py ACTUALLY emits (cron.py:400):
+    #   "[<job>] previous run still in progress — skipping this tick"
+    #
+    # The previous pattern was `skip.*(still|running|overlap|previous|active)`,
+    # which requires one of those words AFTER "skip". In the real message they
+    # all come BEFORE it, so the regex matched zero lines no matter how well
+    # overlap protection worked — the test could not pass (#63). Anchored on the
+    # real phrasing now, order-independent, so a reworded log line fails loudly
+    # instead of silently never matching.
+    overlap_msgs=$(echo "$logs" | grep -icE 'previous run still in progress|skipping this tick' || true)
     docker rm -f "$cname" >/dev/null 2>&1 || true
 
     if [ "$overlap_msgs" -lt 1 ]; then
         echo "  FAIL: no skip messages in cron.py logs — overlap protection either isn't logging or didn't trigger"
-        echo "  fires observed: $fires (in 45s of */10 schedule = 4 boundaries)"
+        echo "  fires observed: $fires (45s of a */2 schedule ≈ 22 boundaries)"
         echo "  logs (last 50):"
         echo "$logs" | tail -50 | sed 's/^/    /'
         _cron_cleanup_dirs
         return 1
     fi
-    # 4 boundaries in 45s; overlap-protected we expect fires < 4 (at least one
-    # skip). If fires == 4 with no skips, overlap protection is off.
-    if [ "$fires" -ge 4 ]; then
-        echo "  FAIL: overlap protection let all 4 boundaries fire ($fires runs, expected <4)"
+    # Guard against passing VACUOUSLY. A container that never ran the job at all
+    # would emit no skip lines either — but that's a broken cron, not working
+    # overlap protection. Require evidence the job actually executed.
+    if [ "$fires" -lt 1 ]; then
+        echo "  FAIL: overlap skips logged but NO job ever completed ($fires runs) — cron isn't firing at all"
         _cron_cleanup_dirs
         return 1
     fi
-    echo "  OK: overlap protection: $fires firings across 4 boundaries; $overlap_msgs skip log line(s)"
+    # Deliberately no upper bound on $fires. The old `fires >= 4` check encoded an
+    # assumed job duration, which is the same rotting premise as the old */10
+    # schedule — how many of ~22 boundaries complete depends on model latency and
+    # container start time, neither of which this test controls. The skip log line
+    # is the direct evidence that cron.py declined a concurrent run; counting
+    # completions is a proxy for it that drifts (#63).
+    echo "  OK: overlap protection: $fires firings, $overlap_msgs skip log line(s)"
     _cron_cleanup_dirs
 }
 

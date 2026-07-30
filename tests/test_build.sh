@@ -5,7 +5,11 @@
 BUILD_CHECKS=(
     "entrypoint|Config.Entrypoint|entrypoint.sh"
     "claude user env|Config.Env|DISABLE_AUTOUPDATER=1"
-    "minimal variant|Config.Env|CLAUDEBOX_IMAGE_VARIANT=minimal"
+    # DRIDOCK_, not CLAUDEBOX_ — the image has stamped the DRIDOCK_ name since the
+    # 3.0 rename (Dockerfile: `ENV DRIDOCK_IMAGE_VARIANT`). The CLAUDEBOX_ fallback
+    # is a READ-side alias in entrypoint.sh, never written into Config.Env, so this
+    # assertion had been failing since 3.0 (#63). Assert what the image sets.
+    "minimal variant|Config.Env|DRIDOCK_IMAGE_VARIANT=minimal"
 )
 
 test_build_image_config() {

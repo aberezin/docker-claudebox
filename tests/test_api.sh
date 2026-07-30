@@ -9,8 +9,17 @@ _api_start() {
     local name="${1:-$API_CONTAINER}"
     shift || true
     _api_claude_tmp=$(mktemp -d "$WORKDIR/tests/.tmp-api-XXXXX")
+    # NO `--rm` — deliberate (#63). With it, a container that EXITS is removed
+    # immediately, so the `docker logs` below prints "No such container" and the
+    # only evidence of why the server died is destroyed by the flag two lines
+    # above the code that needs it. That is how #62 (mcp 2.0.0 killing api_server
+    # on import) stayed invisible through 31 failing tests: every one of them
+    # reported "api server did not start" with no cause attached, and the root
+    # cause was only found by re-running the container by hand without `--rm`.
+    # Teardown is already guaranteed by cleanup()'s EXTRA_CONTAINERS sweep and by
+    # start_container's own `docker rm -f` on the next run, so nothing leaks.
     start_container "$name" \
-        --rm --network host \
+        --network host \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "CLAUDE_MODE_API=1" \
@@ -20,6 +29,11 @@ _api_start() {
         "$IMAGE"
     wait_for_http "$API_BASE/health" 60 || {
         echo "  FAIL: api server did not start"
+        # State first: it distinguishes the two failures that look identical from
+        # the health check alone — "Exited (N)" means the server died (read the
+        # logs), "Up" means it is running but unreachable (a networking/port
+        # problem, not an application one).
+        docker ps -a --filter "name=^${name}$" --format '  container state: {{.Status}}'
         docker logs "$name" 2>&1 | tail -20
         return 1
     }
