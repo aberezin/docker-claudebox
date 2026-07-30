@@ -194,20 +194,28 @@ _is_uint() {
 
 # Determine last drain offset for this session.
 #
-# Fallback strategy for unknown session_id (Arfy's option (d) on #56):
+# Fallback strategy for unknown session_id (Arfy's option (d) on #56,
+# revised for #58 persistent-inbox trade-off):
 #   - Known id      → use its stored offset directly.
 #   - Unknown id, cursors file has OTHER entries → infer from
 #     max(existing offsets). Catch up from wherever the newest known
 #     consumer last got to. Self-heals new session ids without either
 #     replay-all or infinite-skip.
-#   - Unknown id, cursors file EMPTY (or absent) → still EOF. No prior
-#     entries = no evidence to infer from; falling back to 0 would be a
-#     guess that replays the entire inbox at a fresh agent.
-#   - No session_id in payload / no jq → EOF (same as pre-(d) — no id
-#     to key inference on).
-#   - Cursors file CORRUPT (any offset isn't a positive integer) →
-#     EOF, loudly recommend `rm` (legitimate here — unlike the old
-#     replay hint, discarding a corrupt file IS the right recovery).
+#   - Unknown id, cursors file EMPTY / no cursors file at all → default
+#     to 0 (drain the full inbox). Pre-#58 (ephemeral inbox), Arfy's
+#     refinement chose EOF here to avoid replay-all-on-fresh-install.
+#     Post-#58 the inbox PERSISTS across container recreates on the
+#     bind-mounted ~/.claude — so a "no cursors file" state is now the
+#     signal for "cursor was never established", not "fresh install
+#     with nothing to see". EOF here would silently drop any events
+#     accumulated in the persistent inbox (Arfy's gap-event repro on
+#     0ac6281 exposed this). 0 = drain everything, which under a
+#     bounded per-agent inbox is safe and self-establishes the cursor
+#     for subsequent runs.
+#   - No session_id / no jq → EOF (can't write cursor, so draining
+#     would replay every hook run — worse than skip).
+#   - Cursors file CORRUPT → EOF + rm hint (discarding IS correct
+#     recovery).
 _last_offset=0
 _drain_note=""
 if [ -n "$_session_id" ] && [ -f "$_cursors" ] && command -v jq >/dev/null 2>&1; then
@@ -235,16 +243,29 @@ if [ -n "$_session_id" ] && [ -f "$_cursors" ] && command -v jq >/dev/null 2>&1;
                 _drain_note="cursors file CORRUPT — max() returned non-integer '$_max_known'. Defaulting to current EOF. Recover: rm $_cursors"
             fi
         else
-            _last_offset="$_inbox_size"
-            _drain_note="unknown session_id '$_session_id', no prior entries → defaulting to current EOF (no evidence to infer from)"
+            # Unknown id + cursors file exists but empty of entries. No
+            # max() evidence, but this session_id is known so we CAN
+            # advance a cursor. Under 4.2.1's persistent inbox, draining
+            # from 0 self-establishes state without dropping accumulated
+            # events. See header comment for the trade-off shift.
+            _last_offset=0
+            _drain_note="unknown session_id '$_session_id', empty cursors file → draining full inbox to establish this session's baseline"
         fi
     fi
 elif [ -z "$_session_id" ]; then
     _last_offset="$_inbox_size"
     _drain_note="no session_id in hook payload → defaulting to current EOF"
 elif [ ! -f "$_cursors" ]; then
-    _last_offset="$_inbox_size"
-    _drain_note="no cursors file yet → defaulting to current EOF (first session on this agent)"
+    # First-ever hook run on this agent (or after `rm <cursors>`
+    # recovery). Under 4.2.1 the inbox persists, so anything accumulated
+    # in it deserves surfacing on first read — draining from 0
+    # establishes the cursor for this session_id and prevents the
+    # infinite-EOF-default loop that made Arfy's #58 gap-event repro
+    # fail (drain skipped → cursor never written → next hook run also
+    # sees "no cursors file" → same skip). Under a bounded per-agent
+    # inbox this is safe.
+    _last_offset=0
+    _drain_note="no cursors file yet → draining full inbox (first-ever session on this agent; establishes persistent state)"
 elif ! command -v jq >/dev/null 2>&1; then
     _last_offset="$_inbox_size"
     _drain_note="jq not available → defaulting to current EOF"

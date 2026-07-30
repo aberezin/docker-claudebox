@@ -73,6 +73,27 @@ is empty (first-ever install, or state-loss for any reason). Same
 CLAUDE.md-rule fix Arfy applied elsewhere in this review chain:
 silent skip becomes visible signal.
 
+### Fixed — SessionStart drain "no cursors file yet" default flipped from EOF to 0
+
+Late-review catch from Arfy's runtime gap-event repro on this branch:
+under 4.2.0 (ephemeral inbox), the "no cursors file yet" fallback
+defaulted `_last_offset=EOF` so a fresh install wouldn't replay all
+of an empty inbox. Under 4.2.1 (persistent inbox on `~/.claude` bind
+mount), the inbox may already contain accumulated events on first
+hook run — EOF default silently dropped them, AND the conditional
+cursor-advance (from the #56 review round) meant the cursors file
+never got initialized, so EVERY subsequent hook run also fell into
+the same skip. Infinite EOF-default loop; Arfy's gap event stayed in
+the inbox but never surfaced.
+
+Fix: "no cursors file yet" and "empty cursors file, session_id known"
+branches now default `_last_offset=0` — drain the full inbox on
+first-ever hook run, establish the cursor for this session_id, and
+subsequent runs pick up incrementally from that offset. Per-agent
+inbox is bounded so drain-all is safe. `no session_id` / `no jq` /
+`corrupt cursors` branches keep EOF default (can't advance cursor
+without id + jq, so draining would infinite-replay every hook run).
+
 ### Notes
 
 PATCH bump per CLAUDE.md — bug fix for silent event loss on container
