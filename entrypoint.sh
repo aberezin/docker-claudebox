@@ -767,6 +767,17 @@ _dridock_alias_env
 # root and would default to root:root without an explicit chown.
 mkdir -p /home/claude/.claude/xdg-config
 chown -R claude:claude /home/claude/.claude/xdg-config 2>/dev/null || true
+# chmod 700 the xdg-config root — anything XDG-stored in-container is now
+# persistent host-side, and gh's OAuth token in particular lands under
+# ~/.config/dridock/projects/<id>/claude/xdg-config/gh/hosts.yml on the
+# host. Default umask leaves the directory 0755 = traversable by other
+# uids on the host (Arfy has a second Mac account; not hypothetical).
+# gh itself chmod's hosts.yml 0600, but a 0755 parent still leaks
+# metadata (existence, filenames). Lock the dir to owner-only so the
+# credential dir is invisible to other host uids. CLAUDE.md rule:
+# credentials live in chmod-600 files — extend that to their containing
+# dir too when the containing dir is on host disk.
+chmod 700 /home/claude/.claude/xdg-config 2>/dev/null || true
 export XDG_CONFIG_HOME=/home/claude/.claude/xdg-config
 dbg "XDG_CONFIG_HOME=$XDG_CONFIG_HOME (persistence via ~/.claude bind mount, #58)"
 

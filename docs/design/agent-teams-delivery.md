@@ -141,6 +141,31 @@ per-agent locations that survive teardown. The **agreement is
 functional, not path-level** — documented explicitly here rather than
 claiming they're identical.
 
+### Consequence: XDG state is now persistent host-side
+
+The container's `~/.claude/xdg-config/` is a subdir of the bind-
+mounted `~/.claude/`, so anything the container writes under
+`XDG_CONFIG_HOME` lands on the host at
+`~/.config/dridock/projects/<id>/claude/xdg-config/…`. This is the
+whole point for team-watch state — but it also means:
+
+- **`gh` CLI OAuth tokens** in `xdg-config/gh/hosts.yml` — persist.
+- **Anything else XDG-consuming inside the container** (bun cache,
+  language-server configs, etc.) — persist.
+
+`entrypoint.sh` chmod's `~/.claude/xdg-config/` to 0700 so the whole
+subtree is owner-only readable from the host side, matching the
+CLAUDE.md rule that credential-carrying files (and their parents)
+are not world-visible. Individual sensitive files like `gh/hosts.yml`
+retain their tool's chmod (gh uses 0600); the 0700 parent means
+another host uid can't even traverse the tree.
+
+If you're storing a NEW kind of credential in-container, you now
+choose between: (a) tool-provided XDG storage (persists, owner-only,
+same footing as `gh`); (b) `~/.claude/.<container>-secrets` sidecar
+(the framework's existing credential channel — see the "Secrets"
+section of the top-level `CLAUDE.md`).
+
 **Loud fresh-start signal**: when the fetcher spawns with an empty
 cursor (first-ever install, or state-loss for any reason),
 `TeamCommand.runWatch` prints a `⚠️ FRESH START — no prior cursor`

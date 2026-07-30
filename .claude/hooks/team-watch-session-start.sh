@@ -133,6 +133,19 @@ if [ "$_spawn_fetcher" = 1 ]; then
     _spawn_pid="$(cat "$_pid" 2>/dev/null || true)"
     if _check_fetcher_alive "$_spawn_pid"; then
         echo "🚀 team fetcher: spawned (nohup, detached, pid=$_spawn_pid). log=$_log"
+        # Surface any FRESH START warning from the fetcher's log to
+        # session context — Arfy's #58 review finding: `TeamCommand.runWatch`
+        # writes the "no prior cursor, historical events not delivered"
+        # warning to stderr → nohup redirect → log file. Without this
+        # relay, the warning exists but is invisible on the happy path
+        # (log's tail is only echoed by the DEAD-fetcher branch). Same
+        # channel-mistake class we spent an hour removing from the drain
+        # path; catching it here at the spawn path too.
+        if [ -f "$_log" ] && grep -qF "FRESH START" "$_log" 2>/dev/null; then
+            echo ""
+            # 4 lines: the warning header + 3 body lines from TeamCommand.
+            grep -A3 -F "FRESH START" "$_log" 2>/dev/null | head -4
+        fi
     else
         echo "⚠ team fetcher: spawn attempted but pid not alive OR cmdline mismatch."
         if [ -f "$_log" ]; then
