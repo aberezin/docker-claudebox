@@ -71,8 +71,18 @@ test_entrypoint_workspace_ownership() {
 
 test_entrypoint_claude_md() {
     local out
+    # Reads ~/.claude/CLAUDE.md, NOT /workspace/CLAUDE.md (#63). The "Available
+    # Tools in This Container" listing is emitted into CLAUDE_MD_USER
+    # (entrypoint.sh:89) — the user-memory framework guidance rewritten on every
+    # boot. /workspace/CLAUDE.md is a different artifact (the per-project template
+    # copy) and does not exist at all when no workspace is mounted, which is the
+    # case here — so this asserted against an empty string and could only ever
+    # report whatever claude happened to print. Same path as the system_hint test
+    # below; the two are deliberately symmetric.
+    #
+    # `head -1` was also wrong: the marker is ~35 lines in, not on line 1.
     out=$(docker run --rm --entrypoint bash "$IMAGE" -c \
-        '/home/claude/entrypoint.sh ls /workspace/CLAUDE.md 2>/dev/null; head -1 /workspace/CLAUDE.md 2>/dev/null' 2>&1)
+        '/home/claude/entrypoint.sh ls /dev/null 2>/dev/null; cat /home/claude/.claude/CLAUDE.md 2>/dev/null' 2>&1)
     assert_contains "$out" "Available Tools" "CLAUDE.md generated with tool listing"
 }
 
