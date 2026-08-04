@@ -41,12 +41,12 @@ All six are now version-bounded. The specifier shape is deliberately asymmetric
 between 0.x and 1.x+ packages:
 
 ```
-"fastapi~=0.141.1"       # 0.x: ~=X.Y.Z admits patches only (blocks 0.142.0)
-"uvicorn~=0.52.0"        # 0.x: same
+"fastapi~=0.141.1"           # 0.x: ~=X.Y.Z admits patches only (blocks 0.142.0)
+"uvicorn~=0.52.0"            # 0.x: same
 "python-telegram-bot~=22.8"  # 1.x+: ~=X.Y admits minors + patches (blocks 23.0)
-"pyyaml~=6.0.3"          # 1.x+: same (chose ~=X.Y.Z here — pyyaml minors are rare)
-"mcp>=1.29,<2"           # hard <2 stays: FastMCP incompatibility, see #62
-"croniter~=6.2.4"        # 1.x+
+"pyyaml~=6.0"                # 1.x+: same
+"mcp>=1.29,<2"               # hard <2 stays: FastMCP incompatibility, see #62
+"croniter~=6.2"              # 1.x+: same
 ```
 
 **Why 0.x tighter than 1.x+:** for 0.x packages, minor bumps ARE the breaking

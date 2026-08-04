@@ -68,9 +68,9 @@ RUN apt-get update && apt-get install -y \
        "fastapi~=0.141.1" \
        "uvicorn~=0.52.0" \
        "python-telegram-bot~=22.8" \
-       "pyyaml~=6.0.3" \
+       "pyyaml~=6.0" \
        "mcp>=1.29,<2" \
-       "croniter~=6.2.4"
+       "croniter~=6.2"
 
 # docker (needed for docker-in-docker)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
