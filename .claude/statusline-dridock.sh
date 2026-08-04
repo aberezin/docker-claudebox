@@ -3,9 +3,15 @@
 # project as `🚢 cb-<id>`. Silent when the cwd isn't in a dridock project so
 # the statusLine stays empty in non-harness projects.
 #
-# Reads .dridock/config.yml directly (no `dridock` binary shell-out) so the
-# hook stays sub-millisecond even on cold caches. Walks upward from the
-# starting dir to catch the case where the user cd'd into a subdir.
+# Reads .dridock/config.yml directly (no `dridock` binary shell-out). Walks
+# upward from the starting dir to catch the case where the user cd'd into a
+# subdir.
+#
+# COST: ~38ms/render for the jq+bash startup this script already pays, plus
+# ~23ms for the work-indicator scan below. An earlier header claimed
+# "sub-millisecond"; that was never measured and isn't true. Keep new work
+# here to single process scans and avoid `docker` shell-outs, which are an
+# order of magnitude worse.
 #
 # Input contract (Claude Code): a JSON payload on stdin with a `.cwd` field.
 # Falls back to $CLAUDE_PROJECT_DIR then $PWD if stdin is empty or lacks jq.
@@ -20,6 +26,48 @@ if [ -n "$input" ] && command -v jq >/dev/null 2>&1; then
 fi
 [ -z "$cwd" ] && cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
 [ -d "$cwd" ] || exit 0
+
+# ── long-running work indicator (#66) ────────────────────────────────
+# Printed BEFORE the dridock-project walk below, and deliberately NOT
+# gated by it. That walk exits silently outside a dridock project, and
+# the harness repo itself is not one (no .dridock/config.yml anywhere up
+# the tree) — which is precisely where the 8-40 minute `bash test.sh`
+# and `make build` runs happen. Gating this on the walk would reproduce
+# the invisibility it exists to fix.
+#
+# Detection is by RUNNING PROCESS rather than a marker file the launcher
+# has to remember to write, so an ad-hoc `bash test.sh` shows up with no
+# cooperation from whoever started it. Same reasoning as the #63 runner
+# fix: a property that depends on the author remembering isn't a
+# property.
+#
+# `pgrep -o` selects the OLDEST match — the run itself rather than a
+# short-lived child — so the elapsed time shown is the one worth seeing.
+#
+# ONE pgrep covering all patterns, then ONE ps for elapsed + label.
+# Measured here: three separate pgreps cost 58ms/render, this costs 23ms.
+_busy_pid="$(pgrep -o -f 'bash .*test\.sh|docker( [a-z-]+)* build|make( [a-zA-Z-]+)* build' 2>/dev/null || true)"
+
+if [ -n "$_busy_pid" ]; then
+    _info="$(ps -o etime=,command= -p "$_busy_pid" 2>/dev/null)"
+    _et="${_info%% *}"
+    case "$_info" in
+        *test.sh*) _busy_label="tests" ;;
+        *)         _busy_label="build" ;;
+    esac
+    # etime is [[DD-]HH:]MM:SS. Normalise so "10:08" can't be misread as
+    # ten hours.
+    _human="$(printf '%s' "$_et" | awk -F'[-:]' '
+        NF==2 { printf "%dm%02ds", $1, $2; next }
+        NF==3 { printf "%dh%02dm", $1, $2; next }
+        NF==4 { printf "%dd%02dh", $1, $2; next }
+        { print }
+    ' 2>/dev/null)"
+    [ -z "$_human" ] && _human="$_et"
+    # Yellow: reads as in-progress on light and dark terminals alike, and
+    # is distinct from the cyan used for the profile segment below.
+    printf '\033[33m⏳ %s %s\033[0m ' "$_busy_label" "$_human"
+fi
 
 # ── walk up looking for .dridock/config.yml ──────────────────────────
 dir="$cwd"
