@@ -49,9 +49,20 @@ fi
 _busy_pid="$(pgrep -o -f 'bash .*test\.sh|docker( [a-z-]+)* build|make( [a-zA-Z-]+)* build' 2>/dev/null || true)"
 
 if [ -n "$_busy_pid" ]; then
-    _info="$(ps -o etime=,command= -p "$_busy_pid" 2>/dev/null)"
-    _et="${_info%% *}"
-    case "$_info" in
+    # `read` (not `${_info%% *}`) because Linux procps-ng LEFT-PADS etime while
+    # BSD ps does not:
+    #
+    #   macOS   [00:01 sleep 30]        -> ${_info%% *} = "00:01"   ok
+    #   Linux   [      00:01 sleep 30]  -> ${_info%% *} = ""        elapsed vanishes
+    #
+    # `%%` takes the longest prefix up to a space, so leading whitespace makes it
+    # split at position 0 and yield the empty string — the segment then rendered
+    # as a bare "⏳ tests " with no time, which is most of the value gone. `read`
+    # strips leading IFS and splits on the first gap, so it is correct on both.
+    # Caught by Bear dogfooding in-container on #66; not reproducible on macOS.
+    _et=""; _cmd=""
+    read -r _et _cmd < <(ps -o etime=,command= -p "$_busy_pid" 2>/dev/null) || true
+    case "$_cmd" in
         *test.sh*) _busy_label="tests" ;;
         *)         _busy_label="build" ;;
     esac
