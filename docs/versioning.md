@@ -97,6 +97,35 @@ Merging is **fast-forward** where possible (`git merge --ff-only`); check with
 Note that landing anything on `master` while a long-lived branch is open puts that
 branch out of FF range, so prefer to hold unrelated commits until it merges.
 
+### Who merges
+
+**Whoever owns the branch merges it, and says so on the issue** — a close-note naming
+the merge commit (and tag, if one was cut). The reviewer signs off; they do not merge.
+
+"Signed off" does not say who merges, and that ambiguity has two failure modes, both
+seen on #62/#64: each agent waits for the other, or both merge and one clobbers.
+Ownership decides *who*; it does not decide *whether it has been verified* — a branch
+still needs its sign-off before its owner merges it.
+
+### Claiming something is verified
+
+**Name the environment, or you haven't verified it.** "Verified on real runs" is a
+weaker claim than it sounds when this project ships into two runtimes — macOS/colima
+on the host and Linux/`docker` in the container — and most bugs live in exactly one.
+
+Say *macOS + colima* or *Linux + docker backend*, and say which you did **not** cover.
+Two separate bugs in one day were invisible to one side and obvious from the other:
+
+- **#63** — the runner counted visibly-failing tests as PASSED. Only reachable on the
+  `docker` backend, because the test that exposed it legitimately passes under colima.
+- **#66** — elapsed time vanished entirely because Linux `procps-ng` left-pads
+  `ps -o etime=` and BSD `ps` does not. Verified working on macOS; shipped broken for
+  the container, which is the primary target.
+
+Neither was found by review. Both were found by the *other* runtime running the same
+code. When you cannot exercise a path, say so and hand it to whoever can — that is a
+result, not an admission.
+
 ## Changelog policy
 
 Every version bump gets a `CHANGELOG.md` entry. Detailed fork changes **between the
