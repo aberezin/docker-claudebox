@@ -26,6 +26,54 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.2.5] — 2026-08-04 _(fork)_
+
+### Fixed — remaining five daemon deps could break the image the way `mcp` did (#65)
+
+Follow-up to #62. `Dockerfile:47` installed six daemon dependencies with only
+one pin (`mcp<2`, added in 4.2.3). The other five — `fastapi`, `uvicorn`,
+`python-telegram-bot`, `pyyaml`, `croniter` — were unpinned, so any of them
+could take the API/telegram/cron surfaces down the same way `mcp 2.0.0` took
+API mode down: an upstream major landing between two rebuilds, no commit in
+this repo, invisible until something exercised it.
+
+All six are now version-bounded. The specifier shape is deliberately asymmetric
+between 0.x and 1.x+ packages:
+
+```
+"fastapi~=0.141.1"       # 0.x: ~=X.Y.Z admits patches only (blocks 0.142.0)
+"uvicorn~=0.52.0"        # 0.x: same
+"python-telegram-bot~=22.8"  # 1.x+: ~=X.Y admits minors + patches (blocks 23.0)
+"pyyaml~=6.0.3"          # 1.x+: same (chose ~=X.Y.Z here — pyyaml minors are rare)
+"mcp>=1.29,<2"           # hard <2 stays: FastMCP incompatibility, see #62
+"croniter~=6.2.4"        # 1.x+
+```
+
+**Why 0.x tighter than 1.x+:** for 0.x packages, minor bumps ARE the breaking
+bumps by convention (there is no "major" until 1.0), so `~=0.141` would admit
+0.142.0 as compatible when it likely isn't. `~=0.141.1` gives "allow 0.141.2,
+0.141.9; block 0.142.0". For real-semver 1.x+ packages, minors are meant to be
+non-breaking and admitting them is the right cost/benefit.
+
+**Why not exact pins:** exact `==` pins are fully reproducible but freeze
+security patches too, so they need a documented review cadence or they rot.
+`~=` doesn't — patches (and, for 1.x+, minors) flow automatically and a bump
+is a code review, not a chore. The failure mode that motivated the issue was
+a MAJOR (`mcp` 1.x → 2.0.0), and `~=` blocks exactly that.
+
+Verified on Linux + docker backend, dridock 4.2.5 image (`make build` 5m38s):
+
+```
+fastapi 0.141.1  uvicorn 0.52.1 (pip picked up the patch bump — bound works)
+python-telegram-bot 22.8  pyyaml 6.0.3  mcp 1.29.0  croniter 6.2.4
+from mcp.server.fastmcp import FastMCP -> OK
+```
+
+`bash test.sh` → 60 passed / 0 failed under the strict counter; one haiku
+non-determinism flake on the `test_api_openai_chat` "respond with exactly
+OAIPONG" prompt (model gave a boilerplate refusal) that passed cleanly on
+rerun. Unrelated to pins.
+
 ## [4.2.4] — 2026-07-30 _(fork)_
 
 ### Fixed — mountless containers skipped framework-guidance injection (#64)

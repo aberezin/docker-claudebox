@@ -34,17 +34,43 @@ RUN NODE_VERSION=20.20.2 && \
     node --version && npm --version
 
 # python3 + api server deps (needed for CLAUDE_MODE_API)
-# ⚠️  `mcp<2` is a REAL PIN, not caution. mcp 2.0.0 removed `mcp.server.fastmcp`
-# (renamed to `mcp.server.mcpserver`), and `api_server.py` imports FastMCP from the
-# old path at MODULE SCOPE — so the whole API server died on import, taking the REST
-# and OpenAI surfaces down with it even though neither touches MCP (#62). Nothing in
-# this repo changed; upstream published a major and the next rebuild picked it up.
-# Removing this pin without porting the FastMCP usage re-breaks API mode entirely.
-# The other five deps are still unpinned and can fail the same way — see #62.
+#
+# ALL SIX are pinned (#65). The failure mode we're defending against is #62:
+# an upstream major landing between two rebuilds with no commit here. Unpinned,
+# every one of these can do to the daemons what mcp 2.0.0 did to API mode.
+#
+# Version-specifier shape is deliberate and asymmetric between 0.x and 1.x+:
+#   ~=X.Y.Z on 0.x packages   fastapi (0.141.1), uvicorn (0.52.0)
+#   ~=X.Y   on 1.x+ packages  python-telegram-bot (22.8), pyyaml (6.0.3),
+#                             croniter (6.2.4)
+# Reasoning: PEP 440's `~=X.Y.Z` admits patches only (blocks X.Y+1.0), while
+# `~=X.Y` admits minors + patches (blocks X+1.0). For 0.x packages, MINORS are
+# the breaking bumps by convention (there is no "major" until 1.0), so the
+# tighter bound is what actually protects us — fastapi has broken things in a
+# 0.x minor before. For 1.x+ packages following real semver, minors are meant
+# to be non-breaking and admitting them is the right cost/benefit — closer to
+# Arfy's original suggestion in #65.
+#
+# `mcp<2` stays a HARD upper bound: 2.0.0 removed `mcp.server.fastmcp`
+# (renamed to `mcp.server.mcpserver`), and `api_server.py:1141` imports FastMCP
+# from the old path at MODULE SCOPE — the whole API server died on import (#62,
+# fixed in 4.2.3). Removing `<2` without porting the FastMCP usage re-breaks
+# API mode entirely. Same rationale as above but with a known-real ceiling
+# rather than a defensive one.
+#
+# When bumping these deliberately: `pip index versions <pkg>`, run the suite
+# (that gate is real now — #63), then update the ~= floor. No cadence document
+# because the ~= form doesn't need one; a bump is a code review, not a chore.
 RUN apt-get update && apt-get install -y \
     python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/* \
-    && pip3 install --no-cache-dir --break-system-packages --ignore-installed fastapi uvicorn python-telegram-bot pyyaml "mcp<2" croniter
+    && pip3 install --no-cache-dir --break-system-packages --ignore-installed \
+       "fastapi~=0.141.1" \
+       "uvicorn~=0.52.0" \
+       "python-telegram-bot~=22.8" \
+       "pyyaml~=6.0.3" \
+       "mcp>=1.29,<2" \
+       "croniter~=6.2.4"
 
 # docker (needed for docker-in-docker)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
