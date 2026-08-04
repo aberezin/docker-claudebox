@@ -56,14 +56,32 @@ for t in "${TESTS_TO_RUN[@]}"; do
     # own exit code (not tee's) via PIPESTATUS. The `if` form exempts the
     # pipeline from `set -e` so a failing test doesn't kill the runner.
     if $t 2>&1 | tee "$log_file"; then
-        PASSED=$((PASSED + 1))
+        rc_first=0
     else
         rc_first=${PIPESTATUS[0]}
-        if [ "$rc_first" -eq 0 ]; then
-            PASSED=$((PASSED + 1))
-        else
-            FAILED=$((FAILED + 1))
-        fi
+    fi
+    # A test passes only if it BOTH returned 0 AND printed no FAIL line.
+    #
+    # Return code alone is not sufficient: a shell function exits with the status
+    # of its LAST command, so a trailing cleanup line masks a failed assertion
+    # above it —
+    #
+    #     assert_eq "$owner" "$host_uid" "..."   # prints FAIL, returns 1
+    #     rm -rf "$tmpdir"                       # returns 0  <- function returns 0
+    #
+    # the runner then counts a visibly-failing test as PASSED. Bear caught this on
+    # #63 (test_entrypoint_workspace_ownership, docker backend). At least 11 tests
+    # end with cleanup after their last assert, so this was never one test's bug.
+    #
+    # Checking the log closes the whole class at once and keeps working for tests
+    # written later, rather than depending on every author remembering
+    # `|| return 1`. It is also the same rule this suite is being fixed to
+    # enforce elsewhere: a failure must not be silently discarded.
+    if [ "$rc_first" -ne 0 ] || grep -qE "^[[:space:]]*FAIL:" "$log_file"; then
+        FAILED=$((FAILED + 1))
+        [ "$rc_first" -eq 0 ] && echo "  ^^ counted FAILED: assertion failed but the test function returned 0"
+    else
+        PASSED=$((PASSED + 1))
     fi
     test_teardown
 done

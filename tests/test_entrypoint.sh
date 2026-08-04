@@ -52,6 +52,19 @@ test_entrypoint_workspace_ownership() {
         return 0
     fi
 
+    # This assertion is colima-specific. It expects a file created INSIDE the
+    # container to come back owned by the host uid, which depends on colima's
+    # UID reflection into the mount. On the `docker` backend (ambient daemon —
+    # auto-selected inside a container, tests/common.sh) there is no such
+    # reflection and the file comes back uid 0. That's correct behavior for that
+    # backend, not a regression, so assert it only where it means something.
+    # Found by Bear running the suite from inside his claudebot (#63).
+    if [ "${CBX_BACKEND:-}" = "docker" ]; then
+        echo "  SKIP: docker backend has no colima UID reflection — ownership check is colima-only"
+        rm -rf "$tmpdir"
+        return 0
+    fi
+
     # a container process creates a file in the mounted workspace
     docker run --rm -v "$tmpdir:$tmpdir" \
         --entrypoint bash "$IMAGE" -c "touch '$tmpdir/made-in-container'" >/dev/null 2>&1
@@ -82,7 +95,7 @@ test_entrypoint_claude_md() {
     #
     # `head -1` was also wrong: the marker is ~35 lines in, not on line 1.
     out=$(docker run --rm --entrypoint bash "$IMAGE" -c \
-        '/home/claude/entrypoint.sh ls /dev/null 2>/dev/null; cat /home/claude/.claude/CLAUDE.md 2>/dev/null' 2>&1)
+        '/home/claude/entrypoint.sh ls /dev/null 2>&1; cat /home/claude/.claude/CLAUDE.md 2>/dev/null' 2>&1)
     assert_contains "$out" "Available Tools" "CLAUDE.md generated with tool listing"
 }
 
@@ -91,7 +104,7 @@ test_entrypoint_claude_md() {
 test_entrypoint_system_hint() {
     local out
     out=$(docker run --rm --entrypoint bash "$IMAGE" -c \
-        '/home/claude/entrypoint.sh ls /dev/null 2>/dev/null; cat /home/claude/.claude/system-hint.txt 2>/dev/null' 2>&1)
+        '/home/claude/entrypoint.sh ls /dev/null 2>&1; cat /home/claude/.claude/system-hint.txt 2>/dev/null' 2>&1)
     assert_contains "$out" "Docker container" "system hint generated"
 }
 
@@ -100,7 +113,7 @@ test_entrypoint_system_hint() {
 test_entrypoint_config_patching() {
     local out
     out=$(docker run --rm --entrypoint bash "$IMAGE" -c \
-        '/home/claude/entrypoint.sh ls /dev/null 2>/dev/null; cat /home/claude/.claude/.claude.json 2>/dev/null' 2>&1)
+        '/home/claude/entrypoint.sh ls /dev/null 2>&1; cat /home/claude/.claude/.claude.json 2>/dev/null' 2>&1)
     assert_contains "$out" '"installMethod"' "config patched with installMethod" || return 1
     assert_contains "$out" '"native"' "installMethod set to native"
 }
@@ -120,7 +133,7 @@ DEOF
     # run entrypoint but check the marker file, not claude output
     local out
     out=$(docker run --rm --entrypoint bash "$img" -c \
-        'bash /home/claude/entrypoint.sh echo done 2>/dev/null; cat /tmp/init-marker 2>/dev/null' 2>&1)
+        'bash /home/claude/entrypoint.sh echo done 2>&1; cat /tmp/init-marker 2>/dev/null' 2>&1)
     assert_contains "$out" "INITRAN" "init.d script executed"
 
     docker rmi -f "$img" >/dev/null 2>&1 || true
