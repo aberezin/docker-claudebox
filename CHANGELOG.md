@@ -26,6 +26,84 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.3.0] — 2026-08-11 _(fork)_
+
+### Added — `dridock team post` can actually post (#59)
+
+Compose and send in a single command. Closes the two-tool seam that the
+in-container agent hit twice, both silently:
+
+1. `gh api -f body=@-` posted the literal string `"@-"` (`-f` doesn't do
+   stdin; you need `-F` upper or `--body-file`). Two full reports lost.
+2. A merge close-note posted without the `Bear->Arfy:` routing header —
+   the fetcher's `surfacesForAgent` treats unheadered as "not addressed
+   to anyone", advances its cursor past it, and never surfaces it to any
+   inbox. Arfy learned #65 had shipped a week later, when Alan mentioned
+   it. Filed as the third failure mode of #56.
+
+Both failures share one shape: composing the header and sending the
+comment are separate steps, and the gap between them is unguarded. Rather
+than remember-to-do-the-right-thing on every send site, close the gap in
+the tool.
+
+**New flags on `dridock team post`:**
+
+```
+--issue N          send the composed message to issue N via gh(1).
+                   Absent = compose-only (existing behavior; TTY hint
+                   still fires so an interactive operator sees they
+                   didn't send anything).
+--repo owner/name  override roster.github_repo (only with --issue).
+--dry-run          with --issue: print what would be sent + the target,
+                   do NOT invoke gh. Useful for validating flag combos
+                   before a real send.
+```
+
+Under the hood: `--issue` stages the composed body to
+`<xdg>/dridock/pending-post-<pid>-<ts>.md`, invokes
+`gh issue comment N --repo R --body-file <path>`, propagates gh's rc, and
+cleans up the temp file. On success, prints `✅ team post: sent to
+owner/name#N` plus the new comment's URL from gh's stdout.
+
+**Body sanity gate (Arfy's ask):**
+
+`team post` now rejects at the boundary — BEFORE composing — a body that
+is (a) empty, or (b) has no alphanumeric content anywhere. Both are
+shapes that have historically indicated a broken send pipeline (the `@-`
+incident) rather than a real message. `ok`, `hi`, `no` still pass — the
+gate is specifically for punctuation-only / empty bodies. Applies
+uniformly to compose-only, send, and dry-run — otherwise
+`team post --to X < broken-body` would be a working dev loop that
+silently breaks the moment `--issue` is added.
+
+**Dogfooded via the send path itself.** The completion report on #59 was
+posted with `dridock team post --to Arfy --issue 59 < report.md` —
+meta-verification that the tool works before merging.
+
+### Compose-only is still the default without `--issue`
+
+Not deprecated. `dridock team post --to X < body.md` continues to prepend
+the header and print to stdout, exactly as before, with the same
+TTY-detect hint pointing at the send-in-one-step form. Kept because a
+compose-only path is useful for iterating on a draft and for the small
+number of cases the send path doesn't cover (edits, cross-repo posts
+routed elsewhere, etc.).
+
+### Notes
+
+- 12 new unit tests in `dridock-ts/src/cli/commands/TeamCommand.test.ts`
+  covering the send path, dry-run, repo resolution, rc propagation, and
+  the body-sanity gate. 947/947 pass under `bun test`; `tsc --noEmit`
+  clean.
+- Bash integration suite: 61/0 on Linux + docker backend (baseline from
+  #63 held).
+- Semver: MINOR bump (new features, no breaking changes to the CLI
+  surface). Matches the 4.1.0 precedent (`feat(#57,#59): watch`).
+- Read-time backstop (surface unheadered comments authored by roster
+  members, `skipped:` counter) is NOT in this branch — filed separately
+  off #56 so the concerns don't get bundled. This branch is
+  write-side-only.
+
 ## [4.2.5] — 2026-08-04 _(fork)_
 
 ### Fixed — remaining five daemon deps could break the image the way `mcp` did (#65)

@@ -217,17 +217,23 @@ describe("TeamCommand.post — prepend sender header to stdin", () => {
     expect(stdout.text()).toBe("Bear->Arfy,Alan: check this\n");
   });
 
-  test("empty stdin → header alone on its own line (still useful for salutation follow-up)", async () => {
+  test("empty stdin → rc 1 (header-only comment is never intentional; #59 rejection)", async () => {
+    // Was previously "empty stdin → header alone on its own line" —
+    // Arfy's #56 comment 5258528435 showed that a header-only /
+    // trivially-short body has historically indicated a broken send
+    // pipeline (the `@-` incident). Reject at the boundary instead.
     setEnv("DRIDOCK_AGENT_NAME", "Bear");
     const fs = new InMemoryFileSystem();
     seedProject(fs);
-    const { ctx, stdout } = makeCtx(fs);
+    const { ctx, stdout, stderr } = makeCtx(fs);
     const rc = await new TeamCommand(
       { git: new StubGitToplevel("/proj") },
       async () => "",
     ).run(["post", "--to", "Arfy"], ctx);
-    expect(rc).toBe(0);
-    expect(stdout.text()).toBe("Bear->Arfy:\n");
+    expect(rc).toBe(1);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toContain("body is empty");
+    expect(stderr.text()).toContain("never intentional");
   });
 
   test("multi-line body → header on same line as first content line, rest preserved", async () => {
@@ -497,8 +503,12 @@ describe("TeamCommand — subverb --help intercept (spec #59 part 1)", () => {
     const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["post", "--help"], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain("usage: dridock team post");
-    expect(stdout.text()).toContain("COMPOSE-ONLY");
-    expect(stdout.text()).toContain("pipe into gh(1)");
+    expect(stdout.text()).toContain("compose-only");
+    // New in #59: --issue must be documented in post's --help.
+    expect(stdout.text()).toContain("--issue");
+    expect(stdout.text()).toContain("--dry-run");
+    // Both paths (send + compose-only-with-pipe) must be documented.
+    expect(stdout.text()).toContain("gh issue comment");
     // Not the misleading "unexpected argument '--help'" error.
     expect(stderr.text()).not.toContain("unexpected argument");
   });
@@ -615,18 +625,301 @@ describe("TeamCommand.post — TTY-detect hint (spec #59 part 3)", () => {
     expect(stderr.text()).toContain("COMPOSE-ONLY");
   });
 
-  test("TTY hint fires even for empty stdin (header-only compose)", async () => {
-    // Someone running `dridock team post --to Arfy` interactively and
-    // expecting SOMETHING to happen — the hint tells them nothing did.
+  test("empty stdin under TTY → rc 1 (rejection, not compose-only hint — #59)", async () => {
+    // Was previously "TTY hint fires even for empty stdin" — under
+    // the body-sanity gate added in #59, empty stdin now rejects
+    // BEFORE the TTY-hint branch is reached. That's the right shape:
+    // an interactive operator expecting SOMETHING to happen gets a
+    // loud rejection ("body is empty") rather than a warning-and-
+    // header-only-emit that reads as partial success.
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs);
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), stdoutIsTTY: () => true },
+      async () => "",
+    ).run(["post", "--to", "Arfy"], ctx);
+    expect(rc).toBe(1);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toContain("body is empty");
+    // COMPOSE-ONLY hint must NOT fire — rejection is the signal.
+    expect(stderr.text()).not.toContain("COMPOSE-ONLY");
+  });
+});
+
+/** Test-local runner that records every `runCapture` call and returns
+ *  a canned rc/stdout. Kept inline (not added to StubHostCommandRunner)
+ *  because the send-path tests need to inspect the *dynamic* temp path
+ *  in each call, which the exact-string map in `StubHostCommandRunner`
+ *  can't match. */
+class RecordingHostRunner {
+  readonly calls: string[] = [];
+  constructor(private readonly rc = 0, private readonly stdout = "") {}
+  async runCapture(cmd: string): Promise<{ rc: number; stdout: string }> {
+    this.calls.push(cmd);
+    return { rc: this.rc, stdout: this.stdout };
+  }
+}
+
+describe("TeamCommand.post — send path (--issue, --repo, --dry-run) — #59", () => {
+  test("--issue with roster.github_repo → invokes gh with correct repo + temp body-file", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner(0, "https://github.com/aberezin/docker-claudebox/issues/59#issuecomment-9999\n");
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "verified end-to-end\n",
+    ).run(["post", "--to", "Arfy", "--issue", "59"], ctx);
+    expect(rc).toBe(0);
+    // Exactly one gh invocation.
+    expect(host.calls).toHaveLength(1);
+    // Correct issue, repo from roster, body-file present (path is
+    // dynamic — assert on shape, not exact string).
+    expect(host.calls[0]).toContain("gh issue comment 59");
+    expect(host.calls[0]).toContain("--repo 'aberezin/docker-claudebox'");
+    expect(host.calls[0]).toMatch(/--body-file '[^']+pending-post-\d+-\d+\.md'/);
+    // Success line names repo + issue + URL from gh's stdout.
+    expect(stdout.text()).toContain("✅ team post: sent to aberezin/docker-claudebox#59");
+    expect(stdout.text()).toContain("issuecomment-9999");
+    expect(stderr.text()).toBe("");
+  });
+
+  test("--issue with --repo override → uses override, not roster", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner(0, "");
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "cross-repo post\n",
+    ).run(["post", "--to", "Arfy", "--issue", "42", "--repo", "aberezin/other-repo"], ctx);
+    expect(rc).toBe(0);
+    expect(host.calls[0]).toContain("--repo 'aberezin/other-repo'");
+    expect(host.calls[0]).not.toContain("docker-claudebox");
+    expect(stdout.text()).toContain("aberezin/other-repo#42");
+  });
+
+  test("--issue but no roster.github_repo AND no --repo → rc 1, gh not invoked", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs); // roster WITHOUT github_repo
+    const host = new RecordingHostRunner();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body content\n",
+    ).run(["post", "--to", "Arfy", "--issue", "1"], ctx);
+    expect(rc).toBe(1);
+    expect(host.calls).toHaveLength(0);
+    expect(stderr.text()).toContain("no GitHub repo configured");
+  });
+
+  test("--issue with malformed --repo → rc 1, gh not invoked", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body\n",
+    ).run(["post", "--to", "Arfy", "--issue", "1", "--repo", "not-a-repo"], ctx);
+    expect(rc).toBe(1);
+    expect(host.calls).toHaveLength(0);
+    expect(stderr.text()).toContain("invalid repo 'not-a-repo'");
+  });
+
+  test("--issue with non-numeric value → rc 1, gh not invoked", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body\n",
+    ).run(["post", "--to", "Arfy", "--issue", "abc"], ctx);
+    expect(rc).toBe(1);
+    expect(host.calls).toHaveLength(0);
+    expect(stderr.text()).toContain("--issue must be a positive integer, got 'abc'");
+  });
+
+  test("--issue with zero → rc 1 (positive integer required)", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body\n",
+    ).run(["post", "--to", "Arfy", "--issue", "0"], ctx);
+    expect(rc).toBe(1);
+    expect(host.calls).toHaveLength(0);
+    expect(stderr.text()).toContain("--issue must be a positive integer");
+  });
+
+  test("gh failure (non-zero rc) → propagates rc, error line names the failure", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner(4, ""); // gh's typical auth-error rc
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body\n",
+    ).run(["post", "--to", "Arfy", "--issue", "42"], ctx);
+    expect(rc).toBe(4); // rc propagated verbatim
+    expect(host.calls).toHaveLength(1); // gh WAS invoked
+    expect(stderr.text()).toContain("gh issue comment failed with rc=4");
+  });
+
+  test("--dry-run with --issue → prints composed text, does NOT invoke gh", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner();
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "dry-run body\n",
+    ).run(["post", "--to", "Arfy", "--issue", "42", "--dry-run"], ctx);
+    expect(rc).toBe(0);
+    expect(host.calls).toHaveLength(0); // gh MUST NOT be invoked
+    expect(stdout.text()).toContain("Bear->Arfy: dry-run body");
+    expect(stderr.text()).toContain("--dry-run");
+    expect(stderr.text()).toContain("would send to aberezin/docker-claudebox#42");
+    expect(stderr.text()).toContain("no request made");
+  });
+
+  test("--dry-run also validates repo (dry-run of a bad repo still fails loud)", async () => {
+    // Rationale on the impl-side comment: a dry-run that green-lights a
+    // send that would then fail on repo resolution is a lie.
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body\n",
+    ).run(["post", "--to", "Arfy", "--issue", "42", "--repo", "bad!!repo", "--dry-run"], ctx);
+    expect(rc).toBe(1);
+    expect(host.calls).toHaveLength(0);
+    expect(stderr.text()).toContain("invalid repo");
+  });
+
+  test("--dry-run without --issue → rc 1 (compose-only is already the default without --issue)", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body\n",
+    ).run(["post", "--to", "Arfy", "--dry-run"], ctx);
+    expect(rc).toBe(1);
+    expect(host.calls).toHaveLength(0);
+    expect(stderr.text()).toContain("--dry-run requires --issue");
+  });
+
+  test("--repo without --issue → rc 1 (repo has nothing to point at)", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body\n",
+    ).run(["post", "--to", "Arfy", "--repo", "aberezin/other"], ctx);
+    expect(rc).toBe(1);
+    expect(host.calls).toHaveLength(0);
+    expect(stderr.text()).toContain("--repo requires --issue");
+  });
+});
+
+describe("TeamCommand.post — body sanity gate (#59)", () => {
+  test("body of literal '@-' (the historical incident) → rc 1, no compose", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs);
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj") },
+      async () => "@-",
+    ).run(["post", "--to", "Arfy"], ctx);
+    expect(rc).toBe(1);
+    expect(stdout.text()).toBe("");
+    expect(stderr.text()).toContain("no alphanumeric content");
+    // Names the historical incident so the operator can look it up.
+    expect(stderr.text()).toContain("#56");
+  });
+
+  test("body of only punctuation ('?!') → rc 1", async () => {
     setEnv("DRIDOCK_AGENT_NAME", "Bear");
     const fs = new InMemoryFileSystem();
     seedProject(fs);
     const { ctx, stderr } = makeCtx(fs);
     const rc = await new TeamCommand(
-      { git: new StubGitToplevel("/proj"), stdoutIsTTY: () => true },
-      async () => "",
+      { git: new StubGitToplevel("/proj") },
+      async () => "?!\n",
+    ).run(["post", "--to", "Arfy"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("no alphanumeric content");
+  });
+
+  test("body of only whitespace → rc 1 with 'body is empty'", async () => {
+    // trim() collapses whitespace-only to "".
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs);
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj") },
+      async () => "  \n\t\n",
+    ).run(["post", "--to", "Arfy"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("body is empty");
+  });
+
+  test("body 'ok' (2 chars, alphanumeric) → ACCEPTED (short legit messages must pass)", async () => {
+    // Explicitly guards against a naive length-based check that would
+    // reject "ok", "hi", "no" — all of which are legitimate replies.
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs);
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), stdoutIsTTY: () => false },
+      async () => "ok\n",
     ).run(["post", "--to", "Arfy"], ctx);
     expect(rc).toBe(0);
-    expect(stderr.text()).toContain("COMPOSE-ONLY");
+    expect(stdout.text()).toBe("Bear->Arfy: ok\n");
+  });
+
+  test("body sanity gate ALSO fires on send path (--issue), not just compose-only", async () => {
+    // Otherwise `--to X < broken-body` would be a working dev loop
+    // that silently breaks the moment --issue is added.
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner();
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "@-",
+    ).run(["post", "--to", "Arfy", "--issue", "42"], ctx);
+    expect(rc).toBe(1);
+    expect(host.calls).toHaveLength(0);
+    expect(stderr.text()).toContain("no alphanumeric content");
   });
 });

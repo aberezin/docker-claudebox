@@ -23,12 +23,19 @@ import { xdgRoot } from "../../domain/paths.ts";
  *                           DRIDOCK_AGENT_NAME env, or single-agent
  *                           fallback) and print it
  *   roster                → print the whole team (agents + human)
- *   post [--to A,B]       → prepend the sender header to stdin, print
- *                           to stdout (broadcast if --to is omitted)
+ *   post [--to A,B]       → COMPOSE-ONLY. Prepend sender header, print
+ *                           to stdout (broadcast if --to omitted).
+ *   post [--to A,B]       → SEND. Prepend header AND post via gh(1) as
+ *        --issue N          a comment on issue N (#59, closes the two-
+ *        [--repo owner/n]   step seam that dropped headers silently).
+ *        [--dry-run]        --repo overrides roster.github_repo;
+ *                           --dry-run prints what would be sent.
  *
  * Read-only for the roster file — writes go through `bootstrap` or a
- * hand edit. `post` doesn't hit the network; it just formats. Piping
- * to `gh issue comment --body-file -` is the intended use.
+ * hand edit. `post` sends only when --issue is set; otherwise it just
+ * formats and piping to `gh issue comment --body-file -` remains the
+ * documented fallback for cases the send path can't cover (edits,
+ * cross-repo posts routed elsewhere, etc.).
  *
  * `watch` is deferred to a later #46 slice — the watcher is the
  * biggest piece and lands on top of #45's event schema (channel-less
@@ -125,21 +132,51 @@ export class TeamCommand implements Command {
   }
 
   private async runPost(args: readonly string[], selfName: string, roster: Roster, ctx: Context): Promise<number> {
-    // Parse `--to A,B` (single value; repeat not supported — comma-list
-    // is the canonical form per spec §2). Anything else is unexpected.
+    // Parse args. --to A,B (recipients), --issue N (send target — presence
+    // switches from compose-only to actual-send), --repo owner/name
+    // (override roster.githubRepo; only meaningful with --issue), --dry-run
+    // (only meaningful with --issue: show what would be sent without
+    // sending). Anything else is unexpected.
     let toRaw: string | undefined;
+    let issueRaw: string | undefined;
+    let repoOverride: string | undefined;
+    let dryRun = false;
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
-      if (a === "--to") {
-        toRaw = args[i + 1];
-        i++;
-        continue;
+      if (a === "--to")          { toRaw = args[i + 1]; i++; continue; }
+      if (a?.startsWith("--to="))    { toRaw = a.slice("--to=".length); continue; }
+      if (a === "--issue")       { issueRaw = args[i + 1]; i++; continue; }
+      if (a?.startsWith("--issue=")) { issueRaw = a.slice("--issue=".length); continue; }
+      if (a === "--repo")        { repoOverride = args[i + 1]; i++; continue; }
+      if (a?.startsWith("--repo="))  { repoOverride = a.slice("--repo=".length); continue; }
+      if (a === "--dry-run")     { dryRun = true; continue; }
+      ctx.stderr.write(`❌ team post: unexpected argument '${a}' (allowed: --to <A,B>, --issue <N>, --repo <owner/name>, --dry-run)\n`);
+      return 1;
+    }
+
+    // --issue validation. Must be a positive integer if present. This
+    // gates the send path — everything below reads issueN as "set means
+    // send" so a bad value has to become undefined-or-integer here.
+    let issueN: number | undefined;
+    if (issueRaw !== undefined) {
+      const n = Number(issueRaw);
+      if (!Number.isInteger(n) || n <= 0) {
+        ctx.stderr.write(`❌ team post: --issue must be a positive integer, got '${issueRaw}'\n`);
+        return 1;
       }
-      if (a?.startsWith("--to=")) {
-        toRaw = a.slice("--to=".length);
-        continue;
-      }
-      ctx.stderr.write(`❌ team post: unexpected argument '${a}' (allowed: --to <A,B>)\n`);
+      issueN = n;
+    }
+
+    // --dry-run and --repo without --issue are user error, not silent
+    // no-ops. --dry-run without a send target is the compose-only path
+    // by another name; --repo without a send target has nothing to
+    // point at. Reject loud so the operator can pick the right shape.
+    if (dryRun && issueN === undefined) {
+      ctx.stderr.write(`❌ team post: --dry-run requires --issue (without a send target, compose-only is already the default)\n`);
+      return 1;
+    }
+    if (repoOverride !== undefined && issueN === undefined) {
+      ctx.stderr.write(`❌ team post: --repo requires --issue (without a send target, --repo has nothing to point at)\n`);
       return 1;
     }
 
@@ -159,8 +196,7 @@ export class TeamCommand implements Command {
       }
     }
 
-    // Compose the header, read stdin, emit `<header> <body>` on stdout.
-    // No trailing newline added — the stdin content owns its shape.
+    // Compose the header + read stdin body.
     let header: string;
     try {
       header = formatHeader(selfName, recipients);
@@ -169,33 +205,132 @@ export class TeamCommand implements Command {
       return 1;
     }
     const body = await this.readStdinFn();
-    // If stdin is empty, still emit the header alone — user may want
-    // just the salutation for a follow-up edit. Keep behavior explicit.
-    if (body === "") {
-      ctx.stdout.write(`${header}\n`);
-    } else {
-      // Same-line header + body if body starts with content, blank-line
-      // separator if body is multi-paragraph — matches how humans write
-      // it in the tracker. Simplest deterministic rule: single newline
-      // between header and body.
-      ctx.stdout.write(`${header} ${body.startsWith("\n") ? body.trimStart() : body}`);
-      if (!body.endsWith("\n")) ctx.stdout.write(`\n`);
+
+    // Body sanity gate (#59, Arfy's ask): a comment with no meaningful
+    // content is never intentional and has historically shipped as a
+    // silent bug — the `@-` incident where a literal two-character body
+    // reached GitHub because the operator's send pipeline dropped its
+    // real content. Reject BEFORE composing the header so the failure
+    // surfaces at the earliest layer that can see it. Two checks: empty
+    // after trim (nothing at all), and no alphanumeric content anywhere
+    // (`@-`, `--`, `?!` — punctuation-only shapes that indicate a
+    // pipeline failure, not a real message). Never rejects a legit
+    // short message like `ok` or `hi` (both have alphanumeric).
+    //
+    // Applies UNIFORMLY to send and dry-run and compose-only, because
+    // the failure mode isn't about where the output goes — it's about
+    // the content itself being meaningless. Rejecting only on send
+    // would leave `dridock team post --to X < broken-body` as a working
+    // dev loop that silently breaks the moment --issue is added.
+    const trimmedBody = body.trim();
+    if (trimmedBody === "") {
+      ctx.stderr.write(`❌ team post: body is empty. Refusing — a header-only comment is never intentional.\n`);
+      ctx.stderr.write(`  If you meant to draft a header for later editing, invoke gh(1) directly.\n`);
+      return 1;
+    }
+    if (!/[A-Za-z0-9]/.test(trimmedBody)) {
+      const preview = trimmedBody.slice(0, 40);
+      ctx.stderr.write(`❌ team post: body has no alphanumeric content ('${preview}'). Refusing — this shape has historically indicated a broken send pipeline (see #56 comment 5258528435).\n`);
+      return 1;
     }
 
-    // TTY-detect hint (spec #59 part 3): when stdout is a terminal —
-    // i.e. nothing is piping the composed message into `gh issue
-    // comment` — the operator very likely thinks they just SENT the
-    // message. They didn't; `team post` is compose-only. Print one
-    // stderr line so the mistake is caught at the exact moment it's
-    // made, not later when someone points out the message never
-    // arrived. Same failure shape as #56's silent-degrade class.
-    const isTTY = this.deps.stdoutIsTTY?.() ?? (process.stdout.isTTY === true);
-    if (isTTY) {
-      ctx.stderr.write(`⚠ team post is COMPOSE-ONLY — nothing was sent.\n`);
-      ctx.stderr.write(`  Pipe the output into gh(1) to actually post, e.g.:\n`);
-      ctx.stderr.write(`    ... | ${ctx.binName} team post --to Arfy | gh issue comment <n> --repo owner/name --body-file -\n`);
+    // Build final text — same rule as before: single space between
+    // header and body if body starts with content, ensure trailing NL.
+    const composed = body.startsWith("\n") ? `${header} ${body.trimStart()}` : `${header} ${body}`;
+    const finalText = composed.endsWith("\n") ? composed : composed + "\n";
+
+    // ────────────────────────────────────────────────────────────────
+    // Compose-only path (--issue absent): existing behavior + TTY hint.
+    // Kept as the default so `dridock team post --to X < body` remains
+    // a valid dev loop for iterating on a draft before sending.
+    // ────────────────────────────────────────────────────────────────
+    if (issueN === undefined) {
+      ctx.stdout.write(finalText);
+      const isTTY = this.deps.stdoutIsTTY?.() ?? (process.stdout.isTTY === true);
+      if (isTTY) {
+        ctx.stderr.write(`⚠ team post: COMPOSE-ONLY without --issue — nothing was sent.\n`);
+        ctx.stderr.write(`  To send in one step:\n`);
+        ctx.stderr.write(`    ${ctx.binName} team post --to Arfy --issue 42 < body.md\n`);
+        ctx.stderr.write(`  Or pipe explicitly:\n`);
+        ctx.stderr.write(`    ${ctx.binName} team post --to Arfy < body.md | gh issue comment 42 --repo owner/name --body-file -\n`);
+      }
+      return 0;
     }
-    return 0;
+
+    // ────────────────────────────────────────────────────────────────
+    // Send path (--issue present, --dry-run absent): resolve repo →
+    // stage body as a temp file → invoke `gh issue comment N --repo R
+    // --body-file <temp>` → propagate rc. Kept as one-step so the
+    // header can't be dropped by a hand-written second command (#56).
+    // ────────────────────────────────────────────────────────────────
+    const repo = repoOverride ?? roster.githubRepo;
+    if (repo === undefined || repo === "") {
+      ctx.stderr.write(`❌ team post: no GitHub repo configured.\n`);
+      ctx.stderr.write(`  Add 'github_repo: owner/name' to .dridock/agents.yml, or pass --repo owner/name.\n`);
+      return 1;
+    }
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
+      ctx.stderr.write(`❌ team post: invalid repo '${repo}' — expected owner/name.\n`);
+      return 1;
+    }
+
+    // Dry-run: show what would be sent + the target, do NOT invoke gh.
+    // Kept below repo resolution so --dry-run also validates the repo
+    // resolves — otherwise a dry-run could green-light a send that
+    // would then fail on the actual repo lookup.
+    if (dryRun) {
+      ctx.stderr.write(`🔍 team post --dry-run: would send to ${repo}#${issueN} (no request made).\n`);
+      ctx.stdout.write(finalText);
+      return 0;
+    }
+
+    // Stage body to a temp file, invoke gh, always clean up. Temp path
+    // includes PID + timestamp for uniqueness under concurrent posts.
+    // Under `<xdg>/dridock/` so it inherits the same persistence model
+    // as watch state — cleaned up on success/failure regardless.
+    const xdgDir = await xdgRoot(ctx.fs, ctx.env.raw(), ctx.home);
+    const stageDir = `${xdgDir}/dridock`;
+    const tempPath = `${stageDir}/pending-post-${process.pid}-${Date.now()}.md`;
+    try {
+      await ctx.fs.mkdirRecursive(stageDir);
+      await ctx.fs.writeText(tempPath, finalText);
+    } catch (e) {
+      ctx.stderr.write(`❌ team post: failed to stage body at ${tempPath}: ${e instanceof Error ? e.message : String(e)}\n`);
+      return 1;
+    }
+
+    try {
+      const host = this.deps.host ?? new RealHostCommandRunner();
+      // Single-quote-escape all shell-parsed args. tempPath is entirely
+      // under our control (built from xdg + literals + PID + timestamp)
+      // but xdg comes from the environment; quote defensively so a
+      // shell-metachar in $XDG_CONFIG_HOME can't inject.
+      const cmd = `gh issue comment ${issueN} --repo ${shellQuote(repo)} --body-file ${shellQuote(tempPath)}`;
+      const { rc, stdout } = await host.runCapture(cmd);
+      if (rc !== 0) {
+        // gh's stderr is inherited by HostCommandRunner (visible in the
+        // terminal) so the user already sees the diagnostic. Add our
+        // own line naming the rc + the fact that this is a send
+        // failure, and propagate rc for scripts.
+        ctx.stderr.write(`❌ team post: gh issue comment failed with rc=${rc}. See gh(1) output above for details.\n`);
+        return rc;
+      }
+      // gh prints the new comment's URL on stdout — capture and echo
+      // so the sender has a durable pointer for follow-ups. Trim to
+      // strip gh's trailing newline; if gh printed nothing, still
+      // report success without a URL.
+      const url = stdout.trim();
+      if (url === "") {
+        ctx.stdout.write(`✅ team post: sent to ${repo}#${issueN}\n`);
+      } else {
+        ctx.stdout.write(`✅ team post: sent to ${repo}#${issueN}\n   ${url}\n`);
+      }
+      return 0;
+    } finally {
+      // Best-effort cleanup; if it fails we'd rather leak the temp
+      // than mask the real error.
+      try { await ctx.fs.removeFile(tempPath); } catch { /* best-effort */ }
+    }
   }
 
   /**
@@ -554,16 +689,28 @@ export class TeamCommand implements Command {
         ctx.stdout.write(`  bootstrap or a hand-edit.\n`);
         return;
       case "post":
-        ctx.stdout.write(`usage: ${bin} team post [--to A,B]\n`);
-        ctx.stdout.write(`  COMPOSE-ONLY: prepend the "Sender[->A,B]:" header to stdin and write\n`);
-        ctx.stdout.write(`  the result to stdout. Broadcast when --to is omitted. Does NOT hit the\n`);
-        ctx.stdout.write(`  network — pipe into gh(1) to actually post:\n`);
+        ctx.stdout.write(`usage: ${bin} team post [--to A,B] [--issue N [--repo owner/name] [--dry-run]]\n`);
+        ctx.stdout.write(`  Prepend "Sender[->A,B]:" header to stdin. With --issue N, ALSO sends the\n`);
+        ctx.stdout.write(`  composed message via gh(1) as a comment on that issue (#59). Without\n`);
+        ctx.stdout.write(`  --issue, prints to stdout and does not hit the network (compose-only).\n`);
         ctx.stdout.write(`\n`);
+        ctx.stdout.write(`  Send (one step, header can't be dropped by hand-typed gh):\n`);
+        ctx.stdout.write(`      echo "hi" | ${bin} team post --to Arfy --issue 46 < body.md\n`);
+        ctx.stdout.write(`\n`);
+        ctx.stdout.write(`  Compose-only (still supported for iteration + explicit pipelines):\n`);
         ctx.stdout.write(`      echo "hi" | ${bin} team post --to Arfy | \\\n`);
         ctx.stdout.write(`          gh issue comment 46 --repo owner/name --body-file -\n`);
         ctx.stdout.write(`\n`);
-        ctx.stdout.write(`  Recipient names must be in the roster (agents + human); typos are\n`);
-        ctx.stdout.write(`  rejected before composing.\n`);
+        ctx.stdout.write(`  --to A,B      recipients (comma-list; broadcast if omitted). Names must\n`);
+        ctx.stdout.write(`                be in the roster (agents + human); typos are rejected.\n`);
+        ctx.stdout.write(`  --issue N     send to issue N via gh(1); switches from compose-only to\n`);
+        ctx.stdout.write(`                send mode. Repo comes from roster.github_repo unless --repo\n`);
+        ctx.stdout.write(`                overrides.\n`);
+        ctx.stdout.write(`  --repo <r>    override the roster's github_repo (only with --issue).\n`);
+        ctx.stdout.write(`  --dry-run     with --issue: show what would be sent without invoking gh.\n`);
+        ctx.stdout.write(`\n`);
+        ctx.stdout.write(`  Bodies that are empty or have no alphanumeric content are rejected at\n`);
+        ctx.stdout.write(`  the boundary (#59 — @-type shapes indicate a broken send pipeline).\n`);
         return;
       case "watch":
         ctx.stdout.write(`usage: ${bin} team watch [--once] [--repo owner/name] [--interval <ms>]\n`);
@@ -611,8 +758,10 @@ export class TeamCommand implements Command {
     ctx.stderr.write(`  whoami                THIS runtime's agent name (from DRIDOCK_AGENT_NAME env\n`);
     ctx.stderr.write(`                        or single-agent roster fallback)\n`);
     ctx.stderr.write(`  roster                the whole team (agents + human) from .dridock/agents.yml\n`);
-    ctx.stderr.write(`  post [--to A,B]       prepend the sender header to stdin, print to stdout\n`);
-    ctx.stderr.write(`                        (broadcast if --to omitted). Pipe into gh issue comment.\n`);
+    ctx.stderr.write(`  post [--to A,B]       prepend the sender header to stdin. --issue N ALSO sends\n`);
+    ctx.stderr.write(`       [--issue N]      via gh(1) as a comment on that issue (#59); without --issue,\n`);
+    ctx.stderr.write(`                        compose-only (stdout, pipe to gh). --repo overrides\n`);
+    ctx.stderr.write(`                        roster.github_repo; --dry-run shows without sending.\n`);
     ctx.stderr.write(`  watch [--once]        poll GitHub for messages addressed to self; surface\n`);
     ctx.stderr.write(`                        via stdout. --once = one catchup tick then exit\n`);
     ctx.stderr.write(`                        (SessionStart hook). --repo owner/name overrides\n`);
@@ -668,6 +817,16 @@ function stripHeaderFromSummary(summary: string): string {
 
 async function defaultSleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
+}
+
+/** Single-quote-escape for `sh -c` interpolation. Wraps `s` in single
+ *  quotes and escapes any embedded single quote via the classic
+ *  `'\''` sequence. Used by `runPost`'s send path so a shell-metachar
+ *  in $XDG_CONFIG_HOME or a roster repo string can't inject through
+ *  the `gh issue comment` invocation. Not exported — this shape is
+ *  specific to the send path and shouldn't proliferate. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
 /** Read stdin exhaustively into a string. Returns "" if stdin is a TTY
