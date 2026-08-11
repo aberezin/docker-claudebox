@@ -859,7 +859,7 @@ describe("TeamCommand.post — body sanity gate (#59)", () => {
     ).run(["post", "--to", "Arfy"], ctx);
     expect(rc).toBe(1);
     expect(stdout.text()).toBe("");
-    expect(stderr.text()).toContain("no alphanumeric content");
+    expect(stderr.text()).toContain("no letters or numbers");
     // Names the historical incident so the operator can look it up.
     expect(stderr.text()).toContain("#56");
   });
@@ -874,7 +874,7 @@ describe("TeamCommand.post — body sanity gate (#59)", () => {
       async () => "?!\n",
     ).run(["post", "--to", "Arfy"], ctx);
     expect(rc).toBe(1);
-    expect(stderr.text()).toContain("no alphanumeric content");
+    expect(stderr.text()).toContain("no letters or numbers");
   });
 
   test("body of only whitespace → rc 1 with 'body is empty'", async () => {
@@ -906,6 +906,29 @@ describe("TeamCommand.post — body sanity gate (#59)", () => {
     expect(stdout.text()).toBe("Bear->Arfy: ok\n");
   });
 
+  test.each([
+    ["Japanese", "承知しました"],
+    ["Cyrillic", "Одобрено"],
+    ["Greek + non-alphanum mix", "Ω≈ç"],
+    ["Chinese", "已完成"],
+  ])("non-Latin body (%s: %s) → ACCEPTED (Unicode-aware gate — Arfy's finding on #59 review)", async (_label, body) => {
+    // Arfy caught the initial /[A-Za-z0-9]/ shape refusing non-Latin
+    // messages — same silent-refusal-of-legit class the gate exists to
+    // prevent. `/[\p{L}\p{N}]/u` matches any letter or number in any
+    // script; failure shapes (@-, ?!, --, bare fences) still reject
+    // because they contain no letter or number in ANY script.
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs);
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), stdoutIsTTY: () => false },
+      async () => body + "\n",
+    ).run(["post", "--to", "Arfy"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toBe(`Bear->Arfy: ${body}\n`);
+  });
+
   test("body sanity gate ALSO fires on send path (--issue), not just compose-only", async () => {
     // Otherwise `--to X < broken-body` would be a working dev loop
     // that silently breaks the moment --issue is added.
@@ -920,6 +943,6 @@ describe("TeamCommand.post — body sanity gate (#59)", () => {
     ).run(["post", "--to", "Arfy", "--issue", "42"], ctx);
     expect(rc).toBe(1);
     expect(host.calls).toHaveLength(0);
-    expect(stderr.text()).toContain("no alphanumeric content");
+    expect(stderr.text()).toContain("no letters or numbers");
   });
 });

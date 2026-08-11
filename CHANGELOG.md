@@ -68,13 +68,20 @@ owner/name#N` plus the new comment's URL from gh's stdout.
 **Body sanity gate (Arfy's ask):**
 
 `team post` now rejects at the boundary — BEFORE composing — a body that
-is (a) empty, or (b) has no alphanumeric content anywhere. Both are
-shapes that have historically indicated a broken send pipeline (the `@-`
-incident) rather than a real message. `ok`, `hi`, `no` still pass — the
-gate is specifically for punctuation-only / empty bodies. Applies
-uniformly to compose-only, send, and dry-run — otherwise
+is (a) empty, or (b) has no letters or numbers in any script (`\p{L}\p{N}`
+Unicode property escapes). Both are shapes that have historically
+indicated a broken send pipeline (the `@-` incident) rather than a real
+message. `ok`, `hi`, `no`, `承知しました`, `Одобрено`, `已完成` all
+pass — the gate is specifically for punctuation-only / empty bodies.
+Applies uniformly to compose-only, send, and dry-run — otherwise
 `team post --to X < broken-body` would be a working dev loop that
 silently breaks the moment `--issue` is added.
+
+Initial version of the gate was `/[A-Za-z0-9]/`, which Arfy caught in
+review as silently refusing legitimate non-Latin messages — the same
+silent-refusal-of-legit-input class the gate exists to prevent. Fixed to
+`/[\p{L}\p{N}]/u` before merge; every failure shape the gate cares about
+still rejects (none contains any letter or number in any script).
 
 **Dogfooded via the send path itself.** The completion report on #59 was
 posted with `dridock team post --to Arfy --issue 59 < report.md` —

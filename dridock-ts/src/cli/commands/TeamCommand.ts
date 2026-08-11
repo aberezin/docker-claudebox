@@ -228,9 +228,17 @@ export class TeamCommand implements Command {
       ctx.stderr.write(`  If you meant to draft a header for later editing, invoke gh(1) directly.\n`);
       return 1;
     }
-    if (!/[A-Za-z0-9]/.test(trimmedBody)) {
+    // Unicode-aware alphanumeric check (\p{L} = any letter in any script,
+    // \p{N} = any number). Arfy's review of the initial `/[A-Za-z0-9]/`
+    // version pointed out it silently refused legitimate non-Latin
+    // messages like "承知しました" or "Одобрено" — the same
+    // silent-refusal-of-legit-input class the gate exists to prevent, one
+    // layer up. The Unicode form still rejects every failure shape the
+    // gate cares about (`@-`, `?!`, `--`, bare code fences) because none
+    // of them contain any letter or number in any script.
+    if (!/[\p{L}\p{N}]/u.test(trimmedBody)) {
       const preview = trimmedBody.slice(0, 40);
-      ctx.stderr.write(`❌ team post: body has no alphanumeric content ('${preview}'). Refusing — this shape has historically indicated a broken send pipeline (see #56 comment 5258528435).\n`);
+      ctx.stderr.write(`❌ team post: body has no letters or numbers ('${preview}'). Refusing — this shape has historically indicated a broken send pipeline (see #56 comment 5258528435).\n`);
       return 1;
     }
 
