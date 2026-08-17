@@ -95,11 +95,129 @@ _check_fetcher_alive() {
     return 0
 }
 
+# Version of the dridock binary that spawned the RUNNING fetcher (#71).
+#
+# On the host the fetcher never dies: it is a plain detached process with no
+# PID namespace to tear down, so it survives session ends, restarts, gaps and
+# sleep. Measured: 18d21h uptime across three releases (4.2.2 -> 4.3.0). But
+# `install.sh` replaces the binary FILE, which does not touch a running image —
+# so the fetcher keeps executing whatever it was spawned with, forever, and the
+# only signal is that there isn't one (`fetcher: alive`, fresh heartbeat,
+# advancing cursor, three-releases-old code).
+#
+# Compared against the INSTALLED version rather than the binary's mtime:
+# `install.sh` rewrites the file even when the version is unchanged, so an mtime
+# trigger would respawn on every reinstall. A restart notice that cries wolf is
+# worth less than none.
+#
+# HOST-ONLY, gated on `[ ! -f /.dockerenv ]` — the mirror of #70's SessionEnd
+# hook, which is container-only for the inverse reason.
+#
+# Two reasons, either sufficient:
+#
+#  1. Nothing to do there. The container fetcher dies with the session (#70), so
+#     every spawn is fresh and the stamp always matches — the restart branch
+#     could never fire.
+#  2. It can't work there anyway. `/usr/local/bin/dridock` in the container is a
+#     SHIM that rejects `--version` as a host-only verb (rc=2, "run it on your
+#     Mac"). `_installed_version` would return empty, correctly trip the
+#     can't-determine guard, and print a warning about a check that has no
+#     reason to run — noise in every container session with a live fetcher.
+#     Bear diagnosed this verifying #71; the real binary at
+#     /usr/local/lib/dridock/dridock does answer, but reaching around the shim
+#     to ask would be working around a deliberate design decision to no purpose.
+#
+# If container fetchers ever become long-lived, this gate has to come off AND
+# the shim needs to answer `--version` first — in that order.
+if [ -f /.dockerenv ]; then
+    _version_check_enabled=0
+else
+    _version_check_enabled=1
+fi
+
+_verfile="$_inbox.version"
+
+_installed_version() {
+    # "dridock 4.3.0" -> "4.3.0". Empty if the binary can't be asked.
+    dridock --version 2>/dev/null | awk 'NR==1{print $NF}'
+}
+
+# SIGTERM the running fetcher and WAIT for it to actually exit. Returns 0 if
+# the caller may now spawn a replacement, non-zero if it must not. (Status, not
+# stdout — this function prints user-facing progress, and a stdout-based return
+# would be compared against those lines and never match.)
+#
+# The wait is load-bearing, not politeness. `fetcher stop` is asynchronous: the
+# fetcher finishes its current tick, persists state, THEN removes its pidfile.
+# Spawning immediately means the replacement writes a pidfile and the dying
+# process deletes it a moment later — leaving a live fetcher with no pidfile,
+# which the next SessionStart reads as "nothing running" and spawns a DUPLICATE.
+# Observed exactly that while verifying this change: two fetchers, no pidfile.
+#
+# If it refuses to die we deliberately do NOT spawn: a duplicate fetcher is
+# worse than a stale one (two writers on one inbox), and silence here would hide
+# it. Say so and leave the old one running.
+# Timeout must EXCEED one poll interval (default 30s). The SIGTERM handler
+# finishes the tick in flight before exiting, so a fetcher caught at the start
+# of a poll legitimately takes ~30s to go. A 10s budget was tried first and
+# would have warned + refused on every genuine restart — measured this fetcher
+# taking between 13s and 45s to exit after SIGTERM.
+#
+# The stall is paid once per dridock upgrade (only when the version actually
+# changed), not per session, which is why waiting is affordable here.
+_FETCHER_STOP_TIMEOUT=45
+
+_stop_fetcher_and_wait() {
+    local pid="$1" out rc=0 waited=0
+    out="$(dridock team fetcher stop --inbox "$_inbox" 2>&1)" || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "⚠ team fetcher: 'fetcher stop' failed (rc=$rc): ${out}" >&2
+    fi
+    echo "   waiting for pid $pid to finish its current poll and exit (up to ${_FETCHER_STOP_TIMEOUT}s)..."
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$_FETCHER_STOP_TIMEOUT" ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "⚠ team fetcher: pid $pid still alive ${waited}s after SIGTERM — NOT spawning a replacement (would leave two writers on one inbox). The old fetcher keeps running; this will retry next session. Investigate: $_log"
+        return 1
+    fi
+    echo "   old fetcher exited after ${waited}s."
+    return 0
+}
+
 _spawn_fetcher=0
 if [ -f "$_pid" ]; then
     _pidval="$(cat "$_pid" 2>/dev/null || true)"
     if _check_fetcher_alive "$_pidval"; then
-        : # alive AND cmdline matches — nothing to do
+        # Alive and cmdline matches — but is it running CURRENT code? (#71)
+        # Host-only — see the _version_check_enabled rationale above.
+        if [ "$_version_check_enabled" = 1 ]; then
+            _cur_ver="$(_installed_version)"
+            _run_ver="$(cat "$_verfile" 2>/dev/null || true)"
+            if [ -z "$_cur_ver" ]; then
+                # Can't ask the binary its version → can't compare. Don't churn
+                # a working fetcher on missing information, but don't be silent
+                # about skipping the check either.
+                echo "⚠ team fetcher: could not determine installed dridock version — skipping the staleness check (fetcher left running, pid $_pidval)."
+            elif [ -z "$_run_ver" ]; then
+                # No stamp: spawned by a pre-#71 hook, so its version is
+                # unknowable. Restart once to establish it — self-healing, and
+                # the fetcher it replaces is by definition older than this code.
+                echo "♻ team fetcher: no version stamp (spawned before #71) — restarting once to establish it, then this won't recur."
+                if _stop_fetcher_and_wait "$_pidval"; then
+                    rm -f "$_pid"
+                    _spawn_fetcher=1
+                fi
+            elif [ "$_run_ver" != "$_cur_ver" ]; then
+                echo "♻ team fetcher: running $_run_ver but $_cur_ver is installed — restarting so watcher fixes take effect."
+                if _stop_fetcher_and_wait "$_pidval"; then
+                    rm -f "$_pid"
+                    _spawn_fetcher=1
+                fi
+            fi
+        fi
+        # else: alive, cmdline matches, version current — nothing to do.
     else
         # Stale pidfile → the previous fetcher died OR the pid was
         # reused by an unrelated process (reboot / wraparound).
@@ -160,6 +278,16 @@ if [ "$_spawn_fetcher" = 1 ]; then
     _spawn_pid="$(cat "$_pid" 2>/dev/null || true)"
     if _check_fetcher_alive "$_spawn_pid"; then
         echo "🚀 team fetcher: spawned (nohup, detached, pid=$_spawn_pid). log=$_log"
+        # Stamp the version this fetcher is running (#71). Written only after
+        # liveness is confirmed, so a stamp always describes a process that
+        # actually started — a stamp for a fetcher that died at startup would
+        # make the next session believe current code is running when nothing is.
+        _stamp_ver=""
+        [ "$_version_check_enabled" = 1 ] && _stamp_ver="$(_installed_version)"
+        if [ -n "$_stamp_ver" ]; then
+            printf '%s' "$_stamp_ver" > "$_verfile" 2>/dev/null \
+                || echo "⚠ team fetcher: could not write version stamp to $_verfile — staleness check will re-restart next session."
+        fi
         # Surface any FRESH START warning from THIS spawn's log output
         # (bytes appended after `_log_size_before`). Rule: a diagnostic
         # must be derived from the CURRENT run's state, not from
