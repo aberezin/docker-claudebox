@@ -176,23 +176,60 @@ start_container() {
 
 # ── setup / cleanup ─────────────────────────────────────────────────────────
 
+# Run a setup step, and on failure PRINT ITS OUTPUT before exiting (#68).
+#
+# These steps used to be `cmd >/dev/null 2>&1`, so a failure aborted the run
+# (set -e) with the log ending at the "creating throwaway test VM..." line and
+# nothing else — no error, no exit code, no clue. The failure path destroyed
+# the evidence the failure path needed. Same class as `_api_start`'s `--rm`
+# in #63, one layer earlier and worse: setup failures happen before any test
+# output exists to give them context.
+_setup_step() {
+    local _what="$1"; shift
+    local _out _rc=0
+    _out="$("$@" 2>&1)" || _rc=$?
+    if [ "$_rc" -ne 0 ]; then
+        echo "" >&2
+        echo "❌ SETUP FAILED: $_what (rc=$_rc)" >&2
+        echo "   command: $*" >&2
+        printf '%s\n' "$_out" | tail -25 | sed 's/^/   /' >&2
+        exit "$_rc"
+    fi
+}
+
 setup() {
+    # Capture the human's docker context FIRST, before anything can change it
+    # (#68). `colima start` switches the active context as a side effect, so
+    # capturing after it records the THROWAWAY profile as "previous" — cleanup
+    # then faithfully "restores" the user to a context it is about to delete,
+    # leaving the shell pointed at a context docker can't resolve (it reports
+    # `default`, the non-colima daemon). Measured: cb-infra before a run,
+    # default after. That already cost a misdiagnosis — a plain `docker run`
+    # failing with `dial unix /var/run/docker.sock` was chased as a docker
+    # problem when it was this.
+    #
+    # Also captured for the docker backend: harmless there (no context switch),
+    # but it keeps the variable meaningful on both paths.
+    CBX_PREV_CTX="$(docker context show 2>/dev/null)"
+
     if [ "$CBX_BACKEND" = docker ]; then
         echo "docker backend: building the test image on the ambient daemon (no test VM)..."
-        docker build --target minimal -t "$IMAGE" "$WORKDIR" >/dev/null 2>&1
+        _setup_step "build test image ($IMAGE) on the ambient daemon" \
+            docker build --target minimal -t "$IMAGE" "$WORKDIR"
         # bare `docker` already targets the local daemon — no context switch needed.
     else
         echo "creating throwaway test VM ($CBX_TEST_PROFILE)..."
         # a plain VM (no --network-address — tests don't need reachable IPs, and it
         # keeps the profile light and socket_vmnet out of the picture)
-        colima start -p "$CBX_TEST_PROFILE" --cpu 4 --memory 4 --disk 30 >/dev/null 2>&1
+        _setup_step "create throwaway test VM ($CBX_TEST_PROFILE)" \
+            colima start -p "$CBX_TEST_PROFILE" --cpu 4 --memory 4 --disk 30
 
         echo "building dridock test image ($IMAGE) into $CBX_TEST_PROFILE..."
-        docker "${DCTX[@]}" build --target minimal -t "$IMAGE" "$WORKDIR" >/dev/null 2>&1
+        _setup_step "build test image ($IMAGE) into $CBX_TEST_PROFILE" \
+            docker "${DCTX[@]}" build --target minimal -t "$IMAGE" "$WORKDIR"
 
         # run the whole suite against the test VM: bare `docker ...` in tests, and the
         # wrapper's explicit `docker --context $CBX_TEST_CTX`, both resolve to it.
-        CBX_PREV_CTX="$(docker context show 2>/dev/null)"
         docker context use "$CBX_TEST_CTX" >/dev/null 2>&1
     fi
 
@@ -221,7 +258,20 @@ cleanup() {
     else
         # restore the human's docker context, then nuke the throwaway VM (removes its
         # containers + the test image with it).
-        [ -n "$CBX_PREV_CTX" ] && docker context use "$CBX_PREV_CTX" >/dev/null 2>&1
+        #
+        # Validate the captured context still resolves before switching to it
+        # (#68). A blind `docker context use` on a name that no longer exists
+        # fails silently under the `>/dev/null 2>&1`, and the operator is left
+        # on whatever docker falls back to — with no indication the suite did
+        # it. Never leave the shell somewhere without saying so.
+        if [ -n "${CBX_PREV_CTX:-}" ] && docker context inspect "$CBX_PREV_CTX" >/dev/null 2>&1; then
+            docker context use "$CBX_PREV_CTX" >/dev/null 2>&1 \
+                || echo "⚠️  test cleanup: failed to restore docker context '$CBX_PREV_CTX' — check \`docker context show\`" >&2
+        else
+            echo "⚠️  test cleanup: docker context '${CBX_PREV_CTX:-<unset>}' no longer exists; leaving you on 'default'." >&2
+            echo "    Set it with: docker context use <name>   (\`docker context ls\` to list)" >&2
+            docker context use default >/dev/null 2>&1 || true
+        fi
         colima delete -f -p "$CBX_TEST_PROFILE" >/dev/null 2>&1 || true
     fi
     rm -rf "$CBX_TEST_WS"
