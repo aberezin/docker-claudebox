@@ -27,6 +27,16 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/team-watch-session-end.sh\""
+          }
+        ]
+      }
     ]
   }
 }

@@ -26,6 +26,70 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.3.1] — 2026-08-17 _(fork)_
+
+### Fixed — team-watch fetcher no longer SIGKILL'd on Claude session end (#70)
+
+Every SessionStart resume in the container printed `⚠ team fetcher:
+previous fetcher gone (pid N not alive or cmdline mismatch)` — because
+the container's PID 1 is claude, and when claude exits, PID 1 exits,
+docker teardown SIGKILLs everything inside before the fetcher can run
+its own SIGTERM handler (`TeamCommand.runWatch` persists state +
+removes pidfile).
+
+Two changes:
+
+**1. SessionEnd hook fires `dridock team fetcher stop` (container-only).**
+New `.claude/hooks/team-watch-session-end.sh`, wired in
+`.claude/settings.json`. Gated on `[ -f /.dockerenv ]` so it is a no-op
+on the host: Arfy's macOS-native fetcher **must** outlive the session
+(detachment is what lets events accumulate while nothing is attached —
+the property #56 was built for, #58's persistent state protects, and
+verified in practice by 4701+2510 bytes recovered across her two
+multi-day gaps). Killing hers on SessionEnd would convert "collects
+continuously" into "collects only while attached", a strictly worse
+bug than the one this fix addresses. Split-lifecycle rationale in #70
+and #71 (host stale-restart, Arfy's).
+
+### Not in this release — the log-timestamp diagnostic (originally proposed as a companion to #70)
+
+I attempted to pipe the fetcher's stdout+stderr through
+`awk '{ print strftime("[%Y-%m-%dT%H:%M:%SZ]"), $0; fflush() }'` in
+the SessionStart hook to add per-line timestamps for the jq-parse-
+death open loop (see #70 for the criterion). On testing it doesn't
+work: Bun's stderr buffering behaves differently when the destination
+is a pipe vs a file. Direct-to-file (the current shape) line-buffers
+naturally; pipe-to-awk bunches writes in Bun's internal buffer, and
+for a `team watch` loop (long-lived, low-volume writes) they never
+reach awk. A short-lived `team whoami` DOES flow because Bun flushes
+on exit — the bug is loop-specific. `stdbuf -oL -eL` did not help;
+Bun bypasses libc stdio.
+
+The correct fix is TS-side (timestamp inside the fetcher's own
+write path, e.g. a `TimestampingWriter` wrapper around `ctx.stderr`
+in `TeamCommand.runWatch`). Deferred as a follow-up rather than
+shipped as a shell-pipe that we know is silently broken. Notes on
+the failure and the pipe shape I tried are in
+`team-watch-session-start.sh` in-line.
+
+### Not in this release — the entrypoint SIGTERM trap (originally proposed as "option B" on #70)
+
+My original writeup proposed a `trap ... TERM INT` in `entrypoint.sh`
+to catch external `docker stop` (not just Claude session end). On
+review, the exec chain (`entrypoint.sh → exec setpriv ... bash -c ...
+→ exec claude`) means PID 1 becomes claude by the time docker sends
+SIGTERM, so a trap at the top of `entrypoint.sh` never fires —
+entrypoint's shell is long gone. Making it work requires either
+(a) restructuring the interactive path to NOT `exec claude` (bash
+stays PID 1, traps SIGTERM, forwards to claude) or (b) relying on
+claude itself to fire SessionEnd on SIGTERM.
+
+(b) is worth verifying empirically before committing to (a) — if the
+SessionEnd hook here fires reliably when docker stops the container,
+this release covers the external-docker-stop case for free. If not,
+(a) becomes a separate follow-up with its own risk assessment (PID-1
+model change).
+
 ## [4.3.0] — 2026-08-11 _(fork)_
 
 ### Added — `dridock team post` can actually post (#59)

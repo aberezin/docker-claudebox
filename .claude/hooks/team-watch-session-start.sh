@@ -135,6 +135,20 @@ if [ "$_spawn_fetcher" = 1 ]; then
 
     # Detach fully: stdin from /dev/null, stdout+stderr to log, subshell
     # + disown so this hook can exit while the fetcher lives on.
+    #
+    # NOTE (#70 followup): I tried piping through
+    # `awk '{ print strftime(...), $0; fflush() }'` here to add
+    # per-line ISO-8601 timestamps for the jq-death open loop. It
+    # doesn't work: Bun's stderr buffering behavior differs when the
+    # destination is a pipe vs a file. On direct-to-file (this shape)
+    # each line is line-buffered and appears immediately; on
+    # pipe-to-awk they bunch up in Bun's internal buffer and never
+    # reach awk (verified: awk process alive, pipe wired, but zero
+    # bytes flow through for a running `team watch` loop; a
+    # short-lived `team whoami` DOES flow because Bun flushes on
+    # exit). `stdbuf -oL -eL` didn't help — Bun bypasses libc stdio.
+    # Solution needs to be TS-side (timestamp inside the fetcher's
+    # own write path), not shell-side. Filed as a follow-up.
     ( nohup dridock team watch --inbox "$_inbox" >>"$_log" 2>&1 & disown ) >/dev/null 2>&1 || true
 
     # Verify the spawn actually took (Arfy's nit #1): a subshell + &
