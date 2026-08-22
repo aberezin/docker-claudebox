@@ -26,6 +26,48 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.3.2] — 2026-08-21 _(fork)_
+
+### Fixed — containers in `--network-address` VMs had dead DNS (#72)
+
+Colima writes the VM's `/etc/resolv.conf`; docker copies it into every container
+at **create** time. In `--network-address` VMs the generated value was observed
+pointing at `192.168.5.4`, which never answers — so every container in that VM
+had dead name resolution **while routing was perfectly fine** (`curl --resolve`
+to the same host returned 200).
+
+That combination fails in the most misleading way available: Claude Code reports
+a **timeout**, which reads as an API outage or an auth problem. The first
+hypothesis — a container outliving its VM and keeping a stale file — was wrong,
+and a freshly-created container failing identically is what disproved it.
+
+`--network-address` is the normal configuration for projects doing
+container-to-container work, i.e. the mainline of the per-project-VM model.
+
+`entrypoint.sh` now checks name resolution at startup and repairs
+`/etc/resolv.conf` when it fails, probing the container's own default gateways
+first (derived from `/proc/net/route`, not guessed) and then the values colima
+uses in practice. No-op when DNS already works — one `getent`.
+
+```
+before   nameserver 192.168.5.4   resolves? NO    claude -> timeout
+after    dridock: DNS was unreachable; repaired /etc/resolv.conf -> nameserver 192.168.5.1 (#72)
+         nameserver 192.168.5.1   resolves? yes   claude -> NETOK
+```
+
+Deliberately does **not** fall back to public resolvers (8.8.8.8 etc.): moving a
+project's DNS traffic off its own network is a policy decision the harness
+shouldn't make silently. If no local candidate answers it says so, restores the
+original file, and points at `curl --resolve` to distinguish DNS from routing.
+
+Probing is write-and-test because the minimal image has no `dig`/`nslookup`/
+`host`; `getent` honours `resolv.conf`, so pointing at a server is the only way
+to ask whether it answers.
+
+Half of #72. The other half — passing a working resolver at VM creation
+(`colima start --dns`) — is still open; this half is what makes existing broken
+VMs self-heal.
+
 ## [4.3.1] — 2026-08-17 _(fork)_
 
 ### Fixed — team-watch fetcher no longer SIGKILL'd on Claude session end (#70)

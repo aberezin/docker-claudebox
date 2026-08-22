@@ -10,6 +10,86 @@ CLAUDE_GIT_EMAIL="${DRIDOCK_GIT_EMAIL:-${CLAUDE_GIT_EMAIL:-}}"
 CLAUDE_IMAGE_VARIANT="${DRIDOCK_IMAGE_VARIANT:-${CLAUDE_IMAGE_VARIANT:-full}}"
 
 dbg "entrypoint start, args: $*"
+
+# ─── DNS self-repair (#72) ───────────────────────────────────────────────────
+# Colima writes the VM's /etc/resolv.conf, docker copies it into every container
+# at CREATE time, and in `--network-address` VMs the generated value has been
+# observed pointing at 192.168.5.4 — which never answers. Result: every
+# container in that VM has dead name resolution while ROUTING IS PERFECTLY FINE
+# (verified: `curl --resolve` to the same host returns 200). That combination is
+# maximally misleading — Claude Code reports a timeout, which reads as an API
+# outage or an auth failure, and an hour goes into the wrong hypothesis.
+#
+# `--network-address` is the normal configuration for projects doing
+# container-to-container work, i.e. the mainline of the per-project-VM model.
+#
+# Repair rather than detect-and-die: we can find a resolver that works, so a
+# container that fixes itself and says so beats one that refuses to start.
+# Runs before anything that needs the network (daemons, claude, profile
+# installers) and is a no-op when DNS already resolves — the common case, and
+# it costs one getent.
+#
+# Probing is write-and-test because the minimal image has no dig/nslookup/host
+# (checked). getent honours resolv.conf, so the only way to ask "does THIS
+# server answer" is to point at it and try. The original file is restored if no
+# candidate works — never leave it worse than we found it.
+#
+# Deliberately NOT falling back to public resolvers (8.8.8.8 etc.): that moves a
+# project's DNS traffic off its own network, which is a policy decision the
+# harness shouldn't make silently. If no local candidate answers we say so and
+# let a human choose.
+_dns_probe_host="${DRIDOCK_DNS_PROBE_HOST:-api.anthropic.com}"
+
+_dns_resolves() { getent hosts "$_dns_probe_host" >/dev/null 2>&1; }
+
+# /proc/net/route stores the gateway as little-endian hex: 0205A8C0 -> 192.168.5.2
+_hex_le_to_ip() {
+	local h="$1"
+	[ "${#h}" = 8 ] || return 1
+	printf '%d.%d.%d.%d\n' "0x${h:6:2}" "0x${h:4:2}" "0x${h:2:2}" "0x${h:0:2}"
+}
+
+_repair_dns() {
+	local backup cand ip ok=0
+	backup="$(cat /etc/resolv.conf 2>/dev/null)"
+
+	# Candidates, most-principled first: the actual default gateway(s) from the
+	# route table, then the values colima uses in practice. Gateways come first
+	# because they're derived from THIS container's networking rather than
+	# guessed — 192.168.64.1 (the vmnet gateway) is what answered on the VM that
+	# exposed this bug.
+	local -a cands=()
+	while read -r hexgw; do
+		ip="$(_hex_le_to_ip "$hexgw" 2>/dev/null)" && [ -n "$ip" ] && cands+=("$ip")
+	done < <(awk '$2=="00000000" && $3!="00000000" {print $3}' /proc/net/route 2>/dev/null)
+	cands+=("192.168.5.1" "192.168.5.2")
+
+	for cand in "${cands[@]}"; do
+		printf 'nameserver %s\n' "$cand" > /etc/resolv.conf 2>/dev/null || continue
+		if _dns_resolves; then
+			echo "dridock: DNS was unreachable; repaired /etc/resolv.conf -> nameserver $cand (#72)" >&2
+			ok=1
+			break
+		fi
+	done
+
+	if [ "$ok" != 1 ]; then
+		# Restore rather than leave a container pointed at the last thing we tried.
+		printf '%s\n' "$backup" > /etc/resolv.conf 2>/dev/null || true
+		echo "dridock: DNS is unreachable and no local resolver answered (tried: ${cands[*]})." >&2
+		echo "  Name resolution will fail inside this container. Routing may still be fine —" >&2
+		echo "  test with: curl --resolve <host>:443:<ip> https://<host>/" >&2
+		echo "  See #72. Original /etc/resolv.conf left untouched." >&2
+	fi
+}
+
+if [ "$(id -u)" = 0 ]; then
+	if _dns_resolves; then
+		dbg "dns: $_dns_probe_host resolves — no repair needed"
+	else
+		_repair_dns
+	fi
+fi
 dbg "DRIDOCK_CONTAINER_NAME=$CLAUDE_CONTAINER_NAME"
 dbg "DRIDOCK_WORKSPACE=$CLAUDE_WORKSPACE"
 
