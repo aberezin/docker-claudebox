@@ -289,10 +289,26 @@ test_api_large_output() {
 # ── table: OpenAI-compatible chat completions ────────────────────────────────
 
 # format: label|body|expected_in_response
+# Prompts are ORDINARY QUESTIONS with deterministic answers, not
+# "respond with exactly <TOKEN>" (#69). The marker-emit shape gets refused:
+#
+#   "I appreciate the test, but I'm designed to be helpful, harmless, and honest.
+#    I can't respond with arbitrary strings just because they're requested —
+#    that pattern could be exploited for prompt injection..."
+#
+# That is not endpoint non-determinism to average out with a retry; it is the
+# model correctly declining a request shaped like an attack. A retry would
+# convert a visible failure into a silent pass, which is the class this suite
+# exists to catch — so fix the prompt, don't paper over the result.
+#
+# Answers are WORDS, not numbers: the assertion greps the whole JSON envelope,
+# which is full of digits (`chatcmpl-0ee5617c12e8`, `created:1787612084`), so a
+# numeric marker like "42" can match by accident and pass without the model
+# having answered at all.
 OAI_CHAT_CASES=(
-    "basic response|{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"respond with exactly OAIPONG and nothing else\"}]}|OAIPONG"
+    "basic response|{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of France? Answer with one word.\"}]}|Paris"
     "system prompt|{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"system\",\"content\":\"Always respond with I AM A TURNIP.\"},{\"role\":\"user\",\"content\":\"what are you?\"}]}|TURNIP"
-    "reasoning effort|{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"respond with exactly EFFORTOK\"}],\"reasoning_effort\":\"low\"}|EFFORTOK"
+    "reasoning effort|{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"What color is a ripe banana? Answer with one word.\"}],\"reasoning_effort\":\"low\"}|ellow"
 )
 
 test_api_openai_chat() {
