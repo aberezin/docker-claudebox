@@ -170,10 +170,42 @@ describe("surfacesForAgent — LEGACY-shape delivery predicate (degraded)", () =
   });
 });
 
-describe("surfacesForAgent — non-header bodies", () => {
-  test("undefined header (plain text) → DROP (nothing to attribute)", () => {
-    expect(surfacesForAgent(parseHeader("just a comment"), "Bear")).toBe(false);
-    expect(surfacesForAgent(undefined, "Bear")).toBe(false);
+describe("surfacesForAgent — non-header bodies (#56)", () => {
+  // BEHAVIOR CHANGED in #56. These used to DROP, on the reasoning that an
+  // unheadered body carries no attribution. The cost showed up in production:
+  // Bear's "Merged + tagged." close-note on #65 was fetched, skipped, and the
+  // cursor advanced past it — Arfy learned the release had shipped a week
+  // later, from Alan. It also silently broke the merge-ownership rule, whose
+  // whole notification step is exactly this shape.
+  //
+  // "Not addressed to an agent" and "not addressed to anyone" were being
+  // treated identically; only the second should drop, and it never occurs.
+  test("undefined header (plain text) → BROADCAST", () => {
+    expect(surfacesForAgent(parseHeader("just a comment"), "Bear")).toBe(true);
+    expect(surfacesForAgent(undefined, "Bear")).toBe(true);
+  });
+
+  test("null header (WatcherEvent's absence signal) → BROADCAST", () => {
+    expect(surfacesForAgent(null, "Bear")).toBe(true);
+    expect(surfacesForAgent(null, "Arfy")).toBe(true);
+  });
+
+  test("surfaces to EVERY agent — no author-based narrowing is possible", () => {
+    // The narrower "only if authored by a roster member" rule we first
+    // specified is unimplementable: all agents post through one GitHub
+    // account (100/100 comments on this repo are `aberezin`) and the roster
+    // has no per-agent login, so the author field distinguishes nobody.
+    for (const who of ["Bear", "Arfy", "SomeoneElse"]) {
+      expect(surfacesForAgent(undefined, who)).toBe(true);
+    }
+  });
+
+  test("headered posts still take the normal predicate — self-echo still suppressed", () => {
+    // The change must not widen anything that HAS a header: an agent must
+    // still not receive its own headered post.
+    expect(surfacesForAgent(parseHeader("Bear->Arfy: hi"), "Bear")).toBe(false);
+    expect(surfacesForAgent(parseHeader("Bear->Arfy: hi"), "Arfy")).toBe(true);
+    expect(surfacesForAgent(parseHeader("Bear: hi"), "Bear")).toBe(false);
   });
 });
 

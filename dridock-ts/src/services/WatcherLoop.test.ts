@@ -64,7 +64,7 @@ describe("runOneTick — dedup + predicate composition", () => {
     const sink = new RecordingSink();
     const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
     const summary = await runOneTick({ source, store, sink, selfName: "Bear", now: fakeNow() });
-    expect(summary).toEqual({ source: "github", kind: "polled", seen: 1, surfaced: 1, elapsedMs: 42 });
+    expect(summary).toEqual({ source: "github", kind: "polled", seen: 1, surfaced: 1, skipped: 0, elapsedMs: 42 });
     expect(sink.events).toHaveLength(1);
     expect(sink.events[0]!.summary).toBe("Arfy->Bear: verified");
   });
@@ -110,7 +110,10 @@ describe("runOneTick — dedup + predicate composition", () => {
     expect(sink.events).toHaveLength(1);
   });
 
-  test("plain-text body (no header) is dropped (nothing to attribute → not delivered)", async () => {
+  // CHANGED in #56: plain-text bodies now surface as broadcast. They used to be
+  // dropped, which is how Bear's headerless "Merged + tagged." close-note on #65
+  // was fetched, skipped, and lost for a week.
+  test("plain-text body (no header) is DELIVERED as broadcast (#56)", async () => {
     const source = new FakeSource();
     source.outcome = {
       kind: "ok",
@@ -119,8 +122,43 @@ describe("runOneTick — dedup + predicate composition", () => {
     };
     const sink = new RecordingSink();
     const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
-    await runOneTick({ source, store, sink, selfName: "Bear", now: fakeNow() });
+    const summary = await runOneTick({ source, store, sink, selfName: "Bear", now: fakeNow() });
+    expect(sink.events).toHaveLength(1);
+    expect(summary.surfaced).toBe(1);
+    expect(summary.skipped).toBe(0);
+  });
+
+  test("skipped counts predicate rejections, so surfaced:0 is no longer ambiguous (#56)", async () => {
+    // A self-authored post is the one thing still filtered. Without `skipped`,
+    // this tick and a genuinely empty one both read `seen:1, surfaced:0`.
+    const source = new FakeSource();
+    source.outcome = {
+      kind: "ok",
+      newCursor: "2026-07-26T15:00:07.001Z",
+      events: [ev({ ref: "github:#42#comment-9", body: "Bear->Arfy: my own post", observedAt: "2026-07-26T15:00:07Z" })],
+    };
+    const sink = new RecordingSink();
+    const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
+    const summary = await runOneTick({ source, store, sink, selfName: "Bear", now: fakeNow() });
     expect(sink.events).toEqual([]);
+    expect(summary.seen).toBe(1);
+    expect(summary.surfaced).toBe(0);
+    expect(summary.skipped).toBe(1);
+  });
+
+  test("dedup skips do NOT inflate `skipped` (#56)", async () => {
+    // Counting them would grow the number on every re-poll of a window and
+    // turn the signal into noise.
+    const dup = ev({ ref: "github:#42#comment-10", body: "Arfy->Bear: hi", observedAt: "2026-07-26T15:00:08Z" });
+    const fs = new InMemoryFileSystem();
+    const store = new WatcherStore(fs, BASE, "github");
+    await store.save({ cursor: "2026-07-26T15:00:00Z", delivered: [dup.eventHash] });
+    const source = new FakeSource();
+    source.outcome = { kind: "ok", newCursor: "2026-07-26T15:00:08.001Z", events: [dup] };
+    const sink = new RecordingSink();
+    const summary = await runOneTick({ source, store, sink, selfName: "Bear", now: fakeNow() });
+    expect(sink.events).toEqual([]);
+    expect(summary.skipped).toBe(0);
   });
 });
 

@@ -41,7 +41,7 @@ export interface WatcherSink {
    *  a chatty sink can rate-limit; a strict sink can escalate. */
   onPollFailed?(source: string, reason: string): void | Promise<void>;
   /** Fires once per completed tick regardless of outcome. The
-   *  {surfaced, seen, elapsed} shape is enough to drive a heartbeat
+   *  {surfaced, skipped, seen, elapsed} shape is enough to drive a heartbeat
    *  file + optional debug output. */
   onTickComplete?(summary: WatcherTickSummary): void | Promise<void>;
 }
@@ -53,6 +53,20 @@ export interface WatcherTickSummary {
   readonly seen: number;
   /** Events that made it all the way to the sink. */
   readonly surfaced: number;
+  /**
+   * Events the predicate REJECTED this tick (#56).
+   *
+   * `surfaced: 0` alone cannot distinguish "nothing arrived" from "something
+   * arrived and was filtered out" — and those imply completely different
+   * actions. That ambiguity is what let #65's merge note vanish for a week:
+   * the heartbeat read `seen: 1, surfaced: 0`, which looked like a quiet poll.
+   *
+   * Counts predicate rejections ONLY. Dedup skips are excluded on purpose:
+   * those events were already delivered, so counting them would make the
+   * number grow on every re-poll of a window and turn a signal into noise —
+   * which is how a diagnostic dies.
+   */
+  readonly skipped: number;
   /** Wall-clock ms for this tick (start of poll → end of sink calls). */
   readonly elapsedMs: number;
 }
@@ -88,6 +102,7 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
       kind: "poll-failed",
       seen: 0,
       surfaced: 0,
+      skipped: 0,
       elapsedMs: nowMs() - startMs,
     };
     if (deps.sink.onTickComplete !== undefined) {
@@ -98,11 +113,12 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
 
   let nextState: WatcherStoreState = state;
   let surfaced = 0;
+  let skipped = 0;
   // Events arrive from the source pre-sorted by observedAt; iterate in
   // that order so the sink sees them chronologically.
   for (const event of outcome.events) {
     if (WatcherStore.isDelivered(nextState, event.eventHash)) continue;
-    if (!surfacesForAgent(event.header, deps.selfName)) continue;
+    if (!surfacesForAgent(event.header, deps.selfName)) { skipped++; continue; }
     await deps.sink.onEvent(event);
     nextState = WatcherStore.markDelivered(nextState, event.eventHash, event.cursor);
     surfaced++;
@@ -121,6 +137,7 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
     kind: "polled",
     seen: outcome.events.length,
     surfaced,
+    skipped,
     elapsedMs: nowMs() - startMs,
   };
   if (deps.sink.onTickComplete !== undefined) {

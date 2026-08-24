@@ -100,11 +100,35 @@ export function parseHeader(body: string): ParsedHeader | undefined {
 }
 
 /**
- * Delivery predicate for header-bearing (comment-kind) events. Returns
- * `true` iff the event should be surfaced to `selfName`. Non-header
- * bodies (parseHeader returned undefined, or WatcherEvent.header is
- * null) are NOT delivered — they don't carry attribution and the
- * whole point of the header is being addressable in the first place.
+ * Delivery predicate for comment-kind events. Returns `true` iff the event
+ * should be surfaced to `selfName`.
+ *
+ * UNHEADERED bodies are surfaced as BROADCAST (#56). They used to be dropped
+ * on the reasoning that they carry no attribution — but "not addressed to an
+ * agent" and "not addressed to anyone" were being treated identically, and one
+ * of those is a message we want. The cost was real: Bear merged and tagged #65
+ * and said so in a close-note beginning "Merged + tagged." with no header. It
+ * was fetched, counted, skipped, and the cursor advanced past it. I learned the
+ * release had shipped a week later, from Alan.
+ *
+ * That also silently broke the merge-ownership rule in docs/versioning.md
+ * ("whoever owns the branch merges it, AND SAYS SO on the issue") — the
+ * saying-so is exactly the shape that got dropped.
+ *
+ * Why not the narrower "surface unheadered comments authored by a roster
+ * member", which is what Bear and I originally agreed: it is unimplementable
+ * here. Every agent posts through the same GitHub account — 100 of 100 comments
+ * on this repo are authored by `aberezin`, and the roster has no per-agent
+ * login — so the author field cannot distinguish Bear from Arfy from Alan.
+ * "Roster member" degenerates to "everyone", and pretending otherwise would be
+ * a check that looks selective while selecting nothing.
+ *
+ * Self-echo is NOT suppressible for these (no sender to compare), and that is
+ * accepted rather than worked around: agents post through `dridock team post`,
+ * which always writes a header, so unheadered comments in practice are Alan's
+ * or hand-written ones (`gh issue close --comment`). The residue is that an
+ * agent may see its own close-note — one extra notification, and a nudge to use
+ * the tool.
  *
  * Dedup is the CALLER's responsibility — this function is stateless
  * per spec §3's split between the pure predicate and the watcher's
@@ -115,7 +139,9 @@ export function parseHeader(body: string): ParsedHeader | undefined {
  * express "no header" in their own types.
  */
 export function surfacesForAgent(header: ParsedHeader | undefined | null, selfName: string): boolean {
-  if (header === undefined || header === null) return false;
+  // Unheadered → broadcast. See the header comment for why this is not the
+  // narrower roster-author check we first specified.
+  if (header === undefined || header === null) return true;
   if (header.legacy) {
     // Legacy shape: no sender to compare against selfName, so no self-
     // echo suppression is possible. Fall back to the recipient-only

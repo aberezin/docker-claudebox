@@ -179,7 +179,7 @@ describe("makeInboxSink — sink behaviors", () => {
     const stderr = stderrCapture();
     const sink = makeInboxSink({ fs, inboxPath: INBOX, selfName: "Bear", repo: REPO, heartbeatPath: HEART, stderr });
     if (sink.onTickComplete !== undefined) {
-      await sink.onTickComplete({ source: "github", kind: "polled", seen: 3, surfaced: 1, elapsedMs: 42 });
+      await sink.onTickComplete({ source: "github", kind: "polled", seen: 3, surfaced: 1, skipped: 0, elapsedMs: 42 });
     }
     const hb = JSON.parse(await fs.readText(HEART));
     expect(hb.self).toBe("Bear");

@@ -26,6 +26,49 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.3.3] — 2026-08-24 _(fork)_
+
+### Fixed — headerless comments reached no agent, and `surfaced: 0` hid it (#56, read-time half)
+
+Two changes to the fetcher's read side, both from one incident: Bear merged and
+tagged #65, said so in a close-note beginning `Merged + tagged.` with no header,
+and Arfy learned the release had shipped **a week later, from Alan**. The comment
+was fetched, counted, skipped, and the cursor advanced past it.
+
+That also silently broke the merge-ownership rule in `docs/versioning.md`
+("whoever owns the branch merges it, **and says so on the issue**") — the
+saying-so is precisely the shape that got dropped.
+
+**1. Headerless comments now surface as broadcast.** They were dropped on the
+reasoning that they carry no attribution, but "not addressed to an agent" and
+"not addressed to anyone" were treated identically, and only the second should
+drop — and it never occurs.
+
+Not the narrower "surface only comments authored by a roster member" that was
+originally specified: **it is unimplementable here.** Every agent posts through
+one GitHub account — 100 of 100 comments on this repo are authored by
+`aberezin`, and the roster has no per-agent login — so the author field
+distinguishes nobody. A check that looks selective while selecting nothing is
+worse than an honest broadcast.
+
+Self-echo is not suppressible for these (no sender to compare) and that is
+accepted: agents post via `dridock team post`, which always writes a header, so
+headerless comments in practice are Alan's or hand-written (`gh issue close
+--comment`). An agent may see its own close-note — one extra notification, and a
+nudge to use the tool.
+
+**2. New `skipped` counter in the tick summary and heartbeat.** `surfaced: 0`
+could not distinguish "nothing arrived" from "something arrived and was filtered
+out", which is exactly how the lost note read as a quiet poll (`seen: 1,
+surfaced: 0`). Counts predicate rejections only — dedup skips are excluded
+deliberately, since counting them would grow the number on every re-poll of a
+window and turn the signal into noise.
+
+Verified by replaying the actual incident: with a cursor set before
+`comment-5181575287`, the `Merged + tagged.` note now surfaces as
+`sender=<legacy>, recipients=[] (broadcast)`, and the heartbeat reads
+`seen=39 surfaced=22 skipped=17`.
+
 ## [4.3.2] — 2026-08-21 _(fork)_
 
 ### Fixed — containers in `--network-address` VMs had dead DNS (#72)
