@@ -1,5 +1,34 @@
 #!/usr/bin/env bash
 
+# ── flags ────────────────────────────────────────────────────────────────────
+# BIN_NAME stays POSITIONAL for backwards compat (`./install.sh myname`), so
+# flags are stripped out first and the positional args put back.
+CLAUDE_VERSION_OVERRIDE=""
+_rest=()
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--claude-version)   CLAUDE_VERSION_OVERRIDE="${2:-}"; shift 2 || shift ;;
+		--claude-version=*) CLAUDE_VERSION_OVERRIDE="${1#*=}"; shift ;;
+		-h|--help)
+			cat <<'USAGE'
+usage: ./install.sh [BIN_NAME] [--claude-version <v>]
+
+  BIN_NAME              install the host binary under this name (default: dridock)
+  --claude-version <v>  build the image with this Claude Code CLI version,
+                        overriding the Dockerfile's ARG CLAUDE_VERSION pin.
+
+⚠️  Raising the CLI floor is not purely mechanical. Claude Code SILENTLY IGNORES
+    unknown flags (exit 0, no warning — see #17), so a too-old pin accepts
+    feature flags dridock forwards and drops them without complaint. When you
+    raise it, re-check the entrypoint's `--remote-control` capability probe.
+    Run `dridock checkversion` afterwards to confirm what landed.
+USAGE
+			exit 0 ;;
+		*) _rest+=("$1"); shift ;;
+	esac
+done
+set -- "${_rest[@]+"${_rest[@]}"}"
+
 BIN_NAME="${1:-${DRIDOCK_BIN_NAME:-${CLAUDEBOX_BIN_NAME:-${CLAUDE_BIN_NAME:-dridock}}}}"
 # Default to a user-writable dir so install needs no sudo (this fork avoids macOS
 # sudo). Override with DRIDOCK_INSTALL_DIR (legacy CLAUDEBOX_INSTALL_DIR / CLAUDE_INSTALL_DIR
@@ -95,7 +124,16 @@ fi
 # stamp the fork semver into the image (LABEL + ENV); `dridock checkversion` reads it
 DRIDOCK_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 0.0.0)"
 echo "🔨 Building local Claude Code image into $CB_INFRA_PROFILE ($IMAGE_NAME:$CLAUDE_TAG v$DRIDOCK_VERSION, target: $BUILD_TARGET)..."
-if ! docker --context "$CB_INFRA_CTX" build --build-arg DRIDOCK_VERSION="$DRIDOCK_VERSION" --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
+# Only pass --build-arg CLAUDE_VERSION when explicitly overridden, so the
+# Dockerfile's ARG default stays the single source of truth otherwise (#73).
+_build_args=(--build-arg "DRIDOCK_VERSION=$DRIDOCK_VERSION")
+if [ -n "$CLAUDE_VERSION_OVERRIDE" ]; then
+	_build_args+=(--build-arg "CLAUDE_VERSION=$CLAUDE_VERSION_OVERRIDE")
+	echo "   claude CLI pinned to $CLAUDE_VERSION_OVERRIDE for this build (overriding the Dockerfile ARG)."
+	echo "   ⚠️  re-check the entrypoint's --remote-control capability probe — a too-old CLI"
+	echo "      silently ignores unknown flags (#17)."
+fi
+if ! docker --context "$CB_INFRA_CTX" build "${_build_args[@]}" --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
 	echo "❌ Image build failed."
 	exit 1
 fi

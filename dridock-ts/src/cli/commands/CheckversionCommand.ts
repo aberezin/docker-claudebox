@@ -30,6 +30,8 @@ export class CheckversionCommand implements Command {
     private readonly dockerOverride?: Docker,
     private readonly gitOverride?: GitToplevel,
     private readonly colimaOverride?: Colima,
+    /** Injected in tests. Default probes the host's own `claude --version` (#73). */
+    private readonly hostClaudeVersion?: () => Promise<string | undefined>,
   ) {}
 
   async run(args: readonly string[], ctx: Context): Promise<number> {
@@ -70,7 +72,8 @@ export class CheckversionCommand implements Command {
     const svc = new CheckVersionService(docker, this.imageName);
     const evaluation = await svc.evaluate(DRIDOCK_TS_VERSION, projectId);
 
-    this.renderHeader(evaluation, ctx);
+    const hostCli = await this.probeHostClaude();
+    this.renderHeader(evaluation, ctx, hostCli);
 
     if (all) {
       // Ports the `--all` branch at wrapper.sh:1105 — enumerate every
@@ -181,7 +184,7 @@ export class CheckversionCommand implements Command {
     return 0;
   }
 
-  private renderHeader(e: CheckVersionInputs, ctx: Context): void {
+  private renderHeader(e: CheckVersionInputs, ctx: Context, hostCli?: string): void {
     ctx.stdout.write(`dridock versions:\n`);
     ctx.stdout.write(`  wrapper (host):        ${e.wrapperVersion}\n`);
     ctx.stdout.write(`  image (cb-infra):      ${e.infraImageVersion}\n`);
@@ -192,10 +195,47 @@ export class CheckversionCommand implements Command {
       // (VM down / image absent) — matches wrapper.sh:1093. Arfy #38 §🟠
       // caught this row missing.
       ctx.stdout.write(`  claude CLI (in image): ${e.claudeCliVersion ?? "unavailable"}\n`);
+      // The pinned CLI had NOTHING to compare against, so drifting behind was
+      // invisible — found at 2.1.215 in-image vs 2.1.241 on the host, 26
+      // releases, noticed only because someone asked how upgrades work (#73).
+      //
+      // The host is the reference because it auto-updates and costs no network
+      // call. Being behind is not merely "missing features": Claude Code
+      // SILENTLY IGNORES unknown flags (exit 0, no warning — #17), so a stale
+      // pin ACCEPTS feature flags dridock forwards and drops them. That is how
+      // `dridock start --remote-control` appeared to work while Remote Control
+      // was never activated.
+      if (hostCli !== undefined) {
+        ctx.stdout.write(`  claude CLI (host):     ${hostCli}\n`);
+        const img = e.claudeCliVersion;
+        if (img !== undefined && img !== "unavailable" && img !== "unstamped" && img !== hostCli) {
+          ctx.stdout.write(`\n⚠️  the image's claude CLI (${img}) differs from the host's (${hostCli}).\n`);
+          ctx.stdout.write(`    A stale pin silently DROPS unknown flags rather than erroring (#17), so\n`);
+          ctx.stdout.write(`    forwarded features can appear to work while doing nothing.\n`);
+          ctx.stdout.write(`    Bump: edit ARG CLAUDE_VERSION in the Dockerfile, or ./install.sh --claude-version ${hostCli}\n`);
+          ctx.stdout.write(`    Then re-check the entrypoint's --remote-control capability probe.\n`);
+        }
+      }
     } else {
       ctx.stdout.write(`  image (this project):  <no dridock project in ${ctx.cwd}>\n`);
     }
     ctx.stdout.write(`\n`);
+  }
+
+  /** Best-effort `claude --version` on the host → "2.1.241". undefined on any
+   *  failure (not installed, non-zero, unparseable) so the row is simply
+   *  omitted rather than the command breaking (#73). */
+  private async probeHostClaude(): Promise<string | undefined> {
+    if (this.hostClaudeVersion !== undefined) return await this.hostClaudeVersion();
+    try {
+      const proc = Bun.spawn(["claude", "--version"], { stdout: "pipe", stderr: "ignore" });
+      const text = await new Response(proc.stdout).text();
+      if ((await proc.exited) !== 0) return undefined;
+      const m = /([0-9]+\.[0-9]+\.[0-9]+)/.exec(text);
+      return m?.[1];
+    } catch {
+      return undefined;
+    }
   }
 
   private renderOutcome(o: CheckVersionOutcome, ctx: Context, stoppedProfiles: string[] = []): void {

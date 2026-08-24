@@ -134,6 +134,66 @@ describe("CheckversionCommand — happy paths", () => {
     expect(stdout.text()).toContain("no built image reachable");
   });
 
+  // #73 — the pinned CLI had nothing to compare against, so drifting behind was
+  // invisible (2.1.215 in-image vs 2.1.241 on the host: 26 releases, noticed
+  // only because someone asked how upgrades work). Being behind is not merely
+  // "missing features": Claude Code silently ignores unknown flags (#17), so a
+  // stale pin accepts forwarded features and drops them.
+  const projFs = () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    return fs;
+  };
+
+  test("claude CLI drift: image behind host → warns and names the bump path", async () => {
+    const fs = projFs();
+    const docker = new InMemoryDocker();
+    docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "2.1.215");
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+      async () => "2.1.241").run([], ctx);
+    const out = stdout.text();
+    expect(out).toContain("claude CLI (host):     2.1.241");
+    expect(out).toContain("differs from the host's");
+    expect(out).toContain("--claude-version 2.1.241");
+    expect(out).toContain("#17");                 // why it matters, not just that it differs
+  });
+
+  test("claude CLI in sync → host row shown, no warning", async () => {
+    const fs = projFs();
+    const docker = new InMemoryDocker();
+    docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "2.1.241");
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+      async () => "2.1.241").run([], ctx);
+    const out = stdout.text();
+    expect(out).toContain("claude CLI (host):     2.1.241");
+    expect(out).not.toContain("differs from the host's");
+  });
+
+  test("host claude unavailable → row omitted, never a spurious warning", async () => {
+    // The probe is best-effort; a Mac without `claude` on PATH must not make
+    // checkversion noisier than before.
+    const fs = projFs();
+    const docker = new InMemoryDocker();
+    docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "2.1.215");
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+      async () => undefined).run([], ctx);
+    const out = stdout.text();
+    expect(out).not.toContain("claude CLI (host)");
+    expect(out).not.toContain("differs from the host's");
+  });
+
+  test("image CLI unavailable (VM down) → no warning, nothing to compare", async () => {
+    const fs = projFs();
+    const docker = new InMemoryDocker();   // nothing seeded -> unavailable
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+      async () => "2.1.241").run([], ctx);
+    expect(stdout.text()).not.toContain("differs from the host's");
+  });
+
   test("drift: MAJOR bump, wrapper newer", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");

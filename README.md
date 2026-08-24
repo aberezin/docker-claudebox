@@ -90,7 +90,18 @@ export DRIDOCK_MINIMAL=1 && ./install.sh
 # custom binary name (e.g. if you want to call it 'claude' instead of 'dridock')
 ./install.sh claude
 # or: export DRIDOCK_BIN_NAME=claude && ./install.sh
+
+# pin a specific Claude Code CLI version into the image
+./install.sh --claude-version 2.1.241
 ```
+
+The Claude Code CLI inside the container is **pinned** (`ARG CLAUDE_VERSION` in the
+`Dockerfile`) and never self-updates — every claudebot runs a known version. `dridock
+checkversion` reports that pin against the CLI on your Mac and warns when they diverge,
+because being behind is not merely "missing features": Claude Code **silently ignores
+unknown flags** (exit 0, no warning), so a stale pin accepts feature flags dridock
+forwards and drops them. When you raise the pin, re-check the entrypoint's
+`--remote-control` capability probe.
 
 The installer must run from a checkout of the repo — it needs the `Dockerfile` and `dridock-ts/` (the wrapper source) beside it, and it will not pipe from `curl` since there is no registry image to fall back to. `install.sh` also requires [`bun`](https://bun.sh) to compile the wrapper to a single ~95 MB standalone binary.
 
