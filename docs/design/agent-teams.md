@@ -105,11 +105,29 @@ surface(event) :=
         OR selfName ∈ recipients(event) )          # directed → only the named recipients
 ```
 
-**Branches on event kind.** The rule above assumes a header. #45's stateful sources
-(`consult`, `bug-report`) also emit **state-change events** with *no* header — those deliver by
-*subscription* (`self watches this source AND the ref is relevant to self`), not by sender/
-recipient. The full two-branch predicate + the event schema, cursor, dedup, and heartbeat
-contract live in **#45**; this section governs only the header/comment case.
+**Comment-kind events with NO header broadcast** (#56). They were dropped, on the reasoning
+that they carry no attribution — but "not addressed to an agent" and "not addressed to anyone"
+were being treated identically, and only the second should drop. It never occurs.
+
+The cost was concrete: Bear merged and tagged #65 and said so in a close-note beginning
+`Merged + tagged.` with no header. It was fetched, counted, skipped, and the cursor advanced
+past it; Arfy learned the release had shipped a week later, from Alan. That also silently broke
+the merge-ownership rule in [versioning.md](../versioning.md) — "whoever owns the branch merges
+it, **and says so on the issue**" — because the saying-so is exactly the shape that got dropped.
+
+Not the narrower "surface only comments authored by a roster member" first specified: it is
+unimplementable here. Every agent posts through one GitHub account (100/100 comments on this
+repo are `aberezin`) and the roster has no per-agent login, so the author field distinguishes
+nobody. A check that looks selective while selecting nothing is worse than an honest broadcast.
+
+Self-echo is not suppressible for these (no sender to compare) and that is accepted: agents post
+via `dridock team post`, which always writes a header, so headerless comments in practice are the
+human's or hand-written (`gh issue close --comment`). An agent may see its own close-note.
+
+**Branches on event kind.** #45's stateful sources (`consult`, `bug-report`) emit **state-change
+events** that deliver by *subscription* (`self watches this source AND the ref is relevant to
+self`), not by sender/recipient. The full two-branch predicate + the event schema, cursor, dedup,
+and heartbeat contract live in **#45**.
 
 - The human's watcher (if any) is the human reading the tracker — Alan is surfaced by
   `recipients ∋ Alan`, but no automated watcher/heartbeat applies to a person.

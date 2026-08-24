@@ -57,6 +57,11 @@ GitHub  →  [detached fetcher (nohup)]  →  <xdg>/dridock/inbox/<agent>.jsonl
      Code injects that as session context.
   3. Print the exact Monitor arm command `tail -F -c +$((EOF+1))
      <inbox>` for Claude to run.
+- **SessionEnd hook** (`team-watch-session-end.sh`, #70): container-only
+  (`[ -f /.dockerenv ]`). Fires `dridock team fetcher stop` so the fetcher
+  exits cleanly inside Claude's teardown window rather than being SIGKILL'd
+  when PID 1 goes away. A no-op on the host by design — see the inverse
+  lifecycle note in #70/#71.
 - **UserPromptSubmit hook** (`team-watch-user-prompt-submit.sh`): fires
   per turn to make silent-degrade impossible mid-session:
   - Fetcher liveness (with 60s respawn backoff).
@@ -116,6 +121,33 @@ value of `$DRIDOCK_AGENT_NAME`).
 | `<agent>.jsonl.log`               | fetcher (via nohup)   | Combined stdout+stderr. Startup config, poll-failure warnings, sink-write errors. |
 | `<agent>.jsonl.session-cursors.json` | SessionStart + UPS  | `{session_id: last_drained_byte_offset}` — per-session drain cursor. |
 | `<agent>.jsonl.respawn-stamp`     | UPS                   | Unix epoch of last respawn attempt (for 60s backoff). |
+| `<agent>.jsonl.version`           | SessionStart          | dridock version that spawned the RUNNING fetcher (#71). Compared against the installed binary; a mismatch triggers stop+respawn so watcher fixes take effect. **Host-only** — gated on `[ ! -f /.dockerenv ]`, since the container's fetcher dies with the session and its shim rejects `--version`. |
+
+## Heartbeat (`<xdg>/dridock/watch-cursors/github.heartbeat`)
+
+Written by the fetcher on every tick — the staleness signal the catch-up layer checks to
+detect a silently-dead watcher. Shape:
+
+```json
+{"source":"github","kind":"polled","seen":39,"surfaced":22,"skipped":17,
+ "elapsedMs":956,"atIso":"...","self":"Arfy","repo":"owner/name","inbox":"..."}
+```
+
+| field | meaning |
+|---|---|
+| `seen` | events the source returned this tick (pre-dedup, pre-predicate) |
+| `surfaced` | events that reached the sink (the inbox) |
+| `skipped` | events the **predicate rejected** (#56) |
+| `atIso` | tick time — freshness is what makes this a heartbeat |
+
+`skipped` exists because `surfaced: 0` could not distinguish *"nothing arrived"* from
+*"something arrived and was filtered out"*, and those imply completely different actions.
+That ambiguity is how #65's headerless merge note read as a quiet poll (`seen: 1,
+surfaced: 0`) for a week.
+
+It counts **predicate rejections only** — dedup skips are excluded deliberately, since
+counting them would grow the number on every re-poll of a window and turn the signal into
+noise, which is how a diagnostic dies.
 
 ## State persistence
 
@@ -209,6 +241,8 @@ failure.
 | Wraparound pid held by unrelated process    | Cmdline check rejects; treated as dead → respawn           |
 | Session-cursors state file corrupt/absent   | SessionStart falls back to CURRENT EOF (never replay-all) + stderr note |
 | Monitor not armed but events landing        | UserPromptSubmit prints delta events in-line + re-prints arm command |
+| Monitor not armed and inbox EMPTY           | UPS still reports it (#56). The liveness check runs BEFORE the nothing-new early exit — otherwise a dead channel with no traffic is indistinguishable from a healthy idle one, and the reminder is missing at the moment it matters most: a fresh session, before anything has arrived. |
+| Container fetcher SIGKILL'd at teardown     | SessionEnd hook (`team-watch-session-end.sh`, #70) fires `dridock team fetcher stop` so the fetcher's own SIGTERM handler persists state. **Container-only** — gated on `[ -f /.dockerenv ]`; on the host the fetcher SHOULD outlive the session, which is what lets events accumulate for the next drain. |
 | Poll to GitHub failed (rate limit, etc.)    | Fetcher's `onPollFailed` → stderr → log; cursor doesn't advance, next tick retries |
 
 ## Not in scope (deferred to later releases)

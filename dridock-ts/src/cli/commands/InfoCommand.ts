@@ -49,7 +49,18 @@ export class InfoCommand implements Command {
     // ── versions ────────────────────────────────────────────────────────
     ctx.stdout.write(`versions:\n`);
     ctx.stdout.write(`  wrapper (host):    ${DRIDOCK_TS_VERSION}   (${ctx.binName}-ts)\n`);
-    ctx.stdout.write(`  image (cb-infra):  ${await docker.imageVersion(infraContext(), this.imageName)}\n`);
+    // Annotate "unavailable" with the reason when we know it (#54). A stopped VM
+    // and an unbuilt image read identically here, and they need opposite
+    // remedies — `dridock start` vs `make build`. `dridock df` in this same CLI
+    // already knows the status; not saying it here is what made two DNS
+    // investigations open by mistaking a stopped VM for a docker fault.
+    const _infraVer = await docker.imageVersion(infraContext(), this.imageName);
+    if (_infraVer === "unavailable") {
+      const _st = (await colima.get(INFRA_PROFILE))?.status ?? "absent";
+      ctx.stdout.write(`  image (cb-infra):  unavailable   (cb-infra is ${_st}${_st === "Running" ? "" : ` — '${ctx.binName} start' or 'colima start -p ${INFRA_PROFILE}'`})\n`);
+    } else {
+      ctx.stdout.write(`  image (cb-infra):  ${_infraVer}\n`);
+    }
     if (projectId !== undefined) {
       ctx.stdout.write(`  image (project):   ${await docker.imageVersion(projectContext(projectId), this.imageName)}\n`);
       ctx.stdout.write(`  claude CLI (image): ${await docker.imageClaudeCliVersion(projectContext(projectId), this.imageName)}\n`);

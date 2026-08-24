@@ -105,6 +105,35 @@ describe("CheckversionCommand — happy paths", () => {
     expect(stdout.text()).toContain("no built image reachable");
   });
 
+  // #54 — a STOPPED VM and an UNBUILT image both surface as "unavailable", but
+  // need opposite remedies. Sending someone into a 7-minute `make build` for a
+  // 20-second `start` is how this cost time twice.
+  test("no-comparable: cb-infra STOPPED names the cause and gives the right remedy", async () => {
+    const fs = new InMemoryFileSystem();
+    const docker = new InMemoryDocker(); // nothing queryable -> unavailable
+    const { InMemoryColima } = await import("../../test/fakes/InMemoryColima.ts");
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-infra", status: "Stopped", address: "" });
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), colima).run([], ctx);
+    const out = stdout.text();
+    expect(out).toContain("cb-infra is STOPPED");
+    expect(out).toContain("start");
+    expect(out).not.toContain("make build");   // the WRONG remedy for this cause
+  });
+
+  test("no-comparable: VMs RUNNING but nothing built still says make build", async () => {
+    // The other side of the same branch — don't blame a stopped VM when none is.
+    const fs = new InMemoryFileSystem();
+    const docker = new InMemoryDocker();
+    const { InMemoryColima } = await import("../../test/fakes/InMemoryColima.ts");
+    const colima = new InMemoryColima();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), colima).run([], ctx);
+    expect(stdout.text()).toContain("no built image reachable");
+  });
+
   test("drift: MAJOR bump, wrapper newer", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");

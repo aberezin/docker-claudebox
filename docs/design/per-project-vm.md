@@ -414,6 +414,36 @@ No macOS `sudo` **at runtime**. Specifically:
   the Linux UID-matching mechanism. (Verified: a file created by a root process in
   a bind-mounted dir shows up owned by the host user `501` on the Mac.)
 
+### Container DNS: the resolver address rotates per VM lifecycle (#72)
+
+Colima runs the VM's DNS resolver at an address it chooses, and **that address is not
+stable**. Observed across VMs and reboots: `192.168.5.1`, `.2`, `.3`, `.4`, `.5` — while
+Lima documents `.3`, which we saw exactly once. Docker copies `/etc/resolv.conf` into each
+container at **create** time, so when the resolver behind the assigned address stops
+answering, every container in that VM loses name resolution **with routing perfectly
+intact**: `curl --resolve` to the same host returns 200 while every lookup fails, and
+Claude Code surfaces that as a *timeout* — which reads as an API outage or an auth problem.
+
+**Any hardcoded resolver is wrong by construction.** `entrypoint.sh` probes instead: it
+verifies resolution at container start and, on failure, tries the container's own default
+gateways (from `/proc/net/route`) then colima's usual values, rewriting `resolv.conf` with
+the first that answers. No-op when DNS already works.
+
+It deliberately does **not** fall back to public resolvers — moving a project's DNS off its
+own network is a policy decision the harness shouldn't make silently.
+
+**If a VM is persistently broken**, `dridock destroy && dridock start` yields a healthy
+resolver (confirmed). That costs a *reseed*, not a rebuild — the image returns via
+`docker save | docker load` from `cb-infra` — and sessions, `~/.claude` and the workspace
+all survive, since they are host bind mounts. Never `--purge`: that deletes the project's
+session dir.
+
+Note `colima start --dns` does **not** set the VM's `resolv.conf`
+([colima#689](https://github.com/abiosoft/colima/issues/689),
+[#1219](https://github.com/abiosoft/colima/issues/1219)) — a VM-creation fix was tried and
+withdrawn for that reason. Root cause of the resolver dying is upstream; best hypothesis is
+[lima#3101](https://github.com/lima-vm/lima/issues/3101)'s stale nameserver cache.
+
 ## Alternatives considered
 
 - **Shared daemon + socket authz proxy (Layer 1):** keep one daemon; a proxy

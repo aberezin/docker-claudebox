@@ -94,7 +94,25 @@ export class CheckversionCommand implements Command {
       ctx.stdout.write(`\n`);
     }
 
-    this.renderOutcome(evaluation.outcome, ctx);
+    // A stopped VM and an unbuilt image both surface as "unavailable", but they
+    // need OPPOSITE remedies — `dridock start` vs `make build` (#54). Ask colima
+    // which it is, but ONLY on the failure path: the common case shouldn't pay
+    // for a subprocess it won't use.
+    let stoppedProfiles: string[] = [];
+    if (evaluation.outcome.kind === "no-comparable" && evaluation.outcome.reason !== "predates-versioning") {
+      try {
+        const colima = this.colimaOverride ?? new RealColima();
+        const thisProfile = projectId !== undefined ? projectProfile(projectId) : "";
+        stoppedProfiles = (await colima.list())
+          .filter((v) => v.status !== "Running")
+          .map((v) => v.name)
+          .filter((n) => n === "cb-infra" || n === thisProfile);
+      } catch {
+        stoppedProfiles = [];   // best-effort; fall back to the generic remedy
+      }
+    }
+
+    this.renderOutcome(evaluation.outcome, ctx, stoppedProfiles);
     return 0;
   }
 
@@ -180,7 +198,7 @@ export class CheckversionCommand implements Command {
     ctx.stdout.write(`\n`);
   }
 
-  private renderOutcome(o: CheckVersionOutcome, ctx: Context): void {
+  private renderOutcome(o: CheckVersionOutcome, ctx: Context, stoppedProfiles: string[] = []): void {
     switch (o.kind) {
       case "in-sync":
         ctx.stdout.write(`✅ in sync — wrapper and claudebot image are both ${o.version}.\n`);
@@ -194,7 +212,15 @@ export class CheckversionCommand implements Command {
         if (o.reason === "predates-versioning") {
           ctx.stdout.write(`ℹ️  the claudebot image predates versioning (no stamp). Rebuild to stamp it: make build\n`);
         } else {
-          ctx.stdout.write(`ℹ️  no built image reachable to compare (VMs down / not built yet): make build\n`);
+          // Name the actual cause when we know it. "make build" is the WRONG
+          // remedy for a stopped VM, and sending someone into a 7-minute
+          // rebuild for a 20-second `start` is how this cost time twice (#54).
+          if (stoppedProfiles.length > 0) {
+            ctx.stdout.write(`ℹ️  no image to compare — ${stoppedProfiles.join(", ")} ${stoppedProfiles.length === 1 ? "is" : "are"} STOPPED (not a missing build).\n`);
+            ctx.stdout.write(`   → ${ctx.binName} start   (or: colima start -p ${stoppedProfiles[0]})\n`);
+          } else {
+            ctx.stdout.write(`ℹ️  no built image reachable to compare (VMs down / not built yet): make build\n`);
+          }
         }
         return;
       case "drift":
