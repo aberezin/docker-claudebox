@@ -134,12 +134,21 @@ if [ -n "$_session_id" ] && [ -f "$_cursors" ] && command -v jq >/dev/null 2>&1;
     if [ -n "$_v" ] && [ "$_v" != "null" ]; then _last_offset="$_v"; fi
 fi
 
-# Nothing new since last drain → nothing to do.
-if [ "$_inbox_size" -le "$_last_offset" ]; then exit 0; fi
-
-# Something new AND we haven't consumed it. Is a tail process consuming
-# this inbox file? Use pgrep-narrow-then-ps-filter so the `.` in
-# `.jsonl` isn't treated as a regex wildcard (Arfy's nit #2).
+# Is a tail process consuming this inbox file? Use pgrep-narrow-then-ps-filter
+# so the `.` in `.jsonl` isn't treated as a regex wildcard (Arfy's nit #2).
+#
+# Checked BEFORE the nothing-new early exit (#56). It used to sit after, so the
+# channel's health was only ever examined when there was already undelivered
+# mail — meaning a dead channel with no traffic was indistinguishable from a
+# healthy idle one, and the reminder was missing at the exact moment it mattered
+# most: a freshly-started session, before anything had arrived.
+#
+# Observed: Bear came up on a fresh container and did not arm his Monitor. His
+# inbox was empty, so no nag fired; he stayed dark until Alan prompted him. And
+# because he had been told to wait, no prompt was coming — so the fallback that
+# is supposed to cover an unarmed Monitor could never trigger. Same shape as
+# `surfaced: 0` before the `skipped` counter: silence meaning two different
+# things.
 _tail_pid=""
 if command -v pgrep >/dev/null 2>&1; then
     for _p in $(pgrep -f 'tail -F' 2>/dev/null || true); do
@@ -148,6 +157,19 @@ if command -v pgrep >/dev/null 2>&1; then
             break
         fi
     done
+fi
+
+# Nothing new to deliver. Still report an unarmed Monitor — the live layer is
+# down whether or not mail happens to be waiting, and saying so only when there
+# is a backlog means you learn about it after it has already cost you.
+if [ "$_inbox_size" -le "$_last_offset" ]; then
+    if [ -z "$_tail_pid" ]; then
+        echo ""
+        echo "📬 team-inbox: your Monitor is NOT armed — live delivery is off. Events will"
+        echo "   only reach you at the next SessionStart or prompt. Arm it (persistent):"
+        echo "       tail -F -c +$((_inbox_size + 1)) $_inbox"
+    fi
+    exit 0
 fi
 
 if [ -n "$_tail_pid" ]; then
