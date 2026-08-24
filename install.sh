@@ -11,11 +11,16 @@ while [ $# -gt 0 ]; do
 		--claude-version=*) CLAUDE_VERSION_OVERRIDE="${1#*=}"; shift ;;
 		-h|--help)
 			cat <<'USAGE'
-usage: ./install.sh [BIN_NAME] [--claude-version <v>]
+usage: ./install.sh [BIN_NAME] [--claude-version <v>|latest|stable]
 
   BIN_NAME              install the host binary under this name (default: dridock)
   --claude-version <v>  build the image with this Claude Code CLI version,
                         overriding the Dockerfile's ARG CLAUDE_VERSION pin.
+                        `latest` / `stable` are RESOLVED to a concrete version
+                        here and the number is what gets built, so the build
+                        stays reproducible and Docker's layer cache still busts
+                        (the literal string `latest` never changes, so passing
+                        it through would silently reuse a stale cached CLI).
 
 ⚠️  Raising the CLI floor is not purely mechanical. Claude Code SILENTLY IGNORES
     unknown flags (exit 0, no warning — see #17), so a too-old pin accepts
@@ -28,6 +33,34 @@ USAGE
 	esac
 done
 set -- "${_rest[@]+"${_rest[@]}"}"
+
+# ── resolve latest/stable to a concrete version ──────────────────────────────
+# Passing the literal `latest` to the Dockerfile ARG would be a silent trap: the
+# ARG VALUE is what busts Docker's layer cache, and `latest` is a string that
+# never changes — so the CLI layer would be reused indefinitely and you'd get a
+# stale CLI while believing you'd asked for the newest. Resolve it up front, and
+# fail loudly rather than falling back to a guess (repo rule: never silently
+# discard user-supplied input).
+CLAUDE_RELEASES_URL="${CLAUDE_RELEASES_URL:-https://downloads.claude.ai/claude-code-releases}"
+case "$CLAUDE_VERSION_OVERRIDE" in
+	latest|stable)
+		_channel="$CLAUDE_VERSION_OVERRIDE"
+		_resolved=$(curl -fsSL --max-time 20 "$CLAUDE_RELEASES_URL/$_channel" 2>/dev/null | head -1 | tr -d '\r')
+		if [ -z "$_resolved" ]; then
+			echo "install.sh: could not reach $CLAUDE_RELEASES_URL/$_channel to resolve '$_channel'." >&2
+			echo "            Pass an explicit version instead: --claude-version 2.1.243" >&2
+			exit 1
+		fi
+		# Reject anything that isn't a version (an HTML error page, a redirect
+		# notice) before it becomes a build arg.
+		if ! printf '%s' "$_resolved" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[^[:space:]]+)?$'; then
+			echo "install.sh: '$_channel' resolved to something that is not a version: $_resolved" >&2
+			exit 1
+		fi
+		echo "==> claude CLI: $_channel resolves to $_resolved (pinning that, not '$_channel')"
+		CLAUDE_VERSION_OVERRIDE="$_resolved"
+		;;
+esac
 
 BIN_NAME="${1:-${DRIDOCK_BIN_NAME:-${CLAUDEBOX_BIN_NAME:-${CLAUDE_BIN_NAME:-dridock}}}}"
 # Default to a user-writable dir so install needs no sudo (this fork avoids macOS

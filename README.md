@@ -93,7 +93,20 @@ export DRIDOCK_MINIMAL=1 && ./install.sh
 
 # pin a specific Claude Code CLI version into the image
 ./install.sh --claude-version 2.1.241
+
+# or let it resolve the newest published version for you
+./install.sh --claude-version latest    # newest release
+./install.sh --claude-version stable    # newest stable release (lags `latest`)
 ```
+
+`latest` / `stable` are resolved to a concrete version number by `install.sh`, and
+that **number** is what gets built — the literal string never reaches the Dockerfile.
+This is deliberate: the `ARG` value is what busts Docker's layer cache, so a literal
+`latest` (a string that never changes) would reuse the cached CLI layer forever and
+hand you a stale CLI while reporting success. The resolved version is printed before
+the build, so it is also what you paste into the `Dockerfile` pin to make it permanent.
+If the release endpoint can't be reached, the install **fails** rather than quietly
+falling back to the existing pin.
 
 The Claude Code CLI inside the container is **pinned** (`ARG CLAUDE_VERSION` in the
 `Dockerfile`) and never self-updates — every claudebot runs a known version. `dridock
