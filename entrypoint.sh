@@ -1185,8 +1185,32 @@ _install_features() {
 				continue ;;
 		esac
 		# Either marker suffices — 2.x set `.profile-$feat`, 3.0 sets `.feature-$feat`.
-		[ -f "$CLAUDE_CONFIG_DIR/.feature-$feat" ] && continue
-		[ -f "$CLAUDE_CONFIG_DIR/.profile-$feat" ] && continue
+		#
+		# But a marker asserts "on.sh ran once", which is NOT "the payload is
+		# present" (#75). Those diverge whenever a feature installs outside
+		# ~/.claude: the marker is on the bind mount and survives a container
+		# recreate, the payload isn't and doesn't — so the feature reports
+		# enabled with its tools missing, silently.
+		#
+		# If the feature ships an optional `check.sh`, run it and treat failure
+		# as "not installed" regardless of the marker. Same shape as the
+		# team-watch fetcher's two-part liveness (pid AND cmdline): an existence
+		# RECORD is not evidence the thing still exists. Features without a
+		# check.sh keep the old marker-only behavior.
+		if [ -f "$CLAUDE_CONFIG_DIR/.feature-$feat" ] || [ -f "$CLAUDE_CONFIG_DIR/.profile-$feat" ]; then
+			_check="$lib_new/$feat/check.sh"
+			if [ -x "$_check" ]; then
+				if timeout 30 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
+					bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH; exec '$_check'" \
+					>/dev/null 2>&1; then
+					continue    # marker present AND payload verified
+				fi
+				echo "dridock: feature '$feat' is marked installed but its check failed — reinstalling (payload likely lost with a container recreate; #75)" >&2
+				rm -f "$CLAUDE_CONFIG_DIR/.feature-$feat" "$CLAUDE_CONFIG_DIR/.profile-$feat"
+			else
+				continue    # no check.sh — marker-only, as before
+			fi
+		fi
 		marker="$CLAUDE_CONFIG_DIR/.feature-$feat"
 		# Prefer the 3.0 features/ layout; fall back to legacy profiles/<name>.sh for one cycle.
 		if   [ -x "$lib_new/$feat/on.sh" ];    then on_script="$lib_new/$feat/on.sh"

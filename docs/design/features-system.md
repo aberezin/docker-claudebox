@@ -101,6 +101,54 @@ Broaden `profiles:` into a **`features:`** system with:
      safely; run `on.sh` / `off.sh` immediately if the container is up.
    - `dridock features info <name>` — show the manifest.
 
+## Authoring rule: marker and payload must share a persistence domain
+
+A feature's completion marker lives at `~/.claude/.feature-<name>`, on the **bind
+mount** — so it survives a container recreate. Whether the feature's *payload*
+survives depends entirely on where `on.sh` installed it, and the two must agree.
+
+| `on.sh` installs into | survives recreate | marker placement |
+|---|---|---|
+| `~/.claude/…` (e.g. `npm install -g --prefix /home/claude/.claude`) | yes | `~/.claude` — the default, correct |
+| the container (`npm install -g`, `apt-get`, `/usr/local`) | **no** | must NOT rely on the surviving marker |
+
+Get this wrong and the failure is silent: after a recreate the payload is gone,
+the marker remains, the entrypoint skips reinstalling, and the feature reports
+enabled with its tools missing. That is exactly what `web-scaffolders` did until
+#75 — a plain `npm install -g` under a marker that outlived it.
+
+**Prefer installing into `~/.claude`.** `--prefix /home/claude/.claude` puts
+binaries in `~/.claude/bin`, which is already on PATH (`entrypoint.sh:920`) and is
+the documented home for per-project commands. The install is then paid once
+rather than on every recreate — which matters, since the installer runs under a
+120s timeout.
+
+`off.sh` **must mirror `on.sh`'s prefix.** An uninstall pointed at the wrong
+prefix reports success and leaves every tool in place.
+
+### `check.sh` — verify presence, don't trust the marker
+
+A marker records that `on.sh` ran once. That is not the same claim as "the
+payload is present", and the two diverge exactly when the persistence domains
+disagree.
+
+A feature may ship an optional executable `check.sh` beside `on.sh`. When the
+marker exists, the entrypoint runs it (30s timeout, as the `claude` user, with
+`~/.claude/bin` on PATH); a non-zero exit means "not installed" and the feature
+is reinstalled, marker regardless. Features without a `check.sh` keep the
+marker-only behavior.
+
+```sh
+#!/usr/bin/env bash
+set -uo pipefail
+command -v create-vite >/dev/null 2>&1     # one representative binary is enough
+```
+
+Same principle as the team-watch fetcher's two-part liveness check (pid **and**
+cmdline): an existence *record* is not evidence the thing still exists. Writing a
+`check.sh` is the robust option — it makes the system correct even when a future
+feature gets the placement rule wrong.
+
 ## Consequences
 
 **Positive:**

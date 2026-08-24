@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# summary: uninstall the web-scaffolder CLIs (installed by on.sh)
-# Called by `dridock features disable web-scaffolders`. Idempotent — npm silently
-# succeeds on a missing package. We don't touch `create-react-app` since we never
-# installed it (it's the deprecated tool this feature deliberately replaces).
+# summary: remove the framework-scaffolder CLIs installed by on.sh
+#
+# MUST mirror on.sh's --prefix (#75). Without it npm uninstalls from the
+# CONTAINER's global prefix while on.sh installed into ~/.claude — so disabling
+# the feature would report success and leave every tool in place.
 set -uo pipefail
-npm uninstall -g \
+npm uninstall -g --prefix /home/claude/.claude \
     create-vite \
     create-next-app \
     @vue/cli \

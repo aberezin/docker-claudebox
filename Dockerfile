@@ -223,7 +223,13 @@ COPY features/ /h/features/
 # (container) so both sides mirror the two names symmetrically for the whole
 # 3.x deprecation cycle. Removed in 4.0. See docs/design/env-var-rename.md.
 COPY env-rename.map /h/lib/env-rename.map
+# `find` for check.sh rather than a glob: it is OPTIONAL per feature (#75), so a
+# bare /h/features/*/check.sh would fail the build whenever no feature ships one.
+# It must still be chmod'd — the entrypoint gates on `[ -x check.sh ]`, so a
+# non-executable one is silently ignored and the feature falls back to
+# marker-only, which is the bug check.sh exists to prevent.
 RUN chmod +x /h/home/entrypoint.sh /h/bin/* /h/features/*/on.sh /h/features/*/off.sh \
+    && find /h/features -name check.sh -type f -exec chmod +x {} + \
     && ln -sf colima /h/bin/limactl \
     && ln -sf dridock /h/bin/claudebox  # 2.x binary-name compat (one deprecation cycle)
 

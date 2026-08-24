@@ -26,6 +26,49 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.3.4] — 2026-08-24 _(fork)_
+
+### Fixed — a feature could report enabled with its tools missing (#75)
+
+A feature's completion marker lives at `~/.claude/.feature-<name>` on the bind
+mount, so it survives a container recreate. Whether the **payload** survives
+depends on where `on.sh` installed it — and the two must agree.
+
+`web-scaffolders` used a plain `npm install -g`, which writes to the **container**
+filesystem. After any recreate its binaries were gone, the marker remained, the
+entrypoint skipped reinstalling, and the feature reported enabled with every tool
+missing. No error at any layer.
+
+Three changes:
+
+- **`web-scaffolders` now installs into `~/.claude`** via
+  `npm install -g --prefix /home/claude/.claude`, putting binaries in
+  `~/.claude/bin` — already on PATH (`entrypoint.sh:920`) and the documented home
+  for per-project commands. Marker and payload now share one persistence domain,
+  and the install is paid once rather than on every recreate (which matters: the
+  installer runs under a 120s timeout).
+- **`off.sh` mirrors the prefix.** Without it, disabling the feature would
+  uninstall from the container's global prefix, report success, and leave every
+  tool in place — the same bug wearing the opposite hat.
+- **Optional `check.sh` per feature.** When the marker exists, the entrypoint
+  runs it (30s, as `claude`, `~/.claude/bin` on PATH); a non-zero exit means "not
+  installed" and the feature is reinstalled regardless of the marker. Features
+  without one keep the marker-only behavior.
+
+A marker records that `on.sh` *ran once*, which is not the claim that the payload
+*is present*. Same principle as the team-watch fetcher's two-part liveness check
+(pid **and** cmdline): an existence record is not evidence the thing still exists.
+`check.sh` makes the system correct even when a future feature gets the placement
+rule wrong.
+
+Audited all five shipped features; `web-scaffolders` was the only mismatch. The
+rule is now written down in `docs/design/features-system.md`.
+
+Also: the Dockerfile chmods `check.sh` via `find` rather than a glob — it is
+optional, so a bare `features/*/check.sh` would fail the build when no feature
+ships one, and a non-executable `check.sh` is silently ignored by the entrypoint's
+`[ -x ]` gate, which is precisely the failure it exists to prevent.
+
 ## [4.3.3] — 2026-08-24 _(fork)_
 
 ### Fixed — headerless comments reached no agent, and `surfaced: 0` hid it (#56, read-time half)
