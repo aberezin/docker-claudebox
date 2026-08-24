@@ -21,6 +21,25 @@ chmod +x ~/.claude/bin/my-tool
 
 Scripts placed in `~/.claude/init.d/*.sh` run once when a container is first created. They execute as root before the entrypoint drops to the `claude` user. They do not re-run on subsequent `docker start` — only on fresh containers.
 
+> **"Once" means once per _container_, not once ever — so hooks MUST be idempotent.**
+>
+> The guard (`/var/run/claude-initialized`) lives on the container filesystem, so it is
+> lost whenever the container is recreated — `dridock down && dridock start`, an image
+> rebuild, a VM restart, a Mac reboot. All of those are routine, so a hook re-runs
+> regularly, and it may do so *in the middle of a project a claudebot is partway through*:
+> the session history lives on the bind mount and survives, so the agent resumes with no
+> signal that its environment re-initialized underneath it.
+>
+> Write hooks that are safe to run repeatedly. Check before appending, `mkdir -p` rather
+> than `mkdir`, `install -m` rather than `cat >>`, and never assume "first run". A hook
+> that appends a line to a config file will append it again on every recreate.
+>
+> The flip side is useful: because init.d re-runs, it is the right place to make
+> container-local installs **reproducible**. Anything installed into the container (`apt-get`,
+> `npm install -g`, `pip install`) is discarded on recreate — an init.d hook is what brings
+> it back. Contrast with [features](design/features-system.md), whose completion markers
+> live on the persistent mount and therefore do *not* re-run.
+
 ```bash
 mkdir -p ~/.claude/init.d
 cat > ~/.claude/init.d/setup.sh << 'EOF'

@@ -300,6 +300,44 @@ bloat fills it, the Bash tool can't create its tempdir and **every** command fai
   near-zero Mac cost; needs `dridock down` + restart). Full standard:
   `docs/design/disk-management.md` on the host.
 
+## What survives a container restart (and what silently doesn't)
+
+Your container gets **recreated** routinely — a `dridock down && dridock start`, an image
+rebuild, a VM restart, a Mac reboot. It is not a long-lived box, and a recreate is not an
+error condition. Exactly two locations survive it:
+
+- **Your workspace** — bind-mounted from the Mac at the same path. Project files go here.
+- **`~/.claude`** — bind-mounted. Your session history, skills, MCP config, `init.d` hooks,
+  cron history, `~/.claude/bin` (on PATH).
+
+**Everything else is discarded**: `/tmp`, `/opt`, anything under `/home/claude` OUTSIDE
+`.claude`, and anything you `sudo apt-get install` / `npm install -g` / `pip install` into
+the system. No warning is printed when it goes.
+
+The loss is easy to miss because your **conversation survives** — it lives under `.claude`.
+So after a recreate you can resume a session that confidently refers to a venv, a scratch
+file, or an installed tool that no longer exists.
+
+- Need a file to persist? Put it in the **workspace** (if it belongs to the project) or
+  under **`~/.claude`** (if it's yours).
+- Need a *tool* to persist? Either install it under `~/.claude`
+  (`npm install -g --prefix /home/claude/.claude` puts binaries in `~/.claude/bin`, already
+  on PATH), or — better — make it **re-creatable** from a script that lives in the
+  workspace, so a fresh container reproduces it instead of remembering it.
+- `~/.claude/init.d/*.sh` re-runs on **every** fresh container, so a setup script there is a
+  good way to make your environment reproducible — but it MUST be idempotent (see below).
+
+## init.d hooks must be idempotent
+
+`~/.claude/init.d/*.sh` runs once per *container*, not once per project. Its guard lives on
+the container filesystem, so a recreate re-runs every hook — potentially in the middle of
+work you're partway through, with your conversation intact and no signal that the
+environment re-initialized underneath you.
+
+Write hooks that are safe to run repeatedly: check before you append, `mkdir -p` rather than
+`mkdir`, `install -m` rather than `cat >>`, and never assume "first run". A hook that
+appends a line to a config file will append it again on every recreate.
+
 ## Secrets & credentials
 NEVER put a secret value on a command line — arguments leak into shell history, `ps`,
 process listings, and logs. This is a hard rule for the flows you build here AND for
@@ -504,7 +542,7 @@ dbg "framework guidance written to $CLAUDE_MD_USER"
 SYSTEM_HINT_FILE="/home/claude/.claude/system-hint.txt"
 if [ ! -f "$SYSTEM_HINT_FILE" ]; then
 	cat > "$SYSTEM_HINT_FILE" <<SYSHINT
-You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .dridock/BRIEF.md (or legacy .claudebox/BRIEF.md) exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work. If you hit a bug in the dridock FRAMEWORK itself (the wrapper/entrypoint/image/networking that runs you, not your project), file it with the \`cb-report-bug\` command rather than working around it silently. The harness changelog is at ~/CHANGELOG.md — consult it to see what dridock features and conventions exist and what recently changed (especially if a harness behavior surprises you).
+You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. ONLY your workspace and ~/.claude survive a container recreate (which is routine); /tmp, /opt, and anything apt/npm/pip-installed into the system are discarded silently — see \"What survives a container restart\" in your CLAUDE.md. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .dridock/BRIEF.md (or legacy .claudebox/BRIEF.md) exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work. If you hit a bug in the dridock FRAMEWORK itself (the wrapper/entrypoint/image/networking that runs you, not your project), file it with the \`cb-report-bug\` command rather than working around it silently. The harness changelog is at ~/CHANGELOG.md — consult it to see what dridock features and conventions exist and what recently changed (especially if a harness behavior surprises you).
 SYSHINT
 	chown claude:claude "$SYSTEM_HINT_FILE"
 	dbg "system hint created"
