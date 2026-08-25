@@ -26,6 +26,23 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [Unreleased]
+
+### Fixed
+- **The apt mirror rewrite silently did nothing on arm64** (#79) — it matched only
+  `archive.ubuntu.com` / `security.ubuntu.com`, but arm64 images source everything from
+  `ports.ubuntu.com/ubuntu-ports`, so on Apple Silicon the sed matched nothing on every
+  build. Being suffixed `|| true`, it could not report that it had no-op'd. Each arch now
+  prints which branch it took, and an unrecognised sources layout is a loud stderr warning.
+  arm64 deliberately stays on the official mirror: `cloudflaremirrors.com` 301s to
+  `mirrors.edge.kernel.org`, which serves `/ubuntu` but **404s on `/ubuntu-ports`** — so
+  the obvious "just rewrite ports.ubuntu.com too" fix would have broken arm64 builds
+  outright. Verified on both arches.
+- **Transient apt fetch failures now retry** (#79) — `Acquire::Retries "3"` in the three
+  stages that apt-install. This does *not* paper over an inconsistent mirror (an index
+  advertising a `.deb` the pool has already rotated out 404s identically on every retry,
+  which is what #79 originally hit); it covers dropped connections and momentary 5xx.
+
 ## [4.4.0] — 2026-08-25 _(fork)_
 
 ### Added

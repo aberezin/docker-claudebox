@@ -18,8 +18,37 @@ ENV DEBIAN_FRONTEND=noninteractive
 # below and COPY --from'd in at the very END of each variant, after the toolchain. Keep
 # `base` limited to slow-changing, cacheable installs.
 
-# faster apt mirror — Cloudflare
-RUN sed -i 's|http://archive.ubuntu.com|http://cloudflaremirrors.com|g; s|http://security.ubuntu.com|http://cloudflaremirrors.com|g' /etc/apt/sources.list.d/ubuntu.sources || true
+# faster apt mirror — Cloudflare on amd64 only, DELIBERATELY not on arm64.
+#
+# arm64 images source everything from ports.ubuntu.com/ubuntu-ports, not
+# archive/security.ubuntu.com. cloudflaremirrors.com 301s to
+# mirrors.edge.kernel.org, which serves /ubuntu (200) but 404s on
+# /ubuntu-ports — so rewriting the arm64 URIs to it would BREAK the build
+# outright rather than speed it up. arm64 stays on the official mirror; that
+# is a decision, not an oversight. (Third-party ports mirrors do exist, but
+# routing package installs through one is a supply-chain choice this image
+# shouldn't make on its own.)
+#
+# Pre-#79 this was one `sed … || true` matching two hosts that never appear on
+# arm64: it silently no-op'd on every Apple Silicon build and, being `|| true`,
+# could not report that it had. Now each arch prints which branch it took, and
+# an unrecognised sources layout is a loud warning rather than a shrug.
+RUN set -eu; \
+    src=/etc/apt/sources.list.d/ubuntu.sources; \
+    if grep -q 'archive\.ubuntu\.com\|security\.ubuntu\.com' "$src"; then \
+        sed -i 's|http://archive.ubuntu.com|http://cloudflaremirrors.com|g; s|http://security.ubuntu.com|http://cloudflaremirrors.com|g' "$src"; \
+        echo "apt mirror: rewritten to cloudflaremirrors.com (amd64)"; \
+    elif grep -q 'ports\.ubuntu\.com' "$src"; then \
+        echo "apt mirror: ports.ubuntu.com left as-is (arm64 — cloudflaremirrors.com does not serve /ubuntu-ports)"; \
+    else \
+        echo "apt mirror: WARNING — unrecognised sources layout, left unchanged" >&2; \
+    fi
+
+# Retry transient apt fetch failures instead of failing the whole build on one
+# blip. This does NOT paper over an inconsistent mirror (an index advertising a
+# .deb the pool has already rotated out 404s identically on every retry — that
+# is what #79 hit); it covers dropped connections and momentary 5xx.
+RUN printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80-dridock-retries
 
 # core essentials
 RUN apt-get update && apt-get install -y \
@@ -158,6 +187,7 @@ WORKDIR /workspace
 # when raising it, re-check the entrypoint's `--remote-control` capability probe.
 FROM ubuntu:24.04 AS claude-cli
 ENV DEBIAN_FRONTEND=noninteractive
+RUN printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80-dridock-retries
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 ENV HOME=/home/claude
@@ -182,6 +212,7 @@ RUN /home/claude/.local/bin/claude --version
 # claudebot can run `dridock team whoami` / `watch --once` for real, not just via a
 # shell reimpl. Skipped by the `minimal` target (no team-watch there yet).
 FROM ubuntu:24.04 AS dridock-ts-build
+RUN printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80-dridock-retries
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl unzip ca-certificates \
