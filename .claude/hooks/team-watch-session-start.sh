@@ -433,13 +433,60 @@ fi
 # catch-up still marks the skipped window as consumed, silently
 # dropping the events AND erasing the evidence that would identify
 # which branch ran.
+#
+# DRAIN CAP (#61). The inbox is append-only with no rotation, so the
+# drain-from-0 branches above (first-ever run, `rm <cursors>` recovery)
+# replay the ENTIRE accumulated inbox into session context. That cost
+# grows monotonically with agent lifetime — a recovery path that gets
+# more expensive the longer you've been running is backwards.
+#
+# Cap what a single drain emits, and keep the NEWEST bytes: on catch-up
+# the recent traffic is what's actionable, and the old end is the part
+# already superseded. The skipped range is announced as loudly as the
+# drain itself and names the file + exact byte range, because a silent
+# cap would be precisely the class of bug #58 was fixing (CLAUDE.md:
+# never silently discard — print a line the user sees AND leave the
+# evidence recoverable).
+#
+# The cursor still advances to EOF after a capped drain: we consumed up
+# to EOF, having said out loud what we skipped. Advancing only to the
+# emitted start would re-cap the same window on every subsequent run,
+# forever.
+_MAX_DRAIN_BYTES="${DRIDOCK_TEAM_MAX_DRAIN_BYTES:-${CLAUDEBOX_TEAM_MAX_DRAIN_BYTES:-102400}}"
+_is_uint "$_MAX_DRAIN_BYTES" || {
+    echo "team-watch: DRIDOCK_TEAM_MAX_DRAIN_BYTES='$_MAX_DRAIN_BYTES' is not a non-negative integer — using 102400." >&2
+    _MAX_DRAIN_BYTES=102400
+}
+
 _drain_fired=0
 if [ "$_inbox_size" -gt "$_last_offset" ] && [ -f "$_inbox" ]; then
     _delta=$((_inbox_size - _last_offset))
+    _skipped=0
+    _drain_tmp="$(mktemp)"
+    if [ "$_MAX_DRAIN_BYTES" -gt 0 ] && [ "$_delta" -gt "$_MAX_DRAIN_BYTES" ]; then
+        # `tail -c` can land mid-line; `tail -n +2` drops that partial
+        # first record. Worst case it also drops one COMPLETE line, which
+        # is why the skipped count is measured from what actually got
+        # emitted rather than assumed to equal the cap — the reported
+        # range is then exact, not approximate.
+        tail -c "$_MAX_DRAIN_BYTES" "$_inbox" | tail -n +2 > "$_drain_tmp"
+        _emitted=$(wc -c < "$_drain_tmp" | tr -d ' ')
+        _skipped=$((_delta - _emitted))
+    else
+        tail -c "+$((_last_offset + 1))" "$_inbox" | head -c "$_delta" > "$_drain_tmp"
+    fi
     echo ""
-    echo "─── team-inbox catch-up: $_delta bytes since offset $_last_offset ───"
-    tail -c "+$((_last_offset + 1))" "$_inbox" | head -c "$_delta"
+    if [ "$_skipped" -gt 0 ]; then
+        echo "─── team-inbox catch-up: SKIPPED $_skipped bytes [offset $_last_offset → $((_last_offset + _skipped))] ───"
+        echo "    Backlog exceeded the ${_MAX_DRAIN_BYTES}-byte drain cap. Those events were NOT surfaced."
+        echo "    They are still on disk — read them with:"
+        echo "      tail -c +$((_last_offset + 1)) $_inbox | head -c $_skipped"
+        echo "    Raise the cap with DRIDOCK_TEAM_MAX_DRAIN_BYTES=<bytes> (0 disables it)."
+    fi
+    echo "─── team-inbox catch-up: $((_delta - _skipped)) bytes since offset $((_last_offset + _skipped)) ───"
+    cat "$_drain_tmp"
     echo "─── end catch-up ───"
+    rm -f "$_drain_tmp"
     _drain_fired=1
 fi
 
