@@ -84,6 +84,18 @@ targets* — not the mount itself.
 **Topology** — one Colima VM per project, the human's `default` VM untouched, and
 the image seeded into each project VM from the shared `cb-infra` profile:
 
+> **cb-infra is never booted just to answer a question.** If the project VM already
+> has the image, `dridock` compares it against `cb-infra` only when `cb-infra` is
+> *already running* — starting a 4GiB VM to ask "is there a newer image?" is the
+> wrong trade. The consequence: with `cb-infra` stopped, the drift check does not
+> run, so the launch prints
+> `!  image drift not checked (cb-infra is not running) — using dridock:latest X, which may be behind.`
+> and proceeds. That note is deliberate — an unchecked image must never be
+> reported as an up-to-date one (#76). To pick up an image built by a newer
+> `make build`, start `cb-infra` and re-run. The **first-time seed** (project VM
+> has no image at all) is different: it *requires* `cb-infra` and fails loudly
+> with `cb-infra not running — cannot seed image` rather than proceeding.
+
 ```mermaid
 flowchart TB
     browser["Browser / curl on the Mac"]

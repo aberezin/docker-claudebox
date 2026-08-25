@@ -109,7 +109,10 @@ export class StartCommand implements Command {
     const hostGit = this.deps.hostGit ?? new RealHostGit();
     const probe = this.deps.probe ?? new RealProcessProbe();
 
-    const imageEnsure = new ImageEnsureService({ colima, docker, image: this.imageName });
+    const imageEnsure = new ImageEnsureService({
+      colima, docker, image: this.imageName,
+      warn: (m) => ctx.stderr.write(m),
+    });
     const vmEnsure = new VmEnsureService({
       colima, docker, fs: ctx.fs, env: process.env, home: ctx.home, image: this.imageName,
       ensureImage: imageEnsure.asCallback(),

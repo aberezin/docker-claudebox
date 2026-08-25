@@ -61,7 +61,10 @@ export abstract class ProjectPassthroughCommand implements Command {
     const colima = this.deps.colima ?? new RealColima();
     const docker = this.deps.docker ?? new RealDocker();
     const runtime = this.deps.runtime ?? new RealContainerRuntime();
-    const imageEnsure = new ImageEnsureService({ colima, docker, image: this.imageName });
+    const imageEnsure = new ImageEnsureService({
+      colima, docker, image: this.imageName,
+      warn: (m) => ctx.stderr.write(m),
+    });
     const vmEnsure = new VmEnsureService({
       colima, docker, fs: ctx.fs, env: process.env, home: ctx.home, image: this.imageName,
       ensureImage: imageEnsure.asCallback(),

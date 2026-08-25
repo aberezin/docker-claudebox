@@ -4,12 +4,18 @@ import { InMemoryColima } from "../test/fakes/InMemoryColima.ts";
 import { InMemoryDocker } from "../test/fakes/InMemoryDocker.ts";
 import { infraContext } from "../infra/Docker.ts";
 
-function build(): { svc: ImageEnsureService; colima: InMemoryColima; docker: InMemoryDocker } {
+function build(): {
+  svc: ImageEnsureService; colima: InMemoryColima; docker: InMemoryDocker; notes: string[];
+} {
   const colima = new InMemoryColima();
   const docker = new InMemoryDocker();
+  const notes: string[] = [];
   return {
-    svc: new ImageEnsureService({ colima, docker, image: "dridock:latest" }),
-    colima, docker,
+    svc: new ImageEnsureService({
+      colima, docker, image: "dridock:latest",
+      warn: (m) => { notes.push(m); },
+    }),
+    colima, docker, notes,
   };
 }
 
@@ -78,13 +84,19 @@ describe("ImageEnsureService.ensure — drift-reseed", () => {
     expect(docker.saves).toEqual([]);
   });
 
-  test("cb-infra not running → skip drift check (never boot cb-infra just to check)", async () => {
+  test("cb-infra not running → unverified, NOT already-current (#76)", async () => {
     const { svc, docker } = build();
     // cb-infra NOT seeded/running
     docker.seedImage("colima-cb-abc", "dridock:latest", "3.3.7");
     const r = await svc.ensure("colima-cb-abc");
-    expect(r.kind).toBe("already-current");
+    // Still never boots cb-infra just to check...
     expect(docker.saves).toEqual([]);
+    // ...but "couldn't check" must not masquerade as "verified current".
+    expect(r.kind).toBe("unverified");
+    if (r.kind === "unverified") {
+      expect(r.version).toBe("3.3.7");
+      expect(r.reason).toContain("not running");
+    }
   });
 
   test("target 'unstamped' + cb-infra current → reseed (unstamped is older than any real version)", async () => {
@@ -96,14 +108,55 @@ describe("ImageEnsureService.ensure — drift-reseed", () => {
     expect(r.kind).toBe("reseeded");
   });
 
-  test("cb-infra unstamped → NO drift reseed (can't compare vs unstamped)", async () => {
+  test("cb-infra unstamped → NO drift reseed, and unverified not already-current (#76)", async () => {
     const { svc, colima, docker } = build();
     colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
     docker.seedImage(infraContext(), "dridock:latest", "unstamped");
     docker.seedImage("colima-cb-abc", "dridock:latest", "3.3.7");
     const r = await svc.ensure("colima-cb-abc");
-    expect(r.kind).toBe("already-current");
     expect(docker.saves).toEqual([]);
+    // cb-infra is UP but has nothing comparable, so the drift question is
+    // still unanswered — same reporting rule as it being down.
+    expect(r.kind).toBe("unverified");
+    if (r.kind === "unverified") expect(r.reason).toContain("unstamped");
+  });
+
+  test("a genuinely verified current image stays already-current + emits no note", async () => {
+    const { svc, colima, docker, notes } = build();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    docker.seedImage(infraContext(), "dridock:latest", "3.3.7");
+    docker.seedImage("colima-cb-abc", "dridock:latest", "3.3.7");
+    const r = await svc.ensure("colima-cb-abc");
+    expect(r.kind).toBe("already-current");
+    // The note must be specific to "couldn't check" — if it fired here too
+    // it would be noise on every warm launch and get tuned out.
+    await svc.asCallback()("colima-cb-abc");
+    expect(notes).toEqual([]);
+  });
+});
+
+describe("ImageEnsureService.asCallback — #76 drift note", () => {
+  test("unverified still proceeds (ok) but emits a note naming the version and the fix", async () => {
+    const { svc, docker, notes } = build();
+    docker.seedImage("colima-cb-abc", "dridock:latest", "3.3.7");
+    const out = await svc.asCallback()("colima-cb-abc");
+    // Not a failure: the image works, the launch continues.
+    expect(out.ok).toBe(true);
+    expect(notes.length).toBe(1);
+    // The note must say it did NOT check, name what's running, and give
+    // the recovery command — a bare "may be behind" isn't actionable.
+    expect(notes[0]).toContain("not checked");
+    expect(notes[0]).toContain("3.3.7");
+    expect(notes[0]).toContain("colima start -p cb-infra");
+  });
+
+  test("warn is optional — no sink means no crash", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    docker.seedImage("colima-cb-abc", "dridock:latest", "3.3.7");
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest" });
+    const out = await svc.asCallback()("colima-cb-abc");
+    expect(out.ok).toBe(true);
   });
 });
 

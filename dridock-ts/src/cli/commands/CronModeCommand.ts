@@ -81,7 +81,10 @@ export class CronModeCommand implements Command {
 
     // Ensure VM + image (auto-seed from cb-infra if drift/absent) — same
     // shape as StartCommand so a cold-start cron invocation Just Works.
-    const imageEnsure = new ImageEnsureService({ colima, docker, image: this.imageName });
+    const imageEnsure = new ImageEnsureService({
+      colima, docker, image: this.imageName,
+      warn: (m) => ctx.stderr.write(m),
+    });
     const vmEnsure = new VmEnsureService({
       colima, docker, fs: ctx.fs, env: process.env, home: ctx.home, image: this.imageName,
       ensureImage: imageEnsure.asCallback(),
