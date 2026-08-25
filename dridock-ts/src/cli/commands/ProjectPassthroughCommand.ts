@@ -13,7 +13,7 @@ import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
 import { ProjectConfig } from "../../services/ProjectConfig.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
-import { ImageEnsureService } from "../../services/ImageEnsureService.ts";
+import { ImageEnsureService, parseForceReseed } from "../../services/ImageEnsureService.ts";
 import { containerName } from "../../services/ContainerName.ts";
 
 /**
@@ -64,6 +64,7 @@ export abstract class ProjectPassthroughCommand implements Command {
     const imageEnsure = new ImageEnsureService({
       colima, docker, image: this.imageName,
       warn: (m) => ctx.stderr.write(m),
+      force: parseForceReseed(ctx.env.get("FORCE_RESEED"), (m) => ctx.stderr.write(m)),
     });
     const vmEnsure = new VmEnsureService({
       colima, docker, fs: ctx.fs, env: process.env, home: ctx.home, image: this.imageName,

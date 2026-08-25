@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { ImageEnsureService } from "./ImageEnsureService.ts";
+import { ImageEnsureService, parseForceReseed, CLAUDE_CLI_LABEL } from "./ImageEnsureService.ts";
 import { InMemoryColima } from "../test/fakes/InMemoryColima.ts";
 import { InMemoryDocker } from "../test/fakes/InMemoryDocker.ts";
 import { infraContext } from "../infra/Docker.ts";
@@ -187,5 +187,147 @@ describe("ImageEnsureService.asCallback — the VmEnsureService adapter", () => 
     const r = await cb("colima-cb-abc");
     expect(r.ok).toBe(false);
     expect(r.reason).toContain("not running");
+  });
+});
+
+
+/* ── #78: a CLI-only rebuild must reach project VMs ──────────────────────── */
+
+const V = "4.3.4";
+/** Seed an image that is at harness version `V` and pins CLI `cli`. */
+function seedWithCli(docker: InMemoryDocker, ctxName: string, cli?: string): void {
+  docker.seedImage(ctxName, "dridock:latest", V);
+  docker.seedImageIdentity(ctxName, "dridock:latest", {
+    id: `sha256:${ctxName}`,
+    labels: cli === undefined ? {} : { [CLAUDE_CLI_LABEL]: cli },
+  });
+}
+
+describe("ImageEnsureService — claude CLI drift (#78)", () => {
+  test("same harness semver but NEWER CLI in cb-infra → reseed", async () => {
+    const { svc, colima, docker } = build();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    seedWithCli(docker, infraContext(), "2.1.243");
+    seedWithCli(docker, "colima-cb-abc", "2.1.215");
+    const r = await svc.ensure("colima-cb-abc");
+    // This is the whole point: the semvers are EQUAL, so the pre-#78 code
+    // returned already-current and the new CLI never propagated.
+    expect(r.kind).toBe("reseeded");
+    if (r.kind === "reseeded") expect(r.reason).toContain("2.1.215 → 2.1.243");
+    expect(docker.saves.length).toBe(1);
+  });
+
+  test("a deliberate CLI DOWNGRADE in cb-infra also propagates", async () => {
+    const { svc, colima, docker } = build();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    seedWithCli(docker, infraContext(), "2.1.215");
+    seedWithCli(docker, "colima-cb-abc", "2.1.243");
+    // cb-infra is the source of truth for what should be deployed. Pinning an
+    // older CLI to dodge a regression is an explicit act and must reach the
+    // project VMs, so this compares for DIFFERENCE, not newness.
+    const r = await svc.ensure("colima-cb-abc");
+    expect(r.kind).toBe("reseeded");
+    if (r.kind === "reseeded") expect(r.reason).toContain("2.1.243 → 2.1.215");
+  });
+
+  test("identical CLI → already-current, no save, no note", async () => {
+    const { svc, colima, docker, notes } = build();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    seedWithCli(docker, infraContext(), "2.1.243");
+    seedWithCli(docker, "colima-cb-abc", "2.1.243");
+    const r = await svc.ensure("colima-cb-abc");
+    expect(r.kind).toBe("already-current");
+    expect(docker.saves).toEqual([]);
+    expect(notes).toEqual([]);
+  });
+
+  test("BOTH sides unstamped → silent already-current (the pre-#78 steady state)", async () => {
+    const { svc, colima, docker, notes } = build();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    seedWithCli(docker, infraContext(), undefined);
+    seedWithCli(docker, "colima-cb-abc", undefined);
+    const r = await svc.ensure("colima-cb-abc");
+    // Nothing is knowable AND nothing changed — warning here would nag on
+    // every launch of every existing install until an unrelated rebuild.
+    expect(r.kind).toBe("already-current");
+    expect(notes).toEqual([]);
+    expect(docker.saves).toEqual([]);
+  });
+
+  test("exactly ONE side stamped → unverified, NOT a guessed reseed", async () => {
+    for (const [infraCli, targetCli] of [["2.1.243", undefined], [undefined, "2.1.243"]] as const) {
+      const { svc, colima, docker } = build();
+      colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+      seedWithCli(docker, infraContext(), infraCli);
+      seedWithCli(docker, "colima-cb-abc", targetCli);
+      const r = await svc.ensure("colima-cb-abc");
+      // Absent label means the image predates the stamp — that is "unknown",
+      // not "matching". Reseeding on a guess would copy 7.5GB unprompted.
+      expect(r.kind).toBe("unverified");
+      if (r.kind === "unverified") expect(r.reason).toContain("predates");
+      expect(docker.saves).toEqual([]);
+    }
+  });
+
+  test("target on a NEWER harness semver is not downgraded over a CLI difference", async () => {
+    const { svc, colima, docker } = build();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    docker.seedImage(infraContext(), "dridock:latest", "4.3.4");
+    docker.seedImageIdentity(infraContext(), "dridock:latest", { id: "sha256:i", labels: { [CLAUDE_CLI_LABEL]: "2.1.243" } });
+    docker.seedImage("colima-cb-abc", "dridock:latest", "4.4.0");
+    docker.seedImageIdentity("colima-cb-abc", "dridock:latest", { id: "sha256:t", labels: { [CLAUDE_CLI_LABEL]: "2.1.215" } });
+    const r = await svc.ensure("colima-cb-abc");
+    expect(r.kind).toBe("already-current");
+    expect(docker.saves).toEqual([]);
+  });
+});
+
+describe("ImageEnsureService — DRIDOCK_FORCE_RESEED (#78)", () => {
+  test("force reseeds even when everything compares equal", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    seedWithCli(docker, infraContext(), "2.1.243");
+    seedWithCli(docker, "colima-cb-abc", "2.1.243");
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest", force: true });
+    const r = await svc.ensure("colima-cb-abc");
+    expect(r.kind).toBe("reseeded");
+    if (r.kind === "reseeded") expect(r.reason).toContain("FORCE_RESEED");
+    expect(docker.saves.length).toBe(1);
+  });
+
+  test("force rescues the un-comparable case — the reason it exists", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    seedWithCli(docker, infraContext(), undefined);   // pre-stamp images
+    seedWithCli(docker, "colima-cb-abc", undefined);
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest", force: true });
+    const r = await svc.ensure("colima-cb-abc");
+    expect(r.kind).toBe("reseeded");
+  });
+
+  test("force cannot invent an image cb-infra doesn't have", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    docker.seedImage("colima-cb-abc", "dridock:latest", V);
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest", force: true });
+    const r = await svc.ensure("colima-cb-abc");
+    expect(r.kind).not.toBe("reseeded");
+    expect(docker.saves).toEqual([]);
+  });
+
+  test("parseForceReseed: accepted spellings, and an unrecognised value is REPORTED not swallowed", () => {
+    for (const on of ["1", "true", "TRUE", "yes", " yes "]) expect(parseForceReseed(on)).toBe(true);
+    for (const off of ["0", "false", "no", undefined, ""]) expect(parseForceReseed(off)).toBe(false);
+    const seen: string[] = [];
+    expect(parseForceReseed("please", (m) => seen.push(m))).toBe(false);
+    expect(seen.length).toBe(1);
+    expect(seen[0]).toContain("not understood");
+    // A recognised value must never produce noise.
+    const quiet: string[] = [];
+    parseForceReseed("1", (m) => quiet.push(m));
+    expect(quiet).toEqual([]);
   });
 });

@@ -90,7 +90,13 @@ the image seeded into each project VM from the shared `cb-infra` profile:
 > wrong trade. The consequence: with `cb-infra` stopped, the drift check does not
 > run, so the launch prints
 > `!  image drift not checked (cb-infra is not running) — using dridock:latest X, which may be behind.`
-> and proceeds. That note is deliberate — an unchecked image must never be
+> and proceeds. A `--claude-version` rebuild is compared the same way: the image
+> carries `org.dridock.claude-version`, so a CLI-only rebuild (harness semver
+> unchanged) still reseeds — before that label existed, comparison was semver-only
+> and a new CLI never reached existing project VMs at all (#78). Where only one
+> side carries the label — cb-infra rebuilt, the project VM still on a pre-stamp
+> copy — the comparison can't be made, so it reports rather than guesses; set
+> `DRIDOCK_FORCE_RESEED=1` to copy across regardless. That note is deliberate — an unchecked image must never be
 > reported as an up-to-date one (#76). To pick up an image built by a newer
 > `make build`, start `cb-infra` and re-run. The **first-time seed** (project VM
 > has no image at all) is different: it *requires* `cb-infra` and fails loudly

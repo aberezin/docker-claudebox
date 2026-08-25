@@ -38,6 +38,7 @@ export class HelpCommand implements Command {
     ctx.stdout.write(`  DRIDOCK_MOUNT_SCRATCH=/path   extra volume mount into the container\n`);
     ctx.stdout.write(`  DRIDOCK_TMPFS_TMP=2g          RAM-back /tmp\n`);
     ctx.stdout.write(`  DRIDOCK_BASH_WRAPPER=/path/wrapper.sh   for the two bash-delegated verbs\n`);
+    ctx.stdout.write(`  DRIDOCK_FORCE_RESEED=1        copy cb-infra's image into this project's VM regardless of drift\n`);
     ctx.stdout.write(`  See docs/environment-variables.md for the full list.\n`);
     return 0;
   }

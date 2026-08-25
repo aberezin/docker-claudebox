@@ -19,7 +19,7 @@ import { guardWorkspace } from "../../services/WorkspaceGuard.ts";
 import { validateProgArgs } from "../../services/ProgArgValidator.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
-import { ImageEnsureService } from "../../services/ImageEnsureService.ts";
+import { ImageEnsureService, parseForceReseed } from "../../services/ImageEnsureService.ts";
 import { ContainerRefresher } from "../../services/ContainerRefresher.ts";
 import { SidecarWriter } from "../../services/SidecarWriter.ts";
 import { AuthSecretsProvisioner } from "../../services/AuthSecretsProvisioner.ts";
@@ -112,6 +112,7 @@ export class StartCommand implements Command {
     const imageEnsure = new ImageEnsureService({
       colima, docker, image: this.imageName,
       warn: (m) => ctx.stderr.write(m),
+      force: parseForceReseed(ctx.env.get("FORCE_RESEED"), (m) => ctx.stderr.write(m)),
     });
     const vmEnsure = new VmEnsureService({
       colima, docker, fs: ctx.fs, env: process.env, home: ctx.home, image: this.imageName,

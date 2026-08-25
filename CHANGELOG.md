@@ -26,6 +26,44 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [4.4.0] — 2026-08-25 _(fork)_
+
+### Added
+- **`./install.sh --claude-version <v>|latest|stable`** (#73) — pin the Claude Code CLI
+  baked into the image. `latest` / `stable` are **resolved to a concrete version number
+  here**, and the number is what gets built. Passing the literal string through would
+  have looked correct (the upstream installer accepts it) but is a silent-staleness
+  trap: Docker busts the CLI layer on a change to the ARG *value*, and `latest` never
+  changes, so the cached layer would be reused indefinitely while the build reported
+  success. Both failure modes — unreachable release endpoint, or a response that isn't
+  a version — exit non-zero rather than falling back to the existing pin.
+- **`DRIDOCK_FORCE_RESEED=1`** (#78) — copy cb-infra's image into the project VM
+  unconditionally, skipping every drift comparison. An unrecognised value is reported
+  on stderr and ignored rather than silently treated as off.
+- **`org.dridock.claude-version` image label** (#78) — the pinned CLI, stamped so drift
+  detection can read it with a cheap `docker image inspect` instead of spawning a
+  throwaway container on every launch. Declared from a single global `ARG` before the
+  first `FROM`, so the stage that *installs* the CLI and the stage that *labels* it
+  cannot drift apart.
+
+### Fixed
+- **A CLI-only rebuild never reached project VMs** (#78) — reseed compared only
+  `org.dridock.version`, so `--claude-version` with no VERSION bump produced an image
+  whose harness semver was unchanged, compared equal, and never propagated. Project VMs
+  kept the old CLI indefinitely — and a stale CLI *silently drops* unknown flags (#17),
+  so nothing downstream would have surfaced it. The CLI label is now compared too, on
+  difference rather than newness, so a deliberate downgrade propagates as well.
+- **"Drift not checked" reported as "up to date"** (#76) — when the comparison could not
+  be made (cb-infra stopped, or holding an `unavailable`/`unstamped` image), the result
+  was `already-current`, which callers read as verified. Now a distinct `unverified`
+  outcome with a note naming the running version and the recovery command. cb-infra is
+  still never booted just to check, and the launch still proceeds.
+- **`checkversion`'s host Claude CLI row was invisible outside a dridock project** (#77)
+  — it was nested in the project block, so it never rendered from the dridock source
+  tree itself, which is exactly where you stand when deciding whether to upgrade the pin.
+- **`checkversion` / `info` now name a stopped VM** (#54) instead of reporting a bare
+  `unavailable`, which read as a missing image rather than a VM that needs starting.
+
 ## [4.3.4] — 2026-08-24 _(fork)_
 
 ### Fixed — a feature could report enabled with its tools missing (#75)

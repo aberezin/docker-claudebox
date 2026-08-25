@@ -1,3 +1,12 @@
+# The pinned Claude Code CLI version. Declared ONCE, before the first FROM, so
+# every stage that needs it inherits the same default via a bare `ARG
+# CLAUDE_VERSION` re-declaration. Do not repeat the literal in a stage: the
+# builder that INSTALLS the CLI and the stage that LABELS it would drift apart,
+# and the label would quietly describe a version that isn't in the image (#78).
+# Override at build time: --build-arg CLAUDE_VERSION=2.1.243
+# (./install.sh --claude-version <v>|latest|stable does this for you.)
+ARG CLAUDE_VERSION=2.1.215
+
 FROM ubuntu:24.04 AS base
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -153,7 +162,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/*
 ENV HOME=/home/claude
 RUN mkdir -p /home/claude
-ARG CLAUDE_VERSION=2.1.215
+ARG CLAUDE_VERSION
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- $CLAUDE_VERSION && \
     ~/.local/bin/claude install --yes 2>/dev/null || true
 # /claude is the OUTSIDE-the-mount seed the entrypoint copies from at runtime (see the
@@ -260,6 +269,13 @@ COPY --from=claude-cli /claude/ /claude/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION
+# The pinned CLI, stamped so reseed drift-detection can compare it with a cheap
+# `docker image inspect` instead of spawning a throwaway container on every
+# launch. Without this, a CLI-only rebuild (same DRIDOCK_VERSION) compared equal
+# and never propagated to project VMs (#78). Declared bare to inherit the global
+# ARG above. Last in the stage, so changing it rebuilds only this metadata layer.
+ARG CLAUDE_VERSION
+LABEL org.dridock.claude-version=$CLAUDE_VERSION
 ENTRYPOINT ["/home/claude/entrypoint.sh"]
 
 # ── full ───────────────────────────────────────────────────────────────────────
@@ -403,4 +419,11 @@ COPY --from=claude-cli /claude/ /claude/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
 LABEL org.dridock.version=$DRIDOCK_VERSION
+# The pinned CLI, stamped so reseed drift-detection can compare it with a cheap
+# `docker image inspect` instead of spawning a throwaway container on every
+# launch. Without this, a CLI-only rebuild (same DRIDOCK_VERSION) compared equal
+# and never propagated to project VMs (#78). Declared bare to inherit the global
+# ARG above. Last in the stage, so changing it rebuilds only this metadata layer.
+ARG CLAUDE_VERSION
+LABEL org.dridock.claude-version=$CLAUDE_VERSION
 ENTRYPOINT ["/home/claude/entrypoint.sh"]
