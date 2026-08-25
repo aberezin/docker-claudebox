@@ -94,6 +94,7 @@ describe("CommandRegistry — dispatch table", () => {
     let receivedArgs: readonly string[] = [];
     registry.register({
       verb: "start",
+      usage: "stub usage",
       run: async (args) => { receivedArgs = args; return 0; },
     });
     const ctx = makeCtx();
@@ -105,8 +106,8 @@ describe("CommandRegistry — dispatch table", () => {
   test("--help at top level → routes to help command when registered", async () => {
     const registry = new CommandRegistry();
     let helpCalled = false;
-    registry.register({ verb: "start", run: async () => 0 });
-    registry.register({ verb: "help", run: async () => { helpCalled = true; return 0; } });
+    registry.register({ verb: "start", usage: "stub usage", run: async () => 0 });
+    registry.register({ verb: "help", usage: "stub usage", run: async () => { helpCalled = true; return 0; } });
     const ctx = makeCtx();
     const rc = await registry.dispatch(["--help"], ctx);
     expect(rc).toBe(0);
@@ -123,8 +124,8 @@ describe("CommandRegistry — dispatch table", () => {
     const registry = new CommandRegistry();
     let versionCalled = false;
     let startCalled = false;
-    registry.register({ verb: "start", run: async () => { startCalled = true; return 0; } });
-    registry.register({ verb: "version", run: async () => { versionCalled = true; return 0; } });
+    registry.register({ verb: "start", usage: "stub usage", run: async () => { startCalled = true; return 0; } });
+    registry.register({ verb: "version", usage: "stub usage", run: async () => { versionCalled = true; return 0; } });
     const ctx = makeCtx();
     const rc = await registry.dispatch(["-v"], ctx);
     expect(rc).toBe(0);
@@ -136,8 +137,8 @@ describe("CommandRegistry — dispatch table", () => {
     const registry = new CommandRegistry();
     let versionCalled = false;
     let startCalled = false;
-    registry.register({ verb: "start", run: async () => { startCalled = true; return 0; } });
-    registry.register({ verb: "version", run: async () => { versionCalled = true; return 0; } });
+    registry.register({ verb: "start", usage: "stub usage", run: async () => { startCalled = true; return 0; } });
+    registry.register({ verb: "version", usage: "stub usage", run: async () => { versionCalled = true; return 0; } });
     const ctx = makeCtx();
     const rc = await registry.dispatch(["--version"], ctx);
     expect(rc).toBe(0);
@@ -154,7 +155,7 @@ describe("CommandRegistry — dispatch table", () => {
     // in the same situation.
     const registry = new CommandRegistry();
     let receivedArgs: readonly string[] = [];
-    registry.register({ verb: "start", run: async (args) => { receivedArgs = args; return 0; } });
+    registry.register({ verb: "start", usage: "stub usage", run: async (args) => { receivedArgs = args; return 0; } });
     const ctx = makeCtx();
     const rc = await registry.dispatch(["-v"], ctx);
     expect(rc).toBe(0);

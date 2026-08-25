@@ -27,6 +27,9 @@ export interface HarnessDeps {
 
 export class HarnessCommand implements Command {
   readonly verb = "harness" as const;
+  readonly usage = `dridock harness <verb>
+
+Harness-dev mode commands for working on dridock itself.`;
 
   constructor(private readonly depsOverride?: Partial<HarnessDeps>) {}
 

@@ -48,6 +48,7 @@ import { RealGitToplevel } from "../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../services/ProjectRoot.ts";
 import { autoMigrateIfNeeded } from "../services/AutoMigrate.ts";
 import type { Context, TextWriter } from "./Context.ts";
+import { buildRegistry } from "./buildRegistry.ts";
 
 /** Adapts Node-compat `process.stdout` / `process.stderr` to the narrow
  *  TextWriter interface. Uses the Node-compat streams (not `Bun.stdout`
@@ -60,47 +61,6 @@ class ProcessStreamWriter implements TextWriter {
   write(chunk: string): void { this.stream.write(chunk); }
 }
 
-function buildRegistry(): CommandRegistry {
-  const registry = new CommandRegistry();
-  registry.register(new VersionCommand());
-  registry.register(new ConsultCommand());
-  registry.register(new FeaturesCommand("features"));
-  registry.register(new FeaturesCommand("profiles"));
-  registry.register(new CheckversionCommand());
-  registry.register(new InfoCommand("info"));
-  registry.register(new InfoCommand("status"));   // `status` is an alias of `info`
-  registry.register(new MigrateCommand());
-  registry.register(new DownCommand());
-  registry.register(new DestroyCommand());
-  registry.register(new StopCommand());
-  registry.register(new StartCommand());
-  registry.register(new VmCommand());
-  registry.register(new IpCommand());
-  registry.register(new NetCommand());
-  registry.register(new DfCommand());
-  registry.register(new CompletionCommand());
-  registry.register(new FrameworkBugsCommand());
-  registry.register(new ReportBugCommand());
-  registry.register(new ClearSessionCommand());
-  registry.register(new SetupTokenCommand());
-  registry.register(new DoctorCommand());
-  registry.register(new AuthCommand());
-  registry.register(new McpCommand());
-  registry.register(new HarnessCommand());
-  registry.register(new BootstrapCommand());
-  // Native TS implementations (2026-07-24) of the last three verbs that
-  // used to be BashDelegates through 3.4.0. Python daemons underneath
-  // (browser-bridge's forward.py + host-agent.py) are unchanged; only
-  // the bash *orchestration* around them ported. wrapper.sh retirement
-  // is now unblocked on the bash-side (bash still ships these until
-  // the deletion cycle).
-  registry.register(new BrowserBridgeCommand());
-  registry.register(new HostAgentCommand());
-  registry.register(new ClaudeDirCommand());
-  registry.register(new TeamCommand());
-  registry.register(new HelpCommand());
-  return registry;
-}
 
 function resolveBinName(argv0: string): string {
   // Basename of the invoked binary — same as bash's $CB_SELF (added 3.2.3).

@@ -53,6 +53,13 @@ import { loadRoster, soleAgentByEnvironment } from "../../services/AgentRoster.t
  */
 export class StartCommand implements Command {
   readonly verb = "start" as const;
+  readonly usage = `dridock start [claude args…]
+
+Launch claudebot for this project — ensures the VM, seeds/reseeds the image,
+then runs claude. Unrecognised args are forwarded to claude; in programmatic
+mode (-p) they are validated against an allowlist first.
+
+  -p / --print   programmatic (non-interactive) mode`;
 
   constructor(
     private readonly imageName = "dridock:latest",

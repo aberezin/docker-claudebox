@@ -10,6 +10,9 @@ import { allVerbNames } from "../../domain/Verbs.ts";
  */
 export class CompletionCommand implements Command {
   readonly verb = "completion" as const;
+  readonly usage = `dridock completion [bash|zsh]
+
+Emit a shell completion script. Add it to your shell rc to enable tab-completion.`;
 
   async run(args: readonly string[], ctx: Context): Promise<number> {
     const shell = args[0];

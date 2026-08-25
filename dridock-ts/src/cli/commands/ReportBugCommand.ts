@@ -23,6 +23,9 @@ import { RealGitToplevel } from "../../infra/GitToplevel.ts";
  */
 export class ReportBugCommand implements Command {
   readonly verb = "report-bug" as const;
+  readonly usage = `dridock report-bug "<description>"
+
+File a framework bug report against the harness from inside a project.`;
 
   constructor(
     private readonly clockOverride?: Clock,

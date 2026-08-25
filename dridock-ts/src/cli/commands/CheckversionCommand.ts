@@ -24,6 +24,13 @@ import { Version } from "../../domain/Version.ts";
  */
 export class CheckversionCommand implements Command {
   readonly verb = "checkversion" as const;
+  readonly usage = `dridock checkversion [--all|-a] [--binary|-b]
+
+Compare the host wrapper's semver against the claudebot image stamp and warn on
+drift, and report the host vs in-image Claude CLI versions.
+
+  --all      every project VM, not just this one
+  --binary   also check the installed binary itself`;
 
   constructor(
     private readonly imageName = "dridock:latest",

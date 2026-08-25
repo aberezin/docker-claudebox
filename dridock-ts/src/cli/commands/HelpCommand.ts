@@ -9,6 +9,9 @@ import { DRIDOCK_TS_VERSION } from "../../domain/dridockVersion.ts";
  */
 export class HelpCommand implements Command {
   readonly verb = "help" as const;
+  readonly usage = `dridock help
+
+List every verb with a one-line synopsis. \`dridock <verb> --help\` for one verb.`;
 
   async run(_args: readonly string[], ctx: Context): Promise<number> {
     const bin = ctx.binName;

@@ -24,6 +24,10 @@ import { DRIDOCK_TS_VERSION } from "../../domain/dridockVersion.ts";
  */
 export class InfoCommand implements Command {
   readonly verb: "info" | "status";
+  readonly usage = `dridock info
+
+Project identity, VM status, image versions, and container state. \`status\` is
+the alias.`;
 
   constructor(
     verb: "info" | "status" = "info",

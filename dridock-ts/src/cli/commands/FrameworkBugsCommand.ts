@@ -11,6 +11,9 @@ import { stateHome } from "../../domain/paths.ts";
  */
 export class FrameworkBugsCommand implements Command {
   readonly verb = "framework-bugs" as const;
+  readonly usage = `dridock framework-bugs [list|show|resolve] [id]
+
+Harness-dev mode: cross-project framework bug reports.`;
 
   async run(args: readonly string[], ctx: Context): Promise<number> {
     const sub = args[0] ?? "list";

@@ -31,6 +31,11 @@ import { BootstrapService } from "../../services/BootstrapService.ts";
  */
 export class BootstrapCommand implements Command {
   readonly verb = "bootstrap" as const;
+  readonly usage = `dridock bootstrap ["<intent>"] [--gh-token] [--secrets-file F]
+
+Scaffold a new dridock project here: .dridock/config.yml, a project id, and a
+per-project Colima VM. Secrets enter only via file (--secrets-file) or the
+host's own gh auth token (--gh-token) — never as a flag value.`;
 
   constructor(
     private readonly hostOverride?: HostCommandRunner,

@@ -14,6 +14,9 @@ import { HostAgentService } from "../../services/HostAgentService.ts";
  */
 export class HostAgentCommand implements Command {
   readonly verb = "host-agent" as const;
+  readonly usage = `dridock host-agent [status|stop]
+
+Host-side agent process for this project.`;
 
   constructor(private readonly deps: Partial<HostAgentCommandDeps> = {}) {}
 

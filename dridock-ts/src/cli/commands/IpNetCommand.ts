@@ -15,6 +15,9 @@ import { ProjectConfig, parseNestedYaml, stripFeaturesBlock } from "../../servic
  */
 export class IpCommand implements Command {
   readonly verb = "ip" as const;
+  readonly usage = `dridock ip
+
+This project VM's reachable address, for talking to it from the Mac.`;
 
   constructor(
     private readonly colimaOverride?: Colima,
@@ -49,6 +52,9 @@ export class IpCommand implements Command {
  */
 export class NetCommand implements Command {
   readonly verb = "net" as const;
+  readonly usage = `dridock net
+
+Networking details for this project VM.`;
 
   constructor(
     private readonly colimaOverride?: Colima,

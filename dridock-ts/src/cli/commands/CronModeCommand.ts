@@ -35,6 +35,10 @@ import { scanOrphans, formatLaunchWarning } from "../../services/OrphanSessionSc
  */
 export class CronModeCommand implements Command {
   readonly verb = "start" as const; // intercepted BEFORE verb dispatch — verb field is nominal.
+  readonly usage = `dridock start (cron mode)
+
+Long-running cron daemon container for this project, driven by cron.yml.
+Intercepted before verb dispatch, so this text is reached via the cron path.`;
 
   constructor(
     private readonly imageName = "dridock:latest",

@@ -19,6 +19,9 @@ import { MachineConfig } from "../../services/MachineConfig.ts";
  */
 export class ClaudeDirCommand implements Command {
   readonly verb = "claude-dir" as const;
+  readonly usage = `dridock claude-dir
+
+Print the host path of this project's ~/.claude state dir.`;
 
   constructor(private readonly gitOverride?: GitToplevel) {}
 

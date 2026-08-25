@@ -34,6 +34,10 @@ import { RealGitToplevel } from "../../infra/GitToplevel.ts";
  */
 export class DestroyCommand implements Command {
   readonly verb = "destroy" as const;
+  readonly usage = `dridock destroy [--yes]
+
+Destroy this project's container AND its Colima VM. Irreversible — the VM's
+image store and any non-mounted state go with it.`;
 
   constructor(
     private readonly colimaOverride?: Colima,

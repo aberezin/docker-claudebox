@@ -17,6 +17,9 @@ import { RealGitToplevel } from "../../infra/GitToplevel.ts";
  */
 export class DownCommand implements Command {
   readonly verb = "down" as const;
+  readonly usage = `dridock down
+
+Stop this project's container, leaving the VM running.`;
 
   constructor(
     private readonly colimaOverride?: Colima,

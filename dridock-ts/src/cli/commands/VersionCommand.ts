@@ -13,6 +13,9 @@ import { DRIDOCK_TS_VERSION } from "../../domain/dridockVersion.ts";
  */
 export class VersionCommand implements Command {
   readonly verb = "version" as const;
+  readonly usage = `dridock version
+
+Print the installed host binary's version. Works outside a project (#57).`;
 
   async run(_args: string[], ctx: Context): Promise<number> {
     ctx.stdout.write(`dridock ${DRIDOCK_TS_VERSION}\n`);

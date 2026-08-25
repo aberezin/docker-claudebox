@@ -43,6 +43,17 @@ import { xdgRoot } from "../../domain/paths.ts";
  */
 export class TeamCommand implements Command {
   readonly verb = "team" as const;
+  readonly usage = `dridock team <subverb> [args…]
+
+Agent-team message bus over GitHub issue comments.
+
+  whoami    print this agent's resolved name
+  roster    show the configured agent roster
+  post      post a message to the bus
+  watch     run the inbox fetcher in the foreground
+  fetcher   manage the detached fetcher (status|stop)
+
+\`dridock team <subverb> --help\` for one subverb.`;
 
   constructor(
     private readonly deps: Partial<TeamCommandDeps> = {},

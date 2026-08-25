@@ -40,6 +40,7 @@ import { containerName } from "../../services/ContainerName.ts";
  */
 export abstract class ProjectPassthroughCommand implements Command {
   abstract readonly verb: Extract<Verb, "mcp" | "auth">;
+  abstract readonly usage: string;
   protected mode: "interactive" | "attached" = "attached";
 
   constructor(
@@ -161,6 +162,9 @@ export interface ProjectPassthroughDeps {
  *  #39 fix. Mode: attached — mcp add/remove/list work headless. */
 export class McpCommand extends ProjectPassthroughCommand {
   readonly verb = "mcp" as const;
+  readonly usage = `dridock mcp [args…]
+
+Run \`claude mcp\` inside this project's container.`;
 }
 
 /** `dridock auth <sub>` — OAuth-flow credential mutations. Interactive
@@ -168,5 +172,8 @@ export class McpCommand extends ProjectPassthroughCommand {
  *  a TTY to print the URL + block on user action). */
 export class AuthCommand extends ProjectPassthroughCommand {
   readonly verb = "auth" as const;
+  readonly usage = `dridock auth [args…]
+
+Run \`claude auth\` inside this project's container.`;
   protected override mode: "interactive" | "attached" = "interactive";
 }

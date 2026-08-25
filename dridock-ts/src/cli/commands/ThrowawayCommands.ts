@@ -20,6 +20,7 @@ import { RealDocker, infraContext } from "../../infra/Docker.ts";
  */
 abstract class ClaudePassthroughCommand implements Command {
   abstract readonly verb: "setup-token" | "doctor";
+  abstract readonly usage: string;
   constructor(
     protected readonly dockerOverride?: Docker,
     protected readonly imageName = "dridock:latest",
@@ -38,7 +39,13 @@ abstract class ClaudePassthroughCommand implements Command {
 
 export class SetupTokenCommand extends ClaudePassthroughCommand {
   readonly verb = "setup-token" as const;
+  readonly usage = `dridock setup-token
+
+Mint a Claude Code OAuth token in a throwaway container.`;
 }
 export class DoctorCommand extends ClaudePassthroughCommand {
   readonly verb = "doctor" as const;
+  readonly usage = `dridock doctor
+
+Run \`claude doctor\` in a throwaway container.`;
 }

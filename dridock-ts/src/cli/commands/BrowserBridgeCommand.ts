@@ -16,6 +16,9 @@ import { BrowserBridgeService } from "../../services/BrowserBridgeService.ts";
  */
 export class BrowserBridgeCommand implements Command {
   readonly verb = "browser-bridge" as const;
+  readonly usage = `dridock browser-bridge [status|stop]
+
+Host-side browser bridge the container drives via cb-browser.`;
 
   constructor(
     private readonly deps: Partial<BrowserBridgeCommandDeps> = {},

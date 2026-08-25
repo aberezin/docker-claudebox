@@ -10,6 +10,9 @@ import { VmDiskUsageService } from "../../services/VmDiskUsageService.ts";
  */
 export class DfCommand implements Command {
   readonly verb = "df" as const;
+  readonly usage = `dridock df
+
+Disk usage across the project VMs and the shared cb-infra image store.`;
 
   constructor(private readonly colimaOverride?: Colima) {}
 

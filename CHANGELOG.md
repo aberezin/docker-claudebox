@@ -28,7 +28,21 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`--help` on every verb, enforced at compile time** (#60) — `usage` is now a required
+  field on the `Command` interface, and `CommandRegistry.dispatch` answers `-h`/`--help`
+  before the command's own parser runs. Previously 11 of 27 command files mentioned
+  `--help` at all. Verbs that dispatch on their own first argument declare a `subverbs`
+  table so `<verb> <subverb> --help` and the unknown-subverb error render from one source.
+  A conformance test iterates the real composition root and asserts every verb and subverb
+  answers `--help` with rc 0, non-empty stdout, and **no filesystem writes**. Decision
+  record: [docs/design/cli-help-contract.md](docs/design/cli-help-contract.md).
+
 ### Fixed
+- **`dridock consult post --help` created a consult thread named `--help`** (#60) — the
+  subverb parser took the flag as its argument and performed the operation. `consult show
+  --help` looked up a consult by that id and `consult watch --help` entered its watch loop.
+  Asking for help must never run the command.
 - **The apt mirror rewrite silently did nothing on arm64** (#79) — it matched only
   `archive.ubuntu.com` / `security.ubuntu.com`, but arm64 images source everything from
   `ports.ubuntu.com/ubuntu-ports`, so on Apple Silicon the sed matched nothing on every

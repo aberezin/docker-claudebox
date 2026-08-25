@@ -19,6 +19,16 @@ import { cbH } from "../../domain/units.ts";
  */
 export class VmCommand implements Command {
   readonly verb = "vm" as const;
+  readonly usage = `dridock vm [list|start|stop|delete]
+
+Manage this project's Colima VM.`;
+  readonly subverbs = [
+    { name: "list",   synopsis: "dridock vm list\n\nList this project's VMs. Alias: ls." },
+    { name: "ls",     synopsis: "dridock vm ls\n\nList this project's VMs." },
+    { name: "usage",  synopsis: "dridock vm usage\n\nDisk usage for the project VMs. Alias: df." },
+    { name: "df",     synopsis: "dridock vm df\n\nDisk usage for the project VMs." },
+    { name: "gc",     synopsis: "dridock vm gc\n\nReclaim space from stopped/orphaned VMs." },
+  ] as const;
 
   constructor(private readonly colimaOverride?: Colima) {}
 
@@ -26,7 +36,7 @@ export class VmCommand implements Command {
     const sub = args[0] ?? "ls";
     switch (sub) {
       case "ls": case "list": return await this.ls(ctx);
-      case "usage": case "df": return await this.usage(ctx);
+      case "usage": case "df": return await this.diskUsage(ctx);
       case "gc": return await this.gc(ctx);
       case "-h": case "--help":
         ctx.stdout.write(`usage: ${ctx.binName} vm [ls|usage|gc]\n`);
@@ -67,7 +77,8 @@ export class VmCommand implements Command {
    * Full port would need a `Limactl` adapter. TS delegates to a small
    * VmDiskUsageService (below).
    */
-  private async usage(ctx: Context): Promise<number> {
+  /** Renamed from `usage` in #60: the Command interface now owns that name. */
+  private async diskUsage(ctx: Context): Promise<number> {
     const { VmDiskUsageService } = await import("../../services/VmDiskUsageService.ts");
     const colima = this.colimaOverride ?? new RealColima();
     const svc = new VmDiskUsageService(colima);

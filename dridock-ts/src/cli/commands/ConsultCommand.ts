@@ -21,6 +21,18 @@ import { RealClock } from "../../infra/Clock.ts";
  */
 export class ConsultCommand implements Command {
   readonly verb = "consult" as const;
+  readonly usage = `dridock consult <subverb> [args]
+
+Cross-project consult queue. Run \`dridock consult <subverb> --help\` for one.`;
+  readonly subverbs = [
+    { name: "list",    synopsis: "dridock consult list\n\nList consult threads." },
+    { name: "show",    synopsis: "dridock consult show <id>\n\nPrint one consult thread." },
+    { name: "approve", synopsis: "dridock consult approve <id>\n\nApprove the current framework draft." },
+    { name: "revise",  synopsis: "dridock consult revise <id> \"<note>\"\n\nSend the draft back for revision." },
+    { name: "reject",  synopsis: "dridock consult reject <id>\n\nReject the consult." },
+    { name: "post",    synopsis: "dridock consult post <id> \"<text>\"\n\nPost a framework turn to a thread." },
+    { name: "watch",   synopsis: "dridock consult watch [--interval N]\n\nWatch for consults needing a framework draft." },
+  ] as const;
 
   constructor(
     private readonly clockOverride?: Clock,

@@ -18,6 +18,9 @@ import { RealGitToplevel } from "../../infra/GitToplevel.ts";
  */
 export class StopCommand implements Command {
   readonly verb = "stop" as const;
+  readonly usage = `dridock stop
+
+Stop this project's container.`;
 
   constructor(
     private readonly colimaOverride?: Colima,

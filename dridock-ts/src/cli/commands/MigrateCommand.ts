@@ -33,6 +33,9 @@ import { RealClock } from "../../infra/Clock.ts";
  */
 export class MigrateCommand implements Command {
   readonly verb = "migrate" as const;
+  readonly usage = `dridock migrate [--all]
+
+Migrate a legacy .claudebox/ workspace to .dridock/. --all does every project.`;
 
   constructor(
     private readonly gitOverride?: GitToplevel,

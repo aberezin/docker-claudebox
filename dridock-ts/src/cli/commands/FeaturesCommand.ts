@@ -21,6 +21,9 @@ const FEATURE_NAME_REGEX = /^[A-Za-z0-9_-]+$/;
 
 export class FeaturesCommand implements Command {
   readonly verb: "features" | "profiles";
+  readonly usage = `dridock features [on|off|list] [name]
+
+Toggle optional feature payloads for this project. \`profiles\` is the legacy alias.`;
 
   constructor(
     verb: "features" | "profiles" = "features",

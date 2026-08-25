@@ -8,6 +8,9 @@ import type { Context } from "../Context.ts";
  */
 export class ClearSessionCommand implements Command {
   readonly verb = "clear-session" as const;
+  readonly usage = `dridock clear-session
+
+Drop this project's saved Claude session so the next start begins fresh.`;
 
   async run(_args: readonly string[], ctx: Context): Promise<number> {
     // Bash uses CLAUDE_DIR/projects/<project-slug> where project-slug is

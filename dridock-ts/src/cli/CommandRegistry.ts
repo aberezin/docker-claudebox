@@ -16,6 +16,11 @@ export class CommandRegistry {
   /** Register a command. Throws if the verb is already taken (bug — two
    *  commands claiming the same verb is a wiring mistake, not a
    *  runtime-recoverable situation). */
+  /** Every registered command, for the #60 help-conformance test. */
+  all(): ReadonlyArray<Command> {
+    return [...this.commands.values()];
+  }
+
   register(cmd: Command): void {
     if (this.commands.has(cmd.verb)) {
       throw new Error(`CommandRegistry: verb '${cmd.verb}' is already registered`);
@@ -101,7 +106,34 @@ export class CommandRegistry {
       throw new Error(`CommandRegistry: verb '${verb}' known but no command registered (composition-root bug — check main.ts buildRegistry)`);
     }
 
-    return await cmd.run(argv.slice(1), ctx);
+    const rest = argv.slice(1);
+
+    // ── central --help (#60) ────────────────────────────────────────
+    // Handled HERE, before the command's own parser runs, so help works
+    // uniformly for all 31 registrations instead of the 11 that had
+    // hand-rolled it. A framework would have given us this for free;
+    // this is the one line of it we actually needed.
+    //
+    // FIRST POSITION ONLY, deliberately. `start` forwards its args to
+    // claude, so intercepting a `--help` anywhere in the slice would
+    // swallow one meant for the inner process. As the first arg it is
+    // unambiguously addressed to dridock.
+    if (rest[0] === "--help" || rest[0] === "-h") {
+      ctx.stdout.write(cmd.usage.endsWith("\n") ? cmd.usage : cmd.usage + "\n");
+      return 0;
+    }
+
+    // `<verb> <subverb> --help` — same source of truth as the verb's own
+    // subverb table, so the two can't drift.
+    if ((rest[1] === "--help" || rest[1] === "-h") && cmd.subverbs !== undefined) {
+      const sub = cmd.subverbs.find((s) => s.name === rest[0]);
+      if (sub !== undefined) {
+        ctx.stdout.write(`${sub.synopsis.replace(/\n$/, "")}\n`);
+        return 0;
+      }
+    }
+
+    return await cmd.run(rest, ctx);
   }
 
   private writeBanner(ctx: Context): void {
