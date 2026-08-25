@@ -74,13 +74,24 @@ describe("CheckversionCommand — happy paths", () => {
     expect(stdout.text()).toContain("claude CLI (in image): unavailable");
   });
 
-  test("claude CLI row NOT printed when there's no dridock project (bash-parity: gated by cid)", async () => {
+  test("no dridock project: IN-IMAGE claude CLI row gated by cid (bash-parity), HOST row still shown (#77)", async () => {
     const fs = new InMemoryFileSystem();
     const docker = new InMemoryDocker();
     docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
     const { ctx, stdout } = makeCtx(fs);
-    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
-    expect(stdout.text()).not.toContain("claude CLI");
+    await new CheckversionCommand(
+      "dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+      // Stubbed: without this the default probe shells out to the REAL host
+      // `claude`, making the assertion depend on the developer's machine.
+      async () => "2.1.243",
+    ).run([], ctx);
+    // The in-image version needs a project to read it from — bash gated this
+    // on cid and so do we.
+    expect(stdout.text()).not.toContain("claude CLI (in image)");
+    // The host's CLI is a property of the host, not of any project, so it is
+    // NOT gated. This is the row #77 was about: nesting it in the project
+    // block made it invisible from the dridock source tree itself.
+    expect(stdout.text()).toContain("claude CLI (host):     2.1.243");
   });
 
   test("reseed-needed: cb-infra current, project VM behind", async () => {

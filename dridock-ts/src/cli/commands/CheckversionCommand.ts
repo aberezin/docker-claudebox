@@ -187,6 +187,15 @@ export class CheckversionCommand implements Command {
   private renderHeader(e: CheckVersionInputs, ctx: Context, hostCli?: string): void {
     ctx.stdout.write(`dridock versions:\n`);
     ctx.stdout.write(`  wrapper (host):        ${e.wrapperVersion}\n`);
+    // Host-level, so it belongs OUTSIDE the projectId block — it was nested
+    // inside it and therefore invisible from any non-dridock directory,
+    // including this repo itself, which is where you actually stand when
+    // deciding whether to run `./install.sh --claude-version latest` (#77).
+    // The image-vs-host COMPARISON stays in the project block: it needs the
+    // in-image version, which requires a project.
+    if (hostCli !== undefined) {
+      ctx.stdout.write(`  claude CLI (host):     ${hostCli}\n`);
+    }
     ctx.stdout.write(`  image (cb-infra):      ${e.infraImageVersion}\n`);
     if (e.projectId !== undefined) {
       ctx.stdout.write(`  image (this project):  ${e.projectImageVersion ?? "?"}   (VM ${projectProfile(e.projectId)})\n`);
@@ -206,7 +215,6 @@ export class CheckversionCommand implements Command {
       // `dridock start --remote-control` appeared to work while Remote Control
       // was never activated.
       if (hostCli !== undefined) {
-        ctx.stdout.write(`  claude CLI (host):     ${hostCli}\n`);
         const img = e.claudeCliVersion;
         if (img !== undefined && img !== "unavailable" && img !== "unstamped" && img !== hostCli) {
           ctx.stdout.write(`\n⚠️  the image's claude CLI (${img}) differs from the host's (${hostCli}).\n`);
