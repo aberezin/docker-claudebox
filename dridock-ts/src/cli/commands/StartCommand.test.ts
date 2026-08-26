@@ -334,27 +334,17 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
 
   test("DRIDOCK_ENV_FOO=bar → -e FOO=bar + entry in -env sidecar", async () => {
     const { fs, runtime, cmd } = seedProjectVmRunning();
-    process.env["DRIDOCK_ENV_MY_VAR"] = "hello";
-    try {
-      const { ctx } = makeCtx(fs);
-      await cmd.run([], ctx);
-      expect(runtime.runs[0]!.env).toContainEqual({ key: "MY_VAR", value: "hello" });
-      expect(await fs.readText("/home/alan/.config/dridock/projects/abc/claude/.claude-_p_prog-env")).toBe("MY_VAR=hello\n");
-    } finally {
-      delete process.env["DRIDOCK_ENV_MY_VAR"];
-    }
+    const { ctx } = makeCtx(fs, { env: { DRIDOCK_ENV_MY_VAR: "hello" } });
+    await cmd.run([], ctx);
+    expect(runtime.runs[0]!.env).toContainEqual({ key: "MY_VAR", value: "hello" });
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/claude/.claude-_p_prog-env")).toBe("MY_VAR=hello\n");
   });
 
   test("DRIDOCK_MOUNT_SCRATCH=/opt → -v /opt:/opt added to mounts", async () => {
     const { runtime, cmd, fs } = seedProjectVmRunning();
-    process.env["DRIDOCK_MOUNT_SCRATCH"] = "/opt/scratch";
-    try {
-      const { ctx } = makeCtx(fs);
-      await cmd.run([], ctx);
-      expect(runtime.runs[0]!.mounts).toContainEqual({ host: "/opt/scratch", container: "/opt/scratch" });
-    } finally {
-      delete process.env["DRIDOCK_MOUNT_SCRATCH"];
-    }
+    const { ctx } = makeCtx(fs, { env: { DRIDOCK_MOUNT_SCRATCH: "/opt/scratch" } });
+    await cmd.run([], ctx);
+    expect(runtime.runs[0]!.mounts).toContainEqual({ host: "/opt/scratch", container: "/opt/scratch" });
   });
 
   test("DRIDOCK_GIT_NAME/EMAIL sourced from HostGit config", async () => {
@@ -374,26 +364,16 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
 
   test("DRIDOCK_TMPFS_TMP=2g → --tmpfs /tmp:size=2g,exec,mode=1777", async () => {
     const { runtime, cmd, fs } = seedProjectVmRunning();
-    process.env["DRIDOCK_TMPFS_TMP"] = "2g";
-    try {
-      const { ctx } = makeCtx(fs);
-      await cmd.run([], ctx);
-      expect(runtime.runs[0]!.tmpfs).toContain("/tmp:size=2g,exec,mode=1777");
-    } finally {
-      delete process.env["DRIDOCK_TMPFS_TMP"];
-    }
+    const { ctx } = makeCtx(fs, { env: { DRIDOCK_TMPFS_TMP: "2g" } });
+    await cmd.run([], ctx);
+    expect(runtime.runs[0]!.tmpfs).toContain("/tmp:size=2g,exec,mode=1777");
   });
 
   test("DRIDOCK_TMPFS_TMP=1 → shorthand expands to 2g", async () => {
     const { runtime, cmd, fs } = seedProjectVmRunning();
-    process.env["DRIDOCK_TMPFS_TMP"] = "1";
-    try {
-      const { ctx } = makeCtx(fs);
-      await cmd.run([], ctx);
-      expect(runtime.runs[0]!.tmpfs).toContain("/tmp:size=2g,exec,mode=1777");
-    } finally {
-      delete process.env["DRIDOCK_TMPFS_TMP"];
-    }
+    const { ctx } = makeCtx(fs, { env: { DRIDOCK_TMPFS_TMP: "1" } });
+    await cmd.run([], ctx);
+    expect(runtime.runs[0]!.tmpfs).toContain("/tmp:size=2g,exec,mode=1777");
   });
 
   test("features list from config.yml → written to .features sidecar", async () => {

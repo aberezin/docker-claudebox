@@ -106,7 +106,7 @@ Agent-team message bus over GitHub issue comments.
     if (sub === "roster") return this.runRoster(roster, ctx);
 
     // `whoami` and `post` both need selfName resolution.
-    const resolved = resolveSelfName(process.env, roster);
+    const resolved = resolveSelfName(ctx.env.raw(), roster);
     if ("kind" in resolved) {
       for (const line of formatResolveError(resolved, rosterPath)) ctx.stderr.write(line);
       return 1;
@@ -512,7 +512,7 @@ Agent-team message bus over GitHub issue comments.
             repo,
           }));
         } catch { /* best-effort */ }
-        if (process.env["DEBUG"] === "true") {
+        if (ctx.env.raw()["DEBUG"] === "true") {
           ctx.stderr.write(`  tick: ${summary.kind}, seen=${summary.seen}, surfaced=${summary.surfaced}, ${summary.elapsedMs}ms\n`);
         }
       },
@@ -680,7 +680,7 @@ Agent-team message bus over GitHub issue comments.
     }
     // Env var overrides — DRIDOCK_WATCH_POLL_INTERVAL_MS is the flag that
     // matches the rest of the DRIDOCK_* env convention.
-    const envInterval = process.env["DRIDOCK_WATCH_POLL_INTERVAL_MS"];
+    const envInterval = ctx.env.raw()["DRIDOCK_WATCH_POLL_INTERVAL_MS"];
     if (envInterval !== undefined && envInterval !== "") {
       const n = Number(envInterval);
       if (Number.isFinite(n) && n >= 1000) opts.intervalMs = n;

@@ -35,7 +35,7 @@ export class VmDiskUsageService {
     const limactl = this.deps.limactl ?? new RealLimactl();
     const disk = this.deps.diskProbe ?? new RealDiskProbe();
     const home = ctx.home;
-    const env = this.deps.env ?? process.env;
+    const env = this.deps.env ?? ctx.env.raw();
     const limaHome = await resolveLimaHome(fs, env, home);
     if (limaHome === undefined) {
       // Fallback: no LIMA_HOME + no limactl. Print colima's inventory

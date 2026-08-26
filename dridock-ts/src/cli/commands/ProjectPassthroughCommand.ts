@@ -68,7 +68,7 @@ export abstract class ProjectPassthroughCommand implements Command {
       force: parseForceReseed(ctx.env.get("FORCE_RESEED"), (m) => ctx.stderr.write(m)),
     });
     const vmEnsure = new VmEnsureService({
-      colima, docker, fs: ctx.fs, env: process.env, home: ctx.home, image: this.imageName,
+      colima, docker, fs: ctx.fs, env: ctx.env.raw(), home: ctx.home, image: this.imageName,
       ensureImage: imageEnsure.asCallback(),
     });
     const vmOutcome = await vmEnsure.ensure(project.root, id);
@@ -94,6 +94,10 @@ export abstract class ProjectPassthroughCommand implements Command {
     const ctxDocker = projectContext(id);
     void projectProfile;
 
+    // Read once and bind: two separate index expressions can't share a
+    // narrowing, and reading the same var twice invites them drifting.
+    const apiKey = ctx.env.raw()["ANTHROPIC_API_KEY"];
+    const oauthToken = ctx.env.raw()["CLAUDE_CODE_OAUTH_TOKEN"];
     const runArgs: RunArgs = {
       context: ctxDocker,
       containerName: cname,
@@ -116,7 +120,7 @@ export abstract class ProjectPassthroughCommand implements Command {
       mounts: [
         // SSH — needed if `claude mcp` ever gits (some MCP add commands
         // clone; matches bash's DOCKER_ARGS.).
-        { host: process.env["DRIDOCK_SSH_DIR"] ?? process.env["CLAUDEBOX_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
+        { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? ctx.env.raw()["CLAUDEBOX_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
         // THE fix: mount the per-project data dir at /home/claude/.claude
         // so `claude` (running with HOME=/home/claude → below) reads +
         // WRITES its config INSIDE the mount → persists on the Mac.
@@ -141,8 +145,8 @@ export abstract class ProjectPassthroughCommand implements Command {
         // doesn't since it FETCHES a token). But it's harmless when
         // unused, and required if a `claude auth status` or `mcp` cmd
         // ever needs an API call. Empty when unset — no stray leak.
-        ...(process.env["ANTHROPIC_API_KEY"] !== undefined ? [{ key: "ANTHROPIC_API_KEY", value: process.env["ANTHROPIC_API_KEY"] }] : []),
-        ...(process.env["CLAUDE_CODE_OAUTH_TOKEN"] !== undefined ? [{ key: "CLAUDE_CODE_OAUTH_TOKEN", value: process.env["CLAUDE_CODE_OAUTH_TOKEN"] }] : []),
+        ...(apiKey !== undefined ? [{ key: "ANTHROPIC_API_KEY", value: apiKey }] : []),
+        ...(oauthToken !== undefined ? [{ key: "CLAUDE_CODE_OAUTH_TOKEN", value: oauthToken }] : []),
       ],
       cmd: [this.verb, ...args],
       publishPorts: [],

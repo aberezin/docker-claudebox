@@ -10,12 +10,25 @@ import type { Context } from "../Context.ts";
 import { EnvResolver } from "../../domain/EnvResolver.ts";
 import { infraContext, projectContext } from "../../infra/Docker.ts";
 
+/**
+ * #52 — env for these tests lives HERE, not in process.env.
+ *
+ * The commands now read `ctx.env`, so seeding the real process env no longer
+ * reaches them. Pointing makeCtx at `process.env` would have fixed the
+ * failures in one line and reintroduced exactly the leak #51 removed: a var
+ * set in the developer's shell silently changing test outcomes. Instead
+ * `setEnv` writes into this record and the Context is built from it — the
+ * 83 existing `setEnv(...)` call sites keep working verbatim, and the suite
+ * stops depending on ambient environment entirely.
+ */
+const testEnv: Record<string, string | undefined> = {};
+
 function makeCtx(fs: InMemoryFileSystem, cwd = "/p"): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
   const stdout = new StringWriter();
   const stderr = new StringWriter();
   return {
     stdout, stderr,
-    ctx: { fs, env: new EnvResolver({}), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
+    ctx: { fs, env: new EnvResolver(testEnv), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
   };
 }
 
@@ -52,17 +65,11 @@ const ENV_KEYS = [
 ] as const;
 const savedEnv: Record<string, string | undefined> = {};
 afterEach(() => {
-  for (const k of ENV_KEYS) {
-    if (!(k in savedEnv)) continue;
-    if (savedEnv[k] === undefined) delete process.env[k];
-    else process.env[k] = savedEnv[k];
-    delete savedEnv[k];
-  }
+  for (const k of ENV_KEYS) delete testEnv[k];
 });
 function setEnv(k: (typeof ENV_KEYS)[number], v: string | undefined): void {
-  if (!(k in savedEnv)) savedEnv[k] = process.env[k];
-  if (v === undefined) delete process.env[k];
-  else process.env[k] = v;
+  if (v === undefined) delete testEnv[k];
+  else testEnv[k] = v;
 }
 
 describe("cronModeRequested — env-var gate", () => {

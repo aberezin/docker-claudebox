@@ -11,12 +11,25 @@ import { EnvResolver } from "../../domain/EnvResolver.ts";
 import { infraContext } from "../../infra/Docker.ts";
 import { buildRunArgv } from "../../infra/ContainerRuntime.ts";
 
+/**
+ * #52 — env for these tests lives HERE, not in process.env.
+ *
+ * The commands now read `ctx.env`, so seeding the real process env no longer
+ * reaches them. Pointing makeCtx at `process.env` would have fixed the
+ * failures in one line and reintroduced exactly the leak #51 removed: a var
+ * set in the developer's shell silently changing test outcomes. Instead
+ * `setEnv` writes into this record and the Context is built from it — the
+ * 83 existing `setEnv(...)` call sites keep working verbatim, and the suite
+ * stops depending on ambient environment entirely.
+ */
+const testEnv: Record<string, string | undefined> = {};
+
 function makeCtx(fs: InMemoryFileSystem, cwd = "/p"): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
   const stdout = new StringWriter();
   const stderr = new StringWriter();
   return {
     stdout, stderr,
-    ctx: { fs, env: new EnvResolver({}), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
+    ctx: { fs, env: new EnvResolver(testEnv), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
   };
 }
 
@@ -210,22 +223,22 @@ describe("ProjectPassthroughCommand — #39 fix: correct project scope + HOME + 
     const { fs, colima, docker, runtime } = seedReadyProject();
     const cmd = new McpCommand("dridock:latest", { colima, docker, runtime, git: new StubGitToplevel("/p") });
     const { ctx } = makeCtx(fs);
-    const orig = process.env["ANTHROPIC_API_KEY"];
-    delete process.env["ANTHROPIC_API_KEY"];
+    const orig = testEnv["ANTHROPIC_API_KEY"];
+    delete testEnv["ANTHROPIC_API_KEY"];
     try {
       await cmd.run(["list"], ctx);
       expect(runtime.runs[0]!.env.find((e) => e.key === "ANTHROPIC_API_KEY")).toBeUndefined();
     } finally {
-      if (orig !== undefined) process.env["ANTHROPIC_API_KEY"] = orig;
+      if (orig !== undefined) testEnv["ANTHROPIC_API_KEY"] = orig;
     }
     // Now with it set
-    process.env["ANTHROPIC_API_KEY"] = "sk-ant-abc";
+    testEnv["ANTHROPIC_API_KEY"] = "sk-ant-abc";
     try {
       runtime.runs.length = 0;
       await cmd.run(["list"], ctx);
       expect(runtime.runs[0]!.env).toContainEqual({ key: "ANTHROPIC_API_KEY", value: "sk-ant-abc" });
     } finally {
-      if (orig === undefined) delete process.env["ANTHROPIC_API_KEY"];
+      if (orig === undefined) delete testEnv["ANTHROPIC_API_KEY"];
       else process.env["ANTHROPIC_API_KEY"] = orig;
     }
   });

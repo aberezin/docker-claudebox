@@ -38,7 +38,10 @@ export class VmGcService {
     // measure before/after usage for the reclaim summary. Falls back to
     // undefined if colima isn't installed — the summary is skipped.
     const limaHome = this.limaHomeOverride
-      ?? (await resolveLimaHome(this.fs, process.env, process.env["HOME"] ?? "/"));
+      // #52: env + home from ctx, not the ambient process. `ctx.home` is
+      // the canonical home the rest of the CLI resolves against; reading
+      // process.env["HOME"] here could disagree with it.
+      ?? (await resolveLimaHome(this.fs, ctx.env.raw(), ctx.home));
     // Arfy #38 P4c pass 3 residual: bash prints "reclaimed ~5.3G;
     // colima now uses 66.4G" — port via du -sk before/after LIMA_HOME.
     const beforeKb = limaHome !== undefined ? await this.diskProbe.usageKb(limaHome) : 0;

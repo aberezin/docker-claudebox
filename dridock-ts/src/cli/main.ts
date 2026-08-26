@@ -78,6 +78,9 @@ function resolveBinName(argv0: string): string {
 function buildContext(argv0: string): Context {
   return {
     fs: new RealFileSystem(),
+    // The composition root is the ONE place the real environment enters
+    // (#52). Everything downstream takes it from ctx, so tests can supply a
+    // divergent env without a developer's shell leaking into results.
     env: new EnvResolver(process.env),
     cwd: process.cwd(),
     home: process.env["HOME"] ?? "/",
@@ -106,10 +109,10 @@ async function main(): Promise<number> {
     // non-project verbs (help/version/completion/framework-bugs/consult/
     // report-bug) skip the check so users can `dridock help` from
     // anywhere including a marked-off tree.
-    if (shouldCheckNoDridock(userArgs, process.env)) {
+    if (shouldCheckNoDridock(userArgs, ctx.env.raw())) {
       const marker = await findNoDridockMarker(fs, ctx.cwd, ctx.home);
       if (marker !== undefined) {
-        const verbLabel = cronModeRequested(process.env)
+        const verbLabel = cronModeRequested(ctx.env.raw())
           ? "start"          // cron dispatch masquerades as start; own label for the message
           : (userArgs[0] ?? "start");
         for (const line of formatNoDridockRefusal(marker, verbLabel, ctx.binName)) {
@@ -126,7 +129,7 @@ async function main(): Promise<number> {
     const project = await new ProjectRootResolver(fs, new RealGitToplevel()).resolve(ctx.cwd);
     await autoMigrateIfNeeded(project.root, {
       fs, probe: new RealProcessProbe(), clock: new RealClock(),
-      env: process.env, home: ctx.home,
+      env: ctx.env.raw(), home: ctx.home,
       onNotice: (m) => ctx.stderr.write(m),
     });
 
@@ -134,7 +137,7 @@ async function main(): Promise<number> {
     // of the first positional arg (wrapper.sh:3070), so this MUST run
     // before verb dispatch. `stop` becomes "stop the cron container",
     // anything else spawns / resumes the detached _cron container.
-    if (cronModeRequested(process.env)) {
+    if (cronModeRequested(ctx.env.raw())) {
       return await new CronModeCommand().run(userArgs, ctx);
     }
 

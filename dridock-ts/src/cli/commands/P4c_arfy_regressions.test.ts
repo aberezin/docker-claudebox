@@ -12,12 +12,12 @@ import { InfoCommand } from "./InfoCommand.ts";
 import { DestroyCommand } from "./DestroyCommand.ts";
 import { parseNestedYaml, parseTopLevelString } from "../../services/ProjectConfig.ts";
 
-function makeCtx(fs: InMemoryFileSystem, cwd = "/p"): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
+function makeCtx(fs: InMemoryFileSystem, cwd = "/p", env: Record<string, string | undefined> = {}): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
   const stdout = new StringWriter();
   const stderr = new StringWriter();
   return {
     stdout, stderr,
-    ctx: { fs, env: new EnvResolver({}), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
+    ctx: { fs, env: new EnvResolver(env), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
   };
 }
 
@@ -146,18 +146,13 @@ describe("Arfy #38 P4c B4 — destroy always reaps the leaked lima datadisk + pu
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
     fs.seed("/tmp/override-data/session.json", "{}");
-    const orig = process.env["DRIDOCK_DATA_DIR"];
-    process.env["DRIDOCK_DATA_DIR"] = "/tmp/override-data";
-    try {
-      const { ctx, stderr } = makeCtx(fs);
+    {
+      const { ctx, stderr } = makeCtx(fs, "/p", { DRIDOCK_DATA_DIR: "/tmp/override-data" });
       const rc = await new DestroyCommand(new InMemoryColima(), new StubGitToplevel("/p")).run(["--purge"], ctx);
       expect(rc).toBe(0);
       expect(stderr.text()).toContain("DRIDOCK_DATA_DIR override is set");
       // Override path NOT deleted
       expect(await fs.exists("/tmp/override-data/session.json")).toBe(true);
-    } finally {
-      if (orig === undefined) delete process.env["DRIDOCK_DATA_DIR"];
-      else process.env["DRIDOCK_DATA_DIR"] = orig;
     }
   });
 });

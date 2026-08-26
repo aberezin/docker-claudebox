@@ -81,7 +81,7 @@ image store and any non-mounted state go with it.`;
     // at :806-810 — runs regardless of prior VM state so previously-
     // leaked disks are also reclaimed). limactl refuses in-use disks
     // so this can't touch a live VM's disk.
-    const limaHome = await resolveLimaHome(ctx.fs, process.env, ctx.home);
+    const limaHome = await resolveLimaHome(ctx.fs, ctx.env.raw(), ctx.home);
     if (limaHome !== undefined) {
       const rc = await limactl.diskDelete(limaHome, [`colima-${profile}`]);
       if (rc === 0) ctx.stdout.write(`   ✓ freed leaked lima datadisk (colima-${profile})\n`);
@@ -102,7 +102,7 @@ image store and any non-mounted state go with it.`;
     }
     // Guard 2: refuse when DRIDOCK_DATA_DIR override is set (matches
     // wrapper.sh:822 — that path is arbitrary/user-owned).
-    const dataDirOverride = process.env["DRIDOCK_DATA_DIR"] ?? process.env["CLAUDE_DATA_DIR"];
+    const dataDirOverride = ctx.env.raw()["DRIDOCK_DATA_DIR"] ?? ctx.env.raw()["CLAUDE_DATA_DIR"];
     if (dataDirOverride !== undefined && dataDirOverride !== "") {
       ctx.stderr.write(`⚠ DRIDOCK_DATA_DIR override is set — not auto-deleting it; remove it yourself: ${dataDirOverride}\n`);
       return 0;

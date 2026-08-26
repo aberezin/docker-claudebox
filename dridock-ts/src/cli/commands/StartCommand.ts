@@ -68,7 +68,7 @@ mode (-p) they are validated against an allowlist first.
 
   async run(args: string[], ctx: Context): Promise<number> {
     // ── guards ─────────────────────────────────────────────────────────
-    const guard = guardWorkspace(ctx.cwd, process.env, ctx.cwd);
+    const guard = guardWorkspace(ctx.cwd, ctx.env.raw(), ctx.cwd);
     if (guard.kind === "in-dotdir") {
       ctx.stderr.write(`⚠️  You're inside a '${guard.dotName}' directory (${ctx.cwd}).\n`);
       ctx.stderr.write(`   claudebot would mount THIS dir as its workspace. You probably want:\n`);
@@ -122,7 +122,7 @@ mode (-p) they are validated against an allowlist first.
       force: parseForceReseed(ctx.env.get("FORCE_RESEED"), (m) => ctx.stderr.write(m)),
     });
     const vmEnsure = new VmEnsureService({
-      colima, docker, fs: ctx.fs, env: process.env, home: ctx.home, image: this.imageName,
+      colima, docker, fs: ctx.fs, env: ctx.env.raw(), home: ctx.home, image: this.imageName,
       ensureImage: imageEnsure.asCallback(),
     });
     const vmOutcome = await vmEnsure.ensure(project.root, id);
@@ -167,11 +167,11 @@ mode (-p) they are validated against an allowlist first.
     await auth.writeFeaturesSidecar(features);
 
     // Env passthrough (DRIDOCK_ENV_*) → both -e + sidecar
-    const envPassthrough = collectEnvPassthrough(process.env);
+    const envPassthrough = collectEnvPassthrough(ctx.env.raw());
     await sidecars.writeAllRoles("env", envPassthrough.sidecarContent);
 
     // Mount passthrough (DRIDOCK_MOUNT_*) — no sidecar, mount-time only.
-    const mountPassthrough = collectMountPassthrough(process.env);
+    const mountPassthrough = collectMountPassthrough(ctx.env.raw());
 
     // CDP + host-agent sidecars — always written (empty when the bridge is down).
     const bridges = new BridgeStateReader(ctx.fs, ctx.env.raw(), ctx.home, probe);
@@ -272,7 +272,7 @@ mode (-p) they are validated against an allowlist first.
       ...envPassthrough.envAdditions,
     ];
     // tmpfs opt-in
-    const tmpfsSpec = resolveTmpfs(process.env);
+    const tmpfsSpec = resolveTmpfs(ctx.env.raw());
 
     // ── mode dispatch ─────────────────────────────────────────────────
     if (isProg) return await this.runProgrammatic(validated!, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec);
@@ -348,7 +348,7 @@ mode (-p) they are validated against an allowlist first.
       network: "host",
       mounts: [
         // SSH source (DRIDOCK_SSH_DIR / legacy CLAUDEBOX_SSH_DIR override)
-        { host: process.env["DRIDOCK_SSH_DIR"] ?? process.env["CLAUDEBOX_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
+        { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? ctx.env.raw()["CLAUDEBOX_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
         // Per-project data dir — NOT the host global ~/.claude
         { host: dataDir, container: "/home/claude/.claude" },
         { host: ctx.cwd, container: ctx.cwd },

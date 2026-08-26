@@ -91,7 +91,7 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
       force: parseForceReseed(ctx.env.get("FORCE_RESEED"), (m) => ctx.stderr.write(m)),
     });
     const vmEnsure = new VmEnsureService({
-      colima, docker, fs: ctx.fs, env: process.env, home: ctx.home, image: this.imageName,
+      colima, docker, fs: ctx.fs, env: ctx.env.raw(), home: ctx.home, image: this.imageName,
       ensureImage: imageEnsure.asCallback(),
     });
     const vmOutcome = await vmEnsure.ensure(project.root, id);
@@ -129,13 +129,13 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
     const dataDir = await machine.projectDataDir(id);
     await ctx.fs.mkdirRecursive(dataDir);
 
-    const envPassthrough = collectEnvPassthrough(process.env);
-    const mountPassthrough = collectMountPassthrough(process.env);
+    const envPassthrough = collectEnvPassthrough(ctx.env.raw());
+    const mountPassthrough = collectMountPassthrough(ctx.env.raw());
     const xdg = await xdgRoot(ctx.fs, ctx.env.raw(), ctx.home);
     await ctx.fs.mkdirRecursive(`${xdg}/framework-bugs`);
     await ctx.fs.mkdirRecursive(`${xdg}/consult`);
 
-    const cronFile = process.env["DRIDOCK_MODE_CRON_FILE"] ?? process.env["CLAUDE_MODE_CRON_FILE"];
+    const cronFile = ctx.env.raw()["DRIDOCK_MODE_CRON_FILE"] ?? ctx.env.raw()["CLAUDE_MODE_CRON_FILE"];
     const runArgs: RunArgs = {
       context: ctxDocker,
       containerName: cronName,
@@ -143,7 +143,7 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
       mode: "detached",
       network: "host",
       mounts: [
-        { host: process.env["DRIDOCK_SSH_DIR"] ?? process.env["CLAUDEBOX_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
+        { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? ctx.env.raw()["CLAUDEBOX_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
         { host: dataDir, container: "/home/claude/.claude" },
         { host: ctx.cwd, container: ctx.cwd },
         { host: "/var/run/docker.sock", container: "/var/run/docker.sock" },
@@ -157,7 +157,7 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
         { key: "DRIDOCK_WORKSPACE", value: ctx.cwd },
         { key: "DRIDOCK_CONTAINER_NAME", value: cronName },
         ...(cronFile !== undefined && cronFile !== "" ? [{ key: "DRIDOCK_MODE_CRON_FILE", value: cronFile }] : []),
-        ...(process.env["DEBUG"] === "true" ? [{ key: "DEBUG", value: "true" }] : []),
+        ...(ctx.env.raw()["DEBUG"] === "true" ? [{ key: "DEBUG", value: "true" }] : []),
         ...envPassthrough.envAdditions,
       ],
       cmd: [],

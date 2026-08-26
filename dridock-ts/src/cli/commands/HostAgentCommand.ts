@@ -32,9 +32,9 @@ Host-side agent process for this project.`;
     const svc = new HostAgentService({
       fs: ctx.fs,
       processes: this.deps.processes ?? new RealHostProcessManager(),
-      env: process.env,
+      env: ctx.env.raw(),
       home: ctx.home,
-      pyCandidates: this.deps.pyCandidates ?? this.defaultPyCandidates(),
+      pyCandidates: this.deps.pyCandidates ?? this.defaultPyCandidates(ctx.env.raw()),
       sleep: this.deps.sleep,
       randomHex: this.deps.randomHex,
     });
@@ -101,9 +101,9 @@ Host-side agent process for this project.`;
    * Browser-bridge dodged this because it writes forward.py inline
    * rather than resolving a shipped file.
    */
-  private defaultPyCandidates(): readonly string[] {
+  private defaultPyCandidates(env: Record<string, string | undefined>): readonly string[] {
     const cands: string[] = [];
-    const envOverride = process.env["DRIDOCK_HOST_AGENT_PY"];
+    const envOverride = env["DRIDOCK_HOST_AGENT_PY"];
     if (envOverride !== undefined && envOverride !== "") cands.push(envOverride);
     const execPath = process.execPath;
     if (execPath !== undefined && execPath !== "") {

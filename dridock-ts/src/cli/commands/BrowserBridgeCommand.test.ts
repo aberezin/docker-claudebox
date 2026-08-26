@@ -7,6 +7,19 @@ import { StringWriter } from "../Context.ts";
 import type { Context } from "../Context.ts";
 import { EnvResolver } from "../../domain/EnvResolver.ts";
 
+/**
+ * #52 — env for these tests lives HERE, not in process.env.
+ *
+ * The commands now read `ctx.env`, so seeding the real process env no longer
+ * reaches them. Pointing makeCtx at `process.env` would have fixed the
+ * failures in one line and reintroduced exactly the leak #51 removed: a var
+ * set in the developer's shell silently changing test outcomes. Instead
+ * `setEnv` writes into this record and the Context is built from it — the
+ * 83 existing `setEnv(...)` call sites keep working verbatim, and the suite
+ * stops depending on ambient environment entirely.
+ */
+const testEnv: Record<string, string | undefined> = {};
+
 function makeCtx(fs: InMemoryFileSystem, cwd = "/repo"): {
   ctx: Context; stdout: StringWriter; stderr: StringWriter;
 } {
@@ -14,7 +27,7 @@ function makeCtx(fs: InMemoryFileSystem, cwd = "/repo"): {
   const stderr = new StringWriter();
   return {
     stdout, stderr,
-    ctx: { fs, env: new EnvResolver({}), cwd, home: "/home/alan", binName: "dridock-ts", stdout, stderr },
+    ctx: { fs, env: new EnvResolver(testEnv), cwd, home: "/home/alan", binName: "dridock-ts", stdout, stderr },
   };
 }
 
@@ -22,17 +35,11 @@ function makeCtx(fs: InMemoryFileSystem, cwd = "/repo"): {
 const ENV_KEYS = ["XDG_CONFIG_HOME", "DRIDOCK_CHROME", "DRIDOCK_CDP_PORT", "DRIDOCK_CDP_BIND"] as const;
 const saved: Record<string, string | undefined> = {};
 afterEach(() => {
-  for (const k of ENV_KEYS) {
-    if (!(k in saved)) continue;
-    if (saved[k] === undefined) delete process.env[k];
-    else process.env[k] = saved[k];
-    delete saved[k];
-  }
+  for (const k of ENV_KEYS) delete testEnv[k];
 });
 function setEnv(k: (typeof ENV_KEYS)[number], v: string | undefined): void {
-  if (!(k in saved)) saved[k] = process.env[k];
-  if (v === undefined) delete process.env[k];
-  else process.env[k] = v;
+  if (v === undefined) delete testEnv[k];
+  else testEnv[k] = v;
 }
 
 describe("BrowserBridgeCommand — arg validation + project guard", () => {

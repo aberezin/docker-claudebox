@@ -43,7 +43,7 @@ Host-side browser bridge the container drives via cb-browser.`;
     const svc = new BrowserBridgeService({
       fs: ctx.fs,
       processes: this.deps.processes ?? new RealHostProcessManager(),
-      env: process.env,
+      env: ctx.env.raw(),
       home: ctx.home,
       randomHex: this.deps.randomHex,
       sleep: this.deps.sleep,
