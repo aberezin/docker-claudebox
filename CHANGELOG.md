@@ -98,6 +98,42 @@ when a project is still legacy afterwards (opt-out set, or migration failed).
   wrong prefix. Added in the 4.4.0 `--claude-version latest` work; renamed before anyone
   relies on it.
 
+## [5.1.0] — 2026-09-01 _(fork)_
+
+### Added
+- **Agent dotfiles survive a container recreate** (#80 phase 2, closes #55) — the
+  per-project dot dir (`<data-root>/<id>/dot/`) is bind-mounted over `/home/claude`, so
+  `~/.gitconfig` (including the `gh` credential helper), `~/.bash_history`,
+  `~/.config/gh/` and anything else an agent writes to `$HOME` now persist. Previously
+  only the workspace and `~/.claude` survived, while the *session* did — so a claudebot's
+  memory said "as we agreed, `pull.rebase` is set" and was wrong every morning.
+- `~/.claude` is **folded into** that mount rather than nested inside it — one mount, one
+  lifetime. Existing data migrates automatically (`<id>/claude` → `<id>/dot/.claude`); the
+  migration refuses rather than merging if both layouts somehow exist.
+- **Regeneratable caches are excluded via per-project named volumes** — `~/.cache`,
+  `~/.npm`, `~/.local/share/pnpm/store`, `~/go/pkg/mod`. Bind mounts under macOS
+  virtualisation are slow for many small files, so this is a performance fix as much as a
+  disk one. They are VM-local and go away with `dridock destroy`.
+- The entrypoint **seeds `/etc/skel` into a mounted `$HOME`** for absent files only, so a
+  fresh project still gets `.bashrc` / `.profile` / `.inputrc` — and an edited one is
+  never overwritten.
+
+### Fixed
+- `destroy --purge` derived the project root by stripping a trailing `/claude` from the
+  data dir. With the folded layout that string no longer matches, so purge would have
+  deleted the data dir and **orphaned the rest of the dot dir**. It now asks
+  `MachineConfig.projectRoot` instead of doing string surgery.
+- `OrphanSessionScanner` built the session path by hand and now checks both layouts —
+  a sibling project only migrates on its own next start, so during the transition the two
+  coexist and looking in one place would have silently disabled the #42 guard.
+
+### Notes
+- The mount is **gated on the image version** (`org.dridock.version` ≥ 5.1.0). A new host
+  with an older image skips it and says so: mounting over a `$HOME` that still bakes the
+  CLI would shadow it and the container would not start.
+- `DRIDOCK_DATA_DIR` means "put `.claude` exactly here", which is incompatible with
+  folding, so that override keeps the pre-phase-2 mount shape.
+
 ## [Unreleased]
 
 ### Changed

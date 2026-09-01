@@ -25,7 +25,7 @@ describe("DotMountGate — the mount is gated on the IMAGE, never the host", () 
     // The reason must name the real consequence. "Skipped" alone sends someone
     // hunting for a config problem when the fix is `make build`.
     if (d.kind === "skip") {
-      expect(d.reason).toContain("5.0.0");
+      expect(d.reason).toContain("5.0.1");
       expect(d.note).toContain("would not start");
       expect(d.note).toContain("make build");
     }

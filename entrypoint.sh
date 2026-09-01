@@ -182,6 +182,48 @@ dbg "WORKSPACE_DIR=$WORKSPACE_DIR"
 # here holds regardless of image contents or mount state. Re-adding a baked directory
 # would restore the same accident this bug came from.
 #
+# ── make a mounted $HOME writable by the claude user (#80 phase 2) ──────────
+# With the per-project dot dir bind-mounted over /home/claude, the mount root's
+# ownership comes from the HOST directory, not from useradd. Normally that is
+# already correct — the host binary creates the dot dir as the host user and the
+# uid/gid remap above points `claude` at that same owner — but if the dir was
+# created by root (or the remap did not fire), claude cannot write its own
+# $HOME and every dotfile write fails with a bare "Permission denied" that
+# names nothing useful.
+#
+# NON-recursive on purpose: the tree below holds the session history and can be
+# tens of MB, and chowning all of it on every single start would be a visible
+# stall for no benefit. Only the root needs to be writable for new dotfiles.
+if [ "$(stat -c %u /home/claude 2>/dev/null)" != "$(id -u claude)" ]; then
+	chown claude:claude /home/claude 2>/dev/null \
+		|| echo "dridock: chown /home/claude FAILED — the agent may be unable to write dotfiles (\$HOME mount owned by another uid)" >&2
+fi
+
+# ── seed shell skel into a mounted $HOME (#80 phase 2) ──────────────────────
+# When the per-project dot dir is bind-mounted over /home/claude, the image's
+# own skel files are SHADOWED — a fresh project would drop the agent into a
+# shell with no .bashrc, no .profile and no .inputrc at all: no prompt, no
+# PATH additions, no history search.
+#
+# Seed from /etc/skel, and only for files that are ABSENT. An agent (or a
+# human) editing ~/.bashrc is exactly the state phase 2 exists to preserve, so
+# overwriting on every start would defeat the feature it is part of.
+#
+# Runs unconditionally: with no mount these files already exist and every
+# branch is a no-op, so there is no need to detect which mode we are in.
+for _skel in /etc/skel/.[!.]*; do
+	[ -f "$_skel" ] || continue
+	_dest="/home/claude/$(basename "$_skel")"
+	if [ ! -e "$_dest" ]; then
+		if cp "$_skel" "$_dest" 2>/dev/null; then
+			chown claude:claude "$_dest" 2>/dev/null || true
+			dbg "seeded $(basename "$_dest") from /etc/skel"
+		else
+			echo "dridock: FAILED to seed $_dest from skel — the shell may lack its rc" >&2
+		fi
+	fi
+done
+
 # Deliberately NOT `|| true` — if we cannot create the config dir, the CLAUDE.md and
 # system-hint injection below silently does nothing and the claudebot runs without its
 # framework guidance. Say so loudly instead of degrading in silence.

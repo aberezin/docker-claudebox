@@ -14,7 +14,7 @@ import { Version } from "../domain/Version.ts";
  * So the gate is on the IMAGE, never on the host's own version: the host is by
  * definition new if this code is running.
  */
-export const DOT_MOUNT_MIN_IMAGE_VERSION = "5.0.1";
+export const DOT_MOUNT_MIN_IMAGE_VERSION = "5.1.0";
 
 export type DotMountDecision =
   | { readonly kind: "mount" }
