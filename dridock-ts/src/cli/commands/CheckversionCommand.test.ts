@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { CheckversionCommand } from "./CheckversionCommand.ts";
 import { InMemoryFileSystem } from "../../test/fakes/InMemoryFileSystem.ts";
+import { InMemoryColima } from "../../test/fakes/InMemoryColima.ts";
 import { InMemoryDocker } from "../../test/fakes/InMemoryDocker.ts";
 import { StubGitToplevel } from "../../test/fakes/StubGitToplevel.ts";
 import { StringWriter } from "../Context.ts";
@@ -27,7 +28,7 @@ describe("CheckversionCommand — happy paths", () => {
     const docker = new InMemoryDocker();
     docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
     const { ctx, stdout } = makeCtx(fs);
-    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     expect(rc).toBe(0);
     const out = stdout.text();
     expect(out).toContain(`wrapper (host):        ${DRIDOCK_TS_VERSION}`);
@@ -43,7 +44,7 @@ describe("CheckversionCommand — happy paths", () => {
     docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
     docker.seedImage("colima-cb-abc12345", "dridock:latest", DRIDOCK_TS_VERSION);
     const { ctx, stdout } = makeCtx(fs);
-    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     expect(rc).toBe(0);
     const out = stdout.text();
     expect(out).toContain("(VM cb-abc12345)");
@@ -58,7 +59,7 @@ describe("CheckversionCommand — happy paths", () => {
     docker.seedImage("colima-cb-abc", "dridock:latest", DRIDOCK_TS_VERSION);
     docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "0.5.14");
     const { ctx, stdout } = makeCtx(fs);
-    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     expect(stdout.text()).toContain("claude CLI (in image): 0.5.14");
   });
 
@@ -70,7 +71,7 @@ describe("CheckversionCommand — happy paths", () => {
     docker.seedImage("colima-cb-abc", "dridock:latest", DRIDOCK_TS_VERSION);
     // NOTE: no seedClaudeCliVersion — InMemoryDocker returns IMAGE_UNAVAILABLE
     const { ctx, stdout } = makeCtx(fs);
-    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     expect(stdout.text()).toContain("claude CLI (in image): unavailable");
   });
 
@@ -80,7 +81,7 @@ describe("CheckversionCommand — happy paths", () => {
     docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
     const { ctx, stdout } = makeCtx(fs);
     await new CheckversionCommand(
-      "dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+      "dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima(),
       // Stubbed: without this the default probe shells out to the REAL host
       // `claude`, making the assertion depend on the developer's machine.
       async () => "2.1.243",
@@ -101,7 +102,7 @@ describe("CheckversionCommand — happy paths", () => {
     docker.seedImage("colima-cb-infra", "dridock:latest", DRIDOCK_TS_VERSION);
     docker.seedImage("colima-cb-abc", "dridock:latest", "3.3.5");
     const { ctx, stdout } = makeCtx(fs);
-    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     const out = stdout.text();
     expect(out).toContain("ℹ️  cb-infra is current");
     expect(out).toContain("this project's VM still runs 3.3.5");
@@ -112,7 +113,7 @@ describe("CheckversionCommand — happy paths", () => {
     const fs = new InMemoryFileSystem();
     const docker = new InMemoryDocker(); // nothing seeded -> IMAGE_UNAVAILABLE everywhere
     const { ctx, stdout } = makeCtx(fs);
-    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     expect(stdout.text()).toContain("no built image reachable");
   });
 
@@ -161,7 +162,7 @@ describe("CheckversionCommand — happy paths", () => {
     const docker = new InMemoryDocker();
     docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "2.1.215");
     const { ctx, stdout } = makeCtx(fs);
-    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima(),
       async () => "2.1.241").run([], ctx);
     const out = stdout.text();
     expect(out).toContain("claude CLI (host):     2.1.241");
@@ -175,7 +176,7 @@ describe("CheckversionCommand — happy paths", () => {
     const docker = new InMemoryDocker();
     docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "2.1.241");
     const { ctx, stdout } = makeCtx(fs);
-    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima(),
       async () => "2.1.241").run([], ctx);
     const out = stdout.text();
     expect(out).toContain("claude CLI (host):     2.1.241");
@@ -189,7 +190,7 @@ describe("CheckversionCommand — happy paths", () => {
     const docker = new InMemoryDocker();
     docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "2.1.215");
     const { ctx, stdout } = makeCtx(fs);
-    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima(),
       async () => undefined).run([], ctx);
     const out = stdout.text();
     expect(out).not.toContain("claude CLI (host)");
@@ -200,7 +201,7 @@ describe("CheckversionCommand — happy paths", () => {
     const fs = projFs();
     const docker = new InMemoryDocker();   // nothing seeded -> unavailable
     const { ctx, stdout } = makeCtx(fs);
-    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), undefined,
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima(),
       async () => "2.1.241").run([], ctx);
     expect(stdout.text()).not.toContain("differs from the host's");
   });
@@ -215,7 +216,7 @@ describe("CheckversionCommand — happy paths", () => {
     // Force a MAJOR drift by pinning the wrapper at 3.0.0 — assumes DRIDOCK_TS_VERSION >= 3.
     // The command uses DRIDOCK_TS_VERSION directly (no injection point yet); wrapping with
     // a subclass would over-engineer, so we assert on whichever direction lands.
-    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain("⚠️  version drift");
     expect(stdout.text()).toMatch(/(🔴 MAJOR|🟠 MINOR|🟡 PATCH) drift/);
@@ -274,7 +275,7 @@ describe("CheckversionCommand — arg handling", () => {
   test("--help prints usage + exits 0", async () => {
     const fs = new InMemoryFileSystem();
     const { ctx, stdout } = makeCtx(fs);
-    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p")).run(["--help"], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), new InMemoryColima()).run(["--help"], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain("usage: dridock checkversion");
   });
@@ -283,7 +284,7 @@ describe("CheckversionCommand — arg handling", () => {
     const fs = new InMemoryFileSystem();
     const { ctx } = makeCtx(fs);
     try {
-      await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p")).run(["--nonsense"], ctx);
+      await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), new InMemoryColima()).run(["--nonsense"], ctx);
       throw new Error("expected DridockError");
     } catch (e) {
       expect(e).toBeInstanceOf(DridockError);
@@ -298,7 +299,7 @@ describe("CheckversionCommand — silent-arg family (the 3.3.x audit rule)", () 
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
     const docker = new InMemoryDocker(); // both images unavailable
     const { ctx, stdout } = makeCtx(fs);
-    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p")).run([], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain(IMAGE_UNAVAILABLE);
   });
@@ -310,7 +311,7 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
     fs.seed("/repo/VERSION", `${DRIDOCK_TS_VERSION}\n`);
     const docker = new InMemoryDocker();
     const { ctx, stdout } = makeCtx(fs, "/repo/sub/dir");
-    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/repo")).run(["--binary"], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/repo"), new InMemoryColima()).run(["--binary"], ctx);
     expect(rc).toBe(0);
     const out = stdout.text();
     expect(out).toContain(`binary: ${DRIDOCK_TS_VERSION}`);
@@ -327,7 +328,7 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
     // broke it — pin high enough that even a hypothetical 999.x.x won't).
     fs.seed("/repo/VERSION", "9999.0.0\n");
     const { ctx, stdout } = makeCtx(fs, "/repo");
-    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["--binary"], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo"), new InMemoryColima()).run(["--binary"], ctx);
     expect(rc).toBe(0);
     const out = stdout.text();
     expect(out).toContain(`binary: ${DRIDOCK_TS_VERSION}`);
@@ -343,7 +344,7 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
     const fs = new InMemoryFileSystem();
     fs.seed("/repo/VERSION", "0.0.1\n");
     const { ctx, stdout } = makeCtx(fs, "/repo");
-    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["--binary"], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo"), new InMemoryColima()).run(["--binary"], ctx);
     expect(rc).toBe(0);
     const out = stdout.text();
     expect(out).toContain(`ℹ️  binary is NEWER than source`);
@@ -353,7 +354,7 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
   test("not in a git repo → informational, rc 0 (opportunistic verb, not an error)", async () => {
     const fs = new InMemoryFileSystem();
     const { ctx, stdout } = makeCtx(fs, "/tmp");
-    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel(undefined)).run(["--binary"], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel(undefined), new InMemoryColima()).run(["--binary"], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain(`<not in a git repo`);
     expect(stdout.text()).toContain(`run this from a dridock checkout`);
@@ -363,7 +364,7 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
     const fs = new InMemoryFileSystem();
     // No VERSION seeded — toplevel exists per StubGit, but the FS has nothing there.
     const { ctx, stdout, stderr } = makeCtx(fs, "/some/other/repo");
-    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/some/other/repo")).run(["--binary"], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/some/other/repo"), new InMemoryColima()).run(["--binary"], ctx);
     expect(rc).toBe(1);
     expect(stdout.text()).toContain(`<not a dridock checkout>`);
     expect(stderr.text()).toContain(`/some/other/repo/VERSION not found`);
@@ -374,7 +375,7 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
     const fs = new InMemoryFileSystem();
     fs.seed("/repo/VERSION", `v${DRIDOCK_TS_VERSION}\n\n`);
     const { ctx, stdout } = makeCtx(fs, "/repo");
-    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["--binary"], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo"), new InMemoryColima()).run(["--binary"], ctx);
     expect(rc).toBe(0);
     // parseLoose strips the `v`; treats as equal
     expect(stdout.text()).toContain(`✅ in sync`);
@@ -384,7 +385,7 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
     const fs = new InMemoryFileSystem();
     const { ctx } = makeCtx(fs);
     try {
-      await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["--binary", "--all"], ctx);
+      await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo"), new InMemoryColima()).run(["--binary", "--all"], ctx);
       throw new Error("expected DridockError");
     } catch (e) {
       expect(e).toBeInstanceOf(DridockError);
@@ -396,7 +397,7 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
     const fs = new InMemoryFileSystem();
     fs.seed("/repo/VERSION", `${DRIDOCK_TS_VERSION}\n`);
     const { ctx, stdout } = makeCtx(fs, "/repo");
-    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo")).run(["-b"], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/repo"), new InMemoryColima()).run(["-b"], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain(`✅ in sync`);
   });
@@ -404,7 +405,7 @@ describe("CheckversionCommand --binary — stale-binary check (Arfy filed after 
   test("--help mentions --binary", async () => {
     const fs = new InMemoryFileSystem();
     const { ctx, stdout } = makeCtx(fs);
-    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p")).run(["--help"], ctx);
+    const rc = await new CheckversionCommand("dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), new InMemoryColima()).run(["--help"], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain(`--binary`);
   });
