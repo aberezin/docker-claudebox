@@ -240,7 +240,7 @@ def _build_env() -> dict:
         "HOME": "/home/claude",
         "CLAUDE_CONFIG_DIR": "/home/claude/.claude",
         "PATH": (
-            f"/home/claude/.claude/bin:/home/claude/.local/bin:"
+            f"/home/claude/.claude/bin:/opt/claude-cli/bin:"
             f"{os.environ.get('PATH', '')}"
         ),
     }

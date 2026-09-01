@@ -95,7 +95,7 @@ test_entrypoint_claude_md() {
     #
     # `head -1` was also wrong: the marker is ~35 lines in, not on line 1.
     out=$(docker run --rm --entrypoint bash "$IMAGE" -c \
-        '/home/claude/entrypoint.sh ls /dev/null 2>&1; cat /home/claude/.claude/CLAUDE.md 2>/dev/null' 2>&1)
+        '/opt/dridock/entrypoint.sh ls /dev/null 2>&1; cat /home/claude/.claude/CLAUDE.md 2>/dev/null' 2>&1)
     assert_contains "$out" "Available Tools" "CLAUDE.md generated with tool listing"
 }
 
@@ -104,7 +104,7 @@ test_entrypoint_claude_md() {
 test_entrypoint_system_hint() {
     local out
     out=$(docker run --rm --entrypoint bash "$IMAGE" -c \
-        '/home/claude/entrypoint.sh ls /dev/null 2>&1; cat /home/claude/.claude/system-hint.txt 2>/dev/null' 2>&1)
+        '/opt/dridock/entrypoint.sh ls /dev/null 2>&1; cat /home/claude/.claude/system-hint.txt 2>/dev/null' 2>&1)
     assert_contains "$out" "Docker container" "system hint generated"
 }
 
@@ -113,7 +113,7 @@ test_entrypoint_system_hint() {
 test_entrypoint_config_patching() {
     local out
     out=$(docker run --rm --entrypoint bash "$IMAGE" -c \
-        '/home/claude/entrypoint.sh ls /dev/null 2>&1; cat /home/claude/.claude/.claude.json 2>/dev/null' 2>&1)
+        '/opt/dridock/entrypoint.sh ls /dev/null 2>&1; cat /home/claude/.claude/.claude.json 2>/dev/null' 2>&1)
     assert_contains "$out" '"installMethod"' "config patched with installMethod" || return 1
     assert_contains "$out" '"native"' "installMethod set to native"
 }
@@ -133,7 +133,7 @@ DEOF
     # run entrypoint but check the marker file, not claude output
     local out
     out=$(docker run --rm --entrypoint bash "$img" -c \
-        'bash /home/claude/entrypoint.sh echo done 2>&1; cat /tmp/init-marker 2>/dev/null' 2>&1)
+        'bash /opt/dridock/entrypoint.sh echo done 2>&1; cat /tmp/init-marker 2>/dev/null' 2>&1)
     assert_contains "$out" "INITRAN" "init.d script executed"
 
     docker rmi -f "$img" >/dev/null 2>&1 || true

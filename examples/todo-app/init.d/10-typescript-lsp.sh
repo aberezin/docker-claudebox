@@ -11,7 +11,7 @@
 # proceeds. See docs/customization.md (Init hooks + Plugins).
 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
   bash -c '
-    export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:$PATH
+    export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:$PATH
     claude plugin marketplace add anthropics/claude-plugins-official &&
     claude plugin install typescript-lsp@claude-plugins-official --scope user
   ' || echo "init.d: typescript-lsp plugin not installed (offline?) — continuing"

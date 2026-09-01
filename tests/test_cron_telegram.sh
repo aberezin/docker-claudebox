@@ -38,7 +38,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 os.makedirs("/tmp/ct_home/.claude/cron", exist_ok=True)
-sys.path.insert(0, "/home/claude")
+sys.path.insert(0, "/opt/dridock")
 
 import cron
 cron.TELEGRAM_MESSAGES_FILE = Path("/tmp/ct_home/.claude/cron/telegram_messages.json")
@@ -99,7 +99,7 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 os.makedirs("/tmp/ct_home/.claude/cron", exist_ok=True)
-sys.path.insert(0, "/home/claude")
+sys.path.insert(0, "/opt/dridock")
 
 import cron
 cron.TELEGRAM_MESSAGES_FILE = Path("/tmp/ct_home/.claude/cron/telegram_messages.json")
@@ -143,7 +143,7 @@ test_cron_telegram_no_continue_on_cron_reply() {
         -e "DRIDOCK_WORKSPACE=/workspace" \
         "$IMAGE" - <<'PYEOF'
 import sys, os
-sys.path.insert(0, "/home/claude")
+sys.path.insert(0, "/opt/dridock")
 
 import telegram_bot
 
@@ -176,7 +176,7 @@ test_cron_telegram_system_hint_content() {
         -e "DRIDOCK_WORKSPACE=/my/workspace" \
         "$IMAGE" - <<'PYEOF'
 import sys
-sys.path.insert(0, "/home/claude")
+sys.path.insert(0, "/opt/dridock")
 
 import telegram_bot
 

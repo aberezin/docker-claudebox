@@ -79,6 +79,15 @@ when a project is still legacy afterwards (opt-out set, or migration failed).
 
 ## [Unreleased]
 
+### Changed
+- **Baked image content moved out of `$HOME`** (#80 phase 1) — the Claude CLI now lives at
+  `/opt/claude-cli/` (on `PATH` via a stable `bin/claude` symlink) and the harness
+  scripts, daemons and `CHANGELOG.md` at `/opt/dridock/`, with `ENTRYPOINT` following.
+  `$HOME` is down to distro skel plus the `.ssh` mount point. Prerequisite for phase 2's
+  dotfile-persistence mount, which cannot bind-mount over `$HOME` while 321 MB of baked
+  content lives there. Image-internal: the host never referenced these paths, so there is
+  no host↔image contract change and no compat window.
+
 ### Fixed
 - **Containers were handed a host-agent URL on the wrong port** — `BridgeStateReader`
   defaulted `DRIDOCK_HOST_AGENT_PORT` to `8790` (a bash-wrapper-era value) while

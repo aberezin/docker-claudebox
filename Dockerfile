@@ -139,7 +139,7 @@ RUN chmod 440 /etc/sudoers.d/claude-nopass
 # would invalidate the entire toolchain and turn a one-line pin change into a full
 # rebuild. These two ENVs never change with the version, so they stay cache-stable
 # here. Same reasoning as `ARG DRIDOCK_VERSION` being last in each variant.
-ENV PATH="/home/claude/.local/bin:$PATH"
+ENV PATH="/opt/claude-cli/bin:$PATH"
 ENV DISABLE_AUTOUPDATER=1
 # Login shells: Ubuntu's skel .profile already adds ~/.local/bin when it exists, but
 # that block is conditional on the dir being present at shell start. Keep the explicit
@@ -190,18 +190,31 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN printf 'Acquire::Retries "3";\n' > /etc/apt/apt.conf.d/80-dridock-retries
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-ENV HOME=/home/claude
-RUN mkdir -p /home/claude
+# Install INTO /opt/claude-cli, not into $HOME then moved (#80 phase 1).
+#
+# The move-afterwards approach fails: `bin/claude` is an ABSOLUTE symlink into
+# `<home>/.local/share/claude/versions/<v>` (see the note above), so relocating
+# the tree leaves it dangling and the build's own `claude --version` check
+# reports "not found". Redirecting HOME makes the installer write that absolute
+# path pointing where the files actually end up — verified in a throwaway
+# container before committing to it.
+ENV HOME=/opt/claude-cli
+RUN mkdir -p /opt/claude-cli
 ARG CLAUDE_VERSION
 RUN curl -fsSL https://claude.ai/install.sh | bash -s -- $CLAUDE_VERSION && \
     ~/.local/bin/claude install --yes 2>/dev/null || true
+# Tidy entry point at /opt/claude-cli/bin/claude so PATH doesn't carry a `.local`
+# that means nothing here. A symlink to the installer's stable `bin/claude`, NOT
+# to the versioned dir — nothing to update when the pin moves.
+RUN mkdir -p /opt/claude-cli/bin && \
+    ln -sfn /opt/claude-cli/.local/bin/claude /opt/claude-cli/bin/claude
 # /claude is the OUTSIDE-the-mount seed the entrypoint copies from at runtime (see the
 # HEADS UP block in `base`). Built here because .claude.json is an install byproduct.
 RUN mkdir -p /claude && \
-    cp /home/claude/.claude.json /claude/.claude.json
+    cp /opt/claude-cli/.claude.json /claude/.claude.json
 # Fail loudly at build time rather than shipping an image whose `claude` is a dangling
 # symlink — the failure mode this stage's path constraint exists to prevent.
-RUN /home/claude/.local/bin/claude --version
+RUN /opt/claude-cli/bin/claude --version
 
 # ── dridock-ts compile ──────────────────────────────────────────────────────────
 # Bun-compiled standalone binary for the in-container verbs that need the real TS
@@ -235,16 +248,16 @@ RUN bun install --frozen-lockfile && \
 # apt) and COPY --from'd into each variant at the very end — AFTER the expensive toolchain
 # — so editing a script or cutting a release never invalidates the Go/npm/pyenv layers.
 # The staging layout mirrors the install destinations:
-#   /h/home     → /home/claude          (entrypoint, daemons, CHANGELOG)
+#   /h/opt      → /opt/dridock           (entrypoint, daemons, CHANGELOG)
 #   /h/bin      → /usr/local/bin         (cb-* helpers + the host-agent shim colima/limactl)
 #   /h/features → /usr/local/lib/dridock/features   (3.0: superset of the 2.x /h/profiles)
 #   /h/lib      → /usr/local/lib/dridock             (shared data)
 FROM ubuntu:24.04 AS harness
-RUN mkdir -p /h/home /h/bin /h/features /h/lib
-COPY entrypoint.sh api_server.py telegram_bot.py telegram_utils.py cron.py jsonpipe.py /h/home/
-# Bake the harness changelog OUTSIDE the mount (/home/claude/.claude is shadowed) so
+RUN mkdir -p /h/opt /h/bin /h/features /h/lib
+COPY entrypoint.sh api_server.py telegram_bot.py telegram_utils.py cron.py jsonpipe.py /h/opt/
+# Bake the harness changelog outside $HOME entirely (#80 phase 1) so
 # claudebot can read it; the entrypoint points claudebot here and flags version bumps.
-COPY CHANGELOG.md /h/home/
+COPY CHANGELOG.md /h/opt/
 COPY cb-browser cb-report-bug cb-consult cb-df cb-help cb-harness-watch-consults /h/bin/
 COPY cb-host-shim /h/bin/colima
 # Unified command surface (#1, 3.0): baked in-container `dridock` shim that
@@ -263,7 +276,7 @@ COPY features/ /h/features/
 # It must still be chmod'd — the entrypoint gates on `[ -x check.sh ]`, so a
 # non-executable one is silently ignored and the feature falls back to
 # marker-only, which is the bug check.sh exists to prevent.
-RUN chmod +x /h/home/entrypoint.sh /h/bin/* /h/features/*/on.sh /h/features/*/off.sh \
+RUN chmod +x /h/opt/entrypoint.sh /h/bin/* /h/features/*/on.sh /h/features/*/off.sh \
     && find /h/features -name check.sh -type f -exec chmod +x {} + \
     && ln -sf colima /h/bin/limactl \
     && ln -sf dridock /h/bin/claudebox  # 2.x binary-name compat (one deprecation cycle)
@@ -277,7 +290,7 @@ RUN chmod +x /h/home/entrypoint.sh /h/bin/* /h/features/*/on.sh /h/features/*/of
 # ── minimal ────────────────────────────────────────────────────────────────────
 FROM base AS minimal
 ENV DRIDOCK_IMAGE_VARIANT=minimal
-COPY --from=harness /h/home/ /home/claude/
+COPY --from=harness /h/opt/ /opt/dridock/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 # Compiled dridock binary for the team verbs (the shim routes to it) — see the
@@ -288,8 +301,7 @@ COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 COPY --from=dridock-ts-build /out/dridock /usr/local/lib/dridock/dridock
 RUN chmod +x /usr/local/lib/dridock/dridock
 # claude CLI — LAST (see the identical block in `full`).
-COPY --from=claude-cli --chown=claude:claude /home/claude/.local/ /home/claude/.local/
-COPY --from=claude-cli --chown=claude:claude /home/claude/.claude.json /home/claude/.claude.json
+COPY --from=claude-cli --chown=claude:claude /opt/claude-cli/ /opt/claude-cli/
 COPY --from=claude-cli /claude/ /claude/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
@@ -301,7 +313,7 @@ LABEL org.dridock.version=$DRIDOCK_VERSION
 # ARG above. Last in the stage, so changing it rebuilds only this metadata layer.
 ARG CLAUDE_VERSION
 LABEL org.dridock.claude-version=$CLAUDE_VERSION
-ENTRYPOINT ["/home/claude/entrypoint.sh"]
+ENTRYPOINT ["/opt/dridock/entrypoint.sh"]
 
 # ── full ───────────────────────────────────────────────────────────────────────
 FROM base AS full
@@ -430,15 +442,14 @@ RUN pip install --no-cache-dir requests beautifulsoup4 lxml pyyaml toml
 RUN pip install --no-cache-dir pipenv poetry
 
 # harness install (shared tail — keep in sync with the minimal variant above)
-COPY --from=harness /h/home/ /home/claude/
+COPY --from=harness /h/opt/ /opt/dridock/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
 COPY --from=dridock-ts-build /out/dridock /usr/local/lib/dridock/dridock
 RUN chmod +x /usr/local/lib/dridock/dridock
 # claude CLI — LAST, so a CLAUDE_VERSION bump rebuilds only these three COPY layers and
 # the claude-cli stage, never the toolchain above. Keep it after the harness COPYs.
-COPY --from=claude-cli --chown=claude:claude /home/claude/.local/ /home/claude/.local/
-COPY --from=claude-cli --chown=claude:claude /home/claude/.claude.json /home/claude/.claude.json
+COPY --from=claude-cli --chown=claude:claude /opt/claude-cli/ /opt/claude-cli/
 COPY --from=claude-cli /claude/ /claude/
 ARG DRIDOCK_VERSION=0.0.0
 ENV DRIDOCK_VERSION=$DRIDOCK_VERSION
@@ -450,4 +461,4 @@ LABEL org.dridock.version=$DRIDOCK_VERSION
 # ARG above. Last in the stage, so changing it rebuilds only this metadata layer.
 ARG CLAUDE_VERSION
 LABEL org.dridock.claude-version=$CLAUDE_VERSION
-ENTRYPOINT ["/home/claude/entrypoint.sh"]
+ENTRYPOINT ["/opt/dridock/entrypoint.sh"]

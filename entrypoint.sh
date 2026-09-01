@@ -542,7 +542,7 @@ dbg "framework guidance written to $CLAUDE_MD_USER"
 SYSTEM_HINT_FILE="/home/claude/.claude/system-hint.txt"
 if [ ! -f "$SYSTEM_HINT_FILE" ]; then
 	cat > "$SYSTEM_HINT_FILE" <<SYSHINT
-You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. ONLY your workspace and ~/.claude survive a container recreate (which is routine); /tmp, /opt, and anything apt/npm/pip-installed into the system are discarded silently — see \"What survives a container restart\" in your CLAUDE.md. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .dridock/BRIEF.md (or legacy .claudebox/BRIEF.md) exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work. If you hit a bug in the dridock FRAMEWORK itself (the wrapper/entrypoint/image/networking that runs you, not your project), file it with the \`cb-report-bug\` command rather than working around it silently. The harness changelog is at ~/CHANGELOG.md — consult it to see what dridock features and conventions exist and what recently changed (especially if a harness behavior surprises you).
+You are running in a Docker container (${CLAUDE_IMAGE_VARIANT:-full} image) with passwordless sudo access. ~/.claude/bin is in PATH — custom user scripts may be available there. ONLY your workspace and ~/.claude survive a container recreate (which is routine); /tmp and anything apt/npm/pip-installed into the system are discarded silently, as is anything YOU write under /opt (the harness content baked there is restored from the image, your additions are not) — see \"What survives a container restart\" in your CLAUDE.md. Docker socket may be mounted for docker-in-docker. The workspace path inside the container matches the host path so docker volume mounts from within this container resolve correctly on the host. If a file .dridock/BRIEF.md (or legacy .claudebox/BRIEF.md) exists in your workspace, READ IT FIRST — it is the trusted mission brief stating why this project was created and what to build; keep its "Progress / handoff log" section updated as you work. If you hit a bug in the dridock FRAMEWORK itself (the wrapper/entrypoint/image/networking that runs you, not your project), file it with the \`cb-report-bug\` command rather than working around it silently. The harness changelog is at /opt/dridock/CHANGELOG.md — consult it to see what dridock features and conventions exist and what recently changed (especially if a harness behavior surprises you).
 SYSHINT
 	chown claude:claude "$SYSTEM_HINT_FILE"
 	dbg "system hint created"
@@ -560,7 +560,7 @@ HARNESS_UPDATE_NOTE=""
 if [ -n "${DRIDOCK_VERSION:-}" ]; then
 	_seen=""; [ -f "$HARNESS_VER_FILE" ] && _seen="$(cat "$HARNESS_VER_FILE" 2>/dev/null)"
 	if [ -n "$_seen" ] && [ "$_seen" != "$DRIDOCK_VERSION" ]; then
-		HARNESS_UPDATE_NOTE="NOTE: the dridock harness was updated from v${_seen} to v${DRIDOCK_VERSION} since this project last ran. Read ~/CHANGELOG.md (top entry) for what changed before relying on prior assumptions about how the harness behaves."
+		HARNESS_UPDATE_NOTE="NOTE: the dridock harness was updated from v${_seen} to v${DRIDOCK_VERSION} since this project last ran. Read /opt/dridock/CHANGELOG.md (top entry) for what changed before relying on prior assumptions about how the harness behaves."
 		dbg "harness update detected: $_seen -> $DRIDOCK_VERSION"
 	fi
 	printf '%s' "$DRIDOCK_VERSION" > "$HARNESS_VER_FILE" 2>/dev/null || true
@@ -671,7 +671,7 @@ environment. Do NOT try to run the host `dridock` command — it isn't in here.
 1. **Version** — print the harness semver you're running: `echo "$DRIDOCK_VERSION"`.
    If a "harness was updated" note appeared this session, mention it.
 2. **Convenience commands** — run `cb-help` and show the list of available `cb-*` tools.
-3. **What changed** — the harness changelog is at `~/CHANGELOG.md` (point the user there;
+3. **What changed** — the harness changelog is at `/opt/dridock/CHANGELOG.md` (point the user there;
    summarize the top entry if they ask).
 4. **Environment** — your workspace is `$DRIDOCK_WORKSPACE` (same path as on the host).
    Sibling workloads go on the `cb-net` docker network and are reachable by container
@@ -931,7 +931,7 @@ if [ "$_mode_telegram" = "1" ] && [ "$_mode_cron" = "1" ]; then
 	COMBINED_ENV="$COMBINED_ENV; export CLAUDE_CONFIG_DIR=/home/claude/.claude"
 	COMBINED_ENV="$COMBINED_ENV; export DRIDOCK_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file")"
 	COMBINED_ENV="$COMBINED_ENV; export DRIDOCK_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}")"
-	COMBINED_ENV="$COMBINED_ENV; export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH"
+	COMBINED_ENV="$COMBINED_ENV; export PATH=/home/claude/.claude/bin:/opt/claude-cli/bin:\$PATH"
 	# #33 — use absolute /usr/bin/python3, not bare `python3`. The full image
 	# has pyenv shims on PATH ahead of /usr/bin, and pyenv's own 3.12 does NOT
 	# have the daemon deps (uvicorn/fastapi/mcp/telegram/croniter) — the base
@@ -939,7 +939,7 @@ if [ "$_mode_telegram" = "1" ] && [ "$_mode_cron" = "1" ]; then
 	# resolved to pyenv → ModuleNotFoundError → every daemon mode crashed on
 	# boot in the shipped image. Absolute path bypasses PATH resolution.
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "$COMBINED_ENV; /usr/bin/python3 /home/claude/cron.py & CRON_PID=\$!; trap 'kill \$CRON_PID 2>/dev/null' EXIT INT TERM; /usr/bin/python3 /home/claude/telegram_bot.py"
+		bash -c "$COMBINED_ENV; /usr/bin/python3 /opt/dridock/cron.py & CRON_PID=\$!; trap 'kill \$CRON_PID 2>/dev/null' EXIT INT TERM; /usr/bin/python3 /opt/dridock/telegram_bot.py"
 fi
 
 # api mode — run fastapi server instead of claude
@@ -950,7 +950,7 @@ if [ "$_mode_api" = "1" ]; then
 	CLAUDE_UID=$(id -u claude)
 	CLAUDE_GID=$(id -g claude)
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_API_PORT=$_mode_api_port && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec /usr/bin/python3 /home/claude/api_server.py"
+		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_API_PORT=$_mode_api_port && export PATH=/home/claude/.claude/bin:/opt/claude-cli/bin:\$PATH && exec /usr/bin/python3 /opt/dridock/api_server.py"
 fi
 
 # telegram mode — run telegram bot instead of claude
@@ -961,7 +961,7 @@ if [ "$_mode_telegram" = "1" ]; then
 	CLAUDE_UID=$(id -u claude)
 	CLAUDE_GID=$(id -g claude)
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec /usr/bin/python3 /home/claude/telegram_bot.py"
+		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export PATH=/home/claude/.claude/bin:/opt/claude-cli/bin:\$PATH && exec /usr/bin/python3 /opt/dridock/telegram_bot.py"
 fi
 
 # cron mode — run scheduler that fires claude per cron yaml
@@ -981,7 +981,7 @@ if [ "$_mode_cron" = "1" ]; then
 	mkdir -p /home/claude/.claude/cron/history
 	chown -R claude:claude /home/claude/.claude/cron 2>/dev/null || true
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
-		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file") && export DRIDOCK_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}") && export PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH && exec /usr/bin/python3 /home/claude/cron.py"
+		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file") && export DRIDOCK_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}") && export PATH=/home/claude/.claude/bin:/opt/claude-cli/bin:\$PATH && exec /usr/bin/python3 /opt/dridock/cron.py"
 fi
 
 # build the command to run as claude
@@ -1160,7 +1160,7 @@ _maybe_install_default_plugin() {
 	# time on a tty-attached start; with it, exit 0. Keep it on every claude/helper
 	# invocation the entrypoint makes.
 	if timeout 90 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
-		bash -c 'export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:$PATH; claude plugin marketplace add anthropics/claude-plugins-official && exec claude plugin install commit-commands@claude-plugins-official --scope user' \
+		bash -c 'export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:$PATH; claude plugin marketplace add anthropics/claude-plugins-official && exec claude plugin install commit-commands@claude-plugins-official --scope user' \
 		</dev/null >/dev/null 2>&1
 	then
 		touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
@@ -1215,7 +1215,7 @@ _install_features() {
 			_check="$lib_new/$feat/check.sh"
 			if [ -x "$_check" ]; then
 				if timeout 30 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
-					bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.claude/bin:/home/claude/.local/bin:\$PATH; exec '$_check'" \
+					bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.claude/bin:/opt/claude-cli/bin:\$PATH; exec '$_check'" \
 					>/dev/null 2>&1; then
 					continue    # marker present AND payload verified
 				fi
@@ -1235,7 +1235,7 @@ _install_features() {
 		# script that shells out to claude would otherwise stop on the tty and burn
 		# the full 120s timeout. See the comment there.
 		if timeout 120 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
-			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/home/claude/.local/bin:/home/claude/.claude/bin:\$PATH; exec '$on_script'" \
+			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:/home/claude/.claude/bin:\$PATH; exec '$on_script'" \
 			</dev/null >/dev/null 2>&1
 		then
 			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
