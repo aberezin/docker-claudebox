@@ -33,13 +33,24 @@ bash test.sh test_wrapper         # run one test function by name
 bash test.sh test_api test_cron   # run a subset
 # per-test logs land in tests/logs/<testname>.log
 
-# Python unit tests (no Docker, no token needed — pure helper functions)
+# Python unit tests (no Docker, no token needed — but they DO need the daemons'
+# third-party imports present, see below)
 python -m pytest tests/test_api_server_oai.py -v
 python -m pytest tests/test_md_to_tg_html.py -v
 python tests/test_api_server_oai.py     # each file is also directly runnable
 ```
 
-`tests/.env` is mandatory for the bash suite — copy `tests/.env.example` and set `CLAUDE_CODE_OAUTH_TOKEN`. The bash tests build a throwaway `psyb0t/claudebox:test` minimal image, spin up real containers, and hit the live Claude API with the `haiku` model (fast/cheap). The Python unit tests are the exception: they import helpers from `api_server.py` / `telegram_utils.py` and never touch Docker or the API — run them for quick iteration on pure logic. Note `make test` / `test.sh` do **not** run the Python unit tests; invoke those separately.
+`tests/.env` is mandatory for the bash suite — copy `tests/.env.example` and set `CLAUDE_CODE_OAUTH_TOKEN`. The bash tests build a throwaway `psyb0t/claudebox:test` minimal image, spin up real containers, and hit the live Claude API with the `haiku` model (fast/cheap). Note `make test` / `test.sh` do **not** run the Python unit tests; invoke those separately.
+
+The Python unit tests exercise **pure logic** — they never touch Docker, a container, or the API. But "pure logic" is not the same as "no dependencies": they import their helpers from `api_server.py` / `telegram_utils.py`, and those modules import `fastapi` / `uvicorn` / `mcp` / `python-telegram-bot` at module scope. Those packages live in the **image**, not on the Mac, so on a bare host the tests fail at import with `ModuleNotFoundError: No module named 'uvicorn'` (or `'telegram'`) before a single assertion runs — nothing to do with the test's own logic. To run them on the host, install the daemons' imports into a venv first:
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install fastapi uvicorn python-telegram-bot pyyaml mcp croniter pytest
+python -m pytest tests/test_api_server_oai.py tests/test_md_to_tg_html.py -v
+```
+
+Alternatively run them inside the built image, which already has all of it. Either way, a Python change to the daemons is **not** verified by the bash suite alone — that suite drives the daemons through container env, so it exercises their wiring, not their helper functions.
 
 ## Architecture — request flow
 
