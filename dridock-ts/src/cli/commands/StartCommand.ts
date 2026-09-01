@@ -19,6 +19,7 @@ import { guardWorkspace } from "../../services/WorkspaceGuard.ts";
 import { validateProgArgs } from "../../services/ProgArgValidator.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
+import { realSpinner } from "../../infra/Spinner.ts";
 import { ImageEnsureService, parseForceReseed } from "../../services/ImageEnsureService.ts";
 import { ContainerRefresher } from "../../services/ContainerRefresher.ts";
 import { SidecarWriter } from "../../services/SidecarWriter.ts";
@@ -120,6 +121,10 @@ mode (-p) they are validated against an allowlist first.
       colima, docker, image: this.imageName,
       warn: (m) => ctx.stderr.write(m),
       force: parseForceReseed(ctx.env.get("FORCE_RESEED"), (m) => ctx.stderr.write(m)),
+      // #48: the save|load is the one window a cold start still sat silent
+      // through. isTty is read off the real stderr, so redirected output
+      // gets the completion line without the animation frames.
+      progress: realSpinner({ write: (m) => ctx.stderr.write(m) }, process.stderr.isTTY === true),
     });
     const vmEnsure = new VmEnsureService({
       colima, docker, fs: ctx.fs, env: ctx.env.raw(), home: ctx.home, image: this.imageName,

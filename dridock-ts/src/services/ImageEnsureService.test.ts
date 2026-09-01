@@ -1,5 +1,6 @@
 import { test, expect, describe } from "bun:test";
 import { ImageEnsureService, parseForceReseed, CLAUDE_CLI_LABEL } from "./ImageEnsureService.ts";
+import type { Progress } from "../infra/Spinner.ts";
 import { InMemoryColima } from "../test/fakes/InMemoryColima.ts";
 import { InMemoryDocker } from "../test/fakes/InMemoryDocker.ts";
 import { infraContext } from "../infra/Docker.ts";
@@ -329,5 +330,90 @@ describe("ImageEnsureService — DRIDOCK_FORCE_RESEED (#78)", () => {
     const quiet: string[] = [];
     parseForceReseed("1", (m) => quiet.push(m));
     expect(quiet).toEqual([]);
+  });
+});
+
+
+/* ── #48: the save|load window reports progress ──────────────────────────── */
+
+/** Records phases instead of drawing them. */
+function recordingProgress(): { progress: Progress; phases: string[] } {
+  const phases: string[] = [];
+  return {
+    phases,
+    progress: {
+      begin(label) {
+        phases.push(`begin:${label}`);
+        return (r) => { phases.push(`end:${r?.ok === false ? "fail" : "ok"}:${r?.summary ?? label}`); };
+      },
+    },
+  };
+}
+
+describe("ImageEnsureService — reseed progress (#48)", () => {
+  test("first-time seed reports begin and a successful end", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    docker.seedImage(infraContext(), "dridock:latest", "4.4.0");
+    const { progress, phases } = recordingProgress();
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest", progress });
+    const r = await svc.ensure("colima-cb-abc");
+    expect(r.kind).toBe("first-seed");
+    expect(phases).toEqual([
+      "begin:seeding image cb-infra → cb-abc",
+      "end:ok:image seeded cb-infra → cb-abc",
+    ]);
+  });
+
+  test("drift reseed reports too (the 15-45s window this issue is about)", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    docker.seedImage(infraContext(), "dridock:latest", "4.5.0");
+    docker.seedImage("colima-cb-abc", "dridock:latest", "4.4.0");
+    const { progress, phases } = recordingProgress();
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest", progress });
+    expect((await svc.ensure("colima-cb-abc")).kind).toBe("reseeded");
+    expect(phases.length).toBe(2);
+    expect(phases[1]).toContain("end:ok:");
+  });
+
+  test("a FAILED save|load still ends the phase, and marks it failed", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    docker.seedImage(infraContext(), "dridock:latest", "4.4.0");
+    docker.nextSaveAndLoadRc = 1;
+    const { progress, phases } = recordingProgress();
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest", progress });
+    expect((await svc.ensure("colima-cb-abc")).kind).toBe("failed");
+    // Without the finally the spinner row dangles and the error message the
+    // command prints next lands in the middle of it.
+    expect(phases[1]).toContain("end:fail:");
+    expect(phases[1]).toContain("rc 1");
+  });
+
+  test("a no-op ensure starts NO phase (no spinner for an instant path)", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    docker.seedImage(infraContext(), "dridock:latest", "4.4.0");
+    docker.seedImageIdentity(infraContext(), "dridock:latest", { id: "i", labels: { [CLAUDE_CLI_LABEL]: "2.1.243" } });
+    docker.seedImage("colima-cb-abc", "dridock:latest", "4.4.0");
+    docker.seedImageIdentity("colima-cb-abc", "dridock:latest", { id: "t", labels: { [CLAUDE_CLI_LABEL]: "2.1.243" } });
+    const { progress, phases } = recordingProgress();
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest", progress });
+    expect((await svc.ensure("colima-cb-abc")).kind).toBe("already-current");
+    expect(phases).toEqual([]);
+  });
+
+  test("omitting progress entirely behaves exactly as before (#48 is opt-in)", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    docker.seedImage(infraContext(), "dridock:latest", "4.4.0");
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest" });
+    expect((await svc.ensure("colima-cb-abc")).kind).toBe("first-seed");
   });
 });

@@ -2,6 +2,8 @@ import type { Docker } from "../infra/Docker.ts";
 import type { Colima } from "../infra/Colima.ts";
 import { infraContext, INFRA_PROFILE } from "../infra/Docker.ts";
 import { Version } from "../domain/Version.ts";
+import type { Progress } from "../infra/Spinner.ts";
+import { NULL_PROGRESS } from "../infra/Spinner.ts";
 
 /**
  * Seed the claudebot image into a target docker context, or reseed if
@@ -41,6 +43,13 @@ export interface ImageEnsureDeps {
    * Set from DRIDOCK_FORCE_RESEED by the callers.
    */
   readonly force?: boolean;
+  /**
+   * Reporter for the save|load, which takes 15-45s with both docker stderr
+   * streams swallowed — the one window a cold-path `start` still sat
+   * silent through after #48. Defaults to NULL_PROGRESS, so a caller that
+   * supplies nothing behaves exactly as before.
+   */
+  readonly progress?: Progress;
 }
 
 /** Label carrying the pinned Claude CLI version, stamped by the Dockerfile. */
@@ -111,7 +120,7 @@ export class ImageEnsureService {
       // before the comparisons precisely because its purpose is the cases the
       // comparisons cannot settle.
       if (this.deps.force === true && infraVersion !== "unavailable") {
-        const rc = await this.deps.docker.saveAndLoad(infraContext(), this.deps.image, targetContext);
+        const rc = await this.reseed(targetContext);
         if (rc !== 0) return { kind: "failed", reason: `save|load rc ${rc}` };
         return {
           kind: "reseeded", from: targetVersion, to: infraVersion,
@@ -129,7 +138,7 @@ export class ImageEnsureService {
         };
       }
       if (targetVersion === "unstamped" || this.isNewer(infraVersion, targetVersion)) {
-        const rc = await this.deps.docker.saveAndLoad(infraContext(), this.deps.image, targetContext);
+        const rc = await this.reseed(targetContext);
         if (rc !== 0) return { kind: "failed", reason: `save|load rc ${rc}` };
         return { kind: "reseeded", from: targetVersion, to: infraVersion };
       }
@@ -164,7 +173,7 @@ export class ImageEnsureService {
           };
         }
         if (infraCli !== targetCli) {
-          const rc = await this.deps.docker.saveAndLoad(infraContext(), this.deps.image, targetContext);
+          const rc = await this.reseed(targetContext);
           if (rc !== 0) return { kind: "failed", reason: `save|load rc ${rc}` };
           return {
             kind: "reseeded",
@@ -187,7 +196,7 @@ export class ImageEnsureService {
     if (infraVersion === "unavailable") {
       return { kind: "failed", reason: `${this.deps.image} not present in ${INFRA_PROFILE}` };
     }
-    const rc = await this.deps.docker.saveAndLoad(infraContext(), this.deps.image, targetContext);
+    const rc = await this.reseed(targetContext);
     if (rc !== 0) return { kind: "failed", reason: `save|load rc ${rc}` };
     return { kind: "first-seed", version: infraVersion };
   }
@@ -213,6 +222,27 @@ export class ImageEnsureService {
           return { ok: false, reason: r.reason };
       }
     };
+  }
+
+  /**
+   * The save|load, wrapped in progress reporting. A helper rather than four
+   * inline try/finally blocks: forgetting the finally at ONE site leaves a
+   * dangling spinner row that the next status line writes into the middle
+   * of, and that site would be whichever one nobody exercises.
+   */
+  private async reseed(targetContext: string): Promise<number> {
+    const from = INFRA_PROFILE;
+    const to = targetContext.replace(/^colima-/, "");
+    const done = (this.deps.progress ?? NULL_PROGRESS).begin(`seeding image ${from} → ${to}`);
+    let rc = 1;
+    try {
+      rc = await this.deps.docker.saveAndLoad(infraContext(), this.deps.image, targetContext);
+      return rc;
+    } finally {
+      done(rc === 0
+        ? { summary: `image seeded ${from} → ${to}` }
+        : { ok: false, summary: `image seed FAILED ${from} → ${to} (rc ${rc})` });
+    }
   }
 
   /** Pinned CLI version off the image label, or undefined when absent. */

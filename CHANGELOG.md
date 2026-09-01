@@ -29,6 +29,12 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Progress reporting during the image reseed** (#48) — the `docker save | docker load`
+  takes 15-45s with both stderr streams swallowed, and was the one window a cold-path
+  `start` still sat silent through after #48's phase lines. A TTY spinner now shows the
+  phase and elapsed seconds on a single overwritten row; non-TTY output gets the
+  completion line only (no `\r` frames in logs or pipes, but the run is still recorded).
+  Failed seeds are marked `✗`, not `✓`.
 - **`--help` on every verb, enforced at compile time** (#60) — `usage` is now a required
   field on the `Command` interface, and `CommandRegistry.dispatch` answers `-h`/`--help`
   before the command's own parser runs. Previously 11 of 27 command files mentioned

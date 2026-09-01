@@ -12,6 +12,7 @@ import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
 import { ProjectConfig } from "../../services/ProjectConfig.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
+import { realSpinner } from "../../infra/Spinner.ts";
 import { ImageEnsureService, parseForceReseed } from "../../services/ImageEnsureService.ts";
 import { containerName } from "../../services/ContainerName.ts";
 import { collectEnvPassthrough, collectMountPassthrough } from "../../services/EnvMountPassthrough.ts";
@@ -89,6 +90,10 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
       colima, docker, image: this.imageName,
       warn: (m) => ctx.stderr.write(m),
       force: parseForceReseed(ctx.env.get("FORCE_RESEED"), (m) => ctx.stderr.write(m)),
+      // #48: the save|load is the one window a cold start still sat silent
+      // through. isTty is read off the real stderr, so redirected output
+      // gets the completion line without the animation frames.
+      progress: realSpinner({ write: (m) => ctx.stderr.write(m) }, process.stderr.isTTY === true),
     });
     const vmEnsure = new VmEnsureService({
       colima, docker, fs: ctx.fs, env: ctx.env.raw(), home: ctx.home, image: this.imageName,
