@@ -1,0 +1,38 @@
+# Readline defaults for every claudebot's interactive bash (#80-adjacent).
+#
+# Baked into /etc/skel so a NEW container gets it from useradd, and so the set
+# of files phase 2 seeds over a mounted $HOME is complete — .inputrc joins
+# .bashrc / .profile / .bash_logout rather than being remembered later.
+
+# Bring in the distro defaults first; everything below is additive.
+$include /etc/inputrc
+
+# ↑/↓ search history by what you have already typed, instead of walking every
+# command blindly. The single biggest quality-of-life win in an agent shell,
+# where history is long and full of near-identical docker invocations.
+"\e[A": history-search-backward
+"\e[B": history-search-forward
+# Same, for terminals that send the application-mode sequences (tmux, some
+# ssh clients) rather than the normal-mode ones above.
+"\eOA": history-search-backward
+"\eOB": history-search-forward
+
+# Completion that does not punish case or a partial guess.
+set completion-ignore-case on
+set completion-map-case on
+set show-all-if-ambiguous on
+set show-all-if-unmodified on
+
+# Show a trailing / on dirs and * on executables when completing — worth the
+# one extra stat when you are navigating an unfamiliar container.
+set visible-stats on
+set colored-stats on
+# Bold the part of the completion you have already typed.
+set colored-completion-prefix on
+
+# Long completion lists ask before spraying the screen.
+set completion-query-items 200
+set page-completions on
+
+# Don't ring the bell; an agent shell has nobody to hear it.
+set bell-style none

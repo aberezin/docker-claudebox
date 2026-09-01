@@ -117,6 +117,13 @@ RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && \
     rm -rf /var/lib/apt/lists/*
 
+# Readline config, into /etc/skel BEFORE useradd so the claude user's $HOME gets
+# it alongside .bashrc / .profile / .bash_logout. Sits in `base` deliberately
+# despite the cache rules at the top of this file: it is slow-changing (edited
+# roughly never), and the alternative — COPYing it into /home/claude late —
+# would re-bake content into $HOME, which is exactly what #80 phase 1 removed.
+COPY skel/.inputrc /etc/skel/.inputrc
+
 # create 'claude' user with sudo and docker access (remove ubuntu user that ships at uid 1000)
 RUN userdel -r ubuntu 2>/dev/null || true && \
     useradd -u 1000 -ms /bin/bash claude && \
