@@ -48,7 +48,11 @@ CLAUDE_CONFIG_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path(HOME) / ".
 CRON_DIR = CLAUDE_CONFIG_DIR / "cron"
 HISTORY_ROOT = CRON_DIR / "history"
 TELEGRAM_MESSAGES_FILE = CRON_DIR / "telegram_messages.json"
-TELEGRAM_MODE = (os.environ.get("DRIDOCK_MODE_TELEGRAM") or os.environ.get("CLAUDEBOX_MODE_TELEGRAM", "")) == "1"
+TELEGRAM_MODE = (
+    os.environ.get("DRIDOCK_MODE_TELEGRAM")
+    or os.environ.get("CLAUDEBOX_MODE_TELEGRAM")
+    or os.environ.get("CLAUDE_MODE_TELEGRAM", "")
+) == "1"
 
 from telegram_utils import TELEGRAM_HTML_HINT  # noqa: E402  (after env reads)
 

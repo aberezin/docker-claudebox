@@ -145,6 +145,52 @@ for _cb in "$REPO"/cb-*; do
 done
 eq "no bare \${CLAUDEBOX_X:-} reads in cb-* helpers" "$_lint_offenders" "0"
 
+# ── sweep: Python daemons read env in the full three tiers (#26) ────────────
+# The existing sweep above matches SHELL parameter expansion (`${CLAUDEBOX_X`).
+# Python reads the same vars as `os.environ.get("CLAUDEBOX_X")` — a completely
+# different syntax that the shell sweep can never see. That blind spot is why
+# every daemon shipped legacy-only reads undetected until #26 was filed by
+# hand-reading api_server.py.
+#
+# Rule: every `os.environ.get("CLAUDEBOX_X")` must sit in a full three-tier
+# chain — DRIDOCK_X first, CLAUDE_X last — matching the documented pattern in
+# CLAUDE.md. Two-tier is not "mostly fine": cron.py and telegram_bot.py both
+# read MODE_CRON_FILE and WORKSPACE, and in combined TELEGRAM+CRON mode a
+# var honoured by one daemon and ignored by the other is split-brain config
+# inside a single container.
+echo ""
+echo "  python daemon env-read tiers (#26)"
+_py_offenders=0
+for _py in "$REPO"/*.py; do
+    [ -f "$_py" ] || continue
+    while IFS= read -r _hit; do
+        _lineno="${_hit%%:*}"
+        _line="${_hit#*:}"
+        # The legacy name on this line, e.g. CLAUDEBOX_MODE_CRON_FILE -> MODE_CRON_FILE
+        _var=$(printf '%s' "$_line" | grep -oE 'CLAUDEBOX_[A-Z_]+' | head -1)
+        _stem="${_var#CLAUDEBOX_}"
+        # A three-tier chain is often wrapped across lines:
+        #     CONFIG_PATH = (
+        #         os.environ.get("DRIDOCK_X")
+        #         or os.environ.get("CLAUDEBOX_X")
+        #         or os.environ.get("CLAUDE_X")
+        #     )
+        # so judge a WINDOW around the hit, not the single line. Checking one
+        # line flags those as missing both siblings — and a lint that cries
+        # wolf on correct code is one people learn to ignore.
+        _lo=$(( _lineno > 3 ? _lineno - 3 : 1 ))
+        _win=$(sed -n "${_lo},$((_lineno + 3))p" "$_py")
+        _missing=""
+        printf '%s' "$_win" | grep -q "DRIDOCK_${_stem}" || _missing="DRIDOCK_${_stem}"
+        printf '%s' "$_win" | grep -q "CLAUDE_${_stem}\"" || _missing="${_missing:+$_missing }CLAUDE_${_stem}"
+        if [ -n "$_missing" ]; then
+            echo "    $(basename "$_py"):${_lineno}: ${_var} read is missing tier(s): ${_missing}" >&2
+            _py_offenders=$((_py_offenders + 1))
+        fi
+    done < <(grep -nE 'os\.environ\.get\("CLAUDEBOX_[A-Z_]+"' "$_py")
+done
+eq "python daemons read all three env tiers" "$_py_offenders" "0"
+
 echo ""
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

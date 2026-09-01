@@ -29,6 +29,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Python-aware sweep in the env-rename lint** (#26) — the existing sweep matched shell
+  parameter expansion (`${CLAUDEBOX_X`), which can never see Python's
+  `os.environ.get("CLAUDEBOX_X")`. That blind spot is why the daemons' legacy-only reads
+  went undetected until #26 was filed by hand-reading `api_server.py`. The new sweep is
+  window-aware, so a three-tier chain wrapped across lines is not a false positive.
 - **Progress reporting during the image reseed** (#48) — the `docker save | docker load`
   takes 15-45s with both stderr streams swallowed, and was the one window a cold-path
   `start` still sat silent through after #48's phase lines. A TTY spinner now shows the
