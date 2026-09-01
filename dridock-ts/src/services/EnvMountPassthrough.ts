@@ -3,9 +3,9 @@ import type { RunArgs } from "../infra/ContainerRuntime.ts";
 /**
  * Two related host→container env-var passthroughs — same shape, both
  * matched by prefix and stripped:
- *   - DRIDOCK_ENV_FOO=bar / CLAUDEBOX_ENV_FOO=bar / CLAUDE_ENV_FOO=bar
+ *   - DRIDOCK_ENV_FOO=bar   (legacy CLAUDEBOX_/CLAUDE_ prefixes removed in 5.0)
  *     → `-e FOO=bar` inside the container + `-env` sidecar row
- *   - DRIDOCK_MOUNT_X=/host / CLAUDEBOX_MOUNT_X=/host / CLAUDE_MOUNT_X=/host:/ctr
+ *   - DRIDOCK_MOUNT_X=/host:/ctr
  *     → `-v /host:/host` (auto-mirrored) or `-v /host:/ctr` (colon form)
  *
  * Ports wrapper.sh:2932-2960. Pure over the process env — no FS/docker
@@ -13,8 +13,8 @@ import type { RunArgs } from "../infra/ContainerRuntime.ts";
  * the sidecar content to write.
  */
 
-const ENV_PREFIXES = ["DRIDOCK_ENV_", "CLAUDEBOX_ENV_", "CLAUDE_ENV_"] as const;
-const MOUNT_PREFIXES = ["DRIDOCK_MOUNT_", "CLAUDEBOX_MOUNT_", "CLAUDE_MOUNT_"] as const;
+const ENV_PREFIXES = ["DRIDOCK_ENV_"] as const;
+const MOUNT_PREFIXES = ["DRIDOCK_MOUNT_"] as const;
 
 export interface EnvPassthroughResult {
   /** New env pairs to append to RunArgs.env. */

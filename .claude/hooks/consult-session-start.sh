@@ -15,7 +15,7 @@ set -u
 
 # Detect environment and resolve (a) the consult dir, (b) the watcher verb to nudge.
 if [ -f /.dockerenv ]; then
-    CH="${DRIDOCK_CONSULT_DIR:-${CLAUDEBOX_CONSULT_DIR:-/home/claude/framework-consult}}"
+    CH="${DRIDOCK_CONSULT_DIR:-/home/claude/framework-consult}"
     WATCHER='cb-harness-watch-consults'
     WATCHER_LAUNCH='cb-harness-watch-consults'
     WATCHER_PS_PATTERN='cb-harness-watch-consults'

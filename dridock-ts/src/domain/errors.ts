@@ -24,7 +24,7 @@ export class DridockError extends Error {
 export class MissingEnvError extends DridockError {
   readonly canonicalName: string;
   constructor(canonicalName: string) {
-    super(`missing required env: DRIDOCK_${canonicalName} (or legacy CLAUDEBOX_${canonicalName} / CLAUDE_${canonicalName})`, 2);
+    super(`missing required env: DRIDOCK_${canonicalName}`, 2);
     this.name = "MissingEnvError";
     this.canonicalName = canonicalName;
   }

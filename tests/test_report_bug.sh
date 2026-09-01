@@ -20,7 +20,7 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 # ── report from stdin lands in the shared dir with metadata + body ───────────
-CLAUDEBOX_FRAMEWORK_BUGS_DIR="$TMP/fwb" CLAUDEBOX_PROJECT_ID=proj9 CLAUDE_IMAGE_VARIANT=minimal \
+DRIDOCK_FRAMEWORK_BUGS_DIR="$TMP/fwb" DRIDOCK_PROJECT_ID=proj9 CLAUDE_IMAGE_VARIANT=minimal \
     bash "$RB" "mount empty under tmp" --layer wrapper <<'EOF' >/dev/null 2>&1
 ## What I was doing
 started claudebot
@@ -37,19 +37,19 @@ case "$(basename "$f")" in *mount-empty-under-tmp*) ok "filename slug" ;; *) bad
 
 # ── --body-file works ────────────────────────────────────────────────────────
 printf '## Repro\nsteps\n' > "$TMP/body.md"
-CLAUDEBOX_FRAMEWORK_BUGS_DIR="$TMP/fwb2" CLAUDEBOX_PROJECT_ID=p2 \
+DRIDOCK_FRAMEWORK_BUGS_DIR="$TMP/fwb2" DRIDOCK_PROJECT_ID=p2 \
     bash "$RB" "second bug" --body-file "$TMP/body.md" >/dev/null 2>&1
 g="$(ls "$TMP/fwb2"/p2-*.md 2>/dev/null | head -1)"
 { [ -n "$g" ] && grep -q '## Repro' "$g"; } && ok "--body-file captured" || bad "--body-file failed"
 
 # ── falls back to a workspace file when the shared dir is unwritable ──────────
 ws="$TMP/ws"; mkdir -p "$ws"
-( cd "$ws" && CLAUDEBOX_FRAMEWORK_BUGS_DIR="/cannot-create-$RANDOM/x" \
+( cd "$ws" && DRIDOCK_FRAMEWORK_BUGS_DIR="/cannot-create-$RANDOM/x" \
     bash "$RB" "fallback case" <<<'## x' >/dev/null 2>&1 )
 [ -f "$ws/.dridock/FRAMEWORK-BUGS.md" ] && ok "falls back to workspace FRAMEWORK-BUGS.md" || bad "no fallback file"
 
 # ── requires a title ─────────────────────────────────────────────────────────
-if CLAUDEBOX_FRAMEWORK_BUGS_DIR="$TMP/fwb3" bash "$RB" <<<'' >/dev/null 2>&1; then
+if DRIDOCK_FRAMEWORK_BUGS_DIR="$TMP/fwb3" bash "$RB" <<<'' >/dev/null 2>&1; then
     bad "missing title should fail"
 else
     ok "requires a title (usage error)"

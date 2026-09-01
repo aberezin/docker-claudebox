@@ -133,6 +133,27 @@ async function main(): Promise<number> {
       onNotice: (m) => ctx.stderr.write(m),
     });
 
+    // 5.0.0: a project left on `.claudebox/` no longer works SILENTLY.
+    //
+    // Auto-migrate above is the bridge and still runs, so the common case is
+    // converted before anyone notices. This fires only when the project is
+    // STILL legacy afterwards — auto-migrate opted out via
+    // DRIDOCK_NO_AUTO_MIGRATE, or it could not complete. Through 4.x that
+    // state quietly kept working off the legacy paths; now it stops and says
+    // what to run. `migrate` itself is exempt, or the fix would be
+    // unreachable. The migrators stay until 6.0 — see docs/roadmap.md.
+    const verb0 = userArgs[0];
+    if (verb0 !== "migrate") {
+      const after = await new ProjectRootResolver(fs, new RealGitToplevel()).resolve(ctx.cwd);
+      if (after.dotName === ".claudebox") {
+        ctx.stderr.write(`❌ ${after.root} still uses the legacy .claudebox/ layout.\n`);
+        ctx.stderr.write(`   Support for it was removed in 5.0.0 — it is no longer read silently.\n`);
+        ctx.stderr.write(`   Convert it:  ${ctx.binName} migrate\n`);
+        ctx.stderr.write(`   (The migration path itself is removed in 6.0.0 — see docs/roadmap.md.)\n`);
+        return 1;
+      }
+    }
+
     // Cron mode intercept — bash triggers on DRIDOCK_MODE_CRON regardless
     // of the first positional arg (wrapper.sh:3070), so this MUST run
     // before verb dispatch. `stop` becomes "stop the cron container",

@@ -17,7 +17,11 @@ function makeCtx(fs: InMemoryFileSystem, cwd = "/repo"): { ctx: Context; stdout:
   };
 }
 
-const HARNESS_WRAPPER = `#!/usr/bin/env bash\nDRIDOCK_VERSION="3.3.7"\n# ...more script...\n`;
+// The harness fingerprint since 5.0: a file that still EXISTS. Until then this
+// grepped wrapper.sh, which 4.0.0 deleted — so the guard rejected the harness
+// repo itself and `harness sync` was dead in its only valid location.
+const HARNESS_FINGERPRINT = "/repo/dridock-ts/src/domain/dridockVersion.ts";
+const HARNESS_FINGERPRINT_BODY = `export const DRIDOCK_TS_VERSION = "5.0.0";\n`;
 
 describe("HarnessCommand", () => {
   test("no sub → rc 1 usage", async () => {
@@ -45,7 +49,7 @@ describe("HarnessCommand", () => {
 
   test("sync: not a harness fork → rc 1 + explanation", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/repo/wrapper.sh", "#!/usr/bin/env bash\n# no version line here\n");
+    fs.seed("/repo/README.md", "just some repo, no harness fingerprint\n");
     const { ctx, stderr } = makeCtx(fs);
     const rc = await new HarnessCommand({
       git: new StubGitToplevel("/repo"), docker: new InMemoryDocker(),
@@ -58,7 +62,7 @@ describe("HarnessCommand", () => {
 
   test("sync: inside a container → rc 1 + 'run on the Mac' explanation", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/repo/wrapper.sh", HARNESS_WRAPPER);
+    fs.seed(HARNESS_FINGERPRINT, HARNESS_FINGERPRINT_BODY);
     const { ctx, stderr } = makeCtx(fs);
     const rc = await new HarnessCommand({
       git: new StubGitToplevel("/repo"), docker: new InMemoryDocker(),
@@ -71,7 +75,7 @@ describe("HarnessCommand", () => {
 
   test("sync: harness fork, on Mac, make build succeeds → rc 0", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/repo/wrapper.sh", HARNESS_WRAPPER);
+    fs.seed(HARNESS_FINGERPRINT, HARNESS_FINGERPRINT_BODY);
     const { ctx, stdout } = makeCtx(fs);
     let called = 0;
     const rc = await new HarnessCommand({
@@ -86,7 +90,7 @@ describe("HarnessCommand", () => {
 
   test("sync: make build fails, no --repair → rc propagated verbatim", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/repo/wrapper.sh", HARNESS_WRAPPER);
+    fs.seed(HARNESS_FINGERPRINT, HARNESS_FINGERPRINT_BODY);
     const { ctx } = makeCtx(fs);
     const rc = await new HarnessCommand({
       git: new StubGitToplevel("/repo"), docker: new InMemoryDocker(),
@@ -98,7 +102,7 @@ describe("HarnessCommand", () => {
 
   test("sync --repair: BuildKit corruption pattern → docker builder prune + retry, success on retry → rc 0", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/repo/wrapper.sh", HARNESS_WRAPPER);
+    fs.seed(HARNESS_FINGERPRINT, HARNESS_FINGERPRINT_BODY);
     const docker = new InMemoryDocker();
     let attempt = 0;
     const { ctx, stderr } = makeCtx(fs);
@@ -120,7 +124,7 @@ describe("HarnessCommand", () => {
 
   test("sync --repair: unrelated build failure (no corruption pattern) → does NOT prune, returns rc verbatim", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/repo/wrapper.sh", HARNESS_WRAPPER);
+    fs.seed(HARNESS_FINGERPRINT, HARNESS_FINGERPRINT_BODY);
     const docker = new InMemoryDocker();
     const { ctx, stderr } = makeCtx(fs);
     const rc = await new HarnessCommand({
@@ -135,7 +139,7 @@ describe("HarnessCommand", () => {
 
   test("sync --repair: corruption pattern but retry still fails → rc from second attempt + advice to restart colima", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/repo/wrapper.sh", HARNESS_WRAPPER);
+    fs.seed(HARNESS_FINGERPRINT, HARNESS_FINGERPRINT_BODY);
     const docker = new InMemoryDocker();
     const { ctx, stderr } = makeCtx(fs);
     const rc = await new HarnessCommand({
@@ -150,7 +154,7 @@ describe("HarnessCommand", () => {
 
   test("sync unknown arg → DridockError", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/repo/wrapper.sh", HARNESS_WRAPPER);
+    fs.seed(HARNESS_FINGERPRINT, HARNESS_FINGERPRINT_BODY);
     const { ctx } = makeCtx(fs);
     try {
       await new HarnessCommand({

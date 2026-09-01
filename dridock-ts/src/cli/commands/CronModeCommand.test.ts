@@ -76,8 +76,11 @@ describe("cronModeRequested — env-var gate", () => {
   test("DRIDOCK_MODE_CRON=1 → true", () => {
     expect(cronModeRequested({ DRIDOCK_MODE_CRON: "1" })).toBe(true);
   });
-  test("legacy CLAUDE_MODE_CRON=1 → true (bash-parity fallback)", () => {
-    expect(cronModeRequested({ CLAUDE_MODE_CRON: "1" })).toBe(true);
+  test("legacy CLAUDE_MODE_CRON=1 → false (tier removed in 5.0.0)", () => {
+    expect(cronModeRequested({ CLAUDE_MODE_CRON: "1" })).toBe(false);
+    expect(cronModeRequested({ CLAUDEBOX_MODE_CRON: "1" })).toBe(false);
+    // Canonical still gates it.
+    expect(cronModeRequested({ DRIDOCK_MODE_CRON: "1" })).toBe(true);
   });
   test("empty string → false (must be non-empty, matches bash's `[ -n \"$_mode_cron\" ]`)", () => {
     expect(cronModeRequested({ DRIDOCK_MODE_CRON: "" })).toBe(false);

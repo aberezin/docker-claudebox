@@ -26,6 +26,57 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.0.0] — 2026-09-01 _(fork)_
+
+### ⚠️ BREAKING — legacy env prefixes removed
+
+`DRIDOCK_X` is now the **only** name read for any dridock setting. Setting a
+`CLAUDEBOX_*` or `CLAUDE_*` equivalent has **no effect and produces no warning**
+— if a setting stops taking hold after upgrading, check its prefix first.
+
+- Removed the three-tier read chain (`DRIDOCK_X` → `CLAUDEBOX_X` → `CLAUDE_X`)
+  everywhere: TypeScript host, `entrypoint.sh`, the four Python daemons, the
+  `cb-*` helpers, `install.sh`, and the session hooks.
+- Removed `env-rename.map` and the container aliaser `_dridock_alias_env`, which
+  mirrored the pairs at boot. That shim was simultaneously the compatibility
+  layer and the reason the suite could not tell which name a green run had
+  actually exercised (#82).
+- Removed the `DRIDOCK_ENV_*` / `DRIDOCK_MOUNT_*` legacy prefix variants
+  (`CLAUDEBOX_ENV_*`, `CLAUDE_MOUNT_*`, …).
+- **Unaffected:** `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, and
+  `CLAUDE_CONFIG_DIR` are upstream Claude Code variables, were never part of the
+  3.0 rename, and are still read by name.
+
+### ⚠️ BREAKING — legacy `.claudebox/` layout no longer works silently
+
+A project still on `.claudebox/` now **stops with an error** naming `dridock
+migrate`, instead of quietly working off the legacy paths. Auto-migration still
+runs first, so the common case converts before anyone notices; this fires only
+when a project is still legacy afterwards (opt-out set, or migration failed).
+**The migration path itself is removed in 6.0.0** — see [docs/roadmap.md](docs/roadmap.md).
+
+### Added
+- **[docs/roadmap.md](docs/roadmap.md) + `tests/test_deprecation_deadlines.sh`** — planned removals,
+  each one enforced by a test that fails the build when its release arrives and the
+  removal has not happened. This exists because `entrypoint.sh` promised these very
+  removals "in 4.0", we shipped through 4.4.0 with the shim live, and nothing noticed.
+  The test also fails if a commitment is already done but still listed, so rows cannot
+  rot. It **self-registers into `ALL_TESTS`**, unlike the compat test it replaces,
+  which used a standalone shape that meant `test.sh` sourced it and ran nothing.
+
+### Fixed
+- **`dridock harness sync` had been dead since 4.0.0** — it identified a harness fork by
+  grepping `wrapper.sh` for `DRIDOCK_VERSION=`, but 4.0.0 deleted `wrapper.sh`, so the
+  guard rejected the harness repo itself. Now fingerprints
+  `dridock-ts/src/domain/dridockVersion.ts`, matching what `entrypoint.sh` already did.
+- **The bash suite drove the daemons with the deprecated env names only** (#82) — 44
+  `-e CLAUDEBOX_*` and 0 `-e DRIDOCK_*`. Green proved the legacy path worked and said
+  nothing about the documented one. All mode tests now pass canonical names.
+
+### Removed
+- `env-rename.map`, `_dridock_alias_env`, and `tests/test_env_rename_compat.sh`
+  (it guarded the map and the aliaser, both of which are gone).
+
 ## [Unreleased]
 
 ### Added

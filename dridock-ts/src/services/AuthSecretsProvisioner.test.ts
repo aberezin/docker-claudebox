@@ -63,13 +63,15 @@ describe("AuthSecretsProvisioner.writeAuthSidecars", () => {
     );
   });
 
-  test("legacy CLAUDEBOX_NO_API_KEY still honored for one deprecation cycle", async () => {
+  test("legacy CLAUDEBOX_NO_API_KEY is IGNORED (tier removed in 5.0.0)", async () => {
     const { fs, prov } = makeProvisioner({
       ANTHROPIC_API_KEY: "sk-ant-abc",
       CLAUDEBOX_NO_API_KEY: "true",
     });
     await prov.writeAuthSidecars();
-    expect(await fs.readText("/data/.claude-_p_prog-auth")).toContain("ANTHROPIC_API_KEY=\n");
+    // The legacy suppressor is inert, so the key is forwarded normally.
+    // Only DRIDOCK_NO_API_KEY blanks it now.
+    expect(await fs.readText("/data/.claude-_p_prog-auth")).toContain("ANTHROPIC_API_KEY=sk-ant-abc");
   });
 
   test("only 'truthy' values (1/true/yes/on) trigger the opt-out — random strings don't", async () => {

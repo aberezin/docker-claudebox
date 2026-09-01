@@ -2,7 +2,9 @@
 
 Set these on your host (e.g., in `~/.bashrc` or `~/.zshrc`). The wrapper script forwards them into the container automatically. These apply across all modes.
 
-All wrapper/installer config uses the `DRIDOCK_*` prefix in 3.0+. Anything you want available **inside** the container goes through `DRIDOCK_ENV_*` (prefix stripped on the way in). Legacy 2.x names (`CLAUDEBOX_*` / `CLAUDEBOX_ENV_*` / `CLAUDEBOX_MOUNT_*`) and pre-2.x `CLAUDE_*` fallbacks still work for one deprecation cycle, and bare `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` / `DEBUG` are picked up directly.
+All dridock config uses the `DRIDOCK_*` prefix. Anything you want available **inside** the container goes through `DRIDOCK_ENV_*` (prefix stripped on the way in), and bare `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` / `DEBUG` are picked up directly.
+
+> **Removed in 5.0.0 — legacy `CLAUDEBOX_*` and `CLAUDE_*` prefixes.** Through 4.x every setting was read as a three-deep chain (`DRIDOCK_X` → `CLAUDEBOX_X` → `CLAUDE_X`) and a boot-time aliaser mirrored the pairs inside the container. All of that is gone. **A `CLAUDEBOX_*` variable now has no effect at all, and says nothing** — if a setting isn't taking hold, check its prefix first. `ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` and `CLAUDE_CONFIG_DIR` are upstream Claude Code variables, were never part of the 3.0 rename, and are unaffected. See [roadmap.md](roadmap.md).
 
 | Variable                   | Description                                                                                | Default                   |
 | -------------------------- | ------------------------------------------------------------------------------------------ | ------------------------- |
@@ -23,7 +25,7 @@ All wrapper/installer config uses the `DRIDOCK_*` prefix in 3.0+. Anything you w
 | `DRIDOCK_FORCE_RESEED`     | Set to `1` to copy `cb-infra`'s claudebot image into this project's VM **unconditionally**, skipping every drift comparison. Normally the copy happens only when `cb-infra` holds a newer harness semver (`org.dridock.version`) or a different pinned Claude CLI (`org.dridock.claude-version`). Two cases need the override: images built before the CLI label existed (nothing to compare, so dridock reports `image drift not checked` rather than guessing), and any time you want to force cb-infra's copy to win. Accepts `1`/`true`/`yes`; an unrecognised value is reported on stderr and ignored rather than silently treated as off. Costs a full `docker save \| docker load` (15-45s). See [Issue #78](https://github.com/aberezin/docker-claudebox/issues/78). | _(off)_ |
 | `DRIDOCK_ALLOW_NEW`        | Set to `1` to bypass the guard that stops you from silently creating a fresh project (new `.dridock/config.yml` + a new per-project Colima VM) when running `dridock` in a dir that isn't a dridock project yet. Interactive runs prompt; non-interactive runs abort — this env skips both. Prefer `dridock bootstrap "<intent>"` for a proper new project. | _(off)_ |
 | `DRIDOCK_NO_AUTO_MIGRATE`  | Set to `1` to skip the 3.0 auto-migration of a legacy `.claudebox/`-only workspace into a `.dridock/` one on the first `dridock` invocation. The `dridock migrate` verb still works by hand. | _(off — migrate on)_ |
-| `DRIDOCK_HARNESS_DEV`      | Set to `1` to force framework-dev mode (entrypoint startup surfacing of cross-project `awaiting-framework` consults + unreviewed framework-bug reports, `dridock harness <verb>` commands, drift-warning skip). Auto-detected when the workspace looks like a dridock harness fork (a `wrapper.sh` at its root containing `DRIDOCK_VERSION=` or the legacy `CLAUDEBOX_VERSION=`); this env is the explicit opt-in for a renamed/relocated fork. Legacy alias: `DRIDOCK_FRAMEWORK_DEV=1` (and `CLAUDEBOX_HARNESS_DEV` still accepted). See [design/framework-dev-mode.md](design/framework-dev-mode.md). | _(auto)_ |
+| `DRIDOCK_HARNESS_DEV`      | Set to `1` to force framework-dev mode (entrypoint startup surfacing of cross-project `awaiting-framework` consults + unreviewed framework-bug reports, `dridock harness <verb>` commands, drift-warning skip). Auto-detected when the workspace has a `dridock-ts/src/domain/dridockVersion.ts` at its root; this env is the explicit opt-in for a renamed/relocated fork. Legacy alias: `DRIDOCK_FRAMEWORK_DEV=1`. See [design/framework-dev-mode.md](design/framework-dev-mode.md). | _(auto)_ |
 | `DRIDOCK_HARNESS_WATCH_INTERVAL` | Poll interval (seconds) for `cb-harness-watch-consults`, the framework-dev in-container watcher for cross-project `awaiting-framework` consults + new unreviewed framework-bug reports. Positional arg overrides. See [design/framework-dev-mode.md](design/framework-dev-mode.md). | `20` |
 | `DRIDOCK_NO_DRIFT_WARN`    | Set to `1` to silence the wrapper's "cb-infra image is behind wrapper" warning that fires on each `dridock` invocation whose cb-infra image lags the wrapper's `DRIDOCK_VERSION`. Auto-skipped for the framework-dev workspace (which is the one causing drift and already knows); this env is the explicit opt-out for scripted / CI contexts where the warning is noise. | _(off — warn on)_ |
 | `DRIDOCK_PRUNE_ON_START`   | Set to `1` to have the entrypoint run `docker builder prune -f` (build cache) AND `docker image prune -f` (dangling untagged images) on every container start — keeps the shared VM disk from creeping up on image-iterating projects. Best-effort. Never removes tagged images or a running container's image. See [design/disk-management.md](design/disk-management.md). | _(off)_ |
@@ -37,7 +39,7 @@ All wrapper/installer config uses the `DRIDOCK_*` prefix in 3.0+. Anything you w
 | `DRIDOCK_ENV_*`            | Forward env vars into the container (prefix stripped: `DRIDOCK_ENV_FOO=bar` → `FOO=bar`)   | _(none)_                  |
 | `DRIDOCK_MOUNT_*`          | Mount extra host directories into the container                                            | _(none)_                  |
 
-For each `DRIDOCK_*` above, the legacy `CLAUDEBOX_*` name of the same suffix is accepted for one deprecation cycle (removed in 4.0). Where the two are set on the same run, the `DRIDOCK_*` value wins.
+`DRIDOCK_*` is the only prefix read. The legacy `CLAUDEBOX_*` / `CLAUDE_*` equivalents were removed in 5.0.0 and are now inert — see the note at the top.
 
 Auth and in-container settings go through `DRIDOCK_ENV_*`:
 
@@ -83,7 +85,7 @@ dridock bootstrap --secrets-file ./my-secrets.env "build project-A"
 
 `GH_TOKEN` (or `GITHUB_TOKEN`) is picked up by `gh` automatically; the entrypoint additionally runs `gh auth setup-git` so plain `git push https://github.com/...` is authenticated too. Secrets are host-local and never committed — `secrets.env` is auto-added to the project `.gitignore`.
 
-Legacy 2.x projects that still use `.claudebox/secrets.env` continue to work — the wrapper reads either dotname for one deprecation cycle. `dridock migrate` moves the file to the canonical `.dridock/` location.
+As of 5.0.0 a project still on the legacy `.claudebox/` layout does **not** silently work: dridock stops with an error naming `dridock migrate`, which moves `secrets.env` (and the rest) to the canonical `.dridock/` location. The migration path itself is removed in 6.0.0 — see [roadmap.md](roadmap.md).
 
 ## Extra volume mounts
 
@@ -130,7 +132,8 @@ Set these in the claudebot's shell to tune `cb-browser`. Container-only (not rea
 
 ## See also
 
-- [design/3.0-migration.md](design/3.0-migration.md) — the `CLAUDEBOX_*` → `DRIDOCK_*` rename + backward-compat window.
+- [design/3.0-migration.md](design/3.0-migration.md) — the `CLAUDEBOX_*` → `DRIDOCK_*` rename (its compat window closed in 5.0.0).
+- [roadmap.md](roadmap.md) — planned removals and the tests that enforce them.
 - [design/per-project-vm.md](design/per-project-vm.md) — data dir, secrets, VM sizing.
 - [modes/interactive.md](modes/interactive.md) · [modes/programmatic.md](modes/programmatic.md) · [modes/api.md](modes/api.md) — where these vars apply.
 - [versioning.md](versioning.md) — `DRIDOCK_VERSION` and drift.

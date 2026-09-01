@@ -1,7 +1,7 @@
 import { test, expect, describe } from "bun:test";
 import { collectEnvPassthrough, collectMountPassthrough } from "./EnvMountPassthrough.ts";
 
-describe("collectEnvPassthrough — DRIDOCK_ENV_ / CLAUDEBOX_ENV_ / CLAUDE_ENV_ prefixes", () => {
+describe("collectEnvPassthrough — DRIDOCK_ENV_ only (legacy prefixes removed in 5.0)", () => {
   test("strips DRIDOCK_ENV_ prefix, forwards to container as bare name", () => {
     const r = collectEnvPassthrough({
       DRIDOCK_ENV_MY_VAR: "hello",
@@ -11,14 +11,16 @@ describe("collectEnvPassthrough — DRIDOCK_ENV_ / CLAUDEBOX_ENV_ / CLAUDE_ENV_ 
     expect(r.sidecarContent).toBe("MY_VAR=hello\n");
   });
 
-  test("legacy CLAUDEBOX_ENV_ prefix still honored (one deprecation cycle)", () => {
+  test("legacy CLAUDEBOX_ENV_ prefix is IGNORED (5.0.0)", () => {
     const r = collectEnvPassthrough({ CLAUDEBOX_ENV_FOO: "bar" });
-    expect(r.envAdditions).toEqual([{ key: "FOO", value: "bar" }]);
+    expect(r.envAdditions).toEqual([]);
   });
 
-  test("upstream CLAUDE_ENV_ prefix still honored", () => {
+  test("CLAUDE_ENV_ prefix is IGNORED (5.0.0)", () => {
     const r = collectEnvPassthrough({ CLAUDE_ENV_X: "y" });
-    expect(r.envAdditions).toEqual([{ key: "X", value: "y" }]);
+    expect(r.envAdditions).toEqual([]);
+    // Canonical prefix still works.
+    expect(collectEnvPassthrough({ DRIDOCK_ENV_X: "y" }).envAdditions).toEqual([{ key: "X", value: "y" }]);
   });
 
   test("multiple forwards → sorted stable order (deterministic docker inspect + sidecar diff)", () => {
@@ -54,7 +56,7 @@ describe("collectEnvPassthrough — DRIDOCK_ENV_ / CLAUDEBOX_ENV_ / CLAUDE_ENV_ 
   });
 });
 
-describe("collectMountPassthrough — DRIDOCK_MOUNT_ / CLAUDEBOX_MOUNT_ / CLAUDE_MOUNT_ prefixes", () => {
+describe("collectMountPassthrough — DRIDOCK_MOUNT_ only (legacy prefixes removed in 5.0)", () => {
   test("bare-path form auto-mirrors host:host", () => {
     const r = collectMountPassthrough({ DRIDOCK_MOUNT_SCRATCH: "/opt/scratch" });
     expect(r.mountAdditions).toEqual([{ host: "/opt/scratch", container: "/opt/scratch" }]);
@@ -65,15 +67,15 @@ describe("collectMountPassthrough — DRIDOCK_MOUNT_ / CLAUDEBOX_MOUNT_ / CLAUDE
     expect(r.mountAdditions).toEqual([{ host: "/host/data", container: "/mnt/data" }]);
   });
 
-  test("legacy CLAUDEBOX_MOUNT_ + upstream CLAUDE_MOUNT_ honored", () => {
+  test("legacy CLAUDEBOX_MOUNT_ / CLAUDE_MOUNT_ are IGNORED (5.0.0)", () => {
     const r = collectMountPassthrough({
       CLAUDEBOX_MOUNT_A: "/a",
       CLAUDE_MOUNT_B: "/b:/bb",
     });
-    expect(r.mountAdditions).toEqual([
-      { host: "/a", container: "/a" },
-      { host: "/b", container: "/bb" },
-    ]);
+    expect(r.mountAdditions).toEqual([]);
+    // Canonical prefix still works, including the host:container form.
+    expect(collectMountPassthrough({ DRIDOCK_MOUNT_B: "/b:/bb" }).mountAdditions)
+      .toEqual([{ host: "/b", container: "/bb" }]);
   });
 
   test("empty value → skipped (nothing to mount)", () => {

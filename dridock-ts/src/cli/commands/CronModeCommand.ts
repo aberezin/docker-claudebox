@@ -140,7 +140,7 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
     await ctx.fs.mkdirRecursive(`${xdg}/framework-bugs`);
     await ctx.fs.mkdirRecursive(`${xdg}/consult`);
 
-    const cronFile = ctx.env.raw()["DRIDOCK_MODE_CRON_FILE"] ?? ctx.env.raw()["CLAUDE_MODE_CRON_FILE"];
+    const cronFile = ctx.env.raw()["DRIDOCK_MODE_CRON_FILE"];
     const runArgs: RunArgs = {
       context: ctxDocker,
       containerName: cronName,
@@ -148,7 +148,7 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
       mode: "detached",
       network: "host",
       mounts: [
-        { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? ctx.env.raw()["CLAUDEBOX_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
+        { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
         { host: dataDir, container: "/home/claude/.claude" },
         { host: ctx.cwd, container: ctx.cwd },
         { host: "/var/run/docker.sock", container: "/var/run/docker.sock" },
@@ -188,12 +188,12 @@ export interface CronModeDeps {
 }
 
 /**
- * True when `DRIDOCK_MODE_CRON` (or legacy `CLAUDE_MODE_CRON`) is set and
+ * True when `DRIDOCK_MODE_CRON` is set and
  * non-empty. Exported so main.ts can intercept BEFORE the verb registry —
  * matches bash's `if [ -n "$_mode_cron" ]` at wrapper.sh:3070 which fires
  * regardless of the first positional arg.
  */
 export function cronModeRequested(env: Record<string, string | undefined>): boolean {
-  const v = env["DRIDOCK_MODE_CRON"] ?? env["CLAUDE_MODE_CRON"];
+  const v = env["DRIDOCK_MODE_CRON"];
   return v !== undefined && v !== "";
 }

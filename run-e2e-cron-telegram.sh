@@ -23,14 +23,11 @@ if [ -f "$SCRIPT_DIR/tests/.env" ]; then
     set -a; . "$SCRIPT_DIR/tests/.env"; set +a
 fi
 : "${CLAUDE_CODE_OAUTH_TOKEN:?CLAUDE_CODE_OAUTH_TOKEN not set (put it in tests/.env)}"
-# Accept the DRIDOCK_ canonical name (3.0+) with CLAUDEBOX_ as a fallback (2.x / 3.x-compat).
-: "${DRIDOCK_TELEGRAM_BOT_TOKEN:=${CLAUDEBOX_TELEGRAM_BOT_TOKEN:-}}"
-: "${DRIDOCK_TELEGRAM_BOT_TOKEN:?DRIDOCK_TELEGRAM_BOT_TOKEN (or legacy CLAUDEBOX_TELEGRAM_BOT_TOKEN) not set (put it in tests/.env)}"
-CLAUDEBOX_TELEGRAM_BOT_TOKEN="$DRIDOCK_TELEGRAM_BOT_TOKEN"    # keep legacy name populated for tests that grep it
+: "${DRIDOCK_TELEGRAM_BOT_TOKEN:?DRIDOCK_TELEGRAM_BOT_TOKEN not set (put it in tests/.env)}"
 : "${TELEGRAM_CHAT_ID:?TELEGRAM_CHAT_ID not set (put it in tests/.env)}"
 
 OAUTH="$CLAUDE_CODE_OAUTH_TOKEN"
-BOT_TOKEN="$CLAUDEBOX_TELEGRAM_BOT_TOKEN"
+BOT_TOKEN="$DRIDOCK_TELEGRAM_BOT_TOKEN"
 CHAT_ID="$TELEGRAM_CHAT_ID"
 
 mkdir -p "$WORKSPACE"
@@ -68,12 +65,12 @@ docker rm -f "$CNAME" >/dev/null 2>&1 || true
 docker run -d \
     --name "$CNAME" \
     --network host \
-    -e "CLAUDEBOX_MODE_CRON=1" \
-    -e "CLAUDEBOX_MODE_TELEGRAM=1" \
-    -e "CLAUDEBOX_MODE_CRON_FILE=/workspace/cron.yaml" \
-    -e "CLAUDEBOX_WORKSPACE=/workspace" \
+    -e "DRIDOCK_MODE_CRON=1" \
+    -e "DRIDOCK_MODE_TELEGRAM=1" \
+    -e "DRIDOCK_MODE_CRON_FILE=/workspace/cron.yaml" \
+    -e "DRIDOCK_WORKSPACE=/workspace" \
     -e "CLAUDE_CODE_OAUTH_TOKEN=$OAUTH" \
-    -e "CLAUDEBOX_TELEGRAM_BOT_TOKEN=$BOT_TOKEN" \
+    -e "DRIDOCK_TELEGRAM_BOT_TOKEN=$BOT_TOKEN" \
     -v "$WORKSPACE:/workspace" \
     -v "$WORKSPACE/.claude:/home/claude/.claude" \
     -v "$WORKSPACE/workspaces:/workspaces" \

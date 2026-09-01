@@ -352,8 +352,10 @@ mode (-p) they are validated against an allowlist first.
       image: this.imageName,
       network: "host",
       mounts: [
-        // SSH source (DRIDOCK_SSH_DIR / legacy CLAUDEBOX_SSH_DIR override)
-        { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? ctx.env.raw()["CLAUDEBOX_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
+        // SSH source (DRIDOCK_SSH_DIR override). The ~/.ssh/claudebox default PATH
+        // is deliberately unchanged in 5.0 — moving it would make users relocate
+        // their keys, which is a different migration from dropping env tiers.
+        { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
         // Per-project data dir — NOT the host global ~/.claude
         { host: dataDir, container: "/home/claude/.claude" },
         { host: ctx.cwd, container: ctx.cwd },
@@ -388,7 +390,7 @@ export function shellQuote(args: readonly string[]): string {
 
 /** Ports wrapper.sh's DRIDOCK_TMPFS_TMP resolution (:2882-2883). */
 function resolveTmpfs(env: Record<string, string | undefined>): readonly string[] {
-  const raw = env["DRIDOCK_TMPFS_TMP"] ?? env["CLAUDEBOX_TMPFS_TMP"] ?? env["CLAUDE_TMPFS_TMP"];
+  const raw = env["DRIDOCK_TMPFS_TMP"];
   if (raw === undefined || raw === "") return [];
   const size = raw === "1" || raw === "true" || raw === "yes" || raw === "on" ? "2g" : raw;
   return [`/tmp:size=${size},exec,mode=1777`];

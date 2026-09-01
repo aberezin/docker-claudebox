@@ -14,7 +14,7 @@ import { MachineConfig } from "../../services/MachineConfig.ts";
  * doesn't take it down with it).
  *
  * Resolution matches [[MachineConfig.projectDataDir]] — DRIDOCK_DATA_DIR
- * / CLAUDE_DATA_DIR override wins (used as-is, no /<id>/claude suffix);
+ * override wins (used as-is, no /<id>/claude suffix);
  * otherwise `<machine data_root>/<projectId>/claude`.
  */
 export class ClaudeDirCommand implements Command {
@@ -34,7 +34,7 @@ Print the host path of this project's ~/.claude state dir.`;
       // bypasses project detection entirely, matching bash's `if [ -n
       // "$_dd" ]; then printf …; else _cbid=… fi` shape.
       const rawEnv = ctx.env.raw();
-      const envOverride = rawEnv["DRIDOCK_DATA_DIR"] ?? rawEnv["CLAUDE_DATA_DIR"];
+      const envOverride = rawEnv["DRIDOCK_DATA_DIR"];
       if (envOverride !== undefined && envOverride !== "") {
         ctx.stdout.write(`${envOverride}\n`);
         return 0;

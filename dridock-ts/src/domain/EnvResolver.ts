@@ -1,36 +1,40 @@
 import { MissingEnvError } from "./errors.ts";
 
 /**
- * The three-tier env-var fallback dridock has carried since 3.0:
+ * Reads dridock's own settings from the environment: `DRIDOCK_<NAME>`.
  *
- *   ${DRIDOCK_X:-${CLAUDEBOX_X:-${CLAUDE_X:-default}}}
+ * **Single tier as of 5.0.0.** From 3.0 to 4.x this was a three-deep chain
+ * (`DRIDOCK_X` → `CLAUDEBOX_X` → `CLAUDE_X`) carrying the 2.x and upstream-1.x
+ * names. Those are gone; see docs/roadmap.md. Setting a `CLAUDEBOX_*` name now
+ * does nothing, which is the point — the tiers made it impossible for the test
+ * suite to tell which name a green run had actually exercised (#82).
  *
- * In bash this pattern was repeated at every read site, and every reader had
- * to remember to write the whole chain (bug #26 — 10 sites in the Python
- * daemons that only had `CLAUDEBOX_X` — was exactly this class of forgetting).
+ * Centralising the read still earns its keep: in bash the chain was retyped at
+ * every site and #26 found ten Python reads that had silently kept only one
+ * tier. One method, one definition of where a setting comes from.
  *
- * Here, one method call. The fallback chain lives in one place. `.require` throws
- * a typed `MissingEnvError` (exit 2) so callers can `catch (MissingEnvError)` if
- * they want to degrade gracefully, or let it bubble to `main` which uses the
- * exit code.
+ * Scope note: this class governs **dridock's** settings only. Genuine upstream
+ * Claude Code variables — `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`,
+ * `ANTHROPIC_API_KEY` — are read by name elsewhere and are untouched by the
+ * 5.0 removal.
  *
- * Removal in 4.0: the CLAUDEBOX_ and CLAUDE_ tiers go away then; this class's
- * `.get` will only look at DRIDOCK_. Callers don't change.
+ * `.require` throws a typed `MissingEnvError` (exit 2) so callers can catch it
+ * or let it bubble to `main`, which uses the exit code.
  */
 export class EnvResolver {
   constructor(private readonly env: Record<string, string | undefined>) {}
 
   /**
-   * Returns the first defined value across the three tiers, or the given
-   * default (or undefined) if none is set.
+   * Returns `DRIDOCK_<name>`, or the given default (or undefined) if unset.
+   *
+   * Single tier as of 5.0.0. The legacy `CLAUDEBOX_` (2.x) and `CLAUDE_` (1.x
+   * upstream) fallbacks are GONE — see docs/roadmap.md. Note this only ever
+   * governed dridock's OWN settings: genuinely upstream Claude Code vars
+   * (`CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`) were never read through
+   * here and are unaffected.
    */
   get(name: string, defaultValue?: string): string | undefined {
-    return (
-      this.env[`DRIDOCK_${name}`] ??
-      this.env[`CLAUDEBOX_${name}`] ??
-      this.env[`CLAUDE_${name}`] ??
-      defaultValue
-    );
+    return this.env[`DRIDOCK_${name}`] ?? defaultValue;
   }
 
   /**

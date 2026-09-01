@@ -10,7 +10,7 @@ export type WorkspaceGuardVerdict =
   | { kind: "ok" }
   | { kind: "in-dotdir"; dotName: ".dridock" | ".claudebox"; suggestedCd: string };
 
-const OVERRIDE_ENV_KEYS = ["DRIDOCK_ALLOW_SUBDIR", "CLAUDEBOX_ALLOW_SUBDIR", "CLAUDE_ALLOW_SUBDIR"] as const;
+const OVERRIDE_ENV_KEYS = ["DRIDOCK_ALLOW_SUBDIR"] as const;
 
 export function guardWorkspace(cwd: string, env: Record<string, string | undefined>, projectRoot: string): WorkspaceGuardVerdict {
   // Explicit override — user knows what they're doing.

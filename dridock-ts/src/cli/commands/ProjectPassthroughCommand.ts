@@ -125,7 +125,7 @@ export abstract class ProjectPassthroughCommand implements Command {
       mounts: [
         // SSH — needed if `claude mcp` ever gits (some MCP add commands
         // clone; matches bash's DOCKER_ARGS.).
-        { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? ctx.env.raw()["CLAUDEBOX_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
+        { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
         // THE fix: mount the per-project data dir at /home/claude/.claude
         // so `claude` (running with HOME=/home/claude → below) reads +
         // WRITES its config INSIDE the mount → persists on the Mac.

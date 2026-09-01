@@ -58,8 +58,6 @@ def _save_overrides() -> None:
 # BOT_TOKEN imported from telegram_utils
 CONFIG_PATH = (
     os.environ.get("DRIDOCK_TELEGRAM_CONFIG")
-    or os.environ.get("CLAUDEBOX_TELEGRAM_CONFIG")
-    or os.environ.get("CLAUDE_TELEGRAM_CONFIG")
     or "/home/claude/.claude/telegram.yml"
 )
 ROOT_WORKSPACE = "/workspaces"
@@ -73,17 +71,13 @@ if os.path.isfile(SYSTEM_HINT_FILE):
 _HOME = os.environ.get("HOME", "/home/claude")
 _CLAUDE_CONFIG_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path(_HOME) / ".claude"))
 IS_CRON_MODE = (
-    os.environ.get("DRIDOCK_MODE_CRON")
-    or os.environ.get("CLAUDEBOX_MODE_CRON")
-    or os.environ.get("CLAUDE_MODE_CRON", "")
+    os.environ.get("DRIDOCK_MODE_CRON", "")
 ) == "1"
 # Must match cron.py:44 tier-for-tier: in combined TELEGRAM+CRON mode both
 # daemons read this, and a var honoured by one and ignored by the other is
 # split-brain config inside one container (#26).
 CRON_FILE_PATH = (
-    os.environ.get("DRIDOCK_MODE_CRON_FILE")
-    or os.environ.get("CLAUDEBOX_MODE_CRON_FILE")
-    or os.environ.get("CLAUDE_MODE_CRON_FILE", "")
+    os.environ.get("DRIDOCK_MODE_CRON_FILE", "")
 )
 CRON_MESSAGES_FILE = _CLAUDE_CONFIG_DIR / "cron" / "telegram_messages.json"
 
@@ -96,8 +90,6 @@ def _slugify(path: str) -> str:
 # Tier-for-tier with cron.py:45 — see the note on CRON_FILE_PATH above.
 _CRON_WORKSPACE = (
     os.environ.get("DRIDOCK_WORKSPACE")
-    or os.environ.get("CLAUDEBOX_WORKSPACE")
-    or os.environ.get("CLAUDE_WORKSPACE")
     or "/workspace"
 )
 _CRON_HISTORY_ROOT = str(_CLAUDE_CONFIG_DIR / "cron" / "history" / _slugify(_CRON_WORKSPACE))
@@ -935,7 +927,7 @@ async def cmd_fetch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     if not BOT_TOKEN:
-        print("CLAUDEBOX_TELEGRAM_BOT_TOKEN not set", file=sys.stderr)
+        print("DRIDOCK_TELEGRAM_BOT_TOKEN not set", file=sys.stderr)
         sys.exit(1)
 
     logging.basicConfig(

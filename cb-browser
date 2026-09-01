@@ -71,7 +71,7 @@ _ensure_net() { docker network inspect "$NET" >/dev/null 2>&1 || docker network 
 # for belt-and-suspenders; 4.0 drops the shim so DRIDOCK_ is the survivor).
 # Refreshed each run, so it tracks rotation; the container can't self-discover it.
 # Empty => bridge/VM not ready.
-_vm_ip() { printf '%s' "${DRIDOCK_VM_IP:-${CLAUDEBOX_VM_IP:-}}"; }
+_vm_ip() { printf '%s' "${DRIDOCK_VM_IP:-}"; }
 
 # Ensure the debug Chrome has at least one page target before Playwright attaches.
 # Playwright's chromium.connectOverCDP against a stock (non-Playwright) Chrome falls
@@ -156,7 +156,7 @@ RUNNER
 
   script-cdp)
     script="${1:-}"; [ -f "$script" ] || _usage; shift
-    [ -n "${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" ] || {
+    [ -n "${DRIDOCK_HOST_CDP_URL:-}" ] || {
         echo "cb-browser script-cdp: no host CDP bridge. On the Mac run 'dridock browser-bridge up', then restart this session." >&2; exit 1; }
     sdir="$(cd "$(dirname "$script")" && pwd)"; sfile="$(basename "$script")"
     outdir="${CB_BROWSER_OUT:-$PWD/cb-browser-out}"; mkdir -p "$outdir"
@@ -167,7 +167,7 @@ RUNNER
     # dedicated (see browser-testing.md § "B security"); the human shouldn't be doing
     # casual browsing in it. Non-page targets (service workers, iframes, background_page,
     # workers) are never touched — we filter type=="page".
-    _cdp_base="$(printf '%s' "${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" | sed -E 's#/+$##')"
+    _cdp_base="$(printf '%s' "${DRIDOCK_HOST_CDP_URL:-}" | sed -E 's#/+$##')"
     # Auto-warm: our cleanup drives the debug Chrome to zero pages after a run whose
     # script only opened its own tabs, which would make the NEXT script-cdp/cdp attach
     # fail with "Browser.setDownloadBehavior: not supported". Fire BEFORE _pre so the
@@ -201,8 +201,8 @@ RUNNER
     # reach a --network host `docker run` that doesn't go through the dridock
     # entrypoint, so a sub-container script written to EITHER name must find it.
     # Values are the same and resolved via the shim above (either input works).
-    _cdp="${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}"
-    _ip="${DRIDOCK_VM_IP:-${CLAUDEBOX_VM_IP:-}}"
+    _cdp="${DRIDOCK_HOST_CDP_URL:-}"
+    _ip="${DRIDOCK_VM_IP:-}"
     docker run --rm --network host \
         -e CB_OUT=/out -e CDP_URL="$_cdp" \
         -e DRIDOCK_HOST_CDP_URL="$_cdp"    -e CLAUDEBOX_HOST_CDP_URL="$_cdp" \
@@ -241,7 +241,7 @@ RUNNER
 
   cdp)
     url="${1:-}"; [ -n "$url" ] || _usage
-    [ -n "${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" ] || {
+    [ -n "${DRIDOCK_HOST_CDP_URL:-}" ] || {
         echo "cb-browser: no host CDP bridge. On the Mac run 'dridock browser-bridge up', then restart this session." >&2; exit 1; }
     # The browser is the human's Chrome, ON THE MAC. It cannot reach your workload via
     # localhost/127.0.0.1 (that's the Mac's own loopback, not this VM) — only via the
@@ -262,7 +262,7 @@ RUNNER
     outdir="${2:-${CB_BROWSER_OUT:-$PWD/cb-browser-out}}"; mkdir -p "$outdir"
     # Same auto-warm as script-cdp — Playwright connectOverCDP fails against a stock
     # Chrome with zero page targets. See _cdp_ensure_page for the full rationale.
-    _cdp_base="$(printf '%s' "${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" | sed -E 's#/+$##')"
+    _cdp_base="$(printf '%s' "${DRIDOCK_HOST_CDP_URL:-}" | sed -E 's#/+$##')"
     _cdp_ensure_page "$_cdp_base"
     read -r -d '' runner <<'RUNNER' || true
 const { chromium } = require("playwright");
@@ -279,7 +279,7 @@ const { chromium } = require("playwright");
 })().catch(e => { console.error("cb-browser cdp error:", e.message); process.exit(1); });
 RUNNER
     # --network host so the container reaches the Mac's bridge (192.168.64.1) via col0
-    docker run --rm --network host -e TARGET="$url" -e CDP_URL="${DRIDOCK_HOST_CDP_URL:-${CLAUDEBOX_HOST_CDP_URL:-}}" -e CBR_RUNNER="$runner" \
+    docker run --rm --network host -e TARGET="$url" -e CDP_URL="${DRIDOCK_HOST_CDP_URL:-}" -e CBR_RUNNER="$runner" \
         -v "$outdir:/out" "$PW_IMAGE" \
         bash -lc "$INSTALL && printf '%s' \"\$CBR_RUNNER\" > /tmp/cdp.cjs && NODE_PATH=/pw/node_modules node /tmp/cdp.cjs"
     echo "cb-browser: opened $url in your Chrome (screenshot -> $outdir/cdp.png)" ;;

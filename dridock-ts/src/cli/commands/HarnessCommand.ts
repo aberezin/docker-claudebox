@@ -66,11 +66,17 @@ Harness-dev mode commands for working on dridock itself.`;
     // Guard 1: must be a harness fork
     const git = deps.git;
     const project = await new ProjectRootResolver(ctx.fs, git).resolve(ctx.cwd);
-    const wrapperShPath = `${project.root}/wrapper.sh`;
-    const wrapperText = await ctx.fs.readTextOrUndefined(wrapperShPath);
-    const isHarness = wrapperText !== undefined && /^DRIDOCK_VERSION=|^CLAUDEBOX_VERSION=/m.test(wrapperText);
+    // Fingerprint the fork by a file that actually exists. Until 5.0 this
+    // grepped `wrapper.sh` for DRIDOCK_VERSION= — but wrapper.sh was RETIRED in
+    // 4.0.0, so the guard could not recognise the harness repo itself and
+    // `dridock harness sync` had been dead since then, in the one place it is
+    // meant to run. entrypoint.sh:592 already switched to this fingerprint and
+    // says so ("replaces the pre-4.0.0 wrapper.sh + grep check that broke when
+    // wrapper.sh was deleted"); this call site was simply missed.
+    const fingerprint = `${project.root}/dridock-ts/src/domain/dridockVersion.ts`;
+    const isHarness = await ctx.fs.exists(fingerprint);
     if (!isHarness) {
-      ctx.stderr.write(`❌ dridock harness sync: ${project.root} is not a dridock harness fork (no wrapper.sh with DRIDOCK_VERSION= or CLAUDEBOX_VERSION= at its root).\n`);
+      ctx.stderr.write(`❌ dridock harness sync: ${project.root} is not a dridock harness fork (no dridock-ts/src/domain/dridockVersion.ts at its root).\n`);
       ctx.stderr.write(`   This command rebuilds the cb-infra image from a harness checkout; it's meaningful only when developing the harness itself.\n`);
       return 1;
     }

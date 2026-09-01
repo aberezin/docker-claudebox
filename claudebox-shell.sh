@@ -82,7 +82,7 @@ cbx-claude() {
 }
 
 # print this project's host .claude data dir (authoritative — asks the wrapper so it
-# respects any data_root / CLAUDEBOX_DATA_DIR override). `-o` opens it (macOS Finder).
+# respects any data_root / DRIDOCK_DATA_DIR override). `-o` opens it (macOS Finder).
 cbx-claude-dir() {
     local d
     if command -v dridock >/dev/null 2>&1; then

@@ -2,8 +2,8 @@ import { test, expect, describe } from "bun:test";
 import { EnvResolver } from "./EnvResolver.ts";
 import { MissingEnvError } from "./errors.ts";
 
-describe("EnvResolver.get — three-tier fallback", () => {
-  test("prefers DRIDOCK_ over CLAUDEBOX_ over CLAUDE_", () => {
+describe("EnvResolver.get — single DRIDOCK_ tier (5.0.0)", () => {
+  test("reads DRIDOCK_ and ignores the removed legacy tiers", () => {
     const r = new EnvResolver({
       DRIDOCK_MODE_API_TOKEN: "dridock-wins",
       CLAUDEBOX_MODE_API_TOKEN: "claudebox-loses",
@@ -12,17 +12,30 @@ describe("EnvResolver.get — three-tier fallback", () => {
     expect(r.get("MODE_API_TOKEN")).toBe("dridock-wins");
   });
 
-  test("falls back to CLAUDEBOX_ when DRIDOCK_ is unset", () => {
+  test("legacy CLAUDEBOX_ is IGNORED (tier removed in 5.0.0)", () => {
     const r = new EnvResolver({
-      CLAUDEBOX_MODE_API_TOKEN: "claudebox-wins",
-      CLAUDE_MODE_API_TOKEN: "claude-loses",
+      CLAUDEBOX_MODE_API_TOKEN: "legacy-ignored",
+      CLAUDE_MODE_API_TOKEN: "legacy-ignored-too",
     });
-    expect(r.get("MODE_API_TOKEN")).toBe("claudebox-wins");
+    // Deliberately undefined, not a fallback. Through 4.x these silently won,
+    // which is what made a green suite unable to prove the documented name
+    // worked (#82). See docs/roadmap.md.
+    expect(r.get("MODE_API_TOKEN")).toBeUndefined();
   });
 
-  test("falls back to CLAUDE_ when neither DRIDOCK_ nor CLAUDEBOX_ is set", () => {
-    const r = new EnvResolver({ CLAUDE_MODE_API_TOKEN: "claude-wins" });
-    expect(r.get("MODE_API_TOKEN")).toBe("claude-wins");
+  test("a default still applies when only legacy names are set", () => {
+    const r = new EnvResolver({ CLAUDEBOX_MODE_API_PORT: "9999" });
+    // The legacy value must not leak in ahead of the default either.
+    expect(r.get("MODE_API_PORT", "8080")).toBe("8080");
+  });
+
+  test("DRIDOCK_ wins and is the only tier consulted", () => {
+    const r = new EnvResolver({
+      DRIDOCK_MODE_API_TOKEN: "canonical",
+      CLAUDEBOX_MODE_API_TOKEN: "legacy",
+      CLAUDE_MODE_API_TOKEN: "older",
+    });
+    expect(r.get("MODE_API_TOKEN")).toBe("canonical");
   });
 
   test("returns undefined when no tier has it AND no default given", () => {
@@ -101,8 +114,9 @@ describe("EnvResolver.bool — bash `case ... in 1|true|yes|on)` idiom", () => {
     expect(r.bool("FEATURE")).toBe(false);
   });
 
-  test("respects the same three-tier fallback as `get`", () => {
-    const r = new EnvResolver({ CLAUDEBOX_FEATURE: "1" });
-    expect(r.bool("FEATURE")).toBe(true);
+  test("bool reads the same single tier as `get`", () => {
+    expect(new EnvResolver({ DRIDOCK_MINIMAL: "1" }).bool("MINIMAL")).toBe(true);
+    // Legacy name set, canonical absent -> false, not true.
+    expect(new EnvResolver({ CLAUDEBOX_MINIMAL: "1" }).bool("MINIMAL")).toBe(false);
   });
 });

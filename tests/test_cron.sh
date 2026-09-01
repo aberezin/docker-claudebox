@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Tests cron mode end-to-end.
-# Spawns the claudebox image with CLAUDEBOX_MODE_CRON=1 + a yaml,
+# Spawns the claudebox image with DRIDOCK_MODE_CRON=1 + a yaml,
 # waits for the schedule to fire, verifies the history dir and files.
 
 _cron_setup_dirs() {
@@ -32,9 +32,9 @@ EOF
     local out rc
     out=$(docker run --rm --name "$cname" \
         --network host \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -v "$cron_file:/cron.yaml:ro" \
@@ -62,7 +62,7 @@ test_cron_missing_file_env_fails() {
     local out rc
     out=$(docker run --rm --name "$cname" \
         --network host \
-        -e "CLAUDEBOX_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON=1" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         "$IMAGE" 2>&1)
@@ -96,9 +96,9 @@ EOF
     # run for a few seconds, then kill it
     docker run -d --name "$cname" \
         --network host \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "DEBUG=true" \
@@ -137,9 +137,9 @@ EOF
     local cname="claudebox-cron-test-$$-$RANDOM"
     local out rc
     out=$(docker run --rm --name "$cname" \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
         -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \
@@ -168,9 +168,9 @@ EOF
     local cname="claudebox-cron-test-$$-$RANDOM"
     local out rc
     out=$(docker run --rm --name "$cname" \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
         -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \
@@ -199,9 +199,9 @@ EOF
     local cname="claudebox-cron-test-$$-$RANDOM"
 
     docker run -d --name "$cname" \
-        -e "CLAUDE_MODE_CRON=1" \
-        -e "CLAUDE_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
         -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \
@@ -239,9 +239,9 @@ EOF
 
     docker run -d --name "$cname" \
         --network host \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "DEBUG=true" \
@@ -370,9 +370,9 @@ EOF
 
     local cname="claudebox-cron-test-$$-$RANDOM"
     docker run -d --name "$cname" \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDEBOX_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
         -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \
@@ -422,9 +422,9 @@ EOF
 
     docker run -d --name "$cname" \
         --network host \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDEBOX_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -v "$cron_file:/cron.yaml:ro" \
@@ -500,9 +500,9 @@ EOF
     local cname="dridock-cron-6field-$$-$RANDOM"
     docker run -d --name "$cname" \
         --network host \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -v "$cron_file:/cron.yaml:ro" \
@@ -566,9 +566,9 @@ EOF
     local cname="dridock-cron-overlap-$$-$RANDOM"
     docker run -d --name "$cname" \
         --network host \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDE_WORKSPACE=$CRON_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "DEBUG=true" \

@@ -22,8 +22,8 @@ _api_start() {
         --network host \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
-        -e "CLAUDE_MODE_API=1" \
-        -e "CLAUDE_MODE_API_PORT=$API_PORT" \
+        -e "DRIDOCK_MODE_API=1" \
+        -e "DRIDOCK_MODE_API_PORT=$API_PORT" \
         -v "$_api_claude_tmp:/home/claude/.claude" \
         "$@" \
         "$IMAGE"
@@ -153,7 +153,7 @@ AUTH_CASES=(
 )
 
 test_api_auth() {
-    _api_start "${API_CONTAINER}-auth" -e "CLAUDE_MODE_API_TOKEN=secret" || return 1
+    _api_start "${API_CONTAINER}-auth" -e "DRIDOCK_MODE_API_TOKEN=secret" || return 1
 
     local entry label endpoint auth_header expected_code expected_body
     for entry in "${AUTH_CASES[@]}"; do
@@ -625,7 +625,7 @@ MCP_AUTH_CASES=(
 )
 
 test_api_mcp_auth() {
-    _api_start "${API_CONTAINER}-mcp-auth" -e "CLAUDE_MODE_API_TOKEN=mcpsecret" || return 1
+    _api_start "${API_CONTAINER}-mcp-auth" -e "DRIDOCK_MODE_API_TOKEN=mcpsecret" || return 1
 
     local entry label method expected_code expected_body
     for entry in "${MCP_AUTH_CASES[@]}"; do

@@ -34,7 +34,7 @@ export interface AutoMigrateDeps {
 }
 
 export async function autoMigrateIfNeeded(root: string, deps: AutoMigrateDeps): Promise<readonly MigrationReport[]> {
-  if (truthy(deps.env["DRIDOCK_NO_AUTO_MIGRATE"] ?? deps.env["CLAUDEBOX_NO_AUTO_MIGRATE"] ?? deps.env["CLAUDE_NO_AUTO_MIGRATE"])) {
+  if (truthy(deps.env["DRIDOCK_NO_AUTO_MIGRATE"])) {
     return [];
   }
   const hasLegacy = await deps.fs.isDirectory(`${root}/.claudebox`);

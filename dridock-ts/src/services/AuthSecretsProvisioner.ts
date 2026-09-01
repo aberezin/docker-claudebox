@@ -39,9 +39,9 @@ export class AuthSecretsProvisioner {
     // deliberately doesn't want a specific token forwarded. Bash reads
     // these at wrapper.sh:2277-2278; empty-out the field but still write
     // the sidecar so a prior run's token doesn't leak.
-    const anthropicKey = truthy(this.env["DRIDOCK_NO_API_KEY"] ?? this.env["CLAUDEBOX_NO_API_KEY"] ?? this.env["CLAUDE_NO_API_KEY"])
+    const anthropicKey = truthy(this.env["DRIDOCK_NO_API_KEY"])
       ? "" : (this.env["ANTHROPIC_API_KEY"] ?? "");
-    const oauthToken = truthy(this.env["DRIDOCK_NO_OAUTH_TOKEN"] ?? this.env["CLAUDEBOX_NO_OAUTH_TOKEN"] ?? this.env["CLAUDE_NO_OAUTH_TOKEN"])
+    const oauthToken = truthy(this.env["DRIDOCK_NO_OAUTH_TOKEN"])
       ? "" : (this.env["CLAUDE_CODE_OAUTH_TOKEN"] ?? "");
     const content = `ANTHROPIC_API_KEY=${anthropicKey}\nCLAUDE_CODE_OAUTH_TOKEN=${oauthToken}\n`;
     await this.sidecars.writeAllRoles("auth", content);

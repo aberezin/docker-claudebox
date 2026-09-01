@@ -47,8 +47,8 @@ export class BridgeStateReader {
     const pid = Number(pidRaw.trim());
     if (!Number.isFinite(pid) || pid <= 0) return { url: "", token: "" };
     if (!(await this.probe.processAlive(pid))) return { url: "", token: "" };
-    const bind = this.env["DRIDOCK_HOST_AGENT_BIND"] ?? this.env["CLAUDEBOX_HOST_AGENT_BIND"] ?? "192.168.64.1";
-    const port = this.env["DRIDOCK_HOST_AGENT_PORT"] ?? this.env["CLAUDEBOX_HOST_AGENT_PORT"] ?? "8790";
+    const bind = this.env["DRIDOCK_HOST_AGENT_BIND"] ?? "192.168.64.1";
+    const port = this.env["DRIDOCK_HOST_AGENT_PORT"] ?? "8790";
     return { url: `${bind}:${port}`, token };
   }
 }

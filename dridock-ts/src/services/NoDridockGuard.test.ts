@@ -157,7 +157,9 @@ describe("shouldCheckNoDridock — dispatch-level policy", () => {
     expect(shouldCheckNoDridock(["definitely not a verb"], noCronEnv)).toBe(false);
   });
 
-  test("legacy CLAUDE_MODE_CRON=1 also triggers cron-mode guard (bash-parity)", () => {
-    expect(shouldCheckNoDridock(["help"], { CLAUDE_MODE_CRON: "1" })).toBe(true);
+  test("legacy CLAUDE_MODE_CRON=1 no longer triggers the cron-mode guard (5.0.0)", () => {
+    expect(shouldCheckNoDridock(["help"], { CLAUDE_MODE_CRON: "1" })).toBe(false);
+    // Canonical still triggers it.
+    expect(shouldCheckNoDridock(["help"], { DRIDOCK_MODE_CRON: "1" })).toBe(true);
   });
 });

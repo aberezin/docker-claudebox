@@ -26,8 +26,11 @@ describe("guardWorkspace", () => {
     expect(guardWorkspace("/repo/.dridock", { DRIDOCK_ALLOW_SUBDIR: "1" }, "/repo").kind).toBe("ok");
   });
 
-  test("legacy CLAUDEBOX_ALLOW_SUBDIR=1 also overrides (one deprecation cycle)", () => {
-    expect(guardWorkspace("/repo/.dridock", { CLAUDEBOX_ALLOW_SUBDIR: "true" }, "/repo").kind).toBe("ok");
+  test("legacy CLAUDEBOX_ALLOW_SUBDIR=1 no longer overrides (5.0.0)", () => {
+    // The legacy name is inert: the guard still fires.
+    expect(guardWorkspace("/repo/.dridock", { CLAUDEBOX_ALLOW_SUBDIR: "true" }, "/repo").kind).toBe("in-dotdir");
+    // ...and the canonical one still works.
+    expect(guardWorkspace("/repo/.dridock", { DRIDOCK_ALLOW_SUBDIR: "1" }, "/repo").kind).toBe("ok");
   });
 
   test("random truthy strings don't override — only whitelist values", () => {

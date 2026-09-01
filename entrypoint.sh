@@ -2,7 +2,7 @@
 
 dbg() { [ "${DEBUG:-}" = "true" ] && echo "[DEBUG $(date +%H:%M:%S.%3N)] $*" >&2; }
 
-# CLAUDEBOX_* is canonical; CLAUDE_* still accepted for backwards compat
+# DRIDOCK_* is the only tier (5.0.0). Upstream CLAUDE_CODE_* / CLAUDE_CONFIG_DIR are unrelated.
 CLAUDE_CONTAINER_NAME="${DRIDOCK_CONTAINER_NAME:-${CLAUDE_CONTAINER_NAME:-}}"
 CLAUDE_WORKSPACE="${DRIDOCK_WORKSPACE:-${CLAUDE_WORKSPACE:-}}"
 CLAUDE_GIT_NAME="${DRIDOCK_GIT_NAME:-${CLAUDE_GIT_NAME:-}}"
@@ -510,8 +510,8 @@ outside the workspace and `~/.claude`. After a rebuild/recreate they're gone.
   `cb-*` remains canonical. Type whichever feels natural.
 - ~/.claude/bin is in PATH — custom scripts placed here by the user are available to you
 - ~/.claude/init.d/*.sh scripts run once on first container create (not on subsequent starts)
-- Extra host directories may be mounted via DRIDOCK_MOUNT_* env vars (legacy CLAUDEBOX_MOUNT_* still accepted) — check what's available if you need files outside the workspace
-- During 3.x, `DRIDOCK_*` and `CLAUDEBOX_*` env vars are interchangeable INSIDE the container: the entrypoint mirrors every renamed pair symmetrically at boot (from `/usr/local/lib/dridock/env-rename.map`). Prefer the `DRIDOCK_*` name in new code and new `~/.claude/init.d/` hooks; legacy `CLAUDEBOX_*` names go away in 4.0. Baked `cb-*` helpers currently mostly read legacy names — the shim makes that work; migrate any you edit to `${DRIDOCK_X:-${CLAUDEBOX_X:-}}` while you're in the file.
+- Extra host directories may be mounted via DRIDOCK_MOUNT_* env vars — check what's available if you need files outside the workspace
+- Every dridock setting is read as `DRIDOCK_X` and **only** `DRIDOCK_X`. The legacy `CLAUDEBOX_*` / `CLAUDE_*` tiers, and the boot-time aliaser that mirrored them, were removed in 5.0.0 — setting a `CLAUDEBOX_*` name now does nothing at all, silently. If a setting isn't taking effect, check its prefix first. Genuine upstream Claude Code variables (`CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CONFIG_DIR`, `ANTHROPIC_API_KEY`) were never part of that rename and are unaffected. See docs/roadmap.md.
 
 ## Remember
 This file is FRAMEWORK guidance (user memory), not your project's CLAUDE.md — it is rewritten
@@ -842,7 +842,7 @@ _load_env_sidecar secrets   secret
 _load_env_sidecar cdp       cdp
 _load_env_sidecar vmip      vmip
 _load_env_sidecar hostagent hostagent
-# #30 — DRIDOCK_ENV_* / CLAUDEBOX_ENV_* / CLAUDE_ENV_* forwarded values.
+# #30 — DRIDOCK_ENV_* forwarded values.
 # Pre-3.3.0 these rode `-e` on docker run only, so a CHANGED value silently
 # no-op'd on `docker start` (a container that already existed). Now they also
 # land in a chmod-600 `.<name>-env` sidecar the wrapper rewrites each run;
@@ -854,36 +854,12 @@ _load_env_sidecar hostagent hostagent
 # of Part 1 scope; document it in docs/environment-variables.md.
 _load_env_sidecar env       forwarded-env
 
-# ── 3.x env-var rename compat shim (#16, standardized in 3.2.1) ─────────────
-# Mirror every DRIDOCK_X ↔ CLAUDEBOX_X pair from the shared rename map so both
-# names are usable by any downstream process — legacy-reading cb-* helpers
-# (cb-browser, cb-consult, cb-report-bug, cb-harness-watch-consults, cb-host-shim)
-# see the CLAUDEBOX_X name they expect; new code that reads only DRIDOCK_X also
-# works. Symmetric, both directions per pair.
-#
-# ORDER MATTERS: this MUST fire AFTER the _load_env_sidecar calls above. Sidecars
-# are the durability layer — they carry the canonical DRIDOCK_X value (and may
-# explicitly UNSET it, e.g. bridge-down clears DRIDOCK_HOST_CDP_URL). Running
-# the alias BEFORE would let a stale CLAUDEBOX_X from an older `docker run -e`
-# shadow an intentionally-empty sidecar entry, so the canonical clear would
-# never take effect. Post-sidecar: the sidecar wins and its value propagates.
-#
-# Removed in 4.0 together with wrapper.sh's _dridock_alias.
-# See docs/design/env-var-rename.md for the full standard.
-_dridock_alias_env() {
-	local map=/usr/local/lib/dridock/env-rename.map new legacy rest
-	[ -r "$map" ] || return 0
-	while read -r new legacy rest; do
-		case "$new" in ''|'#'*) continue ;; esac
-		[ -n "$legacy" ] || continue
-		if   [ -n "${!new:-}"    ] && [ -z "${!legacy:-}" ]; then
-			export "$legacy=${!new}"
-		elif [ -n "${!legacy:-}" ] && [ -z "${!new:-}"    ]; then
-			export "$new=${!legacy}"
-		fi
-	done < "$map"
-}
-_dridock_alias_env
+# Env aliasing REMOVED in 5.0.0. Through 4.x this mirrored every
+# DRIDOCK_X ↔ CLAUDEBOX_X pair from a rename map so legacy-reading helpers
+# kept working. It also made the test suite unable to tell which name a
+# green run had actually exercised (#82) — the shim was simultaneously the
+# compatibility layer and the thing hiding whether anything else worked.
+# Everything now reads DRIDOCK_X only. See docs/roadmap.md.
 
 # ── XDG_CONFIG_HOME → ~/.claude/xdg-config (persistence, #58) ────────────────
 # Fix for the silent-event-loss-on-rebuild class Arfy caught in #56 review
@@ -924,7 +900,7 @@ chmod 700 /home/claude/.claude/xdg-config 2>/dev/null || true
 export XDG_CONFIG_HOME=/home/claude/.claude/xdg-config
 dbg "XDG_CONFIG_HOME=$XDG_CONFIG_HOME (persistence via ~/.claude bind mount, #58)"
 
-# mode env vars — CLAUDEBOX_MODE_* canonical, CLAUDE_MODE_* legacy fallback
+# mode env vars — DRIDOCK_MODE_* only (5.0.0)
 _mode_api="${DRIDOCK_MODE_API:-${CLAUDE_MODE_API:-}}"
 _mode_api_port="${DRIDOCK_MODE_API_PORT:-${CLAUDE_MODE_API_PORT:-8080}}"
 _mode_telegram="${DRIDOCK_MODE_TELEGRAM:-${CLAUDE_MODE_TELEGRAM:-}}"

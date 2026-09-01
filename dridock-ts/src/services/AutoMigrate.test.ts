@@ -46,12 +46,14 @@ describe("autoMigrateIfNeeded", () => {
     expect(await fs.exists("/repo/.claudebox/config.yml")).toBe(true);
   });
 
-  test("legacy CLAUDEBOX_NO_AUTO_MIGRATE also honored", async () => {
+  test("legacy CLAUDEBOX_NO_AUTO_MIGRATE is IGNORED (tier removed in 5.0.0)", async () => {
     const { fs, notices, deps } = build({ CLAUDEBOX_NO_AUTO_MIGRATE: "true" });
     fs.seedDir("/repo/.claudebox");
     fs.seed("/repo/.claudebox/config.yml", "id: abc\n");
-    expect(await autoMigrateIfNeeded("/repo", deps)).toEqual([]);
-    expect(notices).toEqual([]);
+    // The legacy opt-out no longer suppresses anything, so the migration RUNS.
+    // Only DRIDOCK_NO_AUTO_MIGRATE opts out now.
+    expect((await autoMigrateIfNeeded("/repo", deps)).length).toBeGreaterThan(0);
+    expect(notices.length).toBeGreaterThan(0);
   });
 
   test("legacy-only project → migrates config.yml + emits notice + returns applied reports", async () => {

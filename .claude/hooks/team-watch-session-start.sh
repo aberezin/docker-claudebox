@@ -452,7 +452,7 @@ fi
 # to EOF, having said out loud what we skipped. Advancing only to the
 # emitted start would re-cap the same window on every subsequent run,
 # forever.
-_MAX_DRAIN_BYTES="${DRIDOCK_TEAM_MAX_DRAIN_BYTES:-${CLAUDEBOX_TEAM_MAX_DRAIN_BYTES:-102400}}"
+_MAX_DRAIN_BYTES="${DRIDOCK_TEAM_MAX_DRAIN_BYTES:-102400}"
 _is_uint "$_MAX_DRAIN_BYTES" || {
     echo "team-watch: DRIDOCK_TEAM_MAX_DRAIN_BYTES='$_MAX_DRAIN_BYTES' is not a non-negative integer — using 102400." >&2
     _MAX_DRAIN_BYTES=102400

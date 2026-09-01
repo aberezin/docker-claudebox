@@ -62,11 +62,11 @@ case "$CLAUDE_VERSION_OVERRIDE" in
 		;;
 esac
 
-BIN_NAME="${1:-${DRIDOCK_BIN_NAME:-${CLAUDEBOX_BIN_NAME:-${CLAUDE_BIN_NAME:-dridock}}}}"
+BIN_NAME="${1:-${DRIDOCK_BIN_NAME:-dridock}}"
 # Default to a user-writable dir so install needs no sudo (this fork avoids macOS
-# sudo). Override with DRIDOCK_INSTALL_DIR (legacy CLAUDEBOX_INSTALL_DIR / CLAUDE_INSTALL_DIR
+# sudo). Override with DRIDOCK_INSTALL_DIR
 # still accepted for one deprecation cycle).
-INSTALL_DIR="${DRIDOCK_INSTALL_DIR:-${CLAUDEBOX_INSTALL_DIR:-${CLAUDE_INSTALL_DIR:-$HOME/.local/bin}}}"
+INSTALL_DIR="${DRIDOCK_INSTALL_DIR:-$HOME/.local/bin}"
 BIN_PATH="$INSTALL_DIR/$BIN_NAME"
 
 echo "🚀 Starting dridock setup (binary: $BIN_NAME)..."
@@ -115,10 +115,10 @@ fi
 # run from a checkout of the repo (the Dockerfile and dridock-ts/ live next to it).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/null}")" 2>/dev/null && pwd)"
 
-IMAGE_NAME="${DRIDOCK_IMAGE_NAME:-${CLAUDEBOX_IMAGE_NAME:-dridock}}"
+IMAGE_NAME="${DRIDOCK_IMAGE_NAME:-dridock}"
 CLAUDE_TAG="latest"
 BUILD_TARGET="full"
-_minimal="${DRIDOCK_MINIMAL:-${CLAUDEBOX_MINIMAL:-${CLAUDE_MINIMAL:-}}}"
+_minimal="${DRIDOCK_MINIMAL:-}"
 if [ -n "$_minimal" ]; then
 	CLAUDE_TAG="latest-minimal"
 	BUILD_TARGET="minimal"
@@ -139,16 +139,15 @@ fi
 # Build into a dedicated cb-infra colima profile (never the human's default VM).
 # Project VMs are seeded from it via save|load at run time. See
 # docs/design/per-project-vm.md.
-CB_INFRA_PROFILE="${DRIDOCK_INFRA_PROFILE:-${CLAUDEBOX_INFRA_PROFILE:-cb-infra}}"
+CB_INFRA_PROFILE="${DRIDOCK_INFRA_PROFILE:-cb-infra}"
 CB_INFRA_CTX="colima-$CB_INFRA_PROFILE"
 if ! colima status -p "$CB_INFRA_PROFILE" >/dev/null 2>&1; then
 	echo "🟢 Starting '$CB_INFRA_PROFILE' colima VM (image store, one-time)..."
 	# cb-infra only builds + serves the image (via save|load); it runs no workloads,
 	# so it stays light. Idle use is ~430MB. Bump DRIDOCK_INFRA_MEMORY (e.g. 6) if
 	# building the heavier `full` image ever runs short on memory. Legacy
-	# CLAUDEBOX_INFRA_* names accepted for one deprecation cycle.
 	if ! colima start -p "$CB_INFRA_PROFILE" \
-		--cpu "${DRIDOCK_INFRA_CPU:-${CLAUDEBOX_INFRA_CPU:-2}}" --memory "${DRIDOCK_INFRA_MEMORY:-${CLAUDEBOX_INFRA_MEMORY:-4}}" --disk "${DRIDOCK_INFRA_DISK:-${CLAUDEBOX_INFRA_DISK:-40}}"; then
+		--cpu "${DRIDOCK_INFRA_CPU:-2}" --memory "${DRIDOCK_INFRA_MEMORY:-4}" --disk "${DRIDOCK_INFRA_DISK:-40}"; then
 		echo "❌ Failed to start the $CB_INFRA_PROFILE colima VM."
 		exit 1
 	fi
@@ -253,21 +252,11 @@ if [ -f "$SCRIPT_DIR/host-agent.py" ]; then
 	echo "📝 Installed host-agent.py to $INSTALL_DIR (for '$BIN_NAME host-agent')"
 fi
 
-# Install the shared env-rename map (#16, 3.2.1) into the XDG data dir. Same file
-# is baked into the container image at /usr/local/lib/dridock/env-rename.map for
-# the entrypoint's symmetric aliaser (CLAUDEBOX_* ↔ DRIDOCK_* legacy compat).
-# Best-effort. See docs/design/env-var-rename.md.
-if [ -f "$SCRIPT_DIR/env-rename.map" ]; then
-	DRIDOCK_SHARE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/dridock"
-	if mkdir -p "$DRIDOCK_SHARE_DIR" 2>/dev/null && install -m 644 "$SCRIPT_DIR/env-rename.map" "$DRIDOCK_SHARE_DIR/env-rename.map" 2>/dev/null; then
-		echo "📝 Installed env-rename.map to $DRIDOCK_SHARE_DIR (CLAUDEBOX_* ↔ DRIDOCK_* compat)"
-	fi
-fi
 
 # Install the /dridock Claude Code skill (human status glance) into the user's global
 # skills dir, so /dridock works in any project. Skip with DRIDOCK_SKIP_SKILL=1
-# (CLAUDEBOX_SKIP_SKILL still accepted for one deprecation cycle).
-if [ -z "${DRIDOCK_SKIP_SKILL:-${CLAUDEBOX_SKIP_SKILL:-}}" ] && [ -d "$SCRIPT_DIR/skills" ]; then
+#
+if [ -z "${DRIDOCK_SKIP_SKILL:-}" ] && [ -d "$SCRIPT_DIR/skills" ]; then
 	SKILLS_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills"
 	if mkdir -p "$SKILLS_DIR" 2>/dev/null && cp -R "$SCRIPT_DIR/skills/." "$SKILLS_DIR/" 2>/dev/null; then
 		echo "📝 Installed Claude Code skill(s) to $SKILLS_DIR (use /dridock in a project)"
@@ -276,14 +265,14 @@ fi
 
 # Install the shell helpers (cbx-ps / cbx-sh / cbx-vm / cbx-claude + tab-completion)
 # and source them from your rc. Skip with DRIDOCK_SKIP_SHELL_HELPERS=1 (legacy
-# CLAUDEBOX_SKIP_SHELL_HELPERS accepted for one deprecation cycle).
-if [ -z "${DRIDOCK_SKIP_SHELL_HELPERS:-${CLAUDEBOX_SKIP_SHELL_HELPERS:-}}" ] && [ -f "$SCRIPT_DIR/claudebox-shell.sh" ]; then
-	# Prefer DRIDOCK_ override, then legacy CLAUDEBOX_ override, then default
+#
+if [ -z "${DRIDOCK_SKIP_SHELL_HELPERS:-}" ] && [ -f "$SCRIPT_DIR/claudebox-shell.sh" ]; then
+	# Prefer the DRIDOCK_ override, else the default
 	# ~/.local/share/dridock/. Legacy ~/.local/share/claudebox/ is NEVER
 	# auto-migrated. If both dirs co-exist post-upgrade, we install to dridock/
 	# and print a one-liner recommending cleanup.
 	_LEGACY_SHARE="$HOME/.local/share/claudebox"
-	SHARE_DIR="${DRIDOCK_SHARE_DIR:-${CLAUDEBOX_SHARE_DIR:-$HOME/.local/share/dridock}}"
+	SHARE_DIR="${DRIDOCK_SHARE_DIR:-$HOME/.local/share/dridock}"
 	mkdir -p "$SHARE_DIR"
 	install -m 644 "$SCRIPT_DIR/claudebox-shell.sh" "$SHARE_DIR/claudebox-shell.sh"
 	if [ "$SHARE_DIR" != "$_LEGACY_SHARE" ] && [ -e "$_LEGACY_SHARE/claudebox-shell.sh" ]; then

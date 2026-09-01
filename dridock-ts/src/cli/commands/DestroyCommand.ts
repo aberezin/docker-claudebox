@@ -23,7 +23,7 @@ import { RealGitToplevel } from "../../infra/GitToplevel.ts";
  * also reclaims previously-leaked disks.
  *
  * `--purge` also removes the per-project data dir. Guards:
- *   - Refuses when DRIDOCK_DATA_DIR / CLAUDE_DATA_DIR override is set
+ *   - Refuses when DRIDOCK_DATA_DIR override is set
  *     (that path is arbitrary/user-owned; only the user removes it).
  *   - Refuses if the id doesn't look like a real project id
  *     (hex-only; matches bash's `case "$id" in *[!0-9a-f]*)` guard).
@@ -102,7 +102,7 @@ image store and any non-mounted state go with it.`;
     }
     // Guard 2: refuse when DRIDOCK_DATA_DIR override is set (matches
     // wrapper.sh:822 — that path is arbitrary/user-owned).
-    const dataDirOverride = ctx.env.raw()["DRIDOCK_DATA_DIR"] ?? ctx.env.raw()["CLAUDE_DATA_DIR"];
+    const dataDirOverride = ctx.env.raw()["DRIDOCK_DATA_DIR"];
     if (dataDirOverride !== undefined && dataDirOverride !== "") {
       ctx.stderr.write(`⚠ DRIDOCK_DATA_DIR override is set — not auto-deleting it; remove it yourself: ${dataDirOverride}\n`);
       return 0;

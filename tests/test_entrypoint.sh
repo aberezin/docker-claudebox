@@ -148,8 +148,8 @@ test_entrypoint_auto_continue() {
     out=$(docker run --rm \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
-        -e "CLAUDE_WORKSPACE=/workspace" \
-        -e "CLAUDE_CONTAINER_NAME=${CONTAINER_PREFIX}-autocont" \
+        -e "DRIDOCK_WORKSPACE=/workspace" \
+        -e "DRIDOCK_CONTAINER_NAME=${CONTAINER_PREFIX}-autocont" \
         "$IMAGE" \
         -p "respond with exactly AUTOCONT" --output-format text --model "$TEST_MODEL" 2>&1)
     assert_contains "$out" "AUTOCONT" "auto-continue fallback works"

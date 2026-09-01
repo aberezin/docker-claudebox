@@ -52,8 +52,8 @@ DOCKER_RUN_ARGS=(
     --rm
     --network host
     "${AUTH_ENV_ARGS[@]}"
-    -e "CLAUDE_WORKSPACE=/workspace"
-    -e "CLAUDE_CONTAINER_NAME=${CONTAINER_PREFIX}"
+    -e "DRIDOCK_WORKSPACE=/workspace"
+    -e "DRIDOCK_CONTAINER_NAME=${CONTAINER_PREFIX}"
 )
 
 # ── assertions ───────────────────────────────────────────────────────────────

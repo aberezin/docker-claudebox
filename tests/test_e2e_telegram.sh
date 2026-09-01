@@ -260,13 +260,13 @@ _e2e_run_dridock_cron_tg() {
     E2E_DRIDOCK_NAME="dridock-e2e-$$-$RANDOM"
     docker run -d --name "$E2E_DRIDOCK_NAME" \
         --network host \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_TELEGRAM=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDEBOX_WORKSPACE=$E2E_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_TELEGRAM=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$E2E_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
-        -e "CLAUDEBOX_TELEGRAM_BOT_TOKEN=$CLAUDEBOX_TELEGRAM_BOT_TOKEN" \
+        -e "DRIDOCK_TELEGRAM_BOT_TOKEN=$CLAUDEBOX_TELEGRAM_BOT_TOKEN" \
         -e "DEBUG=true" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$E2E_TMP/home/.claude:/home/claude/.claude" \

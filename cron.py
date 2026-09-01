@@ -5,13 +5,13 @@ Reads a yaml of jobs (cron schedule + multiline instruction) and fires
 `claude -p ...` per match. Streams output to ~/.claude/cron/history/<workspace-slug>/<timestamp>-<job>/.
 
 Activated when DRIDOCK_MODE_CRON=1. Yaml path from DRIDOCK_MODE_CRON_FILE.
-Workspace from CLAUDEBOX_WORKSPACE (legacy CLAUDE_WORKSPACE still accepted).
+Workspace from DRIDOCK_WORKSPACE.
 
 Template variables (expanded at fire time in instruction, system_prompt, append_system_prompt):
   {system_datetime} — current UTC datetime, e.g. "2026-04-29 14:35:00 UTC"
   {job_name}        — the job's name field
 
-Optional telegram notification: set telegram_chat_id (root or per-job) + CLAUDEBOX_TELEGRAM_BOT_TOKEN
+Optional telegram notification: set telegram_chat_id (root or per-job) + DRIDOCK_TELEGRAM_BOT_TOKEN
 to have Claude's result sent to a Telegram chat after each job finishes.
 """
 from __future__ import annotations
@@ -41,17 +41,15 @@ logging.basicConfig(
 )
 log = logging.getLogger("claudebox-cron")
 
-CRON_FILE = os.environ.get("DRIDOCK_MODE_CRON_FILE") or os.environ.get("CLAUDEBOX_MODE_CRON_FILE") or os.environ.get("CLAUDE_MODE_CRON_FILE", "")
-WORKSPACE = os.environ.get("DRIDOCK_WORKSPACE") or os.environ.get("CLAUDEBOX_WORKSPACE") or os.environ.get("CLAUDE_WORKSPACE") or "/workspace"
+CRON_FILE = os.environ.get("DRIDOCK_MODE_CRON_FILE", "")
+WORKSPACE = os.environ.get("DRIDOCK_WORKSPACE") or "/workspace"
 HOME = os.environ.get("HOME", "/home/claude")
 CLAUDE_CONFIG_DIR = Path(os.environ.get("CLAUDE_CONFIG_DIR") or (Path(HOME) / ".claude"))
 CRON_DIR = CLAUDE_CONFIG_DIR / "cron"
 HISTORY_ROOT = CRON_DIR / "history"
 TELEGRAM_MESSAGES_FILE = CRON_DIR / "telegram_messages.json"
 TELEGRAM_MODE = (
-    os.environ.get("DRIDOCK_MODE_TELEGRAM")
-    or os.environ.get("CLAUDEBOX_MODE_TELEGRAM")
-    or os.environ.get("CLAUDE_MODE_TELEGRAM", "")
+    os.environ.get("DRIDOCK_MODE_TELEGRAM", "")
 ) == "1"
 
 from telegram_utils import TELEGRAM_HTML_HINT  # noqa: E402  (after env reads)
@@ -225,7 +223,7 @@ def _notify_telegram(job: dict[str, Any], activity_path: Path, rc: int, fired_at
     if not chat_id:
         return
     if not BOT_TOKEN:
-        log.warning("[%s] telegram_chat_id set but CLAUDEBOX_TELEGRAM_BOT_TOKEN is not — skipping notify", job["name"])
+        log.warning("[%s] telegram_chat_id set but DRIDOCK_TELEGRAM_BOT_TOKEN is not — skipping notify", job["name"])
         return
 
     result = _extract_result(activity_path)
@@ -424,7 +422,7 @@ def _handle_signal(signum: int, _frame: Any) -> None:
 
 def main() -> int:
     if not CRON_FILE:
-        log.error("CLAUDEBOX_MODE_CRON_FILE not set")
+        log.error("DRIDOCK_MODE_CRON_FILE not set")
         return 1
     if not os.path.isfile(CRON_FILE):
         log.error("cron file not found: %s", CRON_FILE)

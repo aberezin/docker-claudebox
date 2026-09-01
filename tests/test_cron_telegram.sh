@@ -28,10 +28,10 @@ test_cron_telegram_message_tracking_roundtrip() {
     out=$(docker run --rm -i \
         --entrypoint python3 \
         -e "HOME=/tmp/ct_home" \
-        -e "CLAUDEBOX_MODE_TELEGRAM=1" \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/tmp/cron.yaml" \
-        -e "CLAUDEBOX_WORKSPACE=/workspace" \
+        -e "DRIDOCK_MODE_TELEGRAM=1" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/tmp/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=/workspace" \
         "$IMAGE" - <<'PYEOF'
 import sys, os, json
 from pathlib import Path
@@ -89,10 +89,10 @@ test_cron_telegram_message_tracking_prune() {
     out=$(docker run --rm -i \
         --entrypoint python3 \
         -e "HOME=/tmp/ct_home" \
-        -e "CLAUDEBOX_MODE_TELEGRAM=1" \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/tmp/cron.yaml" \
-        -e "CLAUDEBOX_WORKSPACE=/workspace" \
+        -e "DRIDOCK_MODE_TELEGRAM=1" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/tmp/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=/workspace" \
         "$IMAGE" - <<'PYEOF'
 import sys, os, json
 from pathlib import Path
@@ -138,9 +138,9 @@ test_cron_telegram_no_continue_on_cron_reply() {
     out=$(docker run --rm -i \
         --entrypoint python3 \
         -e "HOME=/tmp/ct_home" \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/tmp/cron.yaml" \
-        -e "CLAUDEBOX_WORKSPACE=/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/tmp/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=/workspace" \
         "$IMAGE" - <<'PYEOF'
 import sys, os
 sys.path.insert(0, "/home/claude")
@@ -171,9 +171,9 @@ test_cron_telegram_system_hint_content() {
     out=$(docker run --rm -i \
         --entrypoint python3 \
         -e "HOME=/home/claude" \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/home/claude/.claude/cron.yaml" \
-        -e "CLAUDEBOX_WORKSPACE=/my/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/home/claude/.claude/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=/my/workspace" \
         "$IMAGE" - <<'PYEOF'
 import sys
 sys.path.insert(0, "/home/claude")
@@ -223,10 +223,10 @@ EOF
     # but we can verify both processes were launched by checking logs
     local cname="claudebox-cron-tg-test-$$-$RANDOM"
     docker run -d --name "$cname" \
-        -e "CLAUDEBOX_MODE_CRON=1" \
-        -e "CLAUDEBOX_MODE_TELEGRAM=1" \
-        -e "CLAUDEBOX_MODE_CRON_FILE=/cron.yaml" \
-        -e "CLAUDEBOX_WORKSPACE=$CT_TMP/workspace" \
+        -e "DRIDOCK_MODE_CRON=1" \
+        -e "DRIDOCK_MODE_TELEGRAM=1" \
+        -e "DRIDOCK_MODE_CRON_FILE=/cron.yaml" \
+        -e "DRIDOCK_WORKSPACE=$CT_TMP/workspace" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CT_TMP/home/.claude:/home/claude/.claude" \
         -v "$CT_TMP/workspace:$CT_TMP/workspace" \

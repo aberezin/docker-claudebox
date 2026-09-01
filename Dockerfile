@@ -238,7 +238,7 @@ RUN bun install --frozen-lockfile && \
 #   /h/home     → /home/claude          (entrypoint, daemons, CHANGELOG)
 #   /h/bin      → /usr/local/bin         (cb-* helpers + the host-agent shim colima/limactl)
 #   /h/features → /usr/local/lib/dridock/features   (3.0: superset of the 2.x /h/profiles)
-#   /h/lib      → /usr/local/lib/dridock             (shared data: env-rename.map, etc.)
+#   /h/lib      → /usr/local/lib/dridock             (shared data)
 FROM ubuntu:24.04 AS harness
 RUN mkdir -p /h/home /h/bin /h/features /h/lib
 COPY entrypoint.sh api_server.py telegram_bot.py telegram_utils.py cron.py jsonpipe.py /h/home/
@@ -258,11 +258,6 @@ COPY dridock /h/bin/dridock
 # marker-guarded. `profiles:` is accepted as a config-key alias for one cycle. See
 # docs/design/features-system.md.
 COPY features/ /h/features/
-# Shared env-rename map (#16, 3.2.1): the single source of truth for
-# DRIDOCK_X ↔ CLAUDEBOX_X pairs, read by wrapper.sh (host) and entrypoint.sh
-# (container) so both sides mirror the two names symmetrically for the whole
-# 3.x deprecation cycle. Removed in 4.0. See docs/design/env-var-rename.md.
-COPY env-rename.map /h/lib/env-rename.map
 # `find` for check.sh rather than a glob: it is OPTIONAL per feature (#75), so a
 # bare /h/features/*/check.sh would fail the build whenever no feature ships one.
 # It must still be chmod'd — the entrypoint gates on `[ -x check.sh ]`, so a
@@ -285,7 +280,6 @@ ENV DRIDOCK_IMAGE_VARIANT=minimal
 COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
-COPY --from=harness /h/lib/env-rename.map /usr/local/lib/dridock/env-rename.map
 # Compiled dridock binary for the team verbs (the shim routes to it) — see the
 # dridock-ts-build stage above and `dridock` (shim) for the routing. Kept off
 # $PATH at /usr/local/lib/dridock/ so the shim at /usr/local/bin/dridock owns
@@ -439,7 +433,6 @@ RUN pip install --no-cache-dir pipenv poetry
 COPY --from=harness /h/home/ /home/claude/
 COPY --from=harness /h/bin/ /usr/local/bin/
 COPY --from=harness /h/features/ /usr/local/lib/dridock/features/
-COPY --from=harness /h/lib/env-rename.map /usr/local/lib/dridock/env-rename.map
 COPY --from=dridock-ts-build /out/dridock /usr/local/lib/dridock/dridock
 RUN chmod +x /usr/local/lib/dridock/dridock
 # claude CLI — LAST, so a CLAUDE_VERSION bump rebuilds only these three COPY layers and
