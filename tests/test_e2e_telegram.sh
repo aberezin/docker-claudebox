@@ -15,7 +15,7 @@
 #      kind=text label in logs
 #
 # Required env (loaded from tests/.env):
-#   DRIDOCK_TELEGRAM_BOT_TOKEN     bot the dridock container connects as (legacy CLAUDEBOX_TELEGRAM_BOT_TOKEN still read as fallback)
+#   DRIDOCK_TELEGRAM_BOT_TOKEN     bot the dridock container connects as
 #   TELEGRAM_CHAT_ID               chat id (positive = DM user id)
 #   TELETHON_API_ID, TELETHON_API_HASH, TELETHON_SESSION  MTProto creds
 #   TELETHON_AUTH_KEY              bearer key for the telethon-plus HTTP API
@@ -28,7 +28,7 @@ TELETHON_IMAGE="psyb0t/telethon-plus"
 
 _e2e_check_env() {
     local missing=()
-    for v in CLAUDEBOX_TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID \
+    for v in DRIDOCK_TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID \
              TELETHON_API_ID TELETHON_API_HASH TELETHON_SESSION TELETHON_AUTH_KEY; do
         if [ -z "${!v:-}" ]; then
             missing+=("$v")

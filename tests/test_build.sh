@@ -5,10 +5,10 @@
 BUILD_CHECKS=(
     "entrypoint|Config.Entrypoint|entrypoint.sh"
     "claude user env|Config.Env|DISABLE_AUTOUPDATER=1"
-    # DRIDOCK_, not CLAUDEBOX_ — the image has stamped the DRIDOCK_ name since the
-    # 3.0 rename (Dockerfile: `ENV DRIDOCK_IMAGE_VARIANT`). The CLAUDEBOX_ fallback
-    # is a READ-side alias in entrypoint.sh, never written into Config.Env, so this
-    # assertion had been failing since 3.0 (#63). Assert what the image sets.
+    # The image stamps DRIDOCK_IMAGE_VARIANT (Dockerfile: `ENV
+    # DRIDOCK_IMAGE_VARIANT`). Asserting the legacy name here failed from the 3.0
+    # rename until #63, because the CLAUDEBOX_ alias was a READ-side shim in
+    # entrypoint.sh and never written into Config.Env. That shim is gone in 5.0.
     "minimal variant|Config.Env|DRIDOCK_IMAGE_VARIANT=minimal"
 )
 

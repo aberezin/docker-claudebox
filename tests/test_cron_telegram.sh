@@ -241,7 +241,7 @@ EOF
     # cron scheduler must have started (loads the yaml and logs job list)
     assert_contains "$out" "never_fires" "cron scheduler started and loaded jobs" || return 1
     # telegram bot must have attempted to start (fails without token but logs the attempt)
-    assert_contains "$out" "CLAUDEBOX_TELEGRAM_BOT_TOKEN" "telegram bot started (failed on missing token)" || return 1
+    assert_contains "$out" "DRIDOCK_TELEGRAM_BOT_TOKEN" "telegram bot started (failed on missing token)" || return 1
 }
 
 ALL_TESTS+=(
