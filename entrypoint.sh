@@ -3,11 +3,11 @@
 dbg() { [ "${DEBUG:-}" = "true" ] && echo "[DEBUG $(date +%H:%M:%S.%3N)] $*" >&2; }
 
 # DRIDOCK_* is the only tier (5.0.0). Upstream CLAUDE_CODE_* / CLAUDE_CONFIG_DIR are unrelated.
-CLAUDE_CONTAINER_NAME="${DRIDOCK_CONTAINER_NAME:-${CLAUDE_CONTAINER_NAME:-}}"
-CLAUDE_WORKSPACE="${DRIDOCK_WORKSPACE:-${CLAUDE_WORKSPACE:-}}"
-CLAUDE_GIT_NAME="${DRIDOCK_GIT_NAME:-${CLAUDE_GIT_NAME:-}}"
-CLAUDE_GIT_EMAIL="${DRIDOCK_GIT_EMAIL:-${CLAUDE_GIT_EMAIL:-}}"
-CLAUDE_IMAGE_VARIANT="${DRIDOCK_IMAGE_VARIANT:-${CLAUDE_IMAGE_VARIANT:-full}}"
+CLAUDE_CONTAINER_NAME="${DRIDOCK_CONTAINER_NAME:-}"
+CLAUDE_WORKSPACE="${DRIDOCK_WORKSPACE:-}"
+CLAUDE_GIT_NAME="${DRIDOCK_GIT_NAME:-}"
+CLAUDE_GIT_EMAIL="${DRIDOCK_GIT_EMAIL:-}"
+CLAUDE_IMAGE_VARIANT="${DRIDOCK_IMAGE_VARIANT:-full}"
 
 dbg "entrypoint start, args: $*"
 
@@ -115,7 +115,7 @@ dbg "docker socket done"
 # one — common on harness-dev projects that `make build` often; see disk-management.md). Safe +
 # best-effort: `image prune -f` only touches untagged unreferenced images (never a tagged image
 # and never a running container's image), and both never block startup. Default off.
-case "${DRIDOCK_PRUNE_ON_START:-${CLAUDE_PRUNE_ON_START:-}}" in
+case "${DRIDOCK_PRUNE_ON_START:-}" in
 	1|true|yes|on)
 		if [ -S /var/run/docker.sock ]; then
 			dbg "prune-on-start: docker builder prune -f + docker image prune -f"
@@ -901,11 +901,11 @@ export XDG_CONFIG_HOME=/home/claude/.claude/xdg-config
 dbg "XDG_CONFIG_HOME=$XDG_CONFIG_HOME (persistence via ~/.claude bind mount, #58)"
 
 # mode env vars — DRIDOCK_MODE_* only (5.0.0)
-_mode_api="${DRIDOCK_MODE_API:-${CLAUDE_MODE_API:-}}"
-_mode_api_port="${DRIDOCK_MODE_API_PORT:-${CLAUDE_MODE_API_PORT:-8080}}"
-_mode_telegram="${DRIDOCK_MODE_TELEGRAM:-${CLAUDE_MODE_TELEGRAM:-}}"
-_mode_cron="${DRIDOCK_MODE_CRON:-${CLAUDE_MODE_CRON:-}}"
-_mode_cron_file="${DRIDOCK_MODE_CRON_FILE:-${CLAUDE_MODE_CRON_FILE:-}}"
+_mode_api="${DRIDOCK_MODE_API:-}"
+_mode_api_port="${DRIDOCK_MODE_API_PORT:-8080}"
+_mode_telegram="${DRIDOCK_MODE_TELEGRAM:-}"
+_mode_cron="${DRIDOCK_MODE_CRON:-}"
+_mode_cron_file="${DRIDOCK_MODE_CRON_FILE:-}"
 
 # combined telegram + cron mode — run both; cron in background, telegram bot in foreground
 if [ "$_mode_telegram" = "1" ] && [ "$_mode_cron" = "1" ]; then

@@ -56,12 +56,14 @@ describe("ClaudeDirCommand — bash-parity output (wrapper.sh:2560-2573)", () =>
     expect(stderr.text()).toContain("no dridock project here");
   });
 
-  test("legacy CLAUDE_DATA_DIR fallback honored when DRIDOCK_DATA_DIR unset", async () => {
+  test("legacy CLAUDE_DATA_DIR is IGNORED (tier removed in 5.0.1, #83)", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
     const { ctx, stdout } = makeCtx(fs, { env: { CLAUDE_DATA_DIR: "/legacy/claude" } });
     const rc = await new ClaudeDirCommand(new StubGitToplevel("/p")).run([], ctx);
     expect(rc).toBe(0);
-    expect(stdout.text()).toBe("/legacy/claude\n");
+    // The legacy name is inert: falls through to the per-project default.
+    expect(stdout.text()).not.toBe("/legacy/claude\n");
+    expect(stdout.text()).toContain("/projects/abc/claude");
   });
 });

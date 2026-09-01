@@ -77,6 +77,27 @@ when a project is still legacy afterwards (opt-out set, or migration failed).
 - `env-rename.map`, `_dridock_alias_env`, and `tests/test_env_rename_compat.sh`
   (it guarded the map and the aliaser, both of which are gone).
 
+## [5.0.1] — 2026-09-01 _(fork)_
+
+### Fixed
+- **The legacy `CLAUDE_*` tier survived 5.0.0 in ~12 places** (#83) — 5.0.0 announced both
+  legacy tiers removed, but only `CLAUDEBOX_*` actually went. Eleven `${DRIDOCK_X:-${CLAUDE_X:-…}}`
+  fallbacks in `entrypoint.sh` and one `CLAUDE_DATA_DIR` read in `MachineConfig.ts` stayed
+  live, contradicting the release notes. Not a new breaking change — completing one the
+  changelog already claimed.
+- **`tests/test_deprecation_deadlines.sh` could not see the `CLAUDE_` tier** — it matched only
+  `CLAUDEBOX_` reads, so it reported 5/5 green while the fallbacks remained. The enforcement
+  test added to prevent exactly this class had its own blind spot. It now checks the
+  `CLAUDE_` tier too, with an explicit allowlist for the names that are genuinely Claude
+  Code's (`CLAUDE_CODE_*`, `CLAUDE_CONFIG_DIR`, `CLAUDE_PROJECT_DIR`) rather than dridock's.
+  That allowlist encodes the namespace rule — `CLAUDE_` is the CLI's, `DRIDOCK_` is ours —
+  as something checked rather than remembered.
+
+### Changed
+- `CLAUDE_RELEASES_URL` → **`DRIDOCK_CLAUDE_RELEASES_URL`** — a dridock knob wearing the
+  wrong prefix. Added in the 4.4.0 `--claude-version latest` work; renamed before anyone
+  relies on it.
+
 ## [Unreleased]
 
 ### Changed

@@ -34,10 +34,12 @@ describe("MachineConfig.projectDataDir — bash-parity resolution", () => {
     expect(await mc.projectDataDir("abc")).toBe("/tmp/override");
   });
 
-  test("legacy CLAUDE_DATA_DIR still honored (deprecation cycle)", async () => {
+  test("legacy CLAUDE_DATA_DIR is IGNORED (tier removed in 5.0.1, #83)", async () => {
     const fs = new InMemoryFileSystem();
-    const mc = new MachineConfig(fs, { CLAUDE_DATA_DIR: "/tmp/legacy" }, HOME);
-    expect(await mc.projectDataDir("abc")).toBe("/tmp/legacy");
+    const mc = new MachineConfig(fs, { CLAUDE_DATA_DIR: "/legacy" }, "/home/alan");
+    // Inert — resolves to the per-project default, not the legacy override.
+    expect(await mc.projectDataDir("abc")).not.toBe("/legacy");
+    expect(await mc.projectDataDir("abc")).toContain("/projects/abc/claude");
   });
 
   test("DRIDOCK_DATA_DIR wins over legacy CLAUDE_DATA_DIR when both set", async () => {

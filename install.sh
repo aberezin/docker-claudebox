@@ -41,13 +41,13 @@ set -- "${_rest[@]+"${_rest[@]}"}"
 # stale CLI while believing you'd asked for the newest. Resolve it up front, and
 # fail loudly rather than falling back to a guess (repo rule: never silently
 # discard user-supplied input).
-CLAUDE_RELEASES_URL="${CLAUDE_RELEASES_URL:-https://downloads.claude.ai/claude-code-releases}"
+DRIDOCK_CLAUDE_RELEASES_URL="${DRIDOCK_CLAUDE_RELEASES_URL:-https://downloads.claude.ai/claude-code-releases}"
 case "$CLAUDE_VERSION_OVERRIDE" in
 	latest|stable)
 		_channel="$CLAUDE_VERSION_OVERRIDE"
-		_resolved=$(curl -fsSL --max-time 20 "$CLAUDE_RELEASES_URL/$_channel" 2>/dev/null | head -1 | tr -d '\r')
+		_resolved=$(curl -fsSL --max-time 20 "$DRIDOCK_CLAUDE_RELEASES_URL/$_channel" 2>/dev/null | head -1 | tr -d '\r')
 		if [ -z "$_resolved" ]; then
-			echo "install.sh: could not reach $CLAUDE_RELEASES_URL/$_channel to resolve '$_channel'." >&2
+			echo "install.sh: could not reach $DRIDOCK_CLAUDE_RELEASES_URL/$_channel to resolve '$_channel'." >&2
 			echo "            Pass an explicit version instead: --claude-version 2.1.243" >&2
 			exit 1
 		fi

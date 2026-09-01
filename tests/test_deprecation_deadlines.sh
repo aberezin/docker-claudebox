@@ -71,6 +71,41 @@ deadline "legacy CLAUDEBOX_* env READS (typescript)" 5 \
 deadline "container env aliaser (_dridock_alias_env)" 5 \
     -e '_dridock_alias_env' "$REPO/entrypoint.sh"
 
+# The CLAUDE_ tier, which 5.0.0 also declared removed. This check did not exist
+# in 5.0.0 and ~12 fallbacks survived the release unnoticed (#83) — the
+# enforcement test had its own blind spot.
+#
+# CLAUDE_ is TWO namespaces and only one is ours:
+#   (a) Claude Code CLI's own — CLAUDE_CODE_*, CLAUDE_CONFIG_DIR,
+#       CLAUDE_PROJECT_DIR. Never part of the 3.0 rename, must survive forever.
+#       Dropping these breaks auth outright.
+#   (b) dridock's own settings under the upstream-1.x prefix, from when this
+#       project was docker-claude-code — CLAUDE_WORKSPACE, CLAUDE_MODE_*, etc.
+#
+# So this cannot be a bare grep: it excludes (a) by name. That allowlist IS the
+# namespace rule — CLAUDE_ means "the Claude CLI's", DRIDOCK_ means "ours" —
+# made machine-checkable instead of a convention someone has to remember.
+# Adding a genuinely-upstream variable means adding it here, deliberately.
+_UPSTREAM_CLAUDE='CLAUDE_CODE_|CLAUDE_CONFIG_DIR|CLAUDE_PROJECT_DIR'
+deadline_claude_tier() {
+    local due=5 hits
+    hits=$(grep -rnE '\$\{DRIDOCK_[A-Z_]+:-\$\{CLAUDE_|\?\? *[a-zA-Z.]*\["CLAUDE_[A-Z_]+"\]|or os\.environ\.get\("CLAUDE_[A-Z_]+"' \
+        --include=*.sh --include=*.py --include=*.ts \
+        "$REPO/entrypoint.sh" "$REPO/install.sh" "$REPO/dridock-ts/src" "$REPO"/*.py 2>/dev/null \
+        | grep -vE "$_UPSTREAM_CLAUDE" | head -5)
+    if [ "$MAJOR" -ge "$due" ]; then
+        if [ -z "$hits" ]; then
+            ok "legacy CLAUDE_* env tier (dridock settings) — removed, as committed for ${due}.0.0"
+        else
+            bad "legacy CLAUDE_* env tier — ${due}.0.0 committed its removal, but fallbacks remain:"
+            printf '         %s\n' "$hits" >&2
+        fi
+    else
+        ok "legacy CLAUDE_* env tier — due ${due}.0.0, not yet reached"
+    fi
+}
+deadline_claude_tier
+
 # ── 6.0.0: the .claudebox -> .dridock migration path ───────────────────────
 # Kept through 5.x deliberately: 5.0 makes a legacy dot-dir a LOUD error that
 # names `dridock migrate`, so the migrators are what that error points at.

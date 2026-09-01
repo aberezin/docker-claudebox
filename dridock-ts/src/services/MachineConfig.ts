@@ -30,7 +30,7 @@ export class MachineConfig {
    * appended). The other two paths do get the suffix.
    */
   async projectDataDir(projectId: string): Promise<string> {
-    const envOverride = this.env["DRIDOCK_DATA_DIR"] ?? this.env["CLAUDE_DATA_DIR"];
+    const envOverride = this.env["DRIDOCK_DATA_DIR"];
     if (envOverride !== undefined && envOverride !== "") {
       return this.expandHome(envOverride);
     }
