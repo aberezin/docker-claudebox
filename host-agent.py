@@ -4,7 +4,7 @@
 
 SECURITY: this is remote command execution against the Mac. It is deliberately narrow:
   - binds ONLY the Colima gateway (192.168.64.1), never 0.0.0.0/LAN;
-  - requires a per-session bearer token (CB_HOST_AGENT_TOKEN);
+  - requires a per-session bearer token (DRIDOCK_HOST_AGENT_TOKEN);
   - allowlists the binary AND subcommand (the fixed set the framework actually uses);
   - opt-in / off by default (only runs while `dridock host-agent up`).
 It is a TRUSTED, single-operator tool — for you driving your own harness dev dridock, not a
@@ -16,9 +16,9 @@ Line protocol (one connection = one command):
 """
 import json, os, socket, subprocess, sys, threading
 
-BIND = os.environ.get("CB_HOST_AGENT_BIND", "192.168.64.1")
-PORT = int(os.environ.get("CB_HOST_AGENT_PORT", "9280"))
-TOKEN = os.environ.get("CB_HOST_AGENT_TOKEN", "")
+BIND = os.environ.get("DRIDOCK_HOST_AGENT_BIND", "192.168.64.1")
+PORT = int(os.environ.get("DRIDOCK_HOST_AGENT_PORT", "9280"))
+TOKEN = os.environ.get("DRIDOCK_HOST_AGENT_TOKEN", "")
 
 # binary -> allowed subcommands (the fixed set wrapper.sh / Makefile use). Narrow on purpose.
 ALLOW = {
@@ -27,7 +27,7 @@ ALLOW = {
 }
 
 if not TOKEN:
-    print("host-agent: refusing to start without CB_HOST_AGENT_TOKEN", file=sys.stderr)
+    print("host-agent: refusing to start without DRIDOCK_HOST_AGENT_TOKEN", file=sys.stderr)
     sys.exit(1)
 
 

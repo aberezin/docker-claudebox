@@ -74,9 +74,9 @@ export class HostAgentService {
       {
         logFile,
         env: {
-          CB_HOST_AGENT_TOKEN: token,
-          CB_HOST_AGENT_BIND: bind,
-          CB_HOST_AGENT_PORT: port,
+          DRIDOCK_HOST_AGENT_TOKEN: token,
+          DRIDOCK_HOST_AGENT_BIND: bind,
+          DRIDOCK_HOST_AGENT_PORT: port,
         },
       },
     );

@@ -44,10 +44,10 @@ describe("HostAgentService.up — happy path", () => {
     expect(processes.spawns).toHaveLength(1);
     const spawn = processes.spawns[0]!;
     expect(spawn.argv).toEqual(["python3", "/usr/local/bin/host-agent.py"]);
-    // The three CB_* env vars the daemon reads.
-    expect(spawn.opts.env?.["CB_HOST_AGENT_TOKEN"]).toBe("cd".repeat(24));
-    expect(spawn.opts.env?.["CB_HOST_AGENT_BIND"]).toBe("192.168.64.1");
-    expect(spawn.opts.env?.["CB_HOST_AGENT_PORT"]).toBe("9280");
+    // The three DRIDOCK_HOST_AGENT_* env vars the daemon reads.
+    expect(spawn.opts.env?.["DRIDOCK_HOST_AGENT_TOKEN"]).toBe("cd".repeat(24));
+    expect(spawn.opts.env?.["DRIDOCK_HOST_AGENT_BIND"]).toBe("192.168.64.1");
+    expect(spawn.opts.env?.["DRIDOCK_HOST_AGENT_PORT"]).toBe("9280");
 
     // On-disk state.
     expect((await fs.readText(`${AGENT_HOME}/pid`)).trim()).toBe("1000");
@@ -66,8 +66,8 @@ describe("HostAgentService.up — happy path", () => {
     if (out.kind !== "up") return;
     expect(out.bind).toBe("10.0.0.5");
     expect(out.port).toBe("19280");
-    expect(processes.spawns[0]!.opts.env?.["CB_HOST_AGENT_BIND"]).toBe("10.0.0.5");
-    expect(processes.spawns[0]!.opts.env?.["CB_HOST_AGENT_PORT"]).toBe("19280");
+    expect(processes.spawns[0]!.opts.env?.["DRIDOCK_HOST_AGENT_BIND"]).toBe("10.0.0.5");
+    expect(processes.spawns[0]!.opts.env?.["DRIDOCK_HOST_AGENT_PORT"]).toBe("19280");
   });
 });
 
