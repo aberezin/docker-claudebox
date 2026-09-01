@@ -8,21 +8,21 @@ describe("MachineConfig.projectDataDir — bash-parity resolution", () => {
   test("no machine config → baked default `<xdg>/projects/<id>/claude`", async () => {
     const fs = new InMemoryFileSystem();
     const mc = new MachineConfig(fs, {}, HOME);
-    expect(await mc.projectDataDir("abc12345")).toBe("/home/alan/.config/dridock/projects/abc12345/claude");
+    expect(await mc.projectDataDir("abc12345")).toBe("/home/alan/.config/dridock/projects/abc12345/dot/.claude");
   });
 
   test("machine config with `data_root: ~/custom` → ~-expanded + suffixed", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/home/alan/.config/dridock/config.yml", "data_root: ~/dridock-data\n");
     const mc = new MachineConfig(fs, {}, HOME);
-    expect(await mc.projectDataDir("abc")).toBe("/home/alan/dridock-data/abc/claude");
+    expect(await mc.projectDataDir("abc")).toBe("/home/alan/dridock-data/abc/dot/.claude");
   });
 
   test("machine config with absolute `data_root: /var/dridock` → NOT expanded", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/home/alan/.config/dridock/config.yml", "data_root: /var/dridock\n");
     const mc = new MachineConfig(fs, {}, HOME);
-    expect(await mc.projectDataDir("abc")).toBe("/var/dridock/abc/claude");
+    expect(await mc.projectDataDir("abc")).toBe("/var/dridock/abc/dot/.claude");
   });
 
   test("DRIDOCK_DATA_DIR env override wins over machine config (bash-parity wrapper.sh:2168)", async () => {
@@ -39,7 +39,7 @@ describe("MachineConfig.projectDataDir — bash-parity resolution", () => {
     const mc = new MachineConfig(fs, { CLAUDE_DATA_DIR: "/legacy" }, "/home/alan");
     // Inert — resolves to the per-project default, not the legacy override.
     expect(await mc.projectDataDir("abc")).not.toBe("/legacy");
-    expect(await mc.projectDataDir("abc")).toContain("/projects/abc/claude");
+    expect(await mc.projectDataDir("abc")).toContain("/projects/abc/dot/.claude");
   });
 
   test("DRIDOCK_DATA_DIR wins over legacy CLAUDE_DATA_DIR when both set", async () => {
@@ -51,13 +51,13 @@ describe("MachineConfig.projectDataDir — bash-parity resolution", () => {
   test("empty env override falls through to machine config / baked default", async () => {
     const fs = new InMemoryFileSystem();
     const mc = new MachineConfig(fs, { DRIDOCK_DATA_DIR: "" }, HOME);
-    expect(await mc.projectDataDir("abc")).toBe("/home/alan/.config/dridock/projects/abc/claude");
+    expect(await mc.projectDataDir("abc")).toBe("/home/alan/.config/dridock/projects/abc/dot/.claude");
   });
 
   test("XDG_CONFIG_HOME override respected (baked default uses it)", async () => {
     const fs = new InMemoryFileSystem();
     const mc = new MachineConfig(fs, { XDG_CONFIG_HOME: "/custom-xdg" }, HOME);
-    expect(await mc.projectDataDir("abc")).toBe("/custom-xdg/dridock/projects/abc/claude");
+    expect(await mc.projectDataDir("abc")).toBe("/custom-xdg/dridock/projects/abc/dot/.claude");
   });
 
   test("legacy claudebox/ xdg dir preferred as read source when only that exists", async () => {
@@ -65,6 +65,6 @@ describe("MachineConfig.projectDataDir — bash-parity resolution", () => {
     fs.seedDir("/home/alan/.config/claudebox");   // only legacy present
     const mc = new MachineConfig(fs, {}, HOME);
     // Should resolve to the legacy path
-    expect(await mc.projectDataDir("abc")).toBe("/home/alan/.config/claudebox/projects/abc/claude");
+    expect(await mc.projectDataDir("abc")).toBe("/home/alan/.config/claudebox/projects/abc/dot/.claude");
   });
 });

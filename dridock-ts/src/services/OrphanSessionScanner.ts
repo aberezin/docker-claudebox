@@ -62,8 +62,20 @@ export async function scanOrphans(
   }
   for (const id of ids) {
     if (id === ownId) continue;
-    const sessionDir = `${projectsRoot}/${id}/claude/projects/${slug}`;
-    if (!(await deps.fs.isDirectory(sessionDir))) continue;
+    // Check BOTH layouts. #80 phase 2 folded the data dir to
+    // `<id>/dot/.claude`, but a sibling project only migrates on its own next
+    // start — so during the transition the two coexist across projects. Looking
+    // in one place only would make this scan silently find nothing, quietly
+    // disabling the #42 guard rather than failing where anyone would notice.
+    const candidates = [
+      `${projectsRoot}/${id}/dot/.claude/projects/${slug}`,
+      `${projectsRoot}/${id}/claude/projects/${slug}`,
+    ];
+    let sessionDir: string | undefined;
+    for (const c of candidates) {
+      if (await deps.fs.isDirectory(c)) { sessionDir = c; break; }
+    }
+    if (sessionDir === undefined) continue;
     let entries: readonly string[] = [];
     try { entries = await deps.fs.listDir(sessionDir); } catch { /* best-effort */ }
     if (entries.length === 0) continue; // clobbered-but-never-used sibling — no signal

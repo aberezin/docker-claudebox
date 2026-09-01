@@ -71,8 +71,8 @@ describe("DestroyCommand", () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
     // Seed the data dir with content — proves rm -rf actually removes it
-    fs.seed("/home/alan/.config/dridock/projects/abc/claude/session.json", "{}");
-    fs.seed("/home/alan/.config/dridock/projects/abc/claude/.features", "typescript\n");
+    fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/session.json", "{}");
+    fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/.features", "typescript\n");
     const colima = new InMemoryColima();
     colima.seedVm({ name: "cb-abc", status: "Running", address: "1.2.3.4" });
     const { ctx, stdout } = makeCtx(fs);
@@ -83,8 +83,8 @@ describe("DestroyCommand", () => {
     // not just <id>/claude. Both the /claude subtree AND the parent
     // must be gone.
     expect(stdout.text()).toContain("purging data dir /home/alan/.config/dridock/projects/abc");
-    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/session.json")).toBe(false);
-    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/.features")).toBe(false);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/session.json")).toBe(false);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.features")).toBe(false);
     expect(await fs.exists("/home/alan/.config/dridock/projects/abc")).toBe(false);
   });
 

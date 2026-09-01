@@ -118,7 +118,7 @@ describe("InfoCommand — full project (P4c — no more Phase-3 stubs)", () => {
     fs.seed("/home/alan/.config/dridock/config.yml", "data_root: ~/custom-data\n");
     const { ctx, stdout } = makeCtx(fs);
     await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), new InMemoryColima()).run([], ctx);
-    expect(stdout.text()).toContain("/home/alan/custom-data/abc/claude");
+    expect(stdout.text()).toContain("/home/alan/custom-data/abc/dot/.claude");
   });
 
   test("secrets.env row: absent → hint; present → key count", async () => {

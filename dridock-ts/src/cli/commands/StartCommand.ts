@@ -26,6 +26,8 @@ import { SidecarWriter } from "../../services/SidecarWriter.ts";
 import { AuthSecretsProvisioner } from "../../services/AuthSecretsProvisioner.ts";
 import { collectEnvPassthrough, collectMountPassthrough } from "../../services/EnvMountPassthrough.ts";
 import { BridgeStateReader } from "../../services/BridgeStateReader.ts";
+import { DotDirMigrator } from "../../services/DotDirMigrator.ts";
+import { DotMountGate } from "../../services/DotMountGate.ts";
 import { xdgRoot } from "../../domain/paths.ts";
 import { CLAUDE_CLI_REMOTE_CONTROL_FLOOR } from "../../domain/dridockVersion.ts";
 import { Version } from "../../domain/Version.ts";
@@ -159,6 +161,26 @@ mode (-p) they are validated against an allowlist first.
 
     // ── Resolve per-project data dir + sidecar writer ─────────────────
     const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
+
+    // #80 phase 2: fold ~/.claude into the per-project dot dir, then decide
+    // whether it is safe to mount that dir over $HOME. Migration runs BEFORE
+    // projectDataDir is read, because that getter now points at the NEW
+    // location — reading it first would silently create an empty dir beside
+    // 27 MB of live sessions and mount the empty one.
+    const dotDir = await machine.projectDotDir(id);
+    if (dotDir !== undefined) {
+      const projectRoot = dotDir.replace(/\/dot$/, "");
+      const moved = await new DotDirMigrator(ctx.fs).migrate(projectRoot);
+      if (moved.kind === "failed") {
+        ctx.stderr.write(`❌ dridock: cannot migrate this project's ~/.claude data.\n`);
+        ctx.stderr.write(`   ${moved.reason}\n`);
+        return 1;
+      }
+      if (moved.kind === "migrated") {
+        ctx.stderr.write(`📦 moved ${moved.from} → ${moved.to} (dotfiles now persist across recreate)\n`);
+      }
+    }
+
     const dataDir = await machine.projectDataDir(id);
     await ctx.fs.mkdirRecursive(dataDir);
     const cnameBase = containerName(ctx.cwd); // matches wrapper.sh's `container_name`
@@ -193,6 +215,21 @@ mode (-p) they are validated against an allowlist first.
 
     // ── ContainerRefresher: recreate if image drifted ────────────────
     const ctxDocker = projectContext(id);
+
+    // #80 phase 2: decide the $HOME mount only AFTER VmEnsure has seeded /
+    // reseeded the image, since the gate reads that image's version label. A
+    // skip is announced, not silent: "my git config vanished again" with no
+    // explanation is the exact experience this feature exists to end.
+    let dotMount: string | undefined;
+    if (dotDir !== undefined) {
+      const decision = await new DotMountGate(docker, this.imageName).decide(ctxDocker);
+      if (decision.kind === "mount") {
+        dotMount = dotDir;
+      } else {
+        ctx.stderr.write(`!  dotfile persistence off: ${decision.reason}.\n   ${decision.note}\n`);
+      }
+    }
+
     const refresher = new ContainerRefresher(docker);
     if (await refresher.maybeRefresh(ctxDocker, cnameBase, this.imageName)) {
       ctx.stderr.write(`🔄 recreating container ${cnameBase} (image drifted)\n`);
@@ -280,7 +317,7 @@ mode (-p) they are validated against an allowlist first.
     const tmpfsSpec = resolveTmpfs(ctx.env.raw());
 
     // ── mode dispatch ─────────────────────────────────────────────────
-    if (isProg) return await this.runProgrammatic(validated!, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec);
+    if (isProg) return await this.runProgrammatic(validated!, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec, dotMount);
     // (#17) --remote-control against an image whose claude CLI predates
     // the flag: claude ignores unknown flags silently (exit 0), so the
     // session starts, looks healthy, RC never activates, no signal ever
@@ -290,14 +327,14 @@ mode (-p) they are validated against an allowlist first.
     if (hasRemoteControlFlag(args)) {
       await warnIfRemoteControlBelowFloor(docker, ctxDocker, this.imageName, ctx.stderr);
     }
-    return await this.runInteractive(args, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec);
+    return await this.runInteractive(args, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec, dotMount);
   }
 
   private async runInteractive(
     args: readonly string[], id: string, ctx: Context, runtime: ContainerRuntime,
     ctxDocker: string, dataDir: string, baseEnv: RunArgs["env"],
     extraMounts: readonly RunArgs["mounts"][number][], sidecars: SidecarWriter,
-    tmpfs: readonly string[],
+    tmpfs: readonly string[], dotMount?: string,
   ): Promise<number> {
     const cname = containerName(ctx.cwd);
     // Extra interactive args go through the sidecar (entrypoint reads
@@ -313,7 +350,7 @@ mode (-p) they are validated against an allowlist first.
       return await runtime.startAttached(ctxDocker, cname);
     }
     ctx.stderr.write(`🔧 starting container ${cname}\n`);
-    const runArgs = this.buildRunArgs(ctxDocker, cname, id, ctx, "interactive", [], dataDir, baseEnv, extraMounts, tmpfs);
+    const runArgs = this.buildRunArgs(ctxDocker, cname, id, ctx, "interactive", [], dataDir, baseEnv, extraMounts, tmpfs, dotMount);
     return await runtime.runInteractive(runArgs);
   }
 
@@ -321,7 +358,7 @@ mode (-p) they are validated against an allowlist first.
     validated: ReturnType<typeof validateProgArgs>, id: string, ctx: Context, runtime: ContainerRuntime,
     ctxDocker: string, dataDir: string, baseEnv: RunArgs["env"],
     extraMounts: readonly RunArgs["mounts"][number][], sidecars: SidecarWriter,
-    tmpfs: readonly string[],
+    tmpfs: readonly string[], dotMount?: string,
   ): Promise<number> {
     const cname = containerName(ctx.cwd, "programmatic");
     const existing = await runtime.psFilter(ctxDocker, cname);
@@ -336,7 +373,7 @@ mode (-p) they are validated against an allowlist first.
     // the INTERACTIVE name (:2817) — TS avoids that by computing cname
     // per-invocation.
     ctx.stderr.write(`🔧 starting container ${cname} (-p mode)\n`);
-    const runArgs = this.buildRunArgs(ctxDocker, cname, id, ctx, "attached", validated.claudeArgs, dataDir, baseEnv, extraMounts, tmpfs);
+    const runArgs = this.buildRunArgs(ctxDocker, cname, id, ctx, "attached", validated.claudeArgs, dataDir, baseEnv, extraMounts, tmpfs, dotMount);
     return await runtime.runInteractive(runArgs);
   }
 
@@ -344,6 +381,7 @@ mode (-p) they are validated against an allowlist first.
     ctxDocker: string, cname: string, id: string, ctx: Context, mode: RunArgs["mode"],
     cmd: readonly string[], dataDir: string, baseEnv: RunArgs["env"],
     extraMounts: readonly RunArgs["mounts"][number][], tmpfs: readonly string[],
+    dotMount?: string,
   ): RunArgs {
     void id;
     return {
@@ -356,8 +394,14 @@ mode (-p) they are validated against an allowlist first.
         // is deliberately unchanged in 5.0 — moving it would make users relocate
         // their keys, which is a different migration from dropping env tiers.
         { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
-        // Per-project data dir — NOT the host global ~/.claude
-        { host: dataDir, container: "/home/claude/.claude" },
+        // #80 phase 2: when the image is new enough, mount the whole per-project
+        // dot dir over $HOME so agent-written dotfiles survive a recreate, with
+        // .claude folded inside it. Otherwise fall back to the pre-phase-2
+        // shape — mounting over an old image's $HOME shadows the baked CLI and
+        // the container will not start.
+        ...(dotMount
+          ? [{ host: dotMount, container: "/home/claude" }]
+          : [{ host: dataDir, container: "/home/claude/.claude" }]),
         { host: ctx.cwd, container: ctx.cwd },
         { host: "/var/run/docker.sock", container: "/var/run/docker.sock" },
         // Framework-bugs + consult — always mounted (empty dirs are fine)

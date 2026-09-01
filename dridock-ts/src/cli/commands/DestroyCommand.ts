@@ -114,9 +114,12 @@ image store and any non-mounted state go with it.`;
     // `<id>/claude`, leaving an empty `<id>/` parent.
     const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
     const claudeDir = await machine.projectDataDir(id);
-    // projectDataDir returns `.../<id>/claude` — strip the trailing
-    // `/claude` to get the parent.
-    const projectRoot = claudeDir.endsWith("/claude") ? claudeDir.slice(0, -"/claude".length) : claudeDir;
+    // Ask for the parent rather than deriving it from claudeDir. The old code
+    // stripped a trailing "/claude", which silently stopped working when the
+    // data dir became `<root>/dot/.claude` (#80 phase 2) — that ends in
+    // ".claude", not "/claude", so purge would have deleted the data dir and
+    // orphaned the rest of the dot dir.
+    const projectRoot = await machine.projectRoot(id);
     // Guard 3: refuse to purge unexpected paths. Matches wrapper.sh:827.
     if (!projectRoot.endsWith(`/${id}`)) {
       ctx.stderr.write(`refusing to purge unexpected path: ${projectRoot}\n`);

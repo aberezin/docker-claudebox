@@ -70,7 +70,7 @@ describe("ProjectPassthroughCommand — #39 fix: correct project scope + HOME + 
     const run = runtime.runs[0]!;
     // The #39 heart: the data-dir mount MUST be present so
     // .claude.json writes land somewhere persistent.
-    expect(run.mounts).toContainEqual({ host: "/home/alan/.config/dridock/projects/abc/claude", container: "/home/claude/.claude" });
+    expect(run.mounts).toContainEqual({ host: "/home/alan/.config/dridock/projects/abc/dot/.claude", container: "/home/claude/.claude" });
     // NOT the host global (would leak the human's config INTO project scope)
     expect(run.mounts).not.toContainEqual({ host: "/home/alan/.claude", container: "/home/claude/.claude" });
   });

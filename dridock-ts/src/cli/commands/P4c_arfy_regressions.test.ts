@@ -119,12 +119,12 @@ describe("Arfy #38 P4c B4 — destroy always reaps the leaked lima datadisk + pu
   test("--purge rms the PARENT projects/<id> dir (matches cb_purge_data at :826)", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
-    fs.seed("/home/alan/.config/dridock/projects/abc/claude/session.json", "{}");
+    fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/session.json", "{}");
     fs.seed("/home/alan/.config/dridock/projects/abc/some-other-dir/plugin.json", "{}");
     const { ctx } = makeCtx(fs);
     await new DestroyCommand(new InMemoryColima(), new StubGitToplevel("/p")).run(["--purge"], ctx);
     // BOTH the claude subtree AND sibling dirs under /abc/ gone
-    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/session.json")).toBe(false);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/session.json")).toBe(false);
     expect(await fs.exists("/home/alan/.config/dridock/projects/abc/some-other-dir/plugin.json")).toBe(false);
     // And the empty parent /abc/ itself
     expect(await fs.exists("/home/alan/.config/dridock/projects/abc")).toBe(false);

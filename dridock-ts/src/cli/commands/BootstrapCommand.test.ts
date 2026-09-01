@@ -397,10 +397,10 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
     const fs = new InMemoryFileSystem();
     // XDG projects tree with sessions belonging to a different id, keyed on
     // OUR cwd's slug (/repo → -repo). The bug turns those into orphans.
-    fs.seed("/home/alan/.config/dridock/projects/69adc719/claude/projects/-repo/session-a.jsonl", "{}");
-    fs.seed("/home/alan/.config/dridock/projects/aabbccdd/claude/projects/-repo/session-b.jsonl", "{}");
+    fs.seed("/home/alan/.config/dridock/projects/69adc719/dot/.claude/projects/-repo/session-a.jsonl", "{}");
+    fs.seed("/home/alan/.config/dridock/projects/aabbccdd/dot/.claude/projects/-repo/session-b.jsonl", "{}");
     // And an UNRELATED slug that must NOT trigger a warning.
-    fs.seed("/home/alan/.config/dridock/projects/ff00ff00/claude/projects/-other-workspace/x.jsonl", "{}");
+    fs.seed("/home/alan/.config/dridock/projects/ff00ff00/dot/.claude/projects/-other-workspace/x.jsonl", "{}");
     const host = new StubHostCommandRunner();
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
@@ -409,8 +409,8 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
     expect(rc).toBe(0);
     const warn = stderr.text();
     expect(warn).toContain(`⚠️  bootstrap: minting a NEW project id will silently orphan`);
-    expect(warn).toContain(`/home/alan/.config/dridock/projects/69adc719/claude/projects/-repo`);
-    expect(warn).toContain(`/home/alan/.config/dridock/projects/aabbccdd/claude/projects/-repo`);
+    expect(warn).toContain(`/home/alan/.config/dridock/projects/69adc719/dot/.claude/projects/-repo`);
+    expect(warn).toContain(`/home/alan/.config/dridock/projects/aabbccdd/dot/.claude/projects/-repo`);
     // The unrelated project must NOT appear.
     expect(warn).not.toContain(`ff00ff00`);
     // Recovery instructions present.
@@ -434,7 +434,7 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
     fs.seed("/repo/.dridock/BRIEF.md", "existing\n");
     // Even a HUGE sibling-session forest — since we're preserving the id
     // that owns them, they're not orphans.
-    fs.seed("/home/alan/.config/dridock/projects/deadbeef/claude/projects/-repo/leftover.jsonl", "{}");
+    fs.seed("/home/alan/.config/dridock/projects/deadbeef/dot/.claude/projects/-repo/leftover.jsonl", "{}");
     const host = new StubHostCommandRunner();
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
@@ -445,7 +445,7 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
 
   test("XDG_CONFIG_HOME override respected (scanner reads the same root MachineConfig writes to)", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/custom/xdg/dridock/projects/aa112233/claude/projects/-repo/s.jsonl", "{}");
+    fs.seed("/custom/xdg/dridock/projects/aa112233/dot/.claude/projects/-repo/s.jsonl", "{}");
     const host = new StubHostCommandRunner();
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
@@ -453,6 +453,6 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
     // snapshot/restore dance — pass XDG_CONFIG_HOME in via makeCtx.
     const { ctx, stderr } = makeCtx(fs, { env: { XDG_CONFIG_HOME: "/custom/xdg" } });
     await cmd.run(["intent"], ctx);
-    expect(stderr.text()).toContain(`/custom/xdg/dridock/projects/aa112233/claude/projects/-repo`);
+    expect(stderr.text()).toContain(`/custom/xdg/dridock/projects/aa112233/dot/.claude/projects/-repo`);
   });
 });

@@ -89,7 +89,7 @@ describe("StartCommand — #42 tightening: pre-launch orphan-session sanity chec
     try {
       const { fs, runtime, cmd } = seedProjectVmRunning();
       // Seed only the OWN dir — that's not an orphan of itself.
-      fs.seed("/home/alan/.config/dridock/projects/abc/claude/projects/-p/session.jsonl", "{}");
+      fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/projects/-p/session.jsonl", "{}");
       const { ctx, stderr } = makeCtx(fs);
       const rc = await cmd.run([], ctx);
       expect(rc).toBe(0);
@@ -110,14 +110,14 @@ describe("StartCommand — #42 tightening: pre-launch orphan-session sanity chec
     try {
       const { fs, runtime, cmd } = seedProjectVmRunning();
       // Own id: abc. Foreign id 69adc719 has sessions for /p.
-      fs.seed("/home/alan/.config/dridock/projects/69adc719/claude/projects/-p/leftover.jsonl", "{}");
-      fs.seed("/home/alan/.config/dridock/projects/69adc719/claude/projects/-p/leftover2.jsonl", "{}");
+      fs.seed("/home/alan/.config/dridock/projects/69adc719/dot/.claude/projects/-p/leftover.jsonl", "{}");
+      fs.seed("/home/alan/.config/dridock/projects/69adc719/dot/.claude/projects/-p/leftover2.jsonl", "{}");
       const { ctx, stderr } = makeCtx(fs);
       const rc = await cmd.run([], ctx);
       expect(rc).toBe(0); // NOT blocked
       const warn = stderr.text();
       expect(warn).toContain(`you're launching id abc`);
-      expect(warn).toContain(`/home/alan/.config/dridock/projects/69adc719/claude/projects/-p`);
+      expect(warn).toContain(`/home/alan/.config/dridock/projects/69adc719/dot/.claude/projects/-p`);
       expect(warn).toContain(`(2 entries)`);
       expect(warn).toContain(`Continuing with id abc anyway`);
       expect(runtime.runs.length).toBe(1);
@@ -133,7 +133,7 @@ describe("StartCommand — #42 tightening: pre-launch orphan-session sanity chec
     try {
       const { fs, cmd } = seedProjectVmRunning();
       // Empty dir under a foreign id — should be skipped by the scanner.
-      await fs.mkdirRecursive("/home/alan/.config/dridock/projects/deadbeef/claude/projects/-p");
+      await fs.mkdirRecursive("/home/alan/.config/dridock/projects/deadbeef/dot/.claude/projects/-p");
       const { ctx, stderr } = makeCtx(fs);
       const rc = await cmd.run([], ctx);
       expect(rc).toBe(0);
@@ -239,7 +239,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     const run = runtime.runs[0]!;
     expect(run.network).toBe("host");
     // Per-project data dir mount
-    expect(run.mounts).toContainEqual({ host: "/home/alan/.config/dridock/projects/abc/claude", container: "/home/claude/.claude" });
+    expect(run.mounts).toContainEqual({ host: "/home/alan/.config/dridock/projects/abc/dot/.claude", container: "/home/claude/.claude" });
     // NOT host global
     expect(run.mounts).not.toContainEqual({ host: "/home/alan/.claude", container: "/home/claude/.claude" });
     // Framework-bugs + consult mounts
@@ -272,7 +272,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     });
     await cmd.run([], ctx);
     for (const suffix of ["", "_prog", "_cron"]) {
-      const path = `/home/alan/.config/dridock/projects/abc/claude/.claude-_p${suffix}-auth`;
+      const path = `/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p${suffix}-auth`;
       expect(await fs.readText(path)).toContain("ANTHROPIC_API_KEY=sk-ant-test-abc");
       expect(await fs.readText(path)).toContain("CLAUDE_CODE_OAUTH_TOKEN=oauth-test-xyz");
       expect(fs.modeOf(path)).toBe(0o600);
@@ -285,7 +285,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
     for (const suffix of ["", "_prog", "_cron"]) {
-      const path = `/home/alan/.config/dridock/projects/abc/claude/.claude-_p${suffix}-secrets`;
+      const path = `/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p${suffix}-secrets`;
       expect(await fs.readText(path)).toBe("GH_TOKEN=ghp_test\n");
       expect(fs.modeOf(path)).toBe(0o600);
     }
@@ -295,7 +295,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     const { fs, cmd } = seedProjectVmRunning();
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
-    const path = "/home/alan/.config/dridock/projects/abc/claude/.claude-_p_prog-vmip";
+    const path = "/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p_prog-vmip";
     expect(await fs.readText(path)).toContain("DRIDOCK_VM_IP=192.168.64.13");
     expect(fs.modeOf(path)).toBe(0o644);
   });
@@ -306,7 +306,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     fs.seed("/p/.dridock/config.yml", "id: abc\nnetwork:\n  hostname: my-project\n");
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
-    const path = "/home/alan/.config/dridock/projects/abc/claude/.claude-_p-vmip";
+    const path = "/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-vmip";
     expect(await fs.readText(path)).toContain("DRIDOCK_HOSTNAME=my-project");
     expect(runtime.runs[0]!.env).toContainEqual({ key: "DRIDOCK_HOSTNAME", value: "my-project" });
   });
@@ -316,9 +316,9 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
     for (const suffix of ["", "_prog", "_cron"]) {
-      expect(await fs.readText(`/home/alan/.config/dridock/projects/abc/claude/.claude-_p${suffix}-cdp`)).toBe("");
+      expect(await fs.readText(`/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p${suffix}-cdp`)).toBe("");
       // host-agent sidecar always has the two vars, empty when down
-      expect(await fs.readText(`/home/alan/.config/dridock/projects/abc/claude/.claude-_p${suffix}-hostagent`))
+      expect(await fs.readText(`/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p${suffix}-hostagent`))
         .toBe("DRIDOCK_HOST_AGENT_URL=\nDRIDOCK_HOST_AGENT_TOKEN=\n");
     }
   });
@@ -328,7 +328,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     fs.seed("/home/alan/.config/dridock/projects/abc/.cdp-url", "http://192.168.64.1:9223\n");
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
-    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/claude/.claude-_p-cdp")).toContain("DRIDOCK_HOST_CDP_URL=http://192.168.64.1:9223");
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-cdp")).toContain("DRIDOCK_HOST_CDP_URL=http://192.168.64.1:9223");
     expect(runtime.runs[0]!.env).toContainEqual({ key: "DRIDOCK_HOST_CDP_URL", value: "http://192.168.64.1:9223" });
   });
 
@@ -337,7 +337,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     const { ctx } = makeCtx(fs, { env: { DRIDOCK_ENV_MY_VAR: "hello" } });
     await cmd.run([], ctx);
     expect(runtime.runs[0]!.env).toContainEqual({ key: "MY_VAR", value: "hello" });
-    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/claude/.claude-_p_prog-env")).toBe("MY_VAR=hello\n");
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p_prog-env")).toBe("MY_VAR=hello\n");
   });
 
   test("DRIDOCK_MOUNT_SCRATCH=/opt → -v /opt:/opt added to mounts", async () => {
@@ -381,7 +381,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     fs.seed("/p/.dridock/config.yml", "id: abc\nfeatures: [typescript, python]\n");
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
-    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/claude/.features"))
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.features"))
       .toBe("typescript python\n");
   });
 });
@@ -415,7 +415,7 @@ describe("StartCommand — programmatic path with all fidelity", () => {
     await cmd.run(["-p", "hi again"], ctx);
     expect(runtime.runs).toEqual([]);
     expect(runtime.starts).toEqual([{ context: "colima-cb-abc", container: "claude-_p_prog" }]);
-    const argsFile = await fs.readText("/home/alan/.config/dridock/projects/abc/claude/.claude-_p_prog-args");
+    const argsFile = await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p_prog-args");
     expect(argsFile).toContain("hi again");
   });
 
@@ -423,7 +423,7 @@ describe("StartCommand — programmatic path with all fidelity", () => {
     const { fs, cmd } = seedProjectVmRunning();
     const { ctx } = makeCtx(fs);
     await cmd.run(["-p", "hi", "--update"], ctx);
-    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/.claude-_p_prog-update")).toBe(true);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p_prog-update")).toBe(true);
   });
 });
 
@@ -431,20 +431,20 @@ describe("StartCommand — interactive path with sidecars", () => {
   test("interactive with --no-continue writes the sidecar; without removes it", async () => {
     const { fs, cmd } = seedProjectVmRunning();
     // Seed a stale sidecar to prove we remove it on the no-flag path
-    fs.seed("/home/alan/.config/dridock/projects/abc/claude/.claude-_p-no-continue", "");
+    fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-no-continue", "");
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);   // no --no-continue → removed
-    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/.claude-_p-no-continue")).toBe(false);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-no-continue")).toBe(false);
     // With --no-continue → written
     await cmd.run(["--no-continue"], ctx);
-    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/.claude-_p-no-continue")).toBe(true);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-no-continue")).toBe(true);
   });
 
   test("interactive extra args written to sidecar (excluding wrapper-only flags)", async () => {
     const { runtime, cmd, fs } = seedProjectVmRunning();
     const { ctx } = makeCtx(fs);
     await cmd.run(["--resume", "--update"], ctx);
-    const sidecar = await fs.readText("/home/alan/.config/dridock/projects/abc/claude/.claude-_p-interactive-args");
+    const sidecar = await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-interactive-args");
     expect(sidecar).toContain("--resume");
     expect(sidecar).not.toContain("--update"); // wrapper flag, not passed to claude
     // Container CMD stays bare

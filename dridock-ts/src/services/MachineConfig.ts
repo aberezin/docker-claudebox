@@ -34,6 +34,39 @@ export class MachineConfig {
     if (envOverride !== undefined && envOverride !== "") {
       return this.expandHome(envOverride);
     }
+    const dot = await this.projectDotDir(projectId);
+    // `.claude` is a directory INSIDE the dot dir, not its own mount (#80
+    // phase 2). Everything that reads the data dir — the IPC sidecars, `info`,
+    // `claude-dir` — follows it here by construction rather than by each
+    // caller remembering to.
+    return dot !== undefined ? `${dot}/.claude` : `${await this.projectRoot(projectId)}/claude`;
+  }
+
+  /**
+   * The per-project `$HOME` mount source: `<data-root>/<id>/dot`.
+   *
+   * `undefined` when DRIDOCK_DATA_DIR is set. That override is a FULL path
+   * meaning "put .claude exactly here", which is incompatible with folding
+   * `.claude` inside a `$HOME` mount — there is no honest way to derive a dot
+   * dir from it. Callers fall back to the pre-phase-2 shape (mount the data
+   * dir at ~/.claude) rather than guessing, so an explicit override keeps
+   * doing exactly what it says.
+   */
+  async projectDotDir(projectId: string): Promise<string | undefined> {
+    const envOverride = this.env["DRIDOCK_DATA_DIR"];
+    if (envOverride !== undefined && envOverride !== "") return undefined;
+    return `${await this.projectRoot(projectId)}/dot`;
+  }
+
+  /**
+   * `<data-root>/<id>` — the per-project root the dot dir and data dir hang
+   * off. Public because `destroy --purge` needs the PARENT, and used to derive
+   * it by stripping a trailing "/claude" from the data dir. That string surgery
+   * broke silently the moment the data dir became `<root>/dot/.claude`, which
+   * does not end in "/claude" — purge would have deleted the data dir and
+   * orphaned the rest of the dot dir.
+   */
+  async projectRoot(projectId: string): Promise<string> {
     const xdg = await xdgRoot(this.fs, this.env, this.home);
     const machineConfig = await this.fs.readTextOrUndefined(`${xdg}/config.yml`);
     let dataRoot = `${xdg}/projects`; // baked default (wrapper.sh:149)
@@ -41,7 +74,7 @@ export class MachineConfig {
       const configured = parseTopLevelString(machineConfig, "data_root");
       if (configured !== undefined) dataRoot = this.expandHome(configured);
     }
-    return `${dataRoot}/${projectId}/claude`;
+    return `${dataRoot}/${projectId}`;
   }
 
   /**

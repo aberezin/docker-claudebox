@@ -203,12 +203,12 @@ describe("CronModeCommand — #42 tightening: pre-launch orphan-session sanity",
     setEnv("DRIDOCK_MODE_CRON", "1");
     setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
     const { runtime, cmd, fs } = seedProject();
-    fs.seed("/home/alan/.config/dridock/projects/orphan01/claude/projects/-p/history.jsonl", "{}");
+    fs.seed("/home/alan/.config/dridock/projects/orphan01/dot/.claude/projects/-p/history.jsonl", "{}");
     const { ctx, stderr } = makeCtx(fs);
     const rc = await cmd.run([], ctx);
     expect(rc).toBe(0);
     expect(stderr.text()).toContain(`you're launching id abc`);
-    expect(stderr.text()).toContain(`/home/alan/.config/dridock/projects/orphan01/claude/projects/-p`);
+    expect(stderr.text()).toContain(`/home/alan/.config/dridock/projects/orphan01/dot/.claude/projects/-p`);
     expect(runtime.runs.length).toBe(1); // container still spawned
   });
 
@@ -217,7 +217,7 @@ describe("CronModeCommand — #42 tightening: pre-launch orphan-session sanity",
     setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
     const { runtime, cmd, fs } = seedProject();
     runtime.seedPs("claude-_p_cron", { name: "claude-_p_cron", status: "Up 5 minutes", image: "dridock:latest" });
-    fs.seed("/home/alan/.config/dridock/projects/orphan01/claude/projects/-p/history.jsonl", "{}");
+    fs.seed("/home/alan/.config/dridock/projects/orphan01/dot/.claude/projects/-p/history.jsonl", "{}");
     const { ctx, stderr, stdout } = makeCtx(fs);
     const rc = await cmd.run(["stop"], ctx);
     expect(rc).toBe(0);

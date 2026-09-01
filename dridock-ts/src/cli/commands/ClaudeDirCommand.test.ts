@@ -18,13 +18,13 @@ function makeCtx(fs: InMemoryFileSystem, opts: { cwd?: string; env?: Record<stri
 }
 
 describe("ClaudeDirCommand — bash-parity output (wrapper.sh:2560-2573)", () => {
-  test("project bootstrapped → prints <xdg>/projects/<id>/claude", async () => {
+  test("project bootstrapped → prints <xdg>/projects/<id>/dot/.claude (#80 phase 2)", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
     const { ctx, stdout } = makeCtx(fs, { env: { XDG_CONFIG_HOME: "/home/alan/.config" } });
     const rc = await new ClaudeDirCommand(new StubGitToplevel("/p")).run([], ctx);
     expect(rc).toBe(0);
-    expect(stdout.text()).toBe("/home/alan/.config/dridock/projects/abc/claude\n");
+    expect(stdout.text()).toBe("/home/alan/.config/dridock/projects/abc/dot/.claude\n");
   });
 
   test("DRIDOCK_DATA_DIR override wins — used AS-IS, no /<id>/claude suffix", async () => {
@@ -64,6 +64,6 @@ describe("ClaudeDirCommand — bash-parity output (wrapper.sh:2560-2573)", () =>
     expect(rc).toBe(0);
     // The legacy name is inert: falls through to the per-project default.
     expect(stdout.text()).not.toBe("/legacy/claude\n");
-    expect(stdout.text()).toContain("/projects/abc/claude");
+    expect(stdout.text()).toContain("/projects/abc/dot/.claude");
   });
 });
