@@ -3,6 +3,18 @@ import type { HostProcessManager } from "../infra/HostProcessManager.ts";
 import { stateHome } from "../domain/paths.ts";
 
 /**
+ * Host-agent bind/port defaults. Exported and shared because they were
+ * duplicated: HostAgentService (and host-agent.py, and the tests) said 9280
+ * while BridgeStateReader said 8790, left over from the bash wrapper. Nothing
+ * caught it because HostAgentService passes the port to the spawned CHILD's
+ * env — the host binary's own env never has it — so the two defaults are
+ * exactly the values used in practice, and they disagreed. The container was
+ * handed a host-agent URL on the wrong port on every default run.
+ */
+export const HOST_AGENT_DEFAULT_BIND = "192.168.64.1";
+export const HOST_AGENT_DEFAULT_PORT = "9280";
+
+/**
  * `dridock host-agent up|down|status` — port of wrapper.sh:1689-1720
  * (cb_host_agent_up + _down + _status). The Python HTTP daemon
  * (`host-agent.py`) is unchanged — this only ports the bash
@@ -50,8 +62,8 @@ export class HostAgentService {
   constructor(private readonly deps: HostAgentDeps) {}
 
   async up(): Promise<HostAgentUpOutcome> {
-    const bind = this.envOr("DRIDOCK_HOST_AGENT_BIND", "192.168.64.1");
-    const port = this.envOr("DRIDOCK_HOST_AGENT_PORT", "9280");
+    const bind = this.envOr("DRIDOCK_HOST_AGENT_BIND", HOST_AGENT_DEFAULT_BIND);
+    const port = this.envOr("DRIDOCK_HOST_AGENT_PORT", HOST_AGENT_DEFAULT_PORT);
     const { pidFile, tokenFile, logFile } = await this.paths();
 
     // Already-up short-circuit (bash: wrapper.sh:1692-1694).
@@ -108,8 +120,8 @@ export class HostAgentService {
   }
 
   async status(): Promise<HostAgentStatusOutcome> {
-    const bind = this.envOr("DRIDOCK_HOST_AGENT_BIND", "192.168.64.1");
-    const port = this.envOr("DRIDOCK_HOST_AGENT_PORT", "9280");
+    const bind = this.envOr("DRIDOCK_HOST_AGENT_BIND", HOST_AGENT_DEFAULT_BIND);
+    const port = this.envOr("DRIDOCK_HOST_AGENT_PORT", HOST_AGENT_DEFAULT_PORT);
     const { pidFile } = await this.paths();
     const pid = await this.readPid(pidFile);
     const running = pid !== undefined && (await this.deps.processes.isAlive(pid));

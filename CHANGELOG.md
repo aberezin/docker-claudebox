@@ -79,6 +79,16 @@ when a project is still legacy afterwards (opt-out set, or migration failed).
 
 ## [Unreleased]
 
+### Fixed
+- **Containers were handed a host-agent URL on the wrong port** — `BridgeStateReader`
+  defaulted `DRIDOCK_HOST_AGENT_PORT` to `8790` (a bash-wrapper-era value) while
+  `HostAgentService`, `host-agent.py` and their tests all used `9280`. `StartCommand`
+  composes `DRIDOCK_HOST_CDP_URL` from that reader and forwards it into every container,
+  and `HostAgentService` sets the port only in the **spawned child's** env — never the
+  host binary's own — so the default branch was the normal path, not an edge case. The
+  two sides now import one shared constant instead of retyping it.
+
+
 ### Added
 - **Python-aware sweep in the env-rename lint** (#26) — the existing sweep matched shell
   parameter expansion (`${CLAUDEBOX_X`), which can never see Python's

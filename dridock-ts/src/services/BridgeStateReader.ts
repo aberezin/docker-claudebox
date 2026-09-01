@@ -1,6 +1,7 @@
 import type { FileSystem } from "../infra/FileSystem.ts";
 import type { ProcessProbe } from "../infra/ProcessProbe.ts";
 import { xdgRoot } from "../domain/paths.ts";
+import { HOST_AGENT_DEFAULT_BIND, HOST_AGENT_DEFAULT_PORT } from "./HostAgentService.ts";
 
 /**
  * Read the OPT-IN state of the two on-Mac bridges (CDP + host-agent) so
@@ -35,8 +36,9 @@ export class BridgeStateReader {
    * token file exists.
    *
    * URL is composed from DRIDOCK_HOST_AGENT_BIND + DRIDOCK_HOST_AGENT_PORT
-   * env (defaults 192.168.64.1 and 8790 per wrapper.sh:1536-1538 shape —
-   * host-agent-adjacent defaults; the code re-derives them for isolation).
+   * env, using the SAME defaults HostAgentService spawns with. Re-deriving
+   * them here is what let 8790 (a bash-era value) persist against the real
+   * 9280 — the port is now imported, not retyped.
    */
   async hostAgentState(): Promise<{ readonly url: string; readonly token: string }> {
     const xdg = await xdgRoot(this.fs, this.env, this.home);
@@ -47,8 +49,8 @@ export class BridgeStateReader {
     const pid = Number(pidRaw.trim());
     if (!Number.isFinite(pid) || pid <= 0) return { url: "", token: "" };
     if (!(await this.probe.processAlive(pid))) return { url: "", token: "" };
-    const bind = this.env["DRIDOCK_HOST_AGENT_BIND"] ?? "192.168.64.1";
-    const port = this.env["DRIDOCK_HOST_AGENT_PORT"] ?? "8790";
+    const bind = this.env["DRIDOCK_HOST_AGENT_BIND"] ?? HOST_AGENT_DEFAULT_BIND;
+    const port = this.env["DRIDOCK_HOST_AGENT_PORT"] ?? HOST_AGENT_DEFAULT_PORT;
     return { url: `${bind}:${port}`, token };
   }
 }
