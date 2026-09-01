@@ -78,3 +78,12 @@ help:
 	@echo "  test           - Run all tests"
 	@echo "  clean          - Remove built images from cb-infra"
 	@echo "  help           - Show this help message"
+
+# Install the repo's git hooks into .git/hooks (#80-adjacent, 2026-09-01).
+# Copied rather than symlinked via core.hooksPath: that setting is
+# worktree-relative, so the hook disappears on any branch without the file —
+# master included — and a guard that silently vanishes is worse than none.
+.PHONY: hooks
+hooks:
+	install -m 755 .githooks/pre-commit .git/hooks/pre-commit
+	@echo "installed .git/hooks/pre-commit (refuses direct commits on master)"

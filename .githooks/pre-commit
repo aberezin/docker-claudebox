@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Refuse ordinary commits on the default branch.
+#
+# WHY: the repo convention is one issue per branch, and the owner merges. On
+# 2026-09-01 a test-isolation fix (a744f30) was committed and pushed straight to
+# master mid-session — not maliciously, just momentum: the fix was small, the
+# branch for the CURRENT task was the wrong home for it, and creating a third
+# branch felt like ceremony. That is exactly when it happens.
+#
+# Discipline did not hold, so this does. Same reasoning as
+# tests/test_deprecation_deadlines.sh: a rule nobody can forget beats a rule
+# everybody means to keep.
+#
+# Merges are allowed — merging a finished branch INTO master is the workflow.
+# Override for a genuine one-off with:  DRIDOCK_ALLOW_MASTER_COMMIT=1 git commit ...
+#
+# INSTALL VIA `make hooks`, which copies this into .git/hooks/.
+# Do NOT rely on `core.hooksPath=.githooks` alone: that path is inside the
+# worktree, so the hook vanishes on any branch that predates it — including
+# master itself. Tested exactly that way and the guard silently did nothing,
+# which is worse than no guard because you believe you are covered.
+# .git/hooks/ lives outside the worktree and is therefore branch-independent.
+set -uo pipefail
+
+_branch="$(git symbolic-ref --short -q HEAD || echo detached)"
+case "$_branch" in
+    master|main) ;;
+    *) exit 0 ;;
+esac
+
+# A merge in progress is the sanctioned way commits land on master.
+if [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]; then
+    exit 0
+fi
+
+if [ "${DRIDOCK_ALLOW_MASTER_COMMIT:-}" = "1" ]; then
+    echo "⚠️  committing directly to '$_branch' (DRIDOCK_ALLOW_MASTER_COMMIT=1)." >&2
+    exit 0
+fi
+
+cat >&2 <<EOF
+❌ refusing to commit directly to '$_branch'.
+
+   Work goes on a branch named <issue#>-<slug>, and the branch owner merges it.
+   See CLAUDE.md ("Work branches are named ...") and docs/versioning.md.
+
+   Your staged changes are untouched. Move them to a branch:
+
+       git switch -c <issue#>-<slug>
+       git commit ...
+
+   If this genuinely belongs on '$_branch' (rare — a merge does not need this):
+
+       DRIDOCK_ALLOW_MASTER_COMMIT=1 git commit ...
+EOF
+exit 1
