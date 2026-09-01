@@ -28,6 +28,7 @@ import { collectEnvPassthrough, collectMountPassthrough } from "../../services/E
 import { BridgeStateReader } from "../../services/BridgeStateReader.ts";
 import { DotDirMigrator } from "../../services/DotDirMigrator.ts";
 import { DotMountGate } from "../../services/DotMountGate.ts";
+import { dotExclusionVolumes } from "../../services/DotExclusions.ts";
 import { xdgRoot } from "../../domain/paths.ts";
 import { CLAUDE_CLI_REMOTE_CONTROL_FLOOR } from "../../domain/dridockVersion.ts";
 import { Version } from "../../domain/Version.ts";
@@ -383,7 +384,6 @@ mode (-p) they are validated against an allowlist first.
     extraMounts: readonly RunArgs["mounts"][number][], tmpfs: readonly string[],
     dotMount?: string,
   ): RunArgs {
-    void id;
     return {
       context: ctxDocker,
       containerName: cname,
@@ -418,6 +418,10 @@ mode (-p) they are validated against an allowlist first.
       cmd,
       publishPorts: [],
       tmpfs: tmpfs.length > 0 ? tmpfs : undefined,
+      // Exclusions exist only when the $HOME bind is actually in place —
+      // without it there is nothing to shadow, and creating a per-project
+      // volume set nothing reads would just be orphans waiting to happen.
+      volumes: dotMount !== undefined ? dotExclusionVolumes(id) : undefined,
     };
   }
 }

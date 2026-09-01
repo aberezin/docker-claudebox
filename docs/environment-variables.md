@@ -130,6 +130,22 @@ Set these in the claudebot's shell to tune `cb-browser`. Container-only (not rea
 | `CB_WATCH_NAME`         | container name for `cb-browser watch`.                                     | `cb-watch`         |
 | `CB_BROWSER_CDP_KEEP`   | Set to `1` to disable `cb-browser script-cdp`'s snapshot-diff tab cleanup on exit. Use when the script deliberately leaves tabs open for the human to inspect. | _(off — cleanup on)_ |
 
+## Per-project docker volumes (#80 phase 2)
+
+When dotfile persistence is active, dridock creates named volumes per project to
+keep regeneratable caches off the host bind mount:
+
+| volume | mounted at |
+|---|---|
+| `dridock-<id>-cache` | `~/.cache` |
+| `dridock-<id>-npm` | `~/.npm` |
+| `dridock-<id>-local-share-pnpm-store` | `~/.local/share/pnpm/store` |
+| `dridock-<id>-go-pkg-mod` | `~/go/pkg/mod` |
+
+They are VM-local, so npm installs don't cross the VM↔host boundary, and they
+survive a container recreate. `dridock destroy` removes them with the VM. See
+[design/home-persistence.md](design/home-persistence.md).
+
 ## See also
 
 - [design/3.0-migration.md](design/3.0-migration.md) — the `CLAUDEBOX_*` → `DRIDOCK_*` rename (its compat window closed in 5.0.0).

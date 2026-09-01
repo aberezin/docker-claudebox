@@ -16,6 +16,24 @@ export interface RunArgs {
   readonly containerName: string;
   readonly image: string;
   readonly mounts: readonly { host: string; container: string; ro?: boolean }[];
+  /**
+   * Docker-managed NAMED volumes, rendered `-v <name>:<container>`.
+   *
+   * Distinct from `mounts` on purpose. Docker tells a volume from a bind by
+   * whether the source starts with "/", so a name could technically be passed
+   * through `mounts.host` — but a field called `host` holding something that
+   * is not a host path misleads every future reader. The type carries the
+   * intent.
+   *
+   * Used for the #80 phase-2 exclusions: regeneratable caches (~/.cache,
+   * ~/.npm, …) that must NOT land in the per-project dot dir. Mounted at a
+   * deeper path than the $HOME bind, so they shadow that subtree.
+   *
+   * Named, not anonymous: `containerRemove` runs `docker rm -f` WITHOUT `-v`,
+   * so anonymous volumes would leak on every recreate. Named ones are
+   * addressable, so `dridock destroy` can reap them.
+   */
+  readonly volumes?: readonly { readonly name: string; readonly container: string }[];
   readonly envFile?: string;
   /** Env pairs, listed on the command line as `-e KEY=VALUE`. */
   readonly env: readonly { readonly key: string; readonly value: string }[];
@@ -176,6 +194,7 @@ export function buildRunArgv(args: RunArgs): string[] {
       : `${m.host}:${m.container}`;
     argv.push("-v", spec);
   }
+  for (const v of args.volumes ?? []) argv.push("-v", `${v.name}:${v.container}`);
   for (const p of args.publishPorts) argv.push("-p", p);
   for (const t of args.tmpfs ?? []) argv.push("--tmpfs", t);
   argv.push(args.image);

@@ -73,16 +73,44 @@ their **container** path (`~/.claude/…`) does not. Host and container must be
 changed together or the sidecar handoff breaks silently — the class
 `docs/design/agent-teams-delivery.md` and #30 both document.
 
-### Decision: exclusions are mounts, not a config list
+### Decision: exclusions are NAMED VOLUMES layered over the `$HOME` bind
 
-Bind mounts cannot exclude subpaths. Each exclusion has to be its own mount
-(anonymous volume or tmpfs) over the excluded path — `~/.cache`, `~/.npm`,
-`~/go/pkg/mod`, `~/.local/share/pnpm/store`.
+Bind mounts cannot exclude subpaths. Each exclusion is its own mount at a
+**deeper** path than `/home/claude`, which docker layers on top so it shadows
+that subtree — mount ordering, not OverlayFS.
 
-The point survives the mechanism: with `$HOME` empty of baked content the
-**default flips from silent-drop to persist**, so a forgotten exclusion wastes
-disk *visibly* instead of losing state *silently*. That is the direction this
-repo's rules push every time.
+Excluded today (`DOT_EXCLUDED_PATHS`): `~/.cache`, `~/.npm`,
+`~/.local/share/pnpm/store`, `~/go/pkg/mod`.
+
+**Two reasons to exclude, and the first is the one people miss:**
+
+1. **Performance.** Bind mounts under macOS virtualisation are slow for many
+   small files, which is exactly the shape of `~/.npm` and `~/.cache`. Leaving
+   them on the bind pushes every npm install through the VM↔host boundary.
+   Excluding them is a speed fix, not just a tidiness one.
+2. **Size.** They are regeneratable and can reach gigabytes. The dot dir lives
+   in the user's XDG config tree; a multi-GB module cache does not belong there.
+
+**Why named volumes and not the alternatives:**
+
+| | survives restart | survives recreate | why not |
+|---|---|---|---|
+| tmpfs | ❌ | ❌ | RAM-backed, and `~/.npm` is GB-scale. Dies on container *stop*, so an ordinary `dridock down && start` throws the cache away — **worse than today** |
+| anonymous volume | ✅ | ❌ | `containerRemove` runs `docker rm -f` **without** `-v`, so one leaks on every recreate. Trading VM orphans for volume orphans |
+| **named volume** | ✅ | ✅ | VM-local (fast), a cache *should* survive a recreate, and it is addressable |
+
+**Lifetime — why there is no reaper.** These volumes live inside the
+**per-project VM's** docker daemon, and `dridock destroy` runs `colima delete`
+on that whole VM, so they go with it. In a shared-daemon setup they would need
+explicit cleanup; the per-project-VM model removes that need. The one residual
+case is editing `DOT_EXCLUDED_PATHS`, which changes the derived names and
+orphans the previous set inside a living VM — bounded, visible in
+`docker volume ls`, and prunable.
+
+The broader point survives the mechanism: with `$HOME` empty of baked content
+the **default flips from silent-drop to persist**, so a forgotten exclusion
+wastes disk *visibly* instead of losing state *silently*. That is the direction
+this repo's rules push every time.
 
 ### Required: the mount must be version-gated
 
