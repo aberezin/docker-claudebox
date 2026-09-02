@@ -62,6 +62,37 @@ case "$CLAUDE_VERSION_OVERRIDE" in
 		;;
 esac
 
+# The override applies to THIS BUILD ONLY -- it never writes the Dockerfile's
+# `ARG CLAUDE_VERSION`. So an account built with the flag diverges from the
+# committed default, and the next bare `./install.sh` (here or in another
+# account) silently rebuilds on the OLDER CLI.
+#
+# That is not a cosmetic drift. claude SILENTLY IGNORES unknown flags (#17):
+# a too-old CLI accepts the flags dridock forwards and drops them, exit 0, no
+# warning. "Older than intended" never announces itself.
+#
+# Happened for real on 2026-09-02: Bear was rebuilt at 2.1.258 while the pin
+# still said 2.1.215, and nothing anywhere said so.
+if [ -n "$CLAUDE_VERSION_OVERRIDE" ]; then
+	# NB: SCRIPT_DIR is not defined this early in the script, so resolve the
+	# Dockerfile independently. Using it here would read a nonexistent path,
+	# leave _pin empty, and make this warning silently never fire -- which is
+	# the exact failure class it exists to catch.
+	_here="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+	_pin="$(sed -n 's/^ARG CLAUDE_VERSION=\([^ ]*\).*/\1/p' "$_here/Dockerfile" 2>/dev/null | head -1)"
+	if [ -n "$_pin" ] && [ "$_pin" != "$CLAUDE_VERSION_OVERRIDE" ]; then
+		echo ""
+		echo "⚠️  --claude-version $CLAUDE_VERSION_OVERRIDE does NOT update the committed pin"
+		echo "    (Dockerfile: ARG CLAUDE_VERSION=$_pin). This build gets $CLAUDE_VERSION_OVERRIDE;"
+		echo "    the NEXT bare './install.sh' -- here or in another account -- gets $_pin."
+		echo "    claude ignores unknown flags silently (#17), so that regression is invisible."
+		echo ""
+		echo "    To make it stick, commit the pin:"
+		echo "        ARG CLAUDE_VERSION=$CLAUDE_VERSION_OVERRIDE"
+		echo ""
+	fi
+fi
+
 BIN_NAME="${1:-${DRIDOCK_BIN_NAME:-dridock}}"
 # Default to a user-writable dir so install needs no sudo (this fork avoids macOS
 # sudo). Override with DRIDOCK_INSTALL_DIR

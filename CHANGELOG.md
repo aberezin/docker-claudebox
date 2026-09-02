@@ -26,6 +26,15 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.5.0] - 2026-09-02
+
+### Added
+- `./install.sh --claude-version <v>` now warns when the value differs from the
+  committed `ARG CLAUDE_VERSION`, naming both versions and what the next bare
+  `./install.sh` would build. The override applies to that build only; without
+  the warning the divergence is invisible, and because claude silently ignores
+  unknown flags (#17) the resulting regression is invisible too.
+
 ## [5.4.0] - 2026-09-02
 
 ### Changed
