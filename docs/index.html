@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>claudebox — a sandbox for Claude Code on macOS</title>
+  <title>dridock — a sandbox for Claude Code on macOS</title>
   <meta name="description" content="Runs Claude Code with --dangerously-skip-permissions inside a project-scoped Colima VM. Shared-nothing per project, docker-out-of-docker for test workloads, edge cases baked in.">
   <style>
     :root {
@@ -135,7 +135,7 @@
 <body>
 <main>
 
-  <h1>claudebox</h1>
+  <h1>dridock</h1>
   <p class="tagline">A sandbox for Claude Code that makes <code>--dangerously-skip-permissions</code> reasonably safe.</p>
   <p class="lede">
     Every project gets its own Colima VM on your Mac — its own daemon,
@@ -157,11 +157,11 @@
     credentials.
   </p>
   <p>
-    claudebox draws the boundary one level up: every project gets its own
+    dridock draws the boundary one level up: every project gets its own
     Colima VM. Different daemon, different network, different context.
   </p>
 
-  <h2>Why claudebox</h2>
+  <h2>Why dridock</h2>
   <div class="cards">
 
     <div class="card">
@@ -208,7 +208,7 @@
     <div class="card">
       <h3>The edge cases are worked out</h3>
       <p>
-        Rotating VM IPs self-heal via <code>$CLAUDEBOX_VM_IP</code>. Disk
+        Rotating VM IPs self-heal via <code>$DRIDOCK_VM_IP</code>. Disk
         ENOSPC has a runbook. Secrets live in a chmod-600 file, never on
         the command line.
       </p>
