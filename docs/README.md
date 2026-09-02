@@ -16,6 +16,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [customization.md](customization.md) | `~/.claude/bin` scripts, `init.d` hooks, always-active skills, MCP servers, plugins, and **profiles**. |
 | [versioning.md](versioning.md) | Semver, the host↔image contract, release steps, and `dridock checkversion`. |
 | [roadmap.md](roadmap.md) | Committed removals and breaking changes, each enforced by a test that fails when its release arrives with the removal undone. |
+| [marketing/landing.md](marketing/landing.md) | The public pitch — what dridock is, how it compares to the alternatives, and when it is the wrong choice. Rendered as the GitHub Pages site via `docs/index.html`. |
 | [documentation.md](documentation.md) | How to document this framework — house style, the `See also` rule, and the Mermaid convention (+ the `;` gotcha). |
 
 ## Modes
