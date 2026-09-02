@@ -77,6 +77,17 @@ export class BrowserBridgeService {
     const welcomeUrl = welcomeUrlOf(windowTitle, bind, port);
 
     if (!anyAlive) {
+      // Seed Chrome Preferences before spawn: `dridock browser-bridge down`
+      // kills the pid, so Chrome writes exit_type=Crashed on shutdown and
+      // shows the "Restore pages?" bubble on the next up. Overwrite with
+      // exit_type=Normal + disable the password manager so this dedicated
+      // debug profile stays quiet. #84.
+      await this.deps.fs.mkdirRecursive(`${profile}/Default`);
+      await this.deps.fs.writeText(
+        `${profile}/Default/Preferences`,
+        debugProfilePreferences(),
+      );
+
       const chromePid = await this.deps.processes.spawnDetached(
         [chromeBin,
           `--remote-debugging-port=${chromePort}`,
@@ -84,6 +95,7 @@ export class BrowserBridgeService {
           "--remote-allow-origins=*",
           "--no-first-run",
           "--no-default-browser-check",
+          "--hide-crash-restore-bubble",
           welcomeUrl],
         { logFile: chromeLog },
       );
@@ -184,6 +196,30 @@ s.bind(LISTEN); s.listen(64)
 while True:
     c,_=s.accept(); threading.Thread(target=handle,args=(c,),daemon=True).start()
 `;
+}
+
+/** Chrome Preferences JSON seeded into `<profile>/Default/Preferences` before
+ *  every fresh spawn. Two purposes:
+ *  - `profile.exit_type=Normal` + `exited_cleanly=true` — Chrome writes
+ *    `exit_type=Crashed` when its process is killed (which is exactly what
+ *    `dridock browser-bridge down` does), which triggers the "Restore pages?"
+ *    infobar on the next launch. Overwriting the pref pre-empts that.
+ *  - `password_manager_enabled=false` + `credentials_enable_*=false` — no
+ *    "save password?" prompts on a form the claudebot's script touches.
+ *  Safe to overwrite: this profile is dedicated to the harness (created at
+ *  `<state>/chrome-debug-profile` unless the user pointed `DRIDOCK_CDP_PROFILE`
+ *  at their own path). See #84.
+ */
+export function debugProfilePreferences(): string {
+  return JSON.stringify({
+    profile: {
+      exit_type: "Normal",
+      exited_cleanly: true,
+      password_manager_enabled: false,
+    },
+    credentials_enable_service: false,
+    credentials_enable_autosignin: false,
+  });
 }
 
 function welcomeUrlOf(windowTitle: string, bind: string, port: string): string {
