@@ -38,10 +38,25 @@ if ! command -v dridock >/dev/null 2>&1; then
     exit 0
 fi
 
-# ─── project guard: no team roster → no team, no work ─────────────────
-if ! dridock team roster >/dev/null 2>&1; then
-    exit 0
-fi
+# ─── opt-in gate: distinguish "no team" (silent) from "broken team" (loud).
+# `dridock team roster` uses the CLI's own project-root resolution (git
+# toplevel), so it finds the roster from any subdirectory — a naive
+# `[ -f .dridock/agents.yml ]` here would misfire when the hook runs
+# from a subdir of the project. rc semantics (#85):
+#   0 → roster present + parseable + non-empty
+#   2 → roster FILE ABSENT — user never opted in → silent exit
+#   * → any other failure (malformed yaml, empty roster, permission) →
+#       user opted in but roster is broken → surface loudly, still exit 0
+#       so the session starts.
+_roster_out="$(dridock team roster 2>&1)"; _roster_rc=$?
+case $_roster_rc in
+    0) ;;
+    2) exit 0 ;;
+    *) echo ""
+       echo "⚠ team-bus OFF for this session — roster is broken:"
+       printf '%s\n' "$_roster_out" | sed 's/^/  /'
+       exit 0 ;;
+esac
 
 # ─── version gate: `--inbox` needs 4.2.0+ ────────────────────────────
 # A branch checkout without ./install.sh arms these hooks against a
@@ -65,10 +80,21 @@ if [ -n "$_payload" ] && command -v jq >/dev/null 2>&1; then
 fi
 
 # ─── resolve self name ────────────────────────────────────────────────
-# `dridock team whoami` prints the agent name on stdout (or errors on
-# stderr if unresolvable — multi-agent roster with no DRIDOCK_AGENT_NAME).
-_self="$(dridock team whoami 2>/dev/null | head -1 || true)"
-if [ -z "$_self" ]; then
+# `dridock team whoami` prints the agent name on stdout, plus a provenance
+# line to stderr on success. On failure (DRIDOCK_AGENT_NAME missing/typo
+# with a multi-agent roster, renamed roster entry, unmatched name) it
+# writes an actionable error to stderr. Roster is known present + parseable
+# at this point (upstream gate), so a failure here means the identity is
+# broken. Surface the CLI's own stderr and exit 0 — the session still
+# starts, but the bus is off and we say so (#85).
+if _self="$(dridock team whoami 2>&1)"; then
+    # Success: stdout is the name, stderr is a `(from ...)` provenance
+    # line — combined into `_self` by 2>&1. head -1 picks the name.
+    _self="$(printf '%s' "$_self" | head -1)"
+else
+    echo ""
+    echo "⚠ team-bus OFF for this session — could not resolve your identity:"
+    printf '%s\n' "$_self" | sed 's/^/  /'
     exit 0
 fi
 

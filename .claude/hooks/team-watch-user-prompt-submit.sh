@@ -29,9 +29,29 @@ set -u
 
 # Silent no-op guards.
 command -v dridock >/dev/null 2>&1 || exit 0
-dridock team roster >/dev/null 2>&1 || exit 0
-_self="$(dridock team whoami 2>/dev/null | head -1 || true)"
-[ -n "$_self" ] || exit 0
+
+# ─── opt-in gate + roster health (#85). See team-watch-session-start.sh
+# for the full comment; keep in sync.
+_roster_out="$(dridock team roster 2>&1)"; _roster_rc=$?
+case $_roster_rc in
+    0) ;;
+    2) exit 0 ;;
+    *) echo ""
+       echo "⚠ team-bus OFF for this session — roster is broken:"
+       printf '%s\n' "$_roster_out" | sed 's/^/  /'
+       exit 0 ;;
+esac
+
+# ─── resolve self name (#85). See team-watch-session-start.sh for the
+# full comment; keep in sync.
+if _self="$(dridock team whoami 2>&1)"; then
+    _self="$(printf '%s' "$_self" | head -1)"
+else
+    echo ""
+    echo "⚠ team-bus OFF for this session — could not resolve your identity:"
+    printf '%s\n' "$_self" | sed 's/^/  /'
+    exit 0
+fi
 
 # Version gate — 4.2.0+ has `dridock team fetcher`. Older binaries
 # return "unknown subcommand 'fetcher'". One-line probe.
