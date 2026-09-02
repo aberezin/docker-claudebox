@@ -26,6 +26,15 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.7.3] - 2026-09-02
+
+### Changed
+- The `--remote-control` auth warning now says **which** fix applies. It checks
+  whether `~/.claude/.credentials.json` exists and either points you at
+  `claude auth login` or, when a login is already stored, tells you the only
+  missing step is `DRIDOCK_NO_OAUTH_TOKEN=1`. Previously it sent everyone
+  through the browser OAuth flow, including people who had already done it.
+
 ## [5.7.2] - 2026-09-02
 
 ### Fixed

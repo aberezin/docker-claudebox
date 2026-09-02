@@ -1353,9 +1353,27 @@ else
 				echo "⚠ dridock: --remote-control needs a FULL-SCOPE claude.ai OAuth login," >&2
 				echo "  but CLAUDE_CODE_OAUTH_TOKEN (setup-token style) is set — that token is" >&2
 				echo "  model-request-only, so Anthropic rejects the RC registration silently." >&2
-				echo "  Fix (one-time per project): inside this session, run 'claude auth login'" >&2
-				echo "  and complete the browser OAuth flow; then next launch use:" >&2
-				echo "    DRIDOCK_NO_OAUTH_TOKEN=1 dridock start --remote-control" >&2
+				# Which fix applies depends on whether a stored login already
+				# exists, and that is knowable: `claude auth login` writes
+				# ~/.claude/.credentials.json, which is bind-mounted and readable
+				# right here. The message used to tell EVERYONE to go log in --
+				# including people who already had, for whom the only missing
+				# step is the env opt-out. Sending someone through a browser
+				# OAuth flow they completed last week is how a correct warning
+				# still wastes their time.
+				#
+				# A file test only, never a `claude` invocation: running claude
+				# from PID 1 deadlocks on the tty (see the comment above).
+				if [ -s "$HOME/.claude/.credentials.json" ]; then
+					echo "  You ALREADY have a stored login ($HOME/.claude/.credentials.json)," >&2
+					echo "  so it is only the env var shadowing it. One step, no re-login:" >&2
+					echo "    DRIDOCK_NO_OAUTH_TOKEN=1 dridock start --remote-control" >&2
+				else
+					echo "  No stored login found at $HOME/.claude/.credentials.json." >&2
+					echo "  Fix (one-time per project): inside this session, run 'claude auth login'" >&2
+					echo "  and complete the browser OAuth flow; then next launch use:" >&2
+					echo "    DRIDOCK_NO_OAUTH_TOKEN=1 dridock start --remote-control" >&2
+				fi
 				echo "  See docs/design/git-and-api-auth.md and https://code.claude.com/docs/en/remote-control" >&2
 			fi ;;
 	esac

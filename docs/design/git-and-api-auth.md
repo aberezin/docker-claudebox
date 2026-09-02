@@ -253,6 +253,14 @@ exit               # leave the session
 DRIDOCK_NO_OAUTH_TOKEN=1 dridock start --remote-control
 ```
 
+The entrypoint's warning tells you **which** of these two situations you are in:
+it checks whether `~/.claude/.credentials.json` exists (a file test only — never a
+`claude` invocation, which deadlocks from PID 1) and says either "no stored login
+found, run `claude auth login` first" or "you ALREADY have a stored login, it is
+only the env var shadowing it — one step, no re-login". Before that, it sent
+everyone through the browser OAuth flow, including people who had completed it.
+
+
 `DRIDOCK_NO_OAUTH_TOKEN=1` mirrors the existing `DRIDOCK_NO_API_KEY=1` (which does
 the same thing for `ANTHROPIC_API_KEY`). Set it once in `~/.zshrc` if you want RC
 by default across sessions.
