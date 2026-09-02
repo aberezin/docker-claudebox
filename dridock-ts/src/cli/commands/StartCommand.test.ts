@@ -530,3 +530,37 @@ describe("shellQuote — bash %q parity", () => {
   test("embedded single quote", () => expect(shellQuote(["it's"])).toBe(`'it'\\''s'`));
   test("empty", () => expect(shellQuote(["a", "", "b"])).toBe("'a' '' 'b'"));
 });
+
+
+/* ── #80: a data-dir migration must force a container recreate ────────────── */
+
+describe("StartCommand — migration invalidates existing containers", () => {
+  test("after moving the data dir, stale containers are REMOVED so their mounts are rebuilt", async () => {
+    const { fs, runtime, cmd, docker } = seedProjectVmRunning();
+    // Pre-phase-2 layout: the project's data still lives at <root>/claude, so
+    // this start will migrate it.
+    fs.seed("/home/alan/.config/dridock/projects/abc/claude/history.jsonl", "session\n");
+    const { ctx } = makeCtx(fs);
+    await cmd.run([], ctx);
+
+    // Docker does NOT error when a bind source disappears — it recreates the
+    // path as an EMPTY dir and the agent wakes with no memory. The only way a
+    // container picks up the new source is being recreated, and `dridock down`
+    // does not remove. Found on a live project during the #80 gate test.
+    const removed = docker.removals.map((r) => r.name);
+    expect(removed).toContain("claude-_p");
+    expect(removed).toContain("claude-_p_prog");
+    expect(removed).toContain("claude-_p_cron");
+    void runtime;
+  });
+
+  test("with nothing to migrate, no containers are removed", async () => {
+    const { fs, cmd, docker } = seedProjectVmRunning();
+    // Already on the new layout — a start must not gratuitously destroy
+    // containers, which would throw away every unmounted thing in them.
+    fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/history.jsonl", "session\n");
+    const { ctx } = makeCtx(fs);
+    await cmd.run([], ctx);
+    expect(docker.removals.map((r) => r.name)).toEqual([]);
+  });
+});

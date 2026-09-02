@@ -119,6 +119,13 @@ when a project is still legacy afterwards (opt-out set, or migration failed).
   never overwritten.
 
 ### Fixed
+- **A data-dir migration now forces a container recreate.** Moving the mount source out
+  from under an existing container does not error — Docker silently recreates the missing
+  source as an **empty directory**, so the agent wakes with no memory at all while its
+  history sits untouched at the new path. `dridock down` stops without removing, so a
+  plain down/start reattaches to the stale container and reproduces it every time.
+  `ContainerRefresher` only knows about image drift; a mount-source change was invisible
+  to it. Caught on a live project during the gate test.
 - `destroy --purge` derived the project root by stripping a trailing `/claude` from the
   data dir. With the folded layout that string no longer matches, so purge would have
   deleted the data dir and **orphaned the rest of the dot dir**. It now asks
