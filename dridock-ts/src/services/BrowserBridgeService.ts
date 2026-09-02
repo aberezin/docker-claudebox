@@ -77,16 +77,20 @@ export class BrowserBridgeService {
     const welcomeUrl = welcomeUrlOf(windowTitle, bind, port);
 
     if (!anyAlive) {
-      // Seed Chrome Preferences before spawn: `dridock browser-bridge down`
-      // kills the pid, so Chrome writes exit_type=Crashed on shutdown and
-      // shows the "Restore pages?" bubble on the next up. Overwrite with
-      // exit_type=Normal + disable the password manager so this dedicated
-      // debug profile stays quiet. #84.
+      // Quiet this debug profile before spawn: `dridock browser-bridge down`
+      // kills the pid, so Chrome writes exit_type=Crashed on shutdown and shows
+      // the "Restore pages?" bubble on the next up. #84.
+      //
+      // MERGE, never replace. Preferences is Chrome's main config document —
+      // window bounds, per-site permissions (clipboard, notifications, camera),
+      // DevTools settings, zoom levels, extension state. Overwriting it would
+      // fix the bubble by throwing all of that away on every restart: a
+      // script-cdp run that granted clipboard permission would lose it on the
+      // next `up`. The five keys we care about are a DEFAULT, not a lock.
+      const prefsPath = `${profile}/Default/Preferences`;
       await this.deps.fs.mkdirRecursive(`${profile}/Default`);
-      await this.deps.fs.writeText(
-        `${profile}/Default/Preferences`,
-        debugProfilePreferences(),
-      );
+      const existing = await this.deps.fs.readTextOrUndefined(prefsPath);
+      await this.deps.fs.writeTextAtomic(prefsPath, quietProfilePreferences(existing));
 
       const chromePid = await this.deps.processes.spawnDetached(
         [chromeBin,
@@ -198,21 +202,48 @@ while True:
 `;
 }
 
-/** Chrome Preferences JSON seeded into `<profile>/Default/Preferences` before
- *  every fresh spawn. Two purposes:
- *  - `profile.exit_type=Normal` + `exited_cleanly=true` — Chrome writes
- *    `exit_type=Crashed` when its process is killed (which is exactly what
- *    `dridock browser-bridge down` does), which triggers the "Restore pages?"
- *    infobar on the next launch. Overwriting the pref pre-empts that.
- *  - `password_manager_enabled=false` + `credentials_enable_*=false` — no
- *    "save password?" prompts on a form the claudebot's script touches.
- *  Safe to overwrite: this profile is dedicated to the harness (created at
- *  `<state>/chrome-debug-profile` unless the user pointed `DRIDOCK_CDP_PROFILE`
- *  at their own path). See #84.
+/**
+ * Chrome `Default/Preferences` with this harness's quiet-profile keys applied
+ * ON TOP of whatever is already there (#84).
+ *
+ * Two behaviours it must have, and they pull in different directions:
+ *
+ *  - `profile.exit_type=Normal` + `exited_cleanly=true` must be re-asserted on
+ *    EVERY fresh spawn. `browser-bridge down` kills the pid, so Chrome records
+ *    a crash on the way out and offers "Restore pages?" on the next launch.
+ *    Seeding only at profile creation would fix the first run and no other.
+ *  - Everything else in the file must SURVIVE. Preferences is Chrome's main
+ *    config document; replacing it wholesale would reset window bounds,
+ *    per-site permissions, DevTools settings and zoom levels on every restart,
+ *    which is a worse bug than the bubble it fixes.
+ *
+ * Merging satisfies both: the keys are a default we re-apply, not a lock, and a
+ * user who edits anything else keeps their edit.
+ *
+ * Unparseable input falls back to the minimal document. A Preferences file
+ * Chrome cannot parse is already broken — Chrome would discard it itself — so
+ * replacing it is the recovery, not the data loss.
  */
-export function debugProfilePreferences(): string {
+export function quietProfilePreferences(existing?: string): string {
+  let doc: Record<string, unknown> = {};
+  if (existing !== undefined && existing.trim() !== "") {
+    try {
+      const parsed: unknown = JSON.parse(existing);
+      if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+        doc = parsed as Record<string, unknown>;
+      }
+    } catch {
+      // fall through to the minimal document
+    }
+  }
+  const priorProfile =
+    doc["profile"] !== null && typeof doc["profile"] === "object" && !Array.isArray(doc["profile"])
+      ? (doc["profile"] as Record<string, unknown>)
+      : {};
   return JSON.stringify({
+    ...doc,
     profile: {
+      ...priorProfile,
       exit_type: "Normal",
       exited_cleanly: true,
       password_manager_enabled: false,
