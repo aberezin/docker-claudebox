@@ -26,6 +26,19 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.3.0] - 2026-09-02
+
+### Added
+- `dridock team post --issue N --close` (comment then close) and
+  `dridock team post --new --title T` (file an issue), so **every** GitHub write
+  has a headered path (#87). Previously only comments-on-existing did, which
+  meant closing or filing had to go through `gh` unheadered — and an unheadered
+  write is delivered back to its own author and reads as an unknown sender to
+  the other agent.
+- `--close` reports a partial failure explicitly: if the close fails after the
+  comment landed, it says the comment was posted, says the issue is still open,
+  and returns the close's exit code.
+
 ## [5.2.0] - 2026-09-02
 
 ### Added
