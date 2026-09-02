@@ -50,6 +50,11 @@ Concretely, when you `cd` into a project and type `dridock`:
 - The VM has its own reachable IP (`192.168.64.x`), and any workload that
   publishes a port is browsable from your Mac at that IP — collision-free
   with every other project's VM.
+- Claude can **drive a real browser** and you can watch it: `cb-browser shot`
+  and `script` for headless screenshots and Playwright runs inside the VM,
+  `cb-browser watch` for a headful Chromium published over noVNC (you open it
+  in a tab), and `dridock browser-bridge` to expose *your own* Chrome over CDP
+  so Claude can drive a logged-in session it could never authenticate itself.
 
 That's the whole model. Everything below flows from it.
 
@@ -78,6 +83,10 @@ OpenAI-compatible, MCP, Telegram bot, cron). What this fork adds:
   quarantined to the project's VM.
 - **A published n-tier networking standard** so multi-container apps built
   by different Claude sessions in different projects behave the same way.
+- **Browser automation as a first-class surface** — headless screenshots and
+  Playwright scripts inside the VM, a watchable headful Chromium over noVNC,
+  and a CDP bridge to your own Chrome for flows that need a real logged-in
+  session.
 - **Local build only** — no Docker Hub pull.
 
 ### vs. Devcontainers / Anthropic's official Claude Code devcontainer
@@ -182,6 +191,12 @@ and baked in:
   container start, and survive `docker start` (which normally can't take
   new env). The pattern is enforced end-to-end and baked into the guidance
   Claude follows inside every project.
+- **The agent's own setup survives a rebuild.** Everything a claudebot writes
+  to `$HOME` — `git config`, the `gh` credential helper, shell history — lives
+  in a per-project directory mounted over the container's home, so recreating
+  the container (routine, every image rebuild) doesn't silently reset it.
+  Regeneratable caches (`~/.npm`, `~/.cache`) are deliberately excluded onto
+  VM-local volumes so they stay fast.
 - **A feedback loop back to the framework.** When the container's tooling
   gets in Claude's way, `cb-report-bug` files a durable report; when a
   design pattern is missing, `cb-consult` opens a human-mediated
