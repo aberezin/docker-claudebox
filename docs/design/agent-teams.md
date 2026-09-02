@@ -295,6 +295,23 @@ A world-writable directory without sticky is worse than the problem it solves, s
 `team dir` reads the mode back after setting it, falls back to `/bin/chmod`, and
 **refuses** to hand back a path that is world-writable without sticky.
 
+### It is a HOST channel — containers are excluded on purpose
+
+`team dir` **refuses inside a container** (rc 3). `/tmp` there is the
+container's own ephemeral filesystem: the same path string, disjoint bytes,
+wiped on recreate. A claudebot that wrote a handoff file expecting a teammate to
+read it would lose it silently — so the command fails loudly instead of handing
+back a path that looks shared and is not.
+
+To reach a teammate from inside a container, use **cross-session messaging**
+(Claude Code's own agent-to-agent channel), which is account-scoped and crosses
+the container, VM and OS-account boundaries in one step. If you genuinely have a
+bind-mounted shared path, name it and the guard steps aside:
+
+```
+DRIDOCK_TEAM_DIR=/mnt/shared dridock team dir
+```
+
 > **Never put secrets here.** Mode 1777 means every local account can read it.
 > Credentials travel the documented path only: gitignored, chmod-600
 > `.dridock/secrets.env` → per-container sidecars → entrypoint export.

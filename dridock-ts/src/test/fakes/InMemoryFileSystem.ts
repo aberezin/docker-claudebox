@@ -177,16 +177,24 @@ export class InMemoryFileSystem implements FileSystem {
 
   async chmod(path: string, mode: number): Promise<void> {
     const entry = this.files.get(path);
-    if (entry === undefined) throw new Error(`chmod: no such file: ${path}`);
-    this.files.set(path, { ...entry, mode });
+    if (entry !== undefined) { this.files.set(path, { ...entry, mode }); return; }
+    // Directories are tracked separately from files; chmod on one is
+    // legitimate (the real FS allows it) and the fake must model that or
+    // tests take a path production never takes.
+    if (await this.isDirectory(path)) { this.dirModes.set(path, mode); return; }
+    throw new Error(`chmod: no such file: ${path}`);
   }
+
+  private readonly dirModes = new Map<string, number>();
 
   /** Test-controllable mtimes. Unset paths report `undefined`, matching
    *  RealFileSystem's behavior for a missing/unreadable path. */
   private readonly mtimes = new Map<string, number>();
   setMtimeMs(path: string, ms: number): void { this.mtimes.set(path, ms); }
   async mtimeMs(path: string): Promise<number | undefined> { return this.mtimes.get(path); }
-  async statMode(path: string): Promise<number | undefined> { return this.files.get(path)?.mode; }
+  async statMode(path: string): Promise<number | undefined> {
+    return this.files.get(path)?.mode ?? this.dirModes.get(path);
+  }
 
   async removeDirRecursive(path: string): Promise<void> {
     // ENOENT-idempotent (matches `rm -rf` semantics). Delete every

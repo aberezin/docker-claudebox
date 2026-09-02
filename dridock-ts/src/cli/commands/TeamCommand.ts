@@ -54,6 +54,11 @@ import { xdgRoot } from "../../domain/paths.ts";
  */
 export const ROSTER_ABSENT_RC = 2;
 
+/** `team dir` was invoked inside a container without an explicit
+ *  DRIDOCK_TEAM_DIR. Distinct from 1 so a caller can tell "wrong place"
+ *  from "malformed arguments". */
+export const CONTAINER_TEAM_DIR_RC = 3;
+
 export class TeamCommand implements Command {
   readonly verb = "team" as const;
   readonly usage = `dridock team <subverb> [args…]
@@ -740,9 +745,34 @@ Agent-team message bus over GitHub issue comments.
       return 1;
     }
 
+    // The shared dir is a HOST-account rendezvous. Inside a container,
+    // /tmp is the container's own ephemeral filesystem -- same path
+    // string, disjoint bytes, wiped on recreate. A claudebot that wrote a
+    // handoff file here expecting a peer to read it would lose it
+    // silently, which is the failure class this repo keeps paying for.
+    //
+    // Refuse rather than warn: per the never-silently-discard rule a
+    // skipped operation needs BOTH a visible message and a non-zero rc a
+    // caller can act on. An explicit DRIDOCK_TEAM_DIR is the opt-out --
+    // if you have bind-mounted a genuinely shared path, you have taken
+    // responsibility for it and we get out of the way.
+    const explicitDir = ctx.env.raw()["DRIDOCK_TEAM_DIR"];
+    const inContainer = await ctx.fs.exists("/.dockerenv");
+    if (inContainer && (explicitDir === undefined || explicitDir.trim() === "")) {
+      ctx.stderr.write(`❌ team dir: refusing — this is a container, and /tmp here is NOT the host's.\n`);
+      ctx.stderr.write(`   The team shared dir is a rendezvous between macOS ACCOUNTS on the host.\n`);
+      ctx.stderr.write(`   Inside a container the same path resolves to this container's own\n`);
+      ctx.stderr.write(`   ephemeral /tmp: nothing you write is visible to a teammate, and it is\n`);
+      ctx.stderr.write(`   wiped when the container is recreated.\n`);
+      ctx.stderr.write(`   • To reach a teammate from in here, use cross-session messaging.\n`);
+      ctx.stderr.write(`   • If you HAVE bind-mounted a genuinely shared path, name it explicitly:\n`);
+      ctx.stderr.write(`       DRIDOCK_TEAM_DIR=/mnt/shared ${ctx.binName} team dir\n`);
+      return CONTAINER_TEAM_DIR_RC;
+    }
+
     let dir: string;
     try {
-      dir = teamSharedDir(roster.team, ctx.env.raw()["DRIDOCK_TEAM_DIR"]);
+      dir = teamSharedDir(roster.team, explicitDir);
     } catch (e) {
       ctx.stderr.write(`❌ team dir: ${e instanceof Error ? e.message : String(e)}\n`);
       return 1;
@@ -760,9 +790,8 @@ Agent-team message bus over GitHub issue comments.
       for (const p of parentChain(dir)) {
         try { await this.ensureSticky(p, ctx); } catch { /* not ours to fix; the leaf check below is what matters */ }
       }
-      await ctx.fs.chmod(dir, TEAM_DIR_MODE);
     } catch (e) {
-      ctx.stderr.write(`❌ team dir: could not create or chmod ${dir}: ${e instanceof Error ? e.message : String(e)}\n`);
+      ctx.stderr.write(`❌ team dir: could not create ${dir}: ${e instanceof Error ? e.message : String(e)}\n`);
       return 1;
     }
 
@@ -827,6 +856,11 @@ Agent-team message bus over GitHub issue comments.
    * Returns the final mode (undefined if the path can't be stat'd).
    */
   private async ensureSticky(path: string, ctx: Context): Promise<number | undefined> {
+    // Best-effort: chmod FAILS with EPERM when the other team member
+    // created this directory, and that is the normal case for whoever
+    // uses it second -- the mode is already right and there is nothing to
+    // fix. Aborting here would make the shared dir work for exactly one
+    // of the two accounts. The read-back below is what actually decides.
     try { await ctx.fs.chmod(path, TEAM_DIR_MODE); } catch { /* verified below */ }
     let mode = await ctx.fs.statMode(path);
     if (mode !== undefined && (mode & 0o1000) === 0) {

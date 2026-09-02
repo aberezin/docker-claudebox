@@ -26,6 +26,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.7.1] - 2026-09-02
+
+### Fixed
+- `dridock team dir` now refuses inside a container (rc 3) instead of returning a
+  path that looks shared and is not. `/tmp` in a container is its own ephemeral
+  filesystem, so a file written there for a teammate is lost silently and again
+  on recreate. `DRIDOCK_TEAM_DIR` remains the explicit opt-out for a genuinely
+  bind-mounted shared path. Raised by Bear from inside a container.
+- A failing `chmod` no longer aborts `team dir`. Whoever uses a shared directory
+  **second** cannot chmod it — it belongs to the first member, and the mode is
+  already correct. The previous code returned rc 1 there, so the shared directory
+  would have worked for exactly one of the two accounts. The mode read-back
+  decides; the chmod is best-effort.
+
 ## [5.7.0] - 2026-09-02
 
 ### Added

@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach } from "bun:test";
-import { TeamCommand, ROSTER_ABSENT_RC } from "./TeamCommand.ts";
+import { TeamCommand, ROSTER_ABSENT_RC, CONTAINER_TEAM_DIR_RC } from "./TeamCommand.ts";
 import { InMemoryFileSystem } from "../../test/fakes/InMemoryFileSystem.ts";
 import { StubGitToplevel } from "../../test/fakes/StubGitToplevel.ts";
 import { StubHostCommandRunner } from "../../infra/HostCommandRunner.ts";
@@ -21,7 +21,7 @@ import { EnvResolver } from "../../domain/EnvResolver.ts";
  */
 const testEnv: Record<string, string | undefined> = {};
 
-const ENV_KEYS = ["DRIDOCK_AGENT_NAME", "XDG_CONFIG_HOME", "DRIDOCK_WATCH_POLL_INTERVAL_MS", "DEBUG"] as const;
+const ENV_KEYS = ["DRIDOCK_AGENT_NAME", "XDG_CONFIG_HOME", "DRIDOCK_WATCH_POLL_INTERVAL_MS", "DEBUG", "DRIDOCK_TEAM_DIR"] as const;
 const saved: Record<string, string | undefined> = {};
 afterEach(() => {
   for (const k of ENV_KEYS) delete testEnv[k];
@@ -1117,5 +1117,74 @@ describe("TeamCommand.post — --close and --new (#87)", () => {
     expect(rc).toBe(0);
     expect(stderr.text()).toContain("AND CLOSE it");
     expect(host.calls).toHaveLength(0);
+  });
+});
+
+describe("TeamCommand.dir — the container footgun (#94)", () => {
+  // Raised by Bear from inside a container: `team dir` there resolves the
+  // SAME path string to the container's own ephemeral /tmp. A claudebot
+  // writing a handoff file for a teammate loses it silently, and the file
+  // vanishes again on container recreate.
+  const roster = `team: dridock\nagents:\n  - name: Bear\n  - name: Arfy\n`;
+
+  test("in a container with no explicit dir → refuses, rc 3, sends nobody anywhere", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, roster);
+    fs.seed("/.dockerenv", "");            // the marker every other guard uses
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["dir"], ctx);
+    expect(rc).toBe(CONTAINER_TEAM_DIR_RC);
+    expect(rc).not.toBe(0);
+    expect(stderr.text()).toContain("NOT the host's");
+    expect(stderr.text()).toContain("cross-session messaging");
+    // Must not print a path — printing one is what invites the footgun.
+    expect(stdout.text()).not.toContain("/tmp/dridock");
+  });
+
+  test("in a container WITH an explicit DRIDOCK_TEAM_DIR → allowed", async () => {
+    // Opting out is taking responsibility: a bind-mounted shared path is
+    // legitimate and we should not stand in the way of it.
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    setEnv("DRIDOCK_TEAM_DIR", "/mnt/shared");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, roster);
+    fs.seed("/.dockerenv", "");
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj"), host: new StubHostCommandRunner() }, async () => "").run(["dir"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("/mnt/shared");
+  });
+
+  test("on the host → unaffected, still returns the shared path", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Arfy");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, roster);            // no /.dockerenv
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj"), host: new StubHostCommandRunner() }, async () => "").run(["dir"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("/tmp/dridock/teams/dridock");
+  });
+});
+
+describe("TeamCommand.dir — the OTHER member owns the directory", () => {
+  // Whoever uses a shared dir SECOND cannot chmod it: it belongs to the
+  // first. The mode is already correct and there is nothing to fix, so a
+  // failing chmod must not abort -- otherwise the shared directory works
+  // for exactly one of the two accounts, which is no sharing at all.
+  test("chmod failing with EPERM does not fail the command", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Arfy");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, `team: dridock\nagents:\n  - name: Bear\n  - name: Arfy\n`);
+    // Model the real failure: chmod always throws, as it would for a
+    // directory owned by the other account.
+    const original = fs.chmod.bind(fs);
+    (fs as unknown as { chmod: (p: string, m: number) => Promise<void> }).chmod =
+      async () => { throw new Error("EPERM: operation not permitted"); };
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj"), host: new StubHostCommandRunner() }, async () => "").run(["dir"], ctx);
+    (fs as unknown as { chmod: typeof original }).chmod = original;
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("/tmp/dridock/teams/dridock");
   });
 });
