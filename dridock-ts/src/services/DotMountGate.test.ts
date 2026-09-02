@@ -20,12 +20,16 @@ describe("DotMountGate — the mount is gated on the IMAGE, never the host", () 
   });
 
   test("image OLDER than the minimum → skip, because mounting would shadow the CLI", async () => {
-    const d = await gate("5.0.0").decide(CTX);
+    // 4.9.9 is below any plausible minimum, so this test survives a future
+    // bump of DOT_MOUNT_MIN_IMAGE_VERSION instead of silently pinning to
+    // whatever it happened to be the day it was written.
+    const d = await gate("4.9.9").decide(CTX);
     expect(d.kind).toBe("skip");
     // The reason must name the real consequence. "Skipped" alone sends someone
     // hunting for a config problem when the fix is `make build`.
     if (d.kind === "skip") {
-      expect(d.reason).toContain("5.0.1");
+      expect(d.reason).toContain("4.9.9");
+      expect(d.reason).toContain(DOT_MOUNT_MIN_IMAGE_VERSION);
       expect(d.note).toContain("would not start");
       expect(d.note).toContain("make build");
     }

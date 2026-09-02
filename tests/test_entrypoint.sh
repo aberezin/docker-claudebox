@@ -155,6 +155,57 @@ test_entrypoint_auto_continue() {
     assert_contains "$out" "AUTOCONT" "auto-continue fallback works"
 }
 
+
+# #80 phase 2: the whole point of the dot mount — dotfiles an agent writes must
+# survive the container being DESTROYED and replaced. Proved by hand during
+# development; this is what keeps it proved. Without it the mount could regress
+# to shadow-but-don't-persist and every test would still pass, because nothing
+# else recreates a container and looks again.
+test_entrypoint_dotfiles_survive_recreate() {
+    local dot; dot=$(mktemp -d)
+    # Container 1: seed skel into an empty dot dir, then write the exact files
+    # #55 and #80 are about.
+    docker run --rm --entrypoint bash -v "$dot:/home/claude" "$IMAGE" -c \
+        '/opt/dridock/entrypoint.sh true >/dev/null 2>&1
+         su claude -c "git config --global pull.rebase false" 2>/dev/null
+         su claude -c "git config --global credential.helper fake-helper" 2>/dev/null
+         su claude -c "echo agent-was-here > ~/.bash_history" 2>/dev/null' >/dev/null 2>&1
+
+    # Container 1 is gone. A brand-new container, same dot dir.
+    local out
+    out=$(docker run --rm --entrypoint bash -v "$dot:/home/claude" "$IMAGE" -c \
+        '/opt/dridock/entrypoint.sh true >/dev/null 2>&1
+         su claude -c "git config --global --list" 2>/dev/null
+         cat /home/claude/.bash_history 2>/dev/null
+         test -f /home/claude/.inputrc && echo INPUTRC_SEEDED' 2>&1)
+    rm -rf "$dot"
+
+    assert_contains "$out" "credential.helper=fake-helper" "gh credential helper survives recreate (#55)"
+    assert_contains "$out" "pull.rebase=false" "git config survives recreate"
+    assert_contains "$out" "agent-was-here" "bash history survives recreate"
+    assert_contains "$out" "INPUTRC_SEEDED" "skel seeded into the mounted \$HOME"
+}
+
+# The exclusions must SHADOW the $HOME bind, so a cache written in the container
+# never reaches the host dot dir. If this regresses, ~/.npm silently starts
+# syncing gigabytes across the VM boundary and installs just get slower — a
+# symptom nobody would trace back to a mount.
+test_entrypoint_dot_exclusions_shadow() {
+    local dot vol; dot=$(mktemp -d); vol="dridock-test-excl-$$"
+    docker run --rm --entrypoint bash -v "$dot:/home/claude" -v "$vol:/home/claude/.npm" "$IMAGE" -c \
+        'echo cache-content > /home/claude/.npm/entry' >/dev/null 2>&1
+    local leaked="no"
+    [ -e "$dot/.npm/entry" ] && leaked="yes"
+    local in_vol
+    # --entrypoint: the image ENTRYPOINT would swallow `ls /x` as its own args.
+    in_vol=$(docker run --rm --entrypoint ls -v "$vol:/x" "$IMAGE" /x 2>/dev/null)
+    docker volume rm -f "$vol" >/dev/null 2>&1
+    rm -rf "$dot"
+
+    assert_eq "$leaked" "no" "excluded path does NOT leak onto the host dot dir"
+    assert_contains "$in_vol" "entry" "excluded content lands in the named volume"
+}
+
 ALL_TESTS+=(
     test_entrypoint_behaviors
     test_entrypoint_claude_md
@@ -163,4 +214,6 @@ ALL_TESTS+=(
     test_entrypoint_config_patching
     test_entrypoint_initd
     test_entrypoint_auto_continue
+    test_entrypoint_dotfiles_survive_recreate
+    test_entrypoint_dot_exclusions_shadow
 )
