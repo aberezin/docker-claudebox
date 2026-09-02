@@ -35,8 +35,9 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `dridock team dir` resolves and creates the team's shared scratch directory at
   `/tmp/dridock/teams/<team>` (override: `DRIDOCK_TEAM_DIR`), giving members that
   span macOS user accounts one path both can reach.
-- `dridock team dir --reap [--older-than N]` ages entries out. macOS does not
-  clean `/tmp` on this platform, so nothing reclaims the space unless we do.
+- `dridock team dir --reap [--older-than N]` ages entries out. macOS clears
+  `/tmp` at boot but does not age entries during uptime, so this covers long
+  uptimes.
 
 ### Notes
 - The directory is `1777` — world-writable so the other account can write, sticky

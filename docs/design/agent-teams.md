@@ -263,11 +263,17 @@ So the path is **deterministic** (derived from the team name) under `/tmp`, whic
 on macOS is the only cross-account temp that exists (`/private/tmp`, mode 1777).
 `DRIDOCK_TEAM_DIR` overrides it.
 
-### Reaping is ours to do
+### Reaping, and what the OS actually does
 
-macOS does **not** clean `/tmp` on this platform — there is no
-`/etc/periodic/daily/` and no `com.apple.periodic-daily.plist`. Checked, not
-assumed. Nothing reclaims this space unless we do:
+macOS clears `/tmp` **at boot** (`com.apple.tmp_cleaner.plist`), so nothing here
+survives a restart. What it does *not* do is age entries out while the machine
+stays up: there is no `/etc/periodic/daily/` and no
+`com.apple.periodic-daily.plist` on this platform.
+
+That distinction is the whole point. A Mac that stays up for a week accumulates
+everything written in that week — 5¾ days of uptime on the development machine
+had already produced ~190 stale entries from Lima and other tools. So `--reap`
+is for long uptimes, not for reclaiming disk the OS would never touch:
 
 ```
 dridock team dir --reap                  # default: older than 7 days

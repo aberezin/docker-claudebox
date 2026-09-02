@@ -31,11 +31,14 @@
  *
  * REAPING
  * -------
- * macOS does NOT clean `/tmp` on this platform: there is no
- * `/etc/periodic/daily/` and no `com.apple.periodic-daily.plist`.
- * Checked, not assumed. So nothing reclaims this space unless we do —
- * hence `reapableEntries()` and the `--reap` verb. Anything written here
- * must be treated as disposable at any time.
+ * macOS clears `/tmp` at BOOT (`com.apple.tmp_cleaner.plist`), so nothing
+ * here survives a restart — treat everything written here as disposable.
+ *
+ * What macOS does NOT do is age entries out during uptime: there is no
+ * `/etc/periodic/daily/` and no `com.apple.periodic-daily.plist`. On a
+ * machine that stays up for a week, a week of files accumulate. That is
+ * what `--reap` is for -- not reclaiming space the OS ignores forever,
+ * which was the overbroad claim in the first version of this comment.
  *
  * NEVER PUT SECRETS HERE
  * ----------------------
