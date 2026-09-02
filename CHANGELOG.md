@@ -143,6 +143,8 @@ when a project is still legacy afterwards (opt-out set, or migration failed).
 
 ## [Unreleased]
 
+## [5.1.1] — 2026-09-02 _(fork)_
+
 ### Changed
 - **Baked image content moved out of `$HOME`** (#80 phase 1) — the Claude CLI now lives at
   `/opt/claude-cli/` (on `PATH` via a stable `bin/claude` symlink) and the harness
@@ -163,12 +165,15 @@ when a project is still legacy afterwards (opt-out set, or migration failed).
 - **`browser-bridge` Chrome no longer shows a "Restore pages?" bubble on every start,
   or offers to save passwords** (#84) — `dridock browser-bridge down` kills the pid, so
   Chrome writes `exit_type=Crashed` on shutdown and offers to restore on the next `up`.
-  Before every fresh spawn, `BrowserBridgeService` now seeds `<profile>/Default/Preferences`
-  with `exit_type=Normal` + `exited_cleanly=true` and disables the built-in password
-  manager (`password_manager_enabled=false`, `credentials_enable_service=false`,
-  `credentials_enable_autosignin=false`) — the profile is dedicated to the harness, so
-  overwrite-on-fresh-spawn is safe. `--hide-crash-restore-bubble` also added to the
-  Chrome argv as belt-and-suspenders. Reuse-path (bridge alive) leaves Preferences alone.
+  Before every fresh spawn, `BrowserBridgeService` now **merges** `exit_type=Normal` +
+  `exited_cleanly=true` and the password-manager keys (`password_manager_enabled`,
+  `credentials_enable_service`, `credentials_enable_autosignin` → false) into
+  `<profile>/Default/Preferences`, preserving everything else Chrome stored there —
+  window bounds, per-site permissions, DevTools settings, zoom levels. Replacing the file
+  would have fixed the bubble by resetting all of that on every start. The keys are a
+  default that gets re-applied, not a lock. `--hide-crash-restore-bubble` is also passed
+  as belt-and-suspenders, and the reuse path (bridge already alive) leaves Preferences
+  untouched.
 
 
 ### Added
