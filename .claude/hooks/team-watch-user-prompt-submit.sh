@@ -188,6 +188,15 @@ if [ "$_fetcher_alive" = 0 ]; then
         sleep 1
         _spawn_pid="$(cat "$_pid" 2>/dev/null || true)"
         if _check_fetcher_alive "$_spawn_pid"; then
+            # Stamp the version this fetcher is RUNNING. Without it the
+            # version check above reads a stale stamp on the next prompt,
+            # decides the (freshly respawned) fetcher is stale, and
+            # restarts it again -- every prompt, forever. Found live: the
+            # restart landed, then re-fired on the very next turn because
+            # only SessionStart wrote the stamp. Write it here, where the
+            # spawn is CONFIRMED, not before.
+            _spawn_ver="$(dridock --version 2>/dev/null | awk 'NR==1{print $NF}')"
+            [ -n "$_spawn_ver" ] && printf '%s\n' "$_spawn_ver" > "$_inbox.version"
             echo "🚀 team fetcher: respawned (pid=$_spawn_pid, log=$_log)."
         else
             echo "⚠ team fetcher: respawn attempted but pid not alive OR cmdline mismatch."
