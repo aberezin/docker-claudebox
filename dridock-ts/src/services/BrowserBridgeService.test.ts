@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { BrowserBridgeService, forwarderPython } from "./BrowserBridgeService.ts";
+import { BrowserBridgeService, forwarderPython, debugProfilePreferences } from "./BrowserBridgeService.ts";
 import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 import { InMemoryHostProcessManager } from "../test/fakes/InMemoryHostProcessManager.ts";
 
@@ -190,6 +190,70 @@ describe("BrowserBridgeService.down", () => {
     await svc.down("abc12345");
     // The unrelated project's marker survives.
     expect(await fs.exists("/home/alan/.config/dridock/projects/other9999/.cdp-url")).toBe(true);
+  });
+});
+
+describe("BrowserBridgeService.up — Chrome noise suppression (#84)", () => {
+  test("cold start seeds Default/Preferences with quiet-profile keys", async () => {
+    const { svc, fs } = build();
+    await svc.up("abc12345");
+    const prefsPath = "/home/alan/.config/dridock/cdp/chrome-debug-profile/Default/Preferences";
+    const prefs = JSON.parse(await fs.readText(prefsPath));
+    expect(prefs.profile.exit_type).toBe("Normal");
+    expect(prefs.profile.exited_cleanly).toBe(true);
+    expect(prefs.profile.password_manager_enabled).toBe(false);
+    expect(prefs.credentials_enable_service).toBe(false);
+    expect(prefs.credentials_enable_autosignin).toBe(false);
+  });
+
+  test("cold start passes --hide-crash-restore-bubble to Chrome", async () => {
+    const { svc, processes } = build();
+    await svc.up("abc12345");
+    expect(processes.spawns[0]!.argv).toContain("--hide-crash-restore-bubble");
+  });
+
+  test("prior pids dead (previous run was killed) → Preferences re-seeded on fresh spawn", async () => {
+    const { svc, fs } = build();
+    // Simulate a prior run that ended with `down` (kill): stale pid file + a
+    // Preferences file Chrome then wrote with exit_type=Crashed on shutdown.
+    fs.seed("/home/alan/.config/dridock/cdp/pids", "500 501");
+    const prefsPath = "/home/alan/.config/dridock/cdp/chrome-debug-profile/Default/Preferences";
+    fs.seed(prefsPath, JSON.stringify({
+      profile: { exit_type: "Crashed", exited_cleanly: false, password_manager_enabled: true },
+    }));
+
+    await svc.up("abc12345");
+
+    const prefs = JSON.parse(await fs.readText(prefsPath));
+    expect(prefs.profile.exit_type).toBe("Normal");         // was Crashed
+    expect(prefs.profile.exited_cleanly).toBe(true);        // was false
+    expect(prefs.profile.password_manager_enabled).toBe(false); // was true
+  });
+
+  test("reuse path (bridge alive) does NOT rewrite Preferences", async () => {
+    const { svc, fs } = build();
+    // First up — cold start, seeds Preferences.
+    await svc.up("abc12345");
+    const prefsPath = "/home/alan/.config/dridock/cdp/chrome-debug-profile/Default/Preferences";
+    // Simulate Chrome having modified its own Preferences mid-run.
+    await fs.writeText(prefsPath, JSON.stringify({ marker: "chrome-was-here" }));
+
+    // Second up — bridge alive, should NOT respawn or re-seed.
+    await svc.up("abc12345");
+
+    const prefs = JSON.parse(await fs.readText(prefsPath));
+    expect(prefs.marker).toBe("chrome-was-here");
+  });
+});
+
+describe("debugProfilePreferences — content pinned", () => {
+  test("emits valid JSON with all five quiet-profile keys", () => {
+    const prefs = JSON.parse(debugProfilePreferences());
+    expect(prefs.profile.exit_type).toBe("Normal");
+    expect(prefs.profile.exited_cleanly).toBe(true);
+    expect(prefs.profile.password_manager_enabled).toBe(false);
+    expect(prefs.credentials_enable_service).toBe(false);
+    expect(prefs.credentials_enable_autosignin).toBe(false);
   });
 });
 

@@ -160,6 +160,15 @@ when a project is still legacy afterwards (opt-out set, or migration failed).
   and `HostAgentService` sets the port only in the **spawned child's** env — never the
   host binary's own — so the default branch was the normal path, not an edge case. The
   two sides now import one shared constant instead of retyping it.
+- **`browser-bridge` Chrome no longer shows a "Restore pages?" bubble on every start,
+  or offers to save passwords** (#84) — `dridock browser-bridge down` kills the pid, so
+  Chrome writes `exit_type=Crashed` on shutdown and offers to restore on the next `up`.
+  Before every fresh spawn, `BrowserBridgeService` now seeds `<profile>/Default/Preferences`
+  with `exit_type=Normal` + `exited_cleanly=true` and disables the built-in password
+  manager (`password_manager_enabled=false`, `credentials_enable_service=false`,
+  `credentials_enable_autosignin=false`) — the profile is dedicated to the harness, so
+  overwrite-on-fresh-spawn is safe. `--hide-crash-restore-bubble` also added to the
+  Chrome argv as belt-and-suspenders. Reuse-path (bridge alive) leaves Preferences alone.
 
 
 ### Added
