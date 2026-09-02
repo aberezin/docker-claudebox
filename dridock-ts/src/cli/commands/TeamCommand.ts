@@ -12,6 +12,7 @@ import { WatcherStore } from "../../services/WatcherStore.ts";
 import { runOneTick, type WatcherSink, type WatcherTickSummary } from "../../services/WatcherLoop.ts";
 import { makeInboxSink, inboxPathFor, pidfileFor, logfileFor } from "../../services/InboxSink.ts";
 import { isPidAlive, RealProcessProbe, type ProcessProbe } from "../../services/PidLiveness.ts";
+import { teamSharedDir, partitionForReap, TEAM_DIR_MODE, type ReapCandidate } from "../../services/TeamSharedDir.ts";
 import { xdgRoot } from "../../domain/paths.ts";
 
 /**
@@ -79,7 +80,7 @@ Agent-team message bus over GitHub issue comments.
       this.printUsage(ctx);
       return sub === "-h" || sub === "--help" ? 0 : 1;
     }
-    if (sub !== "whoami" && sub !== "roster" && sub !== "post" && sub !== "watch" && sub !== "fetcher") {
+    if (sub !== "whoami" && sub !== "roster" && sub !== "post" && sub !== "watch" && sub !== "fetcher" && sub !== "dir") {
       ctx.stderr.write(`❌ team: unknown subcommand '${sub}' (allowed: whoami, roster, post, watch, fetcher)\n`);
       return 1;
     }
@@ -137,6 +138,7 @@ Agent-team message bus over GitHub issue comments.
     }
 
     if (sub === "roster") return this.runRoster(roster, ctx);
+    if (sub === "dir") return await this.runDir(args.slice(1), roster, ctx);
 
     // `whoami` and `post` both need selfName resolution.
     const resolved = resolveSelfName(ctx.env.raw(), roster);
@@ -707,6 +709,149 @@ Agent-team message bus over GitHub issue comments.
     return alive ? 0 : 1;
   }
 
+  /**
+   * `team dir [--reap [--older-than N]]` — resolve (and create) the
+   * team's shared scratch directory.
+   *
+   * Requires `team:` in the roster. Through 5.x its absence is a WARNING
+   * with the exact line to add; in 6.0 it becomes an error
+   * (docs/roadmap.md, enforced by tests/test_deprecation_deadlines.sh).
+   */
+  private async runDir(args: readonly string[], roster: Roster, ctx: Context): Promise<number> {
+    let reap = false;
+    let olderThan = 7;
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i];
+      if (a === "--reap") { reap = true; continue; }
+      if (a === "--older-than") { olderThan = Number(args[i + 1]); i++; continue; }
+      if (a?.startsWith("--older-than=")) { olderThan = Number(a.slice("--older-than=".length)); continue; }
+      ctx.stderr.write(`❌ team dir: unexpected argument '${a}' (allowed: --reap, --older-than <days>)\n`);
+      return 1;
+    }
+    if (!reap && args.includes("--older-than")) {
+      ctx.stderr.write(`❌ team dir: --older-than requires --reap (without it there is nothing to age out).\n`);
+      return 1;
+    }
+    if (roster.team === undefined) {
+      ctx.stderr.write(`❌ team dir: no 'team:' in .dridock/agents.yml — the shared dir is named after the team.\n`);
+      ctx.stderr.write(`   Add a line at column 0, e.g.:\n`);
+      ctx.stderr.write(`       team: dridock\n`);
+      ctx.stderr.write(`   Optional in 5.x, REQUIRED in 6.0 (docs/roadmap.md).\n`);
+      return 1;
+    }
+
+    let dir: string;
+    try {
+      dir = teamSharedDir(roster.team, ctx.env.raw()["DRIDOCK_TEAM_DIR"]);
+    } catch (e) {
+      ctx.stderr.write(`❌ team dir: ${e instanceof Error ? e.message : String(e)}\n`);
+      return 1;
+    }
+
+    try {
+      await ctx.fs.mkdirRecursive(dir);
+      // Re-assert the mode on EVERY call, not only at creation. mkdir
+      // applies the process umask, so the dir can land 0755 and the other
+      // account silently cannot write -- a failure that looks like an
+      // empty directory rather than an error.
+      //
+      // The PARENTS need it too, or only whoever created them can add a
+      // new team dir later. Same mode, same reason.
+      for (const p of parentChain(dir)) {
+        try { await this.ensureSticky(p, ctx); } catch { /* not ours to fix; the leaf check below is what matters */ }
+      }
+      await ctx.fs.chmod(dir, TEAM_DIR_MODE);
+    } catch (e) {
+      ctx.stderr.write(`❌ team dir: could not create or chmod ${dir}: ${e instanceof Error ? e.message : String(e)}\n`);
+      return 1;
+    }
+
+    // VERIFY the mode landed. Bun's chmod silently drops the sticky bit
+    // (0o1777 -> 0777), and a world-writable dir WITHOUT sticky is worse
+    // than the problem it solves: either account could then delete the
+    // other's files. Read it back, and fall back to /bin/chmod, which
+    // honours the bit.
+    const mode = await this.ensureSticky(dir, ctx);
+    if (mode !== undefined && (mode & 0o1000) === 0) {
+      // Refuse rather than hand back a path that looks shared and is
+      // actually unsafe.
+      ctx.stderr.write(`❌ team dir: ${dir} is mode ${mode.toString(8)} — world-writable WITHOUT the sticky bit.\n`);
+      ctx.stderr.write(`   Either team member could delete the other's files. Fix with: chmod 1777 ${dir}\n`);
+      return 1;
+    }
+
+    if (reap) {
+      let entries: ReapCandidate[];
+      try {
+        entries = await this.listReapCandidates(dir, ctx);
+      } catch (e) {
+        ctx.stderr.write(`❌ team dir --reap: could not list ${dir}: ${e instanceof Error ? e.message : String(e)}\n`);
+        return 1;
+      }
+      let part: { reap: readonly ReapCandidate[]; keep: readonly ReapCandidate[] };
+      try {
+        part = partitionForReap(entries, olderThan);
+      } catch (e) {
+        ctx.stderr.write(`❌ team dir --reap: ${e instanceof Error ? e.message : String(e)}\n`);
+        return 1;
+      }
+      let removed = 0;
+      const failed: string[] = [];
+      for (const e of part.reap) {
+        try { await ctx.fs.removeFile(`${dir}/${e.name}`); removed++; }
+        catch { failed.push(e.name); }
+      }
+      ctx.stdout.write(`🧹 team dir: reaped ${removed} entr${removed === 1 ? "y" : "ies"} older than ${olderThan}d, kept ${part.keep.length}.\n`);
+      if (failed.length > 0) {
+        // Expected under the sticky bit: files owned by the OTHER member
+        // cannot be removed by us. Say so rather than reporting a clean
+        // sweep that silently skipped half the directory.
+        ctx.stderr.write(`⚠ team dir: could not remove ${failed.length} entr${failed.length === 1 ? "y" : "ies"} (owned by another team member — sticky bit): ${failed.slice(0, 5).join(", ")}\n`);
+        return 1;
+      }
+    }
+
+    ctx.stdout.write(`${dir}\n`);
+    return 0;
+  }
+
+  /**
+   * chmod a directory to 1777 and CONFIRM it took, falling back to
+   * /bin/chmod when the runtime drops the sticky bit.
+   *
+   * Bun's chmod silently turns 0o1777 into 0777. Applied to a shared
+   * directory that is the difference between "the other account cannot
+   * delete my files" and "anyone can" — so this verifies rather than
+   * assumes, on every level of the tree, not just the leaf.
+   *
+   * Returns the final mode (undefined if the path can't be stat'd).
+   */
+  private async ensureSticky(path: string, ctx: Context): Promise<number | undefined> {
+    try { await ctx.fs.chmod(path, TEAM_DIR_MODE); } catch { /* verified below */ }
+    let mode = await ctx.fs.statMode(path);
+    if (mode !== undefined && (mode & 0o1000) === 0) {
+      const host = this.deps.host ?? new RealHostCommandRunner();
+      await host.runCapture(`chmod 1777 ${shellQuote(path)}`);
+      mode = await ctx.fs.statMode(path);
+    }
+    return mode;
+  }
+
+  /** Directory listing with ages, isolated so `runDir` stays testable. */
+  private async listReapCandidates(dir: string, ctx: Context): Promise<ReapCandidate[]> {
+    const names = await ctx.fs.listDir(dir);
+    const now = Date.now();
+    const out: ReapCandidate[] = [];
+    for (const name of names) {
+      const mtime = await ctx.fs.mtimeMs(`${dir}/${name}`);
+      // Unknown mtime => age 0 => never reaped. Deleting on missing
+      // information is the wrong default for a directory the other
+      // member is also writing.
+      out.push({ name, ageDays: mtime === undefined ? 0 : (now - mtime) / 86_400_000 });
+    }
+    return out;
+  }
+
   private async runFetcherStop(inboxPath: string, pidPath: string, ctx: Context): Promise<number> {
     const pidText = await ctx.fs.readTextOrUndefined(pidPath);
     if (pidText === undefined) {
@@ -980,4 +1125,16 @@ async function defaultReadStdin(): Promise<string> {
   process.stdin.setEncoding("utf-8");
   for await (const chunk of process.stdin) chunks.push(chunk as string);
   return chunks.join("");
+}
+
+/** Ancestor directories of `dir`, outermost first, stopping above the
+ *  filesystem root. Used to widen permissions on the shared-dir parents
+ *  so either team member can create a NEW team dir later, not only
+ *  whoever happened to run first. */
+function parentChain(dir: string): string[] {
+  const parts = dir.split("/").filter((p) => p !== "");
+  const out: string[] = [];
+  // Start at 2 segments so we never chmod "/" or "/tmp" itself.
+  for (let i = 2; i < parts.length; i++) out.push("/" + parts.slice(0, i).join("/"));
+  return out;
 }

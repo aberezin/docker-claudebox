@@ -114,6 +114,27 @@ deadline "migrate verb + migrators" 6 \
     --include=*.ts -e 'autoMigrateIfNeeded\|class .*Migrator' "$REPO/dridock-ts/src"
 
 echo ""
+
+# --- 6.0.0: `team:` becomes REQUIRED in .dridock/agents.yml -----------
+# Optional through 5.x (absence warns and names the fix). The moment 6.0
+# lands, the roster parser must reject a roster without it -- a prose
+# deadline does not hold, which is why every row in docs/roadmap.md has a
+# check here. See docs/design/agent-teams.md.
+_major="$MAJOR"
+if [ "$_major" -ge 6 ]; then
+    if grep -q "readonly team?: string" "$REPO/dridock-ts/src/services/AgentRoster.ts" 2>/dev/null; then
+        bad "6.0 reached ($MAJOR.x) but 'team:' is still OPTIONAL in AgentRoster.ts — make it required"
+    else
+        ok "6.0: 'team:' is required in the roster"
+    fi
+else
+    if grep -q "readonly team?: string" "$REPO/dridock-ts/src/services/AgentRoster.ts" 2>/dev/null; then
+        ok "pre-6.0 ($MAJOR.x): 'team:' still optional, as documented"
+    else
+        bad "'team:' optional field missing from AgentRoster.ts before its 6.0 deadline"
+    fi
+fi
+
 echo "  deprecation deadlines: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
 }

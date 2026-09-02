@@ -1,6 +1,7 @@
 # .dridock/agents.yml — the team working on dridock itself.
 # Consumed by `dridock team` (whoami/roster/post/watch) + the SessionStart
 # team-watch hook. See docs/design/agent-teams.md.
+team: dridock
 github_repo: aberezin/docker-claudebox
 agents:
   - name: Bear

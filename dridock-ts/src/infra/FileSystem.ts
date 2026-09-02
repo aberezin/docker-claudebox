@@ -48,6 +48,20 @@ export interface FileSystem {
   /** Change permission bits on a file (e.g. 0o600 on secrets.env). */
   chmod(path: string, mode: number): Promise<void>;
 
+  /** Modification time in epoch ms, or `undefined` when the path is
+   *  missing or unreadable. Undefined rather than throwing because the
+   *  only caller ages entries in a directory the OTHER team member is
+   *  also writing: a file vanishing mid-listing is normal, not an error,
+   *  and must not abort the sweep. */
+  mtimeMs(path: string): Promise<number | undefined>;
+
+  /** Permission bits (including setuid/setgid/sticky), or `undefined`
+   *  when the path is missing. Exists so callers can VERIFY a chmod took
+   *  effect: Bun's `chmod` silently drops the sticky bit, so writing the
+   *  mode and trusting it yields a world-writable directory with no
+   *  sticky protection. */
+  statMode(path: string): Promise<number | undefined>;
+
   /** `rm -rf <path>` — remove a directory and its entire content. No-op if
    *  absent. Used by `destroy --purge` for the per-project data dir. */
   removeDirRecursive(path: string): Promise<void>;

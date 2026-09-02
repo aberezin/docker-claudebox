@@ -224,3 +224,72 @@ Today's posts use recipient-only `**→ Arfy:**`. Cutting over to sender-first:
 - [agent-coordination-hooks.md](agent-coordination-hooks.md) — the current GitHub-as-bus hook stack (to be updated to this header).
 - [framework-consult.md](framework-consult.md) · [framework-bug-reporting.md](framework-bug-reporting.md) — the human-gated channels §4 routes to.
 - [../../CLAUDE.md](../../CLAUDE.md) — the framework-vs-project rule (routes *what* is framework; this spec routes *which channel* and *which agent*).
+
+## The team name and the shared directory
+
+A roster declares a team name at column 0:
+
+```yaml
+team: dridock          # optional in 5.x, REQUIRED in 6.0 (docs/roadmap.md)
+github_repo: aberezin/docker-claudebox
+agents:
+  - name: Bear
+  - name: Arfy
+human: Alan
+```
+
+`dridock team dir` resolves (and creates) that team's shared scratch directory:
+
+```
+$ dridock team dir
+/tmp/dridock/teams/dridock
+```
+
+### Why here, and not somewhere nicer
+
+dridock teams span **macOS user accounts** — Arfy as `claude-arfy`, Bear under
+`aberezin` — each with its own colima profile, image store and `~/.claude`. That
+isolation is deliberate, and it leaves the members with no common ground: no
+shared filesystem, no shared docker socket, no shared session registry.
+
+Two obvious answers were tried and rejected:
+
+| Candidate | Why not |
+|---|---|
+| `$TMPDIR` | Per-user on macOS (`/var/folders/<hash>/T/`) — confidential to the account by design. Two accounts, two paths, never a rendezvous. |
+| `mktemp -d` | Creates `drwx------`, and worse, a **random name**. A rendezvous must be discoverable by the other side with no prior coordination; a random name has to be published somewhere shared first — which is the problem it was meant to solve. |
+
+So the path is **deterministic** (derived from the team name) under `/tmp`, which
+on macOS is the only cross-account temp that exists (`/private/tmp`, mode 1777).
+`DRIDOCK_TEAM_DIR` overrides it.
+
+### Reaping is ours to do
+
+macOS does **not** clean `/tmp` on this platform — there is no
+`/etc/periodic/daily/` and no `com.apple.periodic-daily.plist`. Checked, not
+assumed. Nothing reclaims this space unless we do:
+
+```
+dridock team dir --reap                  # default: older than 7 days
+dridock team dir --reap --older-than 1
+```
+
+Entries exactly at the threshold are **kept** (strict `>`), because the other
+member may be mid-write. Files owned by the other member cannot be removed —
+that is the sticky bit doing its job — and the command says so and exits
+non-zero rather than reporting a clean sweep it did not achieve.
+
+### Permissions, and one runtime bug worth knowing
+
+The directory is `1777`: world-writable so the other **account** can write,
+**sticky** so it cannot delete our files. Both halves matter.
+
+Bun's `chmod` silently drops the sticky bit (`0o1777` → `0777`); Node's does not.
+A world-writable directory without sticky is worse than the problem it solves, so
+`team dir` reads the mode back after setting it, falls back to `/bin/chmod`, and
+**refuses** to hand back a path that is world-writable without sticky.
+
+> **Never put secrets here.** Mode 1777 means every local account can read it.
+> Credentials travel the documented path only: gitignored, chmod-600
+> `.dridock/secrets.env` → per-container sidecars → entrypoint export.
+

@@ -26,6 +26,26 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.7.0] - 2026-09-02
+
+### Added
+- `team:` in `.dridock/agents.yml` names the team. Optional in 5.x (its absence
+  is a loud error only where it is actually needed), **required in 6.0** — row
+  in `docs/roadmap.md`, enforced by `tests/test_deprecation_deadlines.sh`.
+- `dridock team dir` resolves and creates the team's shared scratch directory at
+  `/tmp/dridock/teams/<team>` (override: `DRIDOCK_TEAM_DIR`), giving members that
+  span macOS user accounts one path both can reach.
+- `dridock team dir --reap [--older-than N]` ages entries out. macOS does not
+  clean `/tmp` on this platform, so nothing reclaims the space unless we do.
+
+### Notes
+- The directory is `1777` — world-writable so the other account can write, sticky
+  so it cannot delete our files. **Never put secrets there**; credentials keep to
+  `.dridock/secrets.env`.
+- Bun's `chmod` silently drops the sticky bit (`0o1777` → `0777`). `team dir`
+  reads the mode back, falls back to `/bin/chmod`, and refuses to return a path
+  that is world-writable without sticky.
+
 ## [5.6.0] - 2026-09-02
 
 ### Fixed

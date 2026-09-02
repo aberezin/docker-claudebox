@@ -45,3 +45,5 @@ without a check is the failure mode this whole file exists to prevent.
 - [versioning.md](versioning.md) — semver rules and the release process.
 - [design/env-var-rename.md](design/env-var-rename.md) — the 3.0 rename these removals conclude.
 - [../CHANGELOG.md](../CHANGELOG.md) — what actually shipped.
+
+| `team:` optional in `.dridock/agents.yml` | 6.0.0 | `dridock team dir` errors without it; absence warns in 5.x | `tests/test_deprecation_deadlines.sh` |

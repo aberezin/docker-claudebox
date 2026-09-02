@@ -32,6 +32,11 @@ export interface Agent {
 
 export interface Roster {
   readonly agents: readonly Agent[];
+  /** Team name. Optional through 5.x, REQUIRED in 6.0 (docs/roadmap.md).
+   *  Names the team's shared scratch dir and namespaces it, so two teams
+   *  on one machine can't collide. Slug-shaped because it becomes a path
+   *  segment. */
+  readonly team?: string;
   readonly human?: string;
   /** Optional watch config — the GitHub repo `dridock team watch`
    *  polls for this team's messages. Format: `owner/name`. If unset,
@@ -168,6 +173,7 @@ export function parseRoster(text: string): Roster {
   const lines = text.split(/\r?\n/);
   const agents: Agent[] = [];
   let human: string | undefined;
+  let team: string | undefined;
   let githubRepo: string | undefined;
   let inAgents = false;
   let currentAgent: Partial<Agent> | undefined;
@@ -204,6 +210,15 @@ export function parseRoster(text: string): Roster {
           throw new Error(`agents.yml: line ${i + 1}: 'agents:' must open a list on subsequent lines, not have an inline value`);
         }
         inAgents = true;
+      } else if (key === "team") {
+        if (value !== "" && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(value)) {
+          // It becomes a path segment; reject traversal and separators at
+          // the parse boundary rather than sanitizing downstream, where a
+          // missed call site turns into an escape.
+          throw new Error(`agents.yml: line ${i + 1}: invalid team name '${value}' — use letters, digits, dot, dash or underscore (1-64 chars, starting alphanumeric)`);
+        }
+        team = value === "" ? undefined : value;
+        inAgents = false;
       } else if (key === "human") {
         human = value === "" ? undefined : value;
         inAgents = false;
@@ -211,7 +226,7 @@ export function parseRoster(text: string): Roster {
         githubRepo = value === "" ? undefined : value;
         inAgents = false;
       } else {
-        throw new Error(`agents.yml: line ${i + 1}: unknown top-level key '${key}' (allowed: agents, human, github_repo)`);
+        throw new Error(`agents.yml: line ${i + 1}: unknown top-level key '${key}' (allowed: agents, team, human, github_repo)`);
       }
       continue;
     }
@@ -255,6 +270,7 @@ export function parseRoster(text: string): Roster {
   }
   return {
     agents,
+    ...(team === undefined ? {} : { team }),
     ...(human !== undefined ? { human } : {}),
     ...(githubRepo !== undefined ? { githubRepo } : {}),
   };

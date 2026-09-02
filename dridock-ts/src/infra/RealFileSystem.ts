@@ -97,6 +97,26 @@ export class RealFileSystem implements FileSystem {
     await chmod(path, mode);
   }
 
+  async statMode(path: string): Promise<number | undefined> {
+    try {
+      const st = await stat(path);
+      return st.mode & 0o7777;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async mtimeMs(path: string): Promise<number | undefined> {
+    try {
+      const st = await stat(path);
+      return st.mtimeMs;
+    } catch {
+      // Missing or unreadable. The reaper treats undefined as age 0 and
+      // keeps the entry -- never delete on absent information.
+      return undefined;
+    }
+  }
+
   async removeDirRecursive(path: string): Promise<void> {
     // `rm -rf` — force + recursive. `force: true` makes ENOENT idempotent.
     await rm(path, { recursive: true, force: true });
