@@ -76,7 +76,7 @@ Installed as the user-facing binary (default name `dridock`; override with `DRID
 
 Runs as root (PID 1) inside every container, then drops to the `claude` user via `setpriv`. Responsibilities, in order:
 1. Fix the Docker socket group GID and match the `claude` user's UID/GID to the mounted workspace owner (so files created inside are owned correctly on the host).
-2. Generate (once) `~/.claude/CLAUDE.md.template` — the auto-injected per-workspace tool inventory, which differs by image variant (`full` vs `minimal`) — and a `system-hint.txt` appended to every invocation via `--append-system-prompt`. Copy the template into the workspace as `CLAUDE.md` if absent.
+2. Write `~/.claude/CLAUDE.md` — the auto-injected framework guidance + per-workspace tool inventory, which differs by image variant (`full` vs `minimal`) — and a `system-hint.txt` appended to every invocation via `--append-system-prompt`. Rewritten on **every** start, so a harness update reaches existing projects (that's why it's user memory rather than a once-generated file; `541d039`, 2.10.0). A `CLAUDE.md.template` in an old project's data dir is a pre-2.10 fossil and is not read.
 3. Patch `.claude.json` (`installMethod=native`, disable auto-updates, pre-accept the workspace trust dialog).
 4. Run `~/.claude/init.d/*.sh` **once** on first container create (guarded by `/var/run/claude-initialized`, which lives in the container fs, not the mount).
 5. **Mode dispatch** via `CLAUDEBOX_MODE_*`: if `API`, `TELEGRAM`, `CRON`, or combined `TELEGRAM+CRON` is set, `exec` the corresponding Python daemon instead of Claude and stop here.
