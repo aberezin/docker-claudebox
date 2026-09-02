@@ -693,10 +693,19 @@ describe("TeamCommand.post — TTY-detect hint (spec #59 part 3)", () => {
  *  can't match. */
 class RecordingHostRunner {
   readonly calls: string[] = [];
+  /** Per-call outcomes, consumed in order. When exhausted (or never
+   *  supplied) falls back to the constructor's canned rc/stdout. #87's
+   *  --close makes TWO gh calls, and the case that matters most is the
+   *  one where they DIFFER: comment succeeds, close fails. */
+  private readonly queue: { rc: number; stdout: string }[] = [];
   constructor(private readonly rc = 0, private readonly stdout = "") {}
+  seedNext(rc: number, stdout = ""): this {
+    this.queue.push({ rc, stdout });
+    return this;
+  }
   async runCapture(cmd: string): Promise<{ rc: number; stdout: string }> {
     this.calls.push(cmd);
-    return { rc: this.rc, stdout: this.stdout };
+    return this.queue.shift() ?? { rc: this.rc, stdout: this.stdout };
   }
 }
 
@@ -982,5 +991,131 @@ describe("TeamCommand.post — body sanity gate (#59)", () => {
     expect(rc).toBe(1);
     expect(host.calls).toHaveLength(0);
     expect(stderr.text()).toContain("no letters or numbers");
+  });
+});
+
+describe("TeamCommand.post — --close and --new (#87)", () => {
+  // Context: every GitHub write that ISN'T a comment-on-existing had no
+  // headered path, so `gh issue close -c` / `gh issue create -b` were the
+  // only options. An unheadered write echoes back to its own author as
+  // `<legacy>` and, worse, reads as `<legacy>` to the OTHER agent, who then
+  // can't tell your close from a human's.
+
+  test("--close comments THEN closes, in that order", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner(0, "");
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "done, closing\n",
+    ).run(["post", "--to", "Arfy", "--issue", "42", "--close"], ctx);
+    expect(rc).toBe(0);
+    expect(host.calls).toHaveLength(2);
+    // Order is load-bearing: closing first would leave the comment landing
+    // on an already-closed issue if the second call failed.
+    expect(host.calls[0]).toContain("gh issue comment 42");
+    expect(host.calls[1]).toContain("gh issue close 42");
+    expect(host.calls[1]).toContain("--repo 'aberezin/docker-claudebox'");
+    expect(stdout.text()).toContain("closed aberezin/docker-claudebox#42");
+  });
+
+  // THE case worth writing this whole flag for. Two requests means a
+  // partial-failure state that must never look like success.
+  test("comment succeeds but close FAILS → non-zero rc and says the issue is still open", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner().seedNext(0, "https://x/#c1").seedNext(3, "");
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "closing this\n",
+    ).run(["post", "--to", "Arfy", "--issue", "42", "--close"], ctx);
+    expect(rc).not.toBe(0);
+    expect(rc).toBe(3);
+    // Must report BOTH truths: the comment is public, the issue is not closed.
+    expect(stdout.text()).toContain("sent to aberezin/docker-claudebox#42");
+    expect(stderr.text()).toContain("comment WAS posted");
+    expect(stderr.text()).toContain("still OPEN");
+  });
+
+  test("--new creates an issue with the title and a headered body", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner(0, "https://github.com/aberezin/docker-claudebox/issues/99\n");
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "found a thing\n",
+    ).run(["post", "--to", "Arfy", "--new", "--title", "A new problem"], ctx);
+    expect(rc).toBe(0);
+    expect(host.calls).toHaveLength(1);
+    expect(host.calls[0]).toContain("gh issue create");
+    expect(host.calls[0]).toContain("--title 'A new problem'");
+    expect(host.calls[0]).not.toContain("gh issue comment");
+    expect(stdout.text()).toContain("issues/99");
+  });
+
+  test("--title is shell-quoted so a crafted title can't inject", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner(0, "");
+    const { ctx } = makeCtx(fs);
+    await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body\n",
+    ).run(["post", "--to", "Arfy", "--new", "--title", "x'; rm -rf /; echo '"], ctx);
+    // The dangerous substring must not appear as executable shell — it is
+    // inside a quoted literal, so no unescaped `; rm` survives.
+    expect(host.calls[0]).not.toMatch(/[^'\\]; rm -rf/);
+  });
+
+  // Every misuse must be LOUD. A flag that silently does nothing is the
+  // failure class this repo keeps re-hitting (#17, #30, #31, #32).
+  const misuse: [string, string[], string][] = [
+    ["--close without --issue",  ["post", "--close"],                              "--close requires --issue"],
+    ["--new with --issue",       ["post", "--new", "--title", "t", "--issue", "4"], "mutually exclusive"],
+    ["--new without --title",    ["post", "--new"],                                "--new requires --title"],
+    ["--title without --new",    ["post", "--title", "t", "--issue", "4"],          "--title requires --new"],
+    ["--close with --new",       ["post", "--new", "--title", "t", "--close"],      "makes no sense"],
+  ];
+  for (const [name, argv, expected] of misuse) {
+    test(`${name} → rc 1, explains why, sends nothing`, async () => {
+      setEnv("DRIDOCK_AGENT_NAME", "Bear");
+      const fs = new InMemoryFileSystem();
+      seedProject(fs, ROSTER_WITH_REPO);
+      const host = new RecordingHostRunner(0, "");
+      const { ctx, stderr } = makeCtx(fs);
+      const rc = await new TeamCommand(
+        { git: new StubGitToplevel("/proj"), host },
+        async () => "body\n",
+      ).run(argv, ctx);
+      expect(rc).toBe(1);
+      expect(stderr.text()).toContain(expected);
+      expect(host.calls).toHaveLength(0);
+    });
+  }
+
+  test("--dry-run with --close names the close, and makes no request", async () => {
+    setEnv("DRIDOCK_AGENT_NAME", "Bear");
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, ROSTER_WITH_REPO);
+    const host = new RecordingHostRunner(0, "");
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new TeamCommand(
+      { git: new StubGitToplevel("/proj"), host },
+      async () => "body\n",
+    ).run(["post", "--to", "Arfy", "--issue", "42", "--close", "--dry-run"], ctx);
+    expect(rc).toBe(0);
+    expect(stderr.text()).toContain("AND CLOSE it");
+    expect(host.calls).toHaveLength(0);
   });
 });

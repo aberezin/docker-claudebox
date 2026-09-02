@@ -27,6 +27,11 @@ import { xdgRoot } from "../../domain/paths.ts";
  *                           to stdout (broadcast if --to omitted).
  *   post [--to A,B]       → SEND. Prepend header AND post via gh(1) as
  *        --issue N          a comment on issue N (#59, closes the two-
+ *        [--close]          --close also closes it; --new files a NEW
+ *   post --new --title T     issue instead. Both exist so EVERY GitHub
+ *                            write has a headered path (#87) — an
+ *                            unheadered one echoes to its own author
+ *                            and reads as `<legacy>` to other agents.
  *        [--repo owner/n]   step seam that dropped headers silently).
  *        [--dry-run]        --repo overrides roster.github_repo;
  *                           --dry-run prints what would be sent.
@@ -178,6 +183,17 @@ Agent-team message bus over GitHub issue comments.
     // sending). Anything else is unexpected.
     let toRaw: string | undefined;
     let issueRaw: string | undefined;
+    // #87: --close (comment then close) and --new --title (create). Both
+    // exist so that EVERY GitHub write has a headered path. Without them
+    // `gh issue close -c` / `gh issue create -b` are the only options,
+    // they are necessarily unheadered, and an unheadered write echoes
+    // back to its own author as `<legacy>` (broadcast) -- and reads as
+    // `<legacy>` to the OTHER agent, who then cannot tell your close
+    // from Alan's. The header carries routing information no
+    // after-the-fact filter can reconstruct.
+    let doClose = false;
+    let isNew = false;
+    let titleRaw: string | undefined;
     let repoOverride: string | undefined;
     let dryRun = false;
     for (let i = 0; i < args.length; i++) {
@@ -189,7 +205,11 @@ Agent-team message bus over GitHub issue comments.
       if (a === "--repo")        { repoOverride = args[i + 1]; i++; continue; }
       if (a?.startsWith("--repo="))  { repoOverride = a.slice("--repo=".length); continue; }
       if (a === "--dry-run")     { dryRun = true; continue; }
-      ctx.stderr.write(`❌ team post: unexpected argument '${a}' (allowed: --to <A,B>, --issue <N>, --repo <owner/name>, --dry-run)\n`);
+      if (a === "--close")       { doClose = true; continue; }
+      if (a === "--new")         { isNew = true; continue; }
+      if (a === "--title")       { titleRaw = args[i + 1]; i++; continue; }
+      if (a?.startsWith("--title=")) { titleRaw = a.slice("--title=".length); continue; }
+      ctx.stderr.write(`❌ team post: unexpected argument '${a}' (allowed: --to <A,B>, --issue <N>, --close, --new --title <T>, --repo <owner/name>, --dry-run)\n`);
       return 1;
     }
 
@@ -210,12 +230,35 @@ Agent-team message bus over GitHub issue comments.
     // no-ops. --dry-run without a send target is the compose-only path
     // by another name; --repo without a send target has nothing to
     // point at. Reject loud so the operator can pick the right shape.
-    if (dryRun && issueN === undefined) {
-      ctx.stderr.write(`❌ team post: --dry-run requires --issue (without a send target, compose-only is already the default)\n`);
+    if (dryRun && issueN === undefined && !isNew) {
+      ctx.stderr.write(`❌ team post: --dry-run requires --issue or --new (without a send target, compose-only is already the default)\n`);
       return 1;
     }
-    if (repoOverride !== undefined && issueN === undefined) {
-      ctx.stderr.write(`❌ team post: --repo requires --issue (without a send target, --repo has nothing to point at)\n`);
+    if (repoOverride !== undefined && issueN === undefined && !isNew) {
+      ctx.stderr.write(`❌ team post: --repo requires --issue or --new (without a send target, --repo has nothing to point at)\n`);
+      return 1;
+    }
+
+    // #87 flag combinations. Each rejection is loud: a flag that silently
+    // does nothing is the failure class this codebase keeps re-hitting.
+    if (isNew && issueN !== undefined) {
+      ctx.stderr.write(`❌ team post: --new and --issue are mutually exclusive (--new creates an issue, --issue comments on one).\n`);
+      return 1;
+    }
+    if (isNew && doClose) {
+      ctx.stderr.write(`❌ team post: --close with --new makes no sense (that would file an issue and immediately close it).\n`);
+      return 1;
+    }
+    if (doClose && issueN === undefined) {
+      ctx.stderr.write(`❌ team post: --close requires --issue (nothing to close).\n`);
+      return 1;
+    }
+    if (isNew && (titleRaw === undefined || titleRaw.trim() === "")) {
+      ctx.stderr.write(`❌ team post: --new requires --title <text>.\n`);
+      return 1;
+    }
+    if (titleRaw !== undefined && !isNew) {
+      ctx.stderr.write(`❌ team post: --title requires --new (a comment on an existing issue has no title).\n`);
       return 1;
     }
 
@@ -291,7 +334,7 @@ Agent-team message bus over GitHub issue comments.
     // Kept as the default so `dridock team post --to X < body` remains
     // a valid dev loop for iterating on a draft before sending.
     // ────────────────────────────────────────────────────────────────
-    if (issueN === undefined) {
+    if (issueN === undefined && !isNew) {
       ctx.stdout.write(finalText);
       const isTTY = this.deps.stdoutIsTTY?.() ?? (process.stdout.isTTY === true);
       if (isTTY) {
@@ -326,7 +369,12 @@ Agent-team message bus over GitHub issue comments.
     // resolves — otherwise a dry-run could green-light a send that
     // would then fail on the actual repo lookup.
     if (dryRun) {
-      ctx.stderr.write(`🔍 team post --dry-run: would send to ${repo}#${issueN} (no request made).\n`);
+      const what = isNew
+        ? `create a new issue on ${repo} titled '${titleRaw}'`
+        : doClose
+          ? `comment on ${repo}#${issueN} AND CLOSE it`
+          : `send to ${repo}#${issueN}`;
+      ctx.stderr.write(`🔍 team post --dry-run: would ${what} (no request made).\n`);
       ctx.stdout.write(finalText);
       return 0;
     }
@@ -352,7 +400,9 @@ Agent-team message bus over GitHub issue comments.
       // under our control (built from xdg + literals + PID + timestamp)
       // but xdg comes from the environment; quote defensively so a
       // shell-metachar in $XDG_CONFIG_HOME can't inject.
-      const cmd = `gh issue comment ${issueN} --repo ${shellQuote(repo)} --body-file ${shellQuote(tempPath)}`;
+      const cmd = isNew
+        ? `gh issue create --repo ${shellQuote(repo)} --title ${shellQuote(titleRaw ?? "")} --body-file ${shellQuote(tempPath)}`
+        : `gh issue comment ${issueN} --repo ${shellQuote(repo)} --body-file ${shellQuote(tempPath)}`;
       const { rc, stdout } = await host.runCapture(cmd);
       if (rc !== 0) {
         // gh's stderr is inherited by HostCommandRunner (visible in the
@@ -367,10 +417,24 @@ Agent-team message bus over GitHub issue comments.
       // strip gh's trailing newline; if gh printed nothing, still
       // report success without a URL.
       const url = stdout.trim();
-      if (url === "") {
-        ctx.stdout.write(`✅ team post: sent to ${repo}#${issueN}\n`);
-      } else {
-        ctx.stdout.write(`✅ team post: sent to ${repo}#${issueN}\n   ${url}\n`);
+      const target = isNew ? repo : `${repo}#${issueN}`;
+      const verb = isNew ? "filed on" : "sent to";
+      ctx.stdout.write(url === "" ? `✅ team post: ${verb} ${target}\n` : `✅ team post: ${verb} ${target}\n   ${url}\n`);
+
+      // --close is a SECOND request, so it can fail after the comment
+      // already landed. That partial state must never report as clean
+      // success: the comment is public, the issue is still open, and a
+      // caller that trusted rc 0 would move on believing it closed.
+      // Say exactly what happened and propagate a non-zero rc.
+      if (doClose) {
+        const closeCmd = `gh issue close ${issueN} --repo ${shellQuote(repo)}`;
+        const closeRes = await host.runCapture(closeCmd);
+        if (closeRes.rc !== 0) {
+          ctx.stderr.write(`❌ team post: the comment WAS posted, but 'gh issue close' failed with rc=${closeRes.rc}.\n`);
+          ctx.stderr.write(`   ${repo}#${issueN} is still OPEN. Close it by hand, or re-run with --close and no body change.\n`);
+          return closeRes.rc;
+        }
+        ctx.stdout.write(`✅ team post: closed ${repo}#${issueN}\n`);
       }
       return 0;
     } finally {
@@ -736,10 +800,13 @@ Agent-team message bus over GitHub issue comments.
         ctx.stdout.write(`  bootstrap or a hand-edit.\n`);
         return;
       case "post":
-        ctx.stdout.write(`usage: ${bin} team post [--to A,B] [--issue N [--repo owner/name] [--dry-run]]\n`);
+        ctx.stdout.write(`usage: ${bin} team post [--to A,B] [--issue N [--close] | --new --title T] [--repo owner/name] [--dry-run]\n`);
         ctx.stdout.write(`  Prepend "Sender[->A,B]:" header to stdin. With --issue N, ALSO sends the\n`);
         ctx.stdout.write(`  composed message via gh(1) as a comment on that issue (#59). Without\n`);
         ctx.stdout.write(`  --issue, prints to stdout and does not hit the network (compose-only).\n`);
+        ctx.stdout.write(`\n`);
+        ctx.stdout.write(`  Prefer these over gh(1) for every write: an unheadered comment echoes\n`);
+        ctx.stdout.write(`  back to its own author and reads as an unknown sender to other agents.\n`);
         ctx.stdout.write(`\n`);
         ctx.stdout.write(`  Send (one step, header can't be dropped by hand-typed gh):\n`);
         ctx.stdout.write(`      echo "hi" | ${bin} team post --to Arfy --issue 46 < body.md\n`);
@@ -753,7 +820,12 @@ Agent-team message bus over GitHub issue comments.
         ctx.stdout.write(`  --issue N     send to issue N via gh(1); switches from compose-only to\n`);
         ctx.stdout.write(`                send mode. Repo comes from roster.github_repo unless --repo\n`);
         ctx.stdout.write(`                overrides.\n`);
-        ctx.stdout.write(`  --repo <r>    override the roster's github_repo (only with --issue).\n`);
+        ctx.stdout.write(`  --close       with --issue: post the comment, THEN close the issue.\n`);
+        ctx.stdout.write(`                If the close fails after the comment landed, rc is non-zero\n`);
+        ctx.stdout.write(`                and the issue is reported as still open — never silent.\n`);
+        ctx.stdout.write(`  --new         file a NEW issue instead of commenting. Requires --title.\n`);
+        ctx.stdout.write(`  --title T     issue title (only with --new).\n`);
+        ctx.stdout.write(`  --repo <r>    override the roster's github_repo (only with --issue/--new).\n`);
         ctx.stdout.write(`  --dry-run     with --issue: show what would be sent without invoking gh.\n`);
         ctx.stdout.write(`\n`);
         ctx.stdout.write(`  Bodies that are empty or have no alphanumeric content are rejected at\n`);

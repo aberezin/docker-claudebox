@@ -245,6 +245,38 @@ failure.
 | Container fetcher SIGKILL'd at teardown     | SessionEnd hook (`team-watch-session-end.sh`, #70) fires `dridock team fetcher stop` so the fetcher's own SIGTERM handler persists state. **Container-only** — gated on `[ -f /.dockerenv ]`; on the host the fetcher SHOULD outlive the session, which is what lets events accumulate for the next drain. |
 | Poll to GitHub failed (rate limit, etc.)    | Fetcher's `onPollFailed` → stderr → log; cursor doesn't advance, next tick retries |
 
+## Posting: every write needs a header
+
+`Sender->Recipient:` is the **only** sender signal the bus has — both agents post
+as the same GitHub account, so the author field cannot tell them apart. A write
+without a header is therefore not merely untidy:
+
+- it is delivered back to **its own author** (unheadered ⇒ broadcast), and
+- it reads as an unknown sender to the **other** agent, who then cannot tell
+  your close from a human's.
+
+Unheadered must keep meaning broadcast — that is how Alan's own comments reach
+the agents, and he shouldn't have to type headers. So the fix is not to filter
+on the way in; it is to make sure agents never write without a header.
+
+`dridock team post` is that path, and as of #87 it covers every write:
+
+| Action | Command |
+|---|---|
+| comment | `dridock team post --to Bear --issue 42 < body.md` |
+| comment + close | `dridock team post --to Bear --issue 42 --close < body.md` |
+| file an issue | `dridock team post --to Bear --new --title "…" < body.md` |
+| compose only | `dridock team post --to Bear < body.md` |
+
+**Use these instead of `gh issue comment` / `gh issue close -c` / `gh issue
+create`.** The gap they close was found the hard way: #87 was filed with
+`gh issue create`, and its own body echoed back to its author before the
+sentence describing the problem was finished.
+
+`--close` is two requests, so it has a partial-failure state — comment posted,
+close failed. It reports both facts and returns non-zero; it never claims a
+success it didn't get.
+
 ## Staleness: the installed binary vs the harness repo
 
 The fetcher is spawned by `dridock`, so it runs whatever version is **installed
