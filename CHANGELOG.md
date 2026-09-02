@@ -26,6 +26,21 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.6.0] - 2026-09-02
+
+### Fixed
+- `dridock team watch` now exits **immediately** on SIGTERM instead of finishing
+  its 30s poll interval first. Measured 28s → 0s. The team hook's bounded wait
+  gave up before the old fetcher exited and refused to respawn, leaving the
+  inbox with no fetcher at all — observed twice in one session.
+- `dridock team fetcher stop` no longer mistakes a live fetcher for a stale one
+  when the binary is installed under a different name (`install.sh <BIN_NAME>`,
+  `DRIDOCK_BIN_NAME`). The liveness probe matched the literal string
+  `"dridock team watch"`, so a fetcher launched as `cb team watch` read as "not
+  ours": stop deleted its pidfile and returned 0 while the process kept running,
+  and the hook then respawned a **second writer on one inbox**. Now matches the
+  subcommand plus the inbox path, which is the actual discriminator.
+
 ## [5.5.0] - 2026-09-02
 
 ### Added

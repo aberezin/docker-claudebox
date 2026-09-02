@@ -550,10 +550,18 @@ Agent-team message bus over GitHub issue comments.
     // Live loop. SIGINT/SIGTERM → save state (already done per-tick) +
     // remove pidfile (fetcher mode) + exit clean.
     const stopSignal = { stopped: false };
+    // Wakers let SIGTERM interrupt the inter-tick sleep. Without this the
+    // flag is set but the loop stays parked in a 30s timer, so `fetcher
+    // stop` takes up to a full interval to actually exit -- long enough
+    // that the team hook's bounded wait gave up and refused to respawn,
+    // leaving the inbox with no fetcher at all (observed twice, #86).
+    // The signal handler must not just RECORD the stop, it must end the wait.
+    const wakers: (() => void)[] = [];
     const handleStop = (): void => {
       if (stopSignal.stopped) return;
       stopSignal.stopped = true;
       ctx.stderr.write(`\n👋 team watch: stopping (state persisted).\n`);
+      for (const w of wakers.splice(0)) w();
     };
     const sleeper = this.deps.sleep ?? defaultSleep;
     process.once("SIGINT", handleStop);
@@ -562,7 +570,15 @@ Agent-team message bus over GitHub issue comments.
       while (!stopSignal.stopped) {
         await runOneTick({ source, store, sink, selfName });
         if (stopSignal.stopped) break;
-        await sleeper(opts.intervalMs);
+        // Race the interval against a stop. `sleeper` stays injectable so
+        // tests keep their instant stub; the waker resolves the same promise
+        // early when a signal lands mid-sleep.
+        await new Promise<void>((resolve) => {
+          let done = false;
+          const finish = (): void => { if (!done) { done = true; resolve(); } };
+          wakers.push(finish);
+          void sleeper(opts.intervalMs).then(finish);
+        });
       }
     } finally {
       process.removeListener("SIGINT", handleStop);
@@ -935,7 +951,14 @@ function stripHeaderFromSummary(summary: string): string {
 }
 
 async function defaultSleep(ms: number): Promise<void> {
-  await new Promise((r) => setTimeout(r, ms));
+  // unref: when a stop wakes the loop early, this timer is still pending.
+  // A ref'd timer would keep the event loop alive for the rest of the
+  // interval -- so the process would linger up to 30s after saying it
+  // stopped, which is the very delay this change removes.
+  await new Promise<void>((r) => {
+    const t = setTimeout(r, ms);
+    (t as { unref?: () => void }).unref?.();
+  });
 }
 
 /** Single-quote-escape for `sh -c` interpolation. Wraps `s` in single

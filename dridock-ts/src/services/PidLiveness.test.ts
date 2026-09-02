@@ -129,3 +129,36 @@ describe("isPidAlive — the hardcoded 'dridock team watch' substring", () => {
     expect(isPidAlive(1234, OUR_INBOX, probe)).toBe(false); // inbox path absent
   });
 });
+
+describe("isPidAlive — the binary is renameable (install.sh BIN_NAME / DRIDOCK_BIN_NAME)", () => {
+  // Matching on "dridock team watch" inverted the check for anyone who
+  // installed under another name: a LIVE fetcher read as "not ours", so
+  // `fetcher stop` deleted its pidfile and returned 0 while the process kept
+  // running -- and the hook then respawned a SECOND writer on one inbox.
+  test("fetcher installed as `cb` is still recognised as ours", () => {
+    const cmdline = `/Users/alan/.local/bin/cb team watch --inbox ${OUR_INBOX}\n`;
+    const probe = new FakeProbe(new Set([42]), new Map([[42, cmdline]]));
+    expect(isPidAlive(42, OUR_INBOX, probe)).toBe(true);
+  });
+
+  test("fetcher installed as `claudebox` (legacy name) is still ours", () => {
+    const cmdline = `/opt/bin/claudebox team watch --inbox ${OUR_INBOX}\n`;
+    const probe = new FakeProbe(new Set([43]), new Map([[43, cmdline]]));
+    expect(isPidAlive(43, OUR_INBOX, probe)).toBe(true);
+  });
+
+  // Loosening the binary name must NOT loosen the discrimination that
+  // matters: another agent's fetcher, whatever it's called, is not ours.
+  test("renamed binary watching a DIFFERENT inbox is still rejected", () => {
+    const cmdline = `/Users/alan/.local/bin/cb team watch --inbox ${OTHER_INBOX}\n`;
+    const probe = new FakeProbe(new Set([44]), new Map([[44, cmdline]]));
+    expect(isPidAlive(44, OUR_INBOX, probe)).toBe(false);
+  });
+
+  // A process that merely mentions the inbox path (an editor, a grep) must
+  // not be mistaken for the fetcher -- "team watch" still carries weight.
+  test("unrelated process mentioning the inbox path is rejected", () => {
+    const probe = new FakeProbe(new Set([45]), new Map([[45, `vim ${OUR_INBOX}\n`]]));
+    expect(isPidAlive(45, OUR_INBOX, probe)).toBe(false);
+  });
+});

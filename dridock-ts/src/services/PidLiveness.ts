@@ -13,7 +13,8 @@
  * The fix is a two-part check:
  *   1. `probe.isRunning(pid)` — cheap existence check (kill -0).
  *   2. `probe.getCommandLine(pid)` — must contain BOTH the hardcoded
- *      "dridock team watch" (the tool) AND the caller-supplied
+ *      "team watch" (the subcommand, NOT the binary name -- it is
+ *      renameable) AND the caller-supplied
  *      substring (the inbox path — unique per agent+env by
  *      construction).
  *
@@ -45,7 +46,7 @@ export interface ProcessProbe {
 
 /**
  * Two-part liveness probe: (1) pid exists, (2) cmdline contains BOTH
- * "dridock team watch" AND `expectedCmdlineContains`.
+ * "team watch" AND `expectedCmdlineContains`.
  *
  * When `expectedCmdlineContains` is `undefined`, the cmdline check is
  * skipped and this is a bare pid-existence probe. Callers with pid
@@ -72,7 +73,21 @@ export function isPidAlive(
   if (expectedCmdlineContains === "") return false;
   const cmdline = probe.getCommandLine(pid);
   if (cmdline === undefined) return false;
-  return cmdline.includes("dridock team watch") && cmdline.includes(expectedCmdlineContains);
+  // Match on the SUBCOMMAND plus the inbox path -- deliberately NOT on the
+  // binary's name. `install.sh [BIN_NAME]` / DRIDOCK_BIN_NAME install this
+  // binary under any name, so a fetcher launched as `cb team watch ...` has
+  // no "dridock" in its cmdline at all.
+  //
+  // Requiring it inverted the check on exactly those installs: a LIVE fetcher
+  // read as "not ours", so `fetcher stop` deleted its pidfile and returned 0
+  // while the process kept running. The hook then saw no pidfile, respawned,
+  // and put TWO writers on one inbox -- the precise hazard the surrounding
+  // guards exist to prevent, reached through a supported configuration.
+  //
+  // The inbox path is the real discriminator: absolute and unique per agent.
+  // "team watch" keeps it from matching an unrelated process that merely
+  // mentions the path (an editor, a grep).
+  return cmdline.includes("team watch") && cmdline.includes(expectedCmdlineContains);
 }
 
 /** Production probe — the isRunning check uses `process.kill(pid, 0)`
