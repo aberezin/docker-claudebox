@@ -168,6 +168,7 @@ mode (-p) they are validated against an allowlist first.
     // projectDataDir is read, because that getter now points at the NEW
     // location — reading it first would silently create an empty dir beside
     // 27 MB of live sessions and mount the empty one.
+    let dataDirMoved = false;
     const dotDir = await machine.projectDotDir(id);
     if (dotDir !== undefined) {
       const projectRoot = dotDir.replace(/\/dot$/, "");
@@ -179,6 +180,7 @@ mode (-p) they are validated against an allowlist first.
       }
       if (moved.kind === "migrated") {
         ctx.stderr.write(`📦 moved ${moved.from} → ${moved.to} (dotfiles now persist across recreate)\n`);
+        dataDirMoved = true;
       }
     }
 
@@ -229,6 +231,25 @@ mode (-p) they are validated against an allowlist first.
       } else {
         ctx.stderr.write(`!  dotfile persistence off: ${decision.reason}.\n   ${decision.note}\n`);
       }
+    }
+
+    // A migration moved the mount SOURCE, so every existing container is now
+    // pointing at a path that no longer exists. Docker does not error on that —
+    // it silently recreates the missing source as an EMPTY directory, and the
+    // agent wakes with no memory at all ("let's get started", asking to pick a
+    // text style, while 25 MB of its history sits untouched at the new path).
+    //
+    // `dridock down` stops without removing, so a plain down/start reattaches
+    // to that stale container and reproduces it every time. ContainerRefresher
+    // only knows about IMAGE drift; a mount-source change is invisible to it.
+    // Found on gammaray during the #80 gate test — it did not show up on the
+    // first project only because that upgrade also rebuilt the image, which
+    // triggered a recreate for unrelated reasons.
+    if (dataDirMoved) {
+      for (const name of [cnameBase, containerName(ctx.cwd, "programmatic"), containerName(ctx.cwd, "cron")]) {
+        await docker.containerRemove(ctxDocker, name);
+      }
+      ctx.stderr.write(`🔄 recreating containers — the data dir moved, so their mounts are stale\n`);
     }
 
     const refresher = new ContainerRefresher(docker);
