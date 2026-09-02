@@ -245,6 +245,43 @@ failure.
 | Container fetcher SIGKILL'd at teardown     | SessionEnd hook (`team-watch-session-end.sh`, #70) fires `dridock team fetcher stop` so the fetcher's own SIGTERM handler persists state. **Container-only** — gated on `[ -f /.dockerenv ]`; on the host the fetcher SHOULD outlive the session, which is what lets events accumulate for the next drain. |
 | Poll to GitHub failed (rate limit, etc.)    | Fetcher's `onPollFailed` → stderr → log; cursor doesn't advance, next tick retries |
 
+## Staleness: the installed binary vs the harness repo
+
+The fetcher is spawned by `dridock`, so it runs whatever version is **installed
+on PATH** — not the code in the working tree. Editing `dridock-ts/` changes
+nothing until `./install.sh` runs, and nothing used to say so.
+
+That gap cost a real message. On 2026-09-02 a session shipped v5.0.0 → v5.1.1
+while the binary on PATH was still 4.3.3; the fetcher spawned six days earlier
+kept running 4.3.3 code, dropped an inbound comment as `surfaced:0 skipped:1`,
+and advanced its cursor past it. The comment is unrecoverable — a catch-up drain
+only re-reads from the cursor, and the cursor had already moved.
+
+The [#71](https://github.com/aberezin/docker-claudebox/issues/71) guard did not
+help, and could not: it compares the fetcher's stamp (`<inbox>.version`) against
+the **installed** binary. Both agreed at 4.3.3. It correctly reported no drift
+while every part of the system was two majors stale, because the thing that had
+moved — the repo — was not one of the two things being compared.
+
+Two checks now close it, both in `UserPromptSubmit` so they act without an exit:
+
+| Check | Compares | Fires when |
+|---|---|---|
+| install drift (#86) | repo `VERSION` ↔ `dridock --version` | you edited the harness but didn't reinstall |
+| fetcher drift (#71) | `<inbox>.version` ↔ `dridock --version` | you reinstalled but the fetcher predates it |
+
+The first only warns — it never installs for you, because a hook that rebuilds a
+binary mid-prompt is a worse surprise than a stale one. The second restarts the
+fetcher, waiting (bounded, 15s) for the old process to actually exit before
+clearing the pid file: clearing early would start a second writer on one inbox,
+which is precisely the hazard the pid guard exists to prevent.
+
+Both are gated on the harness fingerprint (`dridock-ts/src/domain/dridockVersion.ts`
+under the **git toplevel**, not the CWD — a session started in a subdirectory must
+still see it). An ordinary project has no meaningful "repo version", and nagging
+users who did nothing wrong would be worse than the bug being reported.
+`tests/test_hook_version_drift.sh` pins the silence cases alongside the warning.
+
 ## Not in scope (deferred to later releases)
 
 - **Rotation**: the inbox is still unbounded on disk — there is no size-based rotation. What *is* bounded (#61) is how much of it a single SessionStart drain will emit into context: `DRIDOCK_TEAM_MAX_DRAIN_BYTES` (default 102400, `0` disables). This matters because the drain-from-0 branches — first-ever run, and `rm <cursors>` recovery — replay the whole accumulated inbox, so recovery got *more* expensive the longer an agent had been running. The cap keeps the **newest** bytes (recent traffic is the actionable end) and announces the skipped byte range as loudly as the drain header, naming the file and the exact `tail -c … | head -c …` that reads the skipped events back — a silent cap would be the same class of bug #58 fixed. The cursor still advances to EOF afterwards; advancing only to the emitted start would re-cap the same window forever. Line alignment is handled by dropping the partial first record, and the skipped count is measured from what was actually emitted rather than assumed equal to the cap, so the reported range is exact. Disk-side rotation with a cursor migration remains unimplemented.

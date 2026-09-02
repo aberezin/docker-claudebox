@@ -62,6 +62,35 @@ _respawn_stamp="$_inbox.respawn-stamp"
 # spawn AND the diagnostic channel. (Arfy's blocking finding #3.)
 mkdir -p "$(dirname "$_inbox")"
 
+# ── Check 0: is the INSTALLED binary behind the repo being developed? ─
+# Only meaningful in the harness fork itself, so it is gated on the same
+# fingerprint `harness` mode uses. For an ordinary project the comparison is
+# nonsense and this stays silent.
+#
+# This is the drift NOTHING checked (#86). The #71 guard below compares the
+# fetcher's stamp against the INSTALLED binary — both can agree perfectly while
+# the installed binary is two majors behind the repo you are shipping from. On
+# 2026-09-02 a full session shipped v5.0.0 → v5.1.1 while the binary on PATH
+# was 4.3.3, and the six-day-old fetcher it had spawned silently dropped a
+# message (#50).
+#
+# Warn only. Auto-installing would swap the binary a running session depends on,
+# which is a worse surprise than the drift.
+# Resolve the repo ROOT rather than testing relative paths. A session started
+# in a subdirectory would otherwise skip this check silently — which is exactly
+# the defect flagged on #85's first draft, and it would be embarrassing to ship
+# it in the fix for the issue that found it.
+_hroot="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -n "$_hroot" ] && [ -f "$_hroot/dridock-ts/src/domain/dridockVersion.ts" ] && [ -f "$_hroot/VERSION" ]; then
+    _repo_ver="$(tr -d '[:space:]' < "$_hroot/VERSION" 2>/dev/null || true)"
+    _inst_ver="$(dridock --version 2>/dev/null | awk 'NR==1{print $NF}')"
+    if [ -n "$_repo_ver" ] && [ -n "$_inst_ver" ] && [ "$_repo_ver" != "$_inst_ver" ]; then
+        echo ""
+        echo "⚠ dridock installed $_inst_ver but this harness repo is $_repo_ver — run ./install.sh"
+        echo "   Until you do, this session (and the team fetcher it spawns) runs the OLD code."
+    fi
+fi
+
 # ── Check 1: fetcher liveness (kill -0 + ps cmdline match) ───────────
 # Two-part liveness per spec #56 open loop #4 — the ps cmdline check is
 # what prevents a pid-reuse false positive after reboot/wraparound.
@@ -79,6 +108,41 @@ if [ -f "$_pid" ]; then
     _pidval="$(cat "$_pid" 2>/dev/null || true)"
     if _check_fetcher_alive "$_pidval"; then
         _fetcher_alive=1
+    fi
+fi
+
+# A fetcher that is ALIVE but running older code is the case the #71 guard
+# catches — except that guard lives only in SessionStart, which is why picking
+# up an install used to require exiting the session (#86). Same check here, so
+# `./install.sh` takes effect on the next prompt instead.
+#
+# Container fetchers are short-lived and the shim does not answer --version, so
+# this is host-only — matching the SessionStart rationale.
+if [ "$_fetcher_alive" = 1 ] && [ ! -f /.dockerenv ]; then
+    _cur_ver="$(dridock --version 2>/dev/null | awk 'NR==1{print $NF}')"
+    _run_ver="$(cat "$_inbox.version" 2>/dev/null || true)"
+    if [ -n "$_cur_ver" ] && [ -n "$_run_ver" ] && [ "$_run_ver" != "$_cur_ver" ]; then
+        echo "♻ team fetcher: running $_run_ver but $_cur_ver is installed — restarting so watcher fixes take effect."
+        dridock team fetcher stop --inbox "$_inbox" >/dev/null 2>&1 || true
+        # WAIT for it to actually exit before clearing the pid file. `stop` is
+        # asynchronous; clearing early makes the respawn below start a SECOND
+        # writer on one inbox, which is the hazard the SessionStart guard exists
+        # to avoid. Bounded, then give up and leave the old one running.
+        #
+        # 15s, not the 45s SessionStart can afford: this blocks the user's
+        # prompt. A fetcher still alive after 15s is stuck, not slow, and the
+        # next prompt retries — so waiting longer buys nothing and costs the
+        # user a visibly hung keystroke.
+        _waited=0
+        while [ "$_waited" -lt 15 ] && _check_fetcher_alive "${_pidval:-}"; do
+            sleep 1; _waited=$((_waited + 1))
+        done
+        if _check_fetcher_alive "${_pidval:-}"; then
+            echo "⚠ team fetcher: pid ${_pidval:-?} still alive ${_waited}s after stop — NOT respawning (would leave two writers on one inbox). Investigate: $_log"
+        else
+            rm -f "$_pid"
+            _fetcher_alive=0   # falls through to the respawn block below
+        fi
     fi
 fi
 
