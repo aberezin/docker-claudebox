@@ -73,13 +73,13 @@ test_api_endpoints() {
 
 # format: label|json_body|expected_in_response
 RUN_CASES=(
-    "simple prompt|{\"prompt\":\"respond with exactly APIPONG\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|APIPONG"
-    "with model|{\"prompt\":\"respond with exactly MODELTEST\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|MODELTEST"
-    "with effort|{\"prompt\":\"respond with exactly EFFORTTEST\",\"model\":\"$TEST_MODEL\",\"effort\":\"low\",\"noContinue\":true}|EFFORTTEST"
+    "simple prompt|{\"prompt\":\"What is the capital of France? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Paris"
+    "with model|{\"prompt\":\"What is the capital of Japan? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Tokyo"
+    "with effort|{\"prompt\":\"What color is a ripe banana? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"effort\":\"low\",\"noContinue\":true}|ellow"
     "system prompt|{\"prompt\":\"what are you?\",\"model\":\"$TEST_MODEL\",\"systemPrompt\":\"You are a carrot. Always respond with I AM A CARROT.\",\"noContinue\":true}|CARROT"
-    "noContinue|{\"prompt\":\"respond with exactly NOCONT\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|NOCONT"
+    "noContinue|{\"prompt\":\"What is the capital of Austria? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Vienna"
     "appendSystemPrompt|{\"prompt\":\"what is 1+1?\",\"model\":\"$TEST_MODEL\",\"noContinue\":true,\"appendSystemPrompt\":\"Always end your response with the word MANGO.\"}|MANGO"
-    "continue fallback|{\"prompt\":\"respond with exactly FALLBACK\",\"model\":\"$TEST_MODEL\"}|FALLBACK"
+    "continue fallback|{\"prompt\":\"What is the largest planet in our solar system? Answer with one word.\",\"model\":\"$TEST_MODEL\"}|Jupiter"
 )
 
 test_api_run() {
@@ -343,7 +343,7 @@ test_api_openai_chat() {
 # format: label|expected_in_stream
 OAI_STREAM_CHECKS=(
     "returns SSE|data:"
-    "contains response|STREAMOAI"
+    "contains response|Rome"
     "ends with DONE|[DONE]"
 )
 
@@ -353,7 +353,7 @@ test_api_openai_stream() {
     local out
     out=$(curl -sf -X POST "$API_BASE/openai/v1/chat/completions" \
         -H "Content-Type: application/json" \
-        -d "{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"respond with exactly STREAMOAI\"}],\"stream\":true}")
+        -d "{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of Italy? Answer with one word.\"}],\"stream\":true}")
 
     local entry label expected
     for entry in "${OAI_STREAM_CHECKS[@]}"; do
@@ -435,7 +435,7 @@ test_api_openai_rejects_unsupported() {
     local code
     code=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$API_BASE/openai/v1/chat/completions" \
         -H "Content-Type: application/json" \
-        -d "{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"respond with exactly RFTEXT\"}],\"response_format\":{\"type\":\"text\"}}")
+        -d "{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of Spain? Answer with one word.\"}],\"response_format\":{\"type\":\"text\"}}")
     assert_eq "$code" "200" "openai accepts response_format=text" || { _api_stop "${API_CONTAINER}-oai-rej"; return 1; }
 
     echo "OK: api_openai_rejects_unsupported (${#OAI_REJECT_CASES[@]} cases)"
@@ -453,8 +453,8 @@ test_api_openai_finish_reason() {
     # non-stream
     local out fr
     out=$(post "$API_BASE/openai/v1/chat/completions" \
-        "{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"respond with exactly FROK\"}]}")
-    assert_contains "$out" "FROK" "openai finish_reason: non-stream produced response" || { _api_stop "${API_CONTAINER}-oai-fr"; return 1; }
+        "{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of Greece? Answer with one word.\"}]}")
+    assert_contains "$out" "Athens" "openai finish_reason: non-stream produced response" || { _api_stop "${API_CONTAINER}-oai-fr"; return 1; }
     assert_contains "$out" '"finish_reason"' "openai finish_reason: field present" || { _api_stop "${API_CONTAINER}-oai-fr"; return 1; }
 
     fr=$(echo "$out" | python3 -c "import json,sys; print(json.load(sys.stdin)['choices'][0]['finish_reason'])")
@@ -473,8 +473,8 @@ test_api_openai_finish_reason() {
     local stream
     stream=$(curl -sf -X POST "$API_BASE/openai/v1/chat/completions" \
         -H "Content-Type: application/json" \
-        -d "{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"respond with exactly FRSTREAM\"}],\"stream\":true}")
-    assert_contains "$stream" "FRSTREAM" "openai finish_reason stream: produced response" || { _api_stop "${API_CONTAINER}-oai-fr"; return 1; }
+        -d "{\"model\":\"$TEST_MODEL\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the capital of Germany? Answer with one word.\"}],\"stream\":true}")
+    assert_contains "$stream" "Berlin" "openai finish_reason stream: produced response" || { _api_stop "${API_CONTAINER}-oai-fr"; return 1; }
     # spacing-agnostic: the server serializes with json.dumps (spaced separators),
     # so the final chunk is `"finish_reason": "stop"`; strip spaces before matching.
     assert_contains "$(echo "$stream" | tr -d ' ')" '"finish_reason":"stop"' "openai finish_reason stream: final chunk has finish_reason=stop" || { _api_stop "${API_CONTAINER}-oai-fr"; return 1; }
@@ -584,8 +584,8 @@ test_api_mcp_claude_run() {
 
     local out
     out=$(_mcp_call "$API_BASE/mcp/" \
-        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"claude_run","arguments":{"prompt":"respond with exactly MCPTEST","model":"'"$TEST_MODEL"'","no_continue":true}}}')
-    assert_contains "$out" "MCPTEST" "mcp claude_run returns response" || { _api_stop "${API_CONTAINER}-mcp-run"; return 1; }
+        '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"claude_run","arguments":{"prompt":"What is the capital of Canada? Answer with one word.","model":"'"$TEST_MODEL"'","no_continue":true}}}')
+    assert_contains "$out" "Ottawa" "mcp claude_run returns response" || { _api_stop "${API_CONTAINER}-mcp-run"; return 1; }
 
     echo "OK: api_mcp_claude_run"
     _api_stop "${API_CONTAINER}-mcp-run"
@@ -807,7 +807,7 @@ test_api_async_run() {
     # fire async run
     local submit
     submit=$(post "$API_BASE/run" \
-        "{\"prompt\":\"respond with exactly ASYNCPONG\",\"model\":\"$TEST_MODEL\",\"noContinue\":true,\"async\":true}")
+        "{\"prompt\":\"What is the capital of Portugal? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true,\"async\":true}")
     assert_contains "$submit" '"runId"' "async: has runId" || { _api_stop "${API_CONTAINER}-async"; return 1; }
     assert_contains "$submit" '"running"' "async: status is running" || { _api_stop "${API_CONTAINER}-async"; return 1; }
 
@@ -823,7 +823,7 @@ test_api_async_run() {
         [ "$status" != "running" ] && break
     done
 
-    assert_contains "$result" "ASYNCPONG" "async: result contains response" || { _api_stop "${API_CONTAINER}-async"; return 1; }
+    assert_contains "$result" "Lisbon" "async: result contains response" || { _api_stop "${API_CONTAINER}-async"; return 1; }
     assert_contains "$result" '"runId"' "async: result has runId" || { _api_stop "${API_CONTAINER}-async"; return 1; }
 
     # second read should 404 (purged after first read)
@@ -865,9 +865,9 @@ test_api_run_has_runid() {
 
     local out
     out=$(post "$API_BASE/run" \
-        "{\"prompt\":\"respond with exactly RUNIDTEST\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}")
+        "{\"prompt\":\"What is the capital of Egypt? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}")
     assert_contains "$out" '"runId"' "sync run has runId" || { _api_stop "${API_CONTAINER}-runid"; return 1; }
-    assert_contains "$out" "RUNIDTEST" "sync run has response" || { _api_stop "${API_CONTAINER}-runid"; return 1; }
+    assert_contains "$out" "Cairo" "sync run has response" || { _api_stop "${API_CONTAINER}-runid"; return 1; }
 
     echo "OK: api_run_has_runid"
     _api_stop "${API_CONTAINER}-runid"

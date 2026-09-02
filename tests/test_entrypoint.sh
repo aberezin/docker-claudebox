@@ -151,8 +151,8 @@ test_entrypoint_auto_continue() {
         -e "DRIDOCK_WORKSPACE=/workspace" \
         -e "DRIDOCK_CONTAINER_NAME=${CONTAINER_PREFIX}-autocont" \
         "$IMAGE" \
-        -p "respond with exactly AUTOCONT" --output-format text --model "$TEST_MODEL" 2>&1)
-    assert_contains "$out" "AUTOCONT" "auto-continue fallback works"
+        -p "What is the capital of Norway? Answer with one word." --output-format text --model "$TEST_MODEL" 2>&1)
+    assert_contains "$out" "Oslo" "auto-continue fallback works"
 }
 
 
