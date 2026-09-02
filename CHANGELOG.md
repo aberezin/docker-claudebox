@@ -26,6 +26,30 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.2.0] - 2026-09-02
+
+### Added
+- `dridock team roster` exits **2** when the roster file is absent, distinct from
+  **1** (present but unusable). The SessionStart / UserPromptSubmit team hooks
+  branch on this to stay silent for users who never opted into agent-teams while
+  surfacing a broken roster loudly (#85).
+
+### Fixed
+- The team hooks no longer die silently when `.dridock/agents.yml` is malformed,
+  empty, or unreadable, and no longer mis-resolve the roster when a session
+  starts in a subdirectory of the project (#85).
+- The `UserPromptSubmit` hook now warns when the installed `dridock` is older
+  than the harness repo, and restarts a version-stale team fetcher without
+  requiring a session exit (#86).
+
+### Note for anyone upgrading
+This release changes a **host↔hook contract**, so the version bump is load-bearing
+rather than cosmetic. Until `./install.sh` runs, the hooks call an older binary
+that still returns rc 1 for an absent roster — and the hook reads that as
+"roster is broken", printing a spurious `team-bus OFF` banner in projects that
+simply have no team. `dridock checkversion` and the #86 hook warning both key off
+this bump; without it the drift is invisible.
+
 ## [5.0.0] — 2026-09-01 _(fork)_
 
 ### ⚠️ BREAKING — legacy env prefixes removed
