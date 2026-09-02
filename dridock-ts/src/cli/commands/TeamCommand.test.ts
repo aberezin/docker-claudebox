@@ -1,5 +1,5 @@
 import { test, expect, describe, afterEach } from "bun:test";
-import { TeamCommand } from "./TeamCommand.ts";
+import { TeamCommand, ROSTER_ABSENT_RC } from "./TeamCommand.ts";
 import { InMemoryFileSystem } from "../../test/fakes/InMemoryFileSystem.ts";
 import { StubGitToplevel } from "../../test/fakes/StubGitToplevel.ts";
 import { StubHostCommandRunner } from "../../infra/HostCommandRunner.ts";
@@ -70,15 +70,46 @@ describe("TeamCommand — arg + roster preconditions", () => {
     expect(stderr.text()).toContain("whoami, roster, post");
   });
 
-  test("roster file missing → rc 1 + spec pointer", async () => {
+  test("roster file missing → rc 2 + spec pointer", async () => {
     const fs = new InMemoryFileSystem();
     // config.yml present but agents.yml absent
     fs.seed("/proj/.dridock/config.yml", "id: abc\n");
     const { ctx, stderr } = makeCtx(fs);
     const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["whoami"], ctx);
-    expect(rc).toBe(1);
+    expect(rc).toBe(ROSTER_ABSENT_RC);
     expect(stderr.text()).toContain("no roster at /proj/.dridock/agents.yml");
     expect(stderr.text()).toContain("agent-teams.md §1");
+  });
+
+  // #85: the hooks branch on these two codes to decide silent-vs-loud, so the
+  // codes must stay DISTINCT. A refactor that collapsed both to rc 1 would
+  // make the team bus die silently on a broken roster -- the original bug.
+  test("absent and malformed rosters use DIFFERENT exit codes", async () => {
+    const absentFs = new InMemoryFileSystem();
+    absentFs.seed("/proj/.dridock/config.yml", "id: abc\n");
+    const absent = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "")
+      .run(["whoami"], makeCtx(absentFs).ctx);
+
+    const brokenFs = new InMemoryFileSystem();
+    seedProject(brokenFs, `agents:\n  - role: eng\n`);
+    const broken = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "")
+      .run(["whoami"], makeCtx(brokenFs).ctx);
+
+    expect(absent).not.toBe(broken);
+    expect(absent).toBe(2);
+    expect(broken).toBe(1);
+  });
+
+  // The reason an exit code was chosen over `[ -f .dridock/agents.yml ]` in
+  // the hook: resolution is git-toplevel-relative, so a CWD deep in the tree
+  // must still find the roster. If this regresses, the hook goes silent for
+  // exactly the users who DO have a team.
+  test("roster resolves from a subdirectory, not the CWD", async () => {
+    const fs = new InMemoryFileSystem();
+    seedProject(fs, `agents:\n  - name: Arfy\n`);
+    const { ctx } = makeCtx(fs, "/proj/deeply/nested/src");
+    const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["roster"], ctx);
+    expect(rc).toBe(0);
   });
 
   test("roster malformed → rc 1 with parser error message", async () => {

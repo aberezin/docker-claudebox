@@ -41,6 +41,13 @@ import { xdgRoot } from "../../domain/paths.ts";
  * biggest piece and lands on top of #45's event schema (channel-less
  * polling per ADR-0001).
  */
+/**
+ * Exit code for "no roster file" -- distinct from rc 1 (roster present but
+ * unusable) so callers can branch on opted-in-ness. Consumed by the
+ * SessionStart / UserPromptSubmit team hooks; see the block in `run()`.
+ */
+export const ROSTER_ABSENT_RC = 2;
+
 export class TeamCommand implements Command {
   readonly verb = "team" as const;
   readonly usage = `dridock team <subverb> [args…]
@@ -100,7 +107,28 @@ Agent-team message bus over GitHub issue comments.
       for (const line of formatResolveError({ kind: "roster-missing", configPath: rosterPath }, rosterPath)) {
         ctx.stderr.write(line);
       }
-      return 1;
+      // rc 2, not 1: ABSENT is categorically different from BROKEN, and the
+      // hooks need to tell them apart to decide whether to stay quiet (#85).
+      //
+      // "No roster" means the user never opted into agent-teams -- the hook
+      // must exit silently, because an ordinary user does not want a team-bus
+      // banner. "Malformed roster" (rc 1) means they DID opt in and it's
+      // broken -- the hook must say so loudly, which is the whole point of
+      // that issue.
+      //
+      // The hooks cannot make this distinction themselves. Testing
+      // `[ -f .dridock/agents.yml ]` looks equivalent and is not: the CLI
+      // resolves the roster from the git toplevel via ProjectRootResolver, so
+      // a session started in a SUBDIRECTORY finds no file by that test while
+      // `team roster` finds it fine. That check would take the silent arm for
+      // exactly the users most likely to have a roster -- reintroducing #85
+      // inside its own fix. An exit code is the smallest signal that carries
+      // the CLI's own path resolution out to the shell.
+      //
+      // Grepping stderr for "no roster at" would also work and is what the
+      // hooks would otherwise be forced into; an exit code beats coupling
+      // them to an error string we reword freely.
+      return ROSTER_ABSENT_RC;
     }
 
     if (sub === "roster") return this.runRoster(roster, ctx);
