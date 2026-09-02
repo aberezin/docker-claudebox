@@ -5,7 +5,7 @@
 # and the label would quietly describe a version that isn't in the image (#78).
 # Override at build time: --build-arg CLAUDE_VERSION=2.1.243
 # (./install.sh --claude-version <v>|latest|stable does this for you.)
-ARG CLAUDE_VERSION=2.1.215
+ARG CLAUDE_VERSION=2.1.258
 
 FROM ubuntu:24.04 AS base
 

@@ -26,6 +26,22 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.4.0] - 2026-09-02
+
+### Changed
+- Claude Code CLI pin raised **2.1.215 → 2.1.258** (`ARG CLAUDE_VERSION`). Above
+  the `--remote-control` floor (2.1.206), so the #17 capability probe is
+  unchanged.
+
+### Note
+`./install.sh --claude-version <v>` is a **per-build override** — it does not
+write the Dockerfile pin. An account built with the flag therefore diverges from
+the committed default, and the next bare `./install.sh` silently rebuilds on the
+OLDER CLI. That happened here: Bear was built at 2.1.258 while the repo still
+said 2.1.215. Raising the pin is what makes the two agree; the flag alone does
+not. Verify with `dridock checkversion` or the image's
+`org.dridock.claude-version` label.
+
 ## [5.3.0] - 2026-09-02
 
 ### Added
