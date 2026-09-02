@@ -224,11 +224,33 @@ drift, and report the host vs in-image Claude CLI versions.
       if (hostCli !== undefined) {
         const img = e.claudeCliVersion;
         if (img !== undefined && img !== "unavailable" && img !== "unstamped" && img !== hostCli) {
-          ctx.stdout.write(`\n⚠️  the image's claude CLI (${img}) differs from the host's (${hostCli}).\n`);
-          ctx.stdout.write(`    A stale pin silently DROPS unknown flags rather than erroring (#17), so\n`);
-          ctx.stdout.write(`    forwarded features can appear to work while doing nothing.\n`);
-          ctx.stdout.write(`    Bump: edit ARG CLAUDE_VERSION in the Dockerfile, or ./install.sh --claude-version ${hostCli}\n`);
-          ctx.stdout.write(`    Then re-check the entrypoint's --remote-control capability probe.\n`);
+          // DIRECTION MATTERS. The original check was a bare `!==` on the
+          // assumption above -- that the host auto-updates and is therefore
+          // the newer reference. That held only while the pin lagged. Once
+          // the pin was deliberately raised ahead of a host (5.4.0 pinned
+          // 2.1.258 against a host on 2.1.238), the same branch advised
+          // `--claude-version <host>`, i.e. rebuild the image at the OLDER
+          // version: a downgrade, recommended as a fix, with a rationale
+          // ("a stale pin drops unknown flags") describing the opposite of
+          // the actual situation.
+          const cmp = Version.parseLoose(img).compareTo(Version.parseLoose(hostCli));
+          if (cmp === "lt") {
+            // Image behind host — the original case, and the dangerous one.
+            ctx.stdout.write(`\n⚠️  the image's claude CLI (${img}) is BEHIND the host's (${hostCli}).\n`);
+            ctx.stdout.write(`    A stale pin silently DROPS unknown flags rather than erroring (#17), so\n`);
+            ctx.stdout.write(`    forwarded features can appear to work while doing nothing.\n`);
+            ctx.stdout.write(`    Bump: edit ARG CLAUDE_VERSION in the Dockerfile, or ./install.sh --claude-version ${hostCli}\n`);
+            ctx.stdout.write(`    Then re-check the entrypoint's --remote-control capability probe.\n`);
+          } else {
+            // Image AHEAD of host. Nothing dridock does is broken by this:
+            // the claudebot runs the image's CLI, and the host's is only
+            // what the human types on the Mac. Say so, and do NOT suggest
+            // rebuilding -- that would throw away a deliberate pin.
+            ctx.stdout.write(`\nℹ️  the image's claude CLI (${img}) is AHEAD of the host's (${hostCli}).\n`);
+            ctx.stdout.write(`    Nothing to fix: the claudebot runs the image's CLI. The host's is only\n`);
+            ctx.stdout.write(`    what you run on the Mac yourself, and each macOS account has its own.\n`);
+            ctx.stdout.write(`    Do NOT rebuild at the host's version — that would downgrade the pin.\n`);
+          }
         }
       }
     } else {

@@ -166,9 +166,43 @@ describe("CheckversionCommand — happy paths", () => {
       async () => "2.1.241").run([], ctx);
     const out = stdout.text();
     expect(out).toContain("claude CLI (host):     2.1.241");
-    expect(out).toContain("differs from the host's");
+    expect(out).toContain("is BEHIND the host's");
     expect(out).toContain("--claude-version 2.1.241");
     expect(out).toContain("#17");                 // why it matters, not just that it differs
+  });
+
+  // The direction the original bare `!==` never considered. Its comment
+  // assumed "the host is the reference because it auto-updates" -- true only
+  // while the pin lagged. 5.4.0 pinned 2.1.258 against a host on 2.1.238 and
+  // the same branch then advised `--claude-version 2.1.238`: a DOWNGRADE,
+  // recommended as a fix, justified by a rationale describing the opposite
+  // situation.
+  test("claude CLI drift: image AHEAD of host → says nothing to fix, never suggests a downgrade", async () => {
+    const fs = projFs();
+    const docker = new InMemoryDocker();
+    docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "2.1.258");
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima(),
+      async () => "2.1.238").run([], ctx);
+    const out = stdout.text();
+    expect(out).toContain("is AHEAD of the host's");
+    expect(out).toContain("Nothing to fix");
+    // The actual regression: never advise rebuilding at the older version.
+    expect(out).not.toContain("--claude-version 2.1.238");
+    expect(out).not.toContain("is BEHIND");
+  });
+
+  test("ahead-case is informational, not a warning", async () => {
+    // A ⚠ on a benign, deliberate state trains people to ignore warnings —
+    // the same reason the RC false alarm matters.
+    const fs = projFs();
+    const docker = new InMemoryDocker();
+    docker.seedClaudeCliVersion("colima-cb-abc", "dridock:latest", "2.1.258");
+    const { ctx, stdout } = makeCtx(fs);
+    await new CheckversionCommand("dridock:latest", docker, new StubGitToplevel("/p"), new InMemoryColima(),
+      async () => "2.1.238").run([], ctx);
+    expect(stdout.text()).toContain("ℹ️");
+    expect(stdout.text()).not.toContain("⚠️  the image's claude CLI");
   });
 
   test("claude CLI in sync → host row shown, no warning", async () => {

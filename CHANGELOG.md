@@ -26,6 +26,18 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.7.2] - 2026-09-02
+
+### Fixed
+- `dridock checkversion` no longer recommends **downgrading** the image's Claude
+  CLI. The drift check compared host and image with a bare `!==` on the
+  assumption that the host auto-updates and is therefore newer — true only while
+  the pin lagged. After 5.4.0 raised the pin to 2.1.258, a host on 2.1.238 was
+  told to run `./install.sh --claude-version 2.1.238`, justified by a rationale
+  ("a stale pin drops unknown flags") describing the opposite situation. It now
+  compares semantically: behind → the original warning; ahead → an
+  informational note that there is nothing to fix.
+
 ## [5.7.1] - 2026-09-02
 
 ### Fixed
