@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { BrowserBridgeService, forwarderPython, debugProfilePreferences } from "./BrowserBridgeService.ts";
+import { BrowserBridgeService, forwarderPython, quietProfilePreferences } from "./BrowserBridgeService.ts";
 import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 import { InMemoryHostProcessManager } from "../test/fakes/InMemoryHostProcessManager.ts";
 
@@ -246,9 +246,9 @@ describe("BrowserBridgeService.up — Chrome noise suppression (#84)", () => {
   });
 });
 
-describe("debugProfilePreferences — content pinned", () => {
+describe("quietProfilePreferences — content pinned", () => {
   test("emits valid JSON with all five quiet-profile keys", () => {
-    const prefs = JSON.parse(debugProfilePreferences());
+    const prefs = JSON.parse(quietProfilePreferences());
     expect(prefs.profile.exit_type).toBe("Normal");
     expect(prefs.profile.exited_cleanly).toBe(true);
     expect(prefs.profile.password_manager_enabled).toBe(false);
@@ -267,5 +267,66 @@ describe("forwarderPython — the emitted Python script", () => {
     expect(src).toContain(`s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)`);
     expect(src).not.toContain(`$`);
     expect(src).not.toContain(`{`);
+  });
+});
+
+
+/* ── #84 review: the keys are a DEFAULT, not a lock ──────────────────────── */
+
+describe("quietProfilePreferences — merges, never replaces", () => {
+  test("preserves everything Chrome already stored", async () => {
+    // A realistic slice of what Preferences actually holds. Replacing the file
+    // wholesale would reset all of it on EVERY `browser-bridge up` — a
+    // script-cdp run that granted clipboard permission would lose it, window
+    // size would reset, DevTools settings would go. That is a worse bug than
+    // the restore bubble it fixes.
+    const before = JSON.stringify({
+      profile: {
+        exit_type: "Crashed",
+        name: "Debug",
+        content_settings: { exceptions: { clipboard: { "https://example.com,*": { setting: 1 } } } },
+      },
+      browser: { window_placement: { bottom: 900, right: 1600 } },
+      devtools: { preferences: { "panel-selected-tab": "console" } },
+      partition: { per_host_zoom_levels: { "x": { "example.com": 1.2 } } },
+    });
+    const after = JSON.parse(quietProfilePreferences(before));
+
+    // The five keys we manage are applied…
+    expect(after.profile.exit_type).toBe("Normal");
+    expect(after.profile.exited_cleanly).toBe(true);
+    expect(after.profile.password_manager_enabled).toBe(false);
+    expect(after.credentials_enable_service).toBe(false);
+    expect(after.credentials_enable_autosignin).toBe(false);
+    // …and everything else survives untouched.
+    expect(after.profile.name).toBe("Debug");
+    expect(after.profile.content_settings.exceptions.clipboard["https://example.com,*"].setting).toBe(1);
+    expect(after.browser.window_placement.bottom).toBe(900);
+    expect(after.devtools.preferences["panel-selected-tab"]).toBe("console");
+    expect(after.partition.per_host_zoom_levels.x["example.com"]).toBe(1.2);
+  });
+
+  test("a user's edit to a key we do NOT manage is kept", async () => {
+    const after = JSON.parse(quietProfilePreferences(JSON.stringify({
+      profile: { default_content_setting_values: { notifications: 1 } },
+    })));
+    expect(after.profile.default_content_setting_values.notifications).toBe(1);
+    expect(after.profile.exit_type).toBe("Normal");
+  });
+
+  test("no existing file → the minimal document", async () => {
+    const after = JSON.parse(quietProfilePreferences(undefined));
+    expect(after.profile.exit_type).toBe("Normal");
+    expect(after.credentials_enable_service).toBe(false);
+  });
+
+  test("unparseable or non-object input → minimal document, not a throw", async () => {
+    // Chrome discards a Preferences file it cannot parse, so replacing it is
+    // the recovery rather than data loss. What must not happen is throwing and
+    // taking `browser-bridge up` down with it.
+    for (const junk of ["{not json", "", "null", "[1,2,3]"]) {
+      const after = JSON.parse(quietProfilePreferences(junk));
+      expect(after.profile.exit_type).toBe("Normal");
+    }
   });
 });
