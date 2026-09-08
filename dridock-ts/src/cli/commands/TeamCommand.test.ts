@@ -424,6 +424,10 @@ describe("TeamCommand.watch --once — single-tick catch-up (SessionStart hook u
     // Config surface + no error on stderr
     expect(stderr.text()).toContain("self=Bear, repo=aberezin/docker-claudebox");
     expect(stderr.text()).not.toContain("poll failed");
+    // #90 follow-up: the startup config line carries an ISO-8601 timestamp
+    // prefix, matching the per-tick line's format (5.8.0). Without this, a
+    // fetcher log at post-mortem has no anchor for when the lifetime started.
+    expect(stderr.text()).toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z 👀 team watch: self=Bear/);
   });
 
   test("--once with poll-failed → stderr warning, rc 0 (soft failure doesn't crash catchup)", async () => {

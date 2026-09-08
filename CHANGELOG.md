@@ -26,6 +26,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [Unreleased]
+
+### Fixed
+- **`team watch` startup + FRESH-START + shutdown lines now carry ISO-8601
+  timestamps** (#90 follow-up on the 5.8.0 slice). 5.8.0 timestamped the
+  per-tick line and fixed the underlying data-loss; the lifetime-boundary
+  lines — the startup config summary, the FRESH-START warning header, and
+  the shutdown notice — were left untimed, so a fetcher log at post-mortem
+  had no anchor for when a lifetime started or ended relative to the timed
+  tick lines. Same format as tick lines (`${new Date().toISOString()} ...`).
+  Continuation lines under a header stay bare-indented so grep-by-timestamp
+  finds one entry per event, not one per line. Test at
+  `TeamCommand.test.ts` pins the config-line prefix.
+
 ## [5.8.0] - 2026-09-08
 
 ### Fixed

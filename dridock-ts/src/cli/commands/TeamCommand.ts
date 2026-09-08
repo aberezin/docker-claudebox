@@ -528,8 +528,18 @@ Agent-team message bus over GitHub issue comments.
       }
     }
 
+    // Local helper: prepend an ISO-8601 timestamp to a lifetime-boundary line
+    // (startup config, FRESH START header, shutdown notice) so the fetcher log
+    // has anchoring at each start/stop, matching the per-tick line's format
+    // added in 5.8.0. Continuation lines under a header stay bare-indented so
+    // grep-by-timestamp finds one entry per event, not one per continuation.
+    // Closes the remaining slice of #90 that 5.8.0's data-loss fix didn't cover.
+    const logLine = (msg: string): void => {
+      ctx.stderr.write(`${new Date().toISOString()} ${msg}`);
+    };
+
     // Surface config so the user sees what's running.
-    ctx.stderr.write(`👀 team watch: self=${selfName}, repo=${repo}, interval=${opts.intervalMs}ms${opts.once ? " (once)" : ""}${opts.inbox !== undefined ? `, inbox=${opts.inbox}` : ""}\n`);
+    logLine(`👀 team watch: self=${selfName}, repo=${repo}, interval=${opts.intervalMs}ms${opts.once ? " (once)" : ""}${opts.inbox !== undefined ? `, inbox=${opts.inbox}` : ""}\n`);
 
     // FRESH-START warning (Arfy's #56 mitigation, landed with #58): if the
     // persisted cursor is empty, this is the first spawn (post-install or
@@ -542,7 +552,7 @@ Agent-team message bus over GitHub issue comments.
     if (opts.inbox !== undefined && !opts.once) {
       const initialState = await store.load();
       if (initialState.cursor === "") {
-        ctx.stderr.write(`⚠️  team watch: FRESH START — no prior cursor at ${stateDir}.\n`);
+        logLine(`⚠️  team watch: FRESH START — no prior cursor at ${stateDir}.\n`);
         ctx.stderr.write(`    Historical events posted before this spawn will NOT be delivered.\n`);
         ctx.stderr.write(`    Persistence begins now; subsequent restarts pick up where this run left off.\n`);
       }
@@ -567,7 +577,11 @@ Agent-team message bus over GitHub issue comments.
     const handleStop = (): void => {
       if (stopSignal.stopped) return;
       stopSignal.stopped = true;
-      ctx.stderr.write(`\n👋 team watch: stopping (state persisted).\n`);
+      // Leading \n separates the shutdown line from any preceding tick line,
+      // then the timestamp anchors the shutdown to the same clock the tick
+      // lines use (#90 follow-up). Kept inline rather than via `logLine`
+      // because the newline-first shape doesn't fit the helper.
+      ctx.stderr.write(`\n${new Date().toISOString()} 👋 team watch: stopping (state persisted).\n`);
       for (const w of wakers.splice(0)) w();
     };
     const sleeper = this.deps.sleep ?? defaultSleep;
