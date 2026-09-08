@@ -27,6 +27,10 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+- Added `FetcherLogTimestamps.test.ts`, which enumerates the fetcher's log-write
+  sites and fails on any new untimed one. #90 was declared fixed three times in
+  one afternoon and was incomplete each time — every miss was caught by a human
+  asking a question that forced an enumeration, which is not a control.
 - Timestamped the last two runtime log sites: the pidfile-write failure (on the
   fetcher path — a failed pidfile breaks every liveness check the hooks make)
   and the display sink's `poll failed`, a second site carrying the same text as
