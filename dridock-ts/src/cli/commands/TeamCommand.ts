@@ -522,7 +522,10 @@ Agent-team message bus over GitHub issue comments.
         await ctx.fs.mkdirRecursive(opts.inbox.substring(0, opts.inbox.lastIndexOf("/")));
         await ctx.fs.writeText(pidfileFor(opts.inbox), `${process.pid}\n`);
       } catch (e) {
-        ctx.stderr.write(`⚠️  team watch: failed to write pidfile ${pidfileFor(opts.inbox)}: ${e instanceof Error ? e.message : String(e)}\n`);
+        // Timestamped: this is on the fetcher path and a failed pidfile
+        // write breaks every liveness check the hooks do. Knowing WHEN it
+        // failed is what lets it be correlated with a restart storm.
+        ctx.stderr.write(`${new Date().toISOString()} ⚠️  team watch: failed to write pidfile ${pidfileFor(opts.inbox)}: ${e instanceof Error ? e.message : String(e)}\n`);
         // Continue anyway — the fetcher can still run without a pidfile;
         // status/stop verbs just won't find it. Loud, not fatal.
       }
@@ -630,7 +633,11 @@ Agent-team message bus over GitHub issue comments.
         ctx.stdout.write(`[${time}] ${event.ref} ← ${sender}: ${summary}\n`);
       },
       onPollFailed: (source, reason) => {
-        ctx.stderr.write(`⚠️  team watch: ${source} poll failed: ${reason}\n`);
+        // Second site with the same text as InboxSink's. This one belongs to
+        // the interactive display sink (no --inbox), that one to the fetcher.
+        // Fixing one and assuming both were done is precisely the mistake
+        // this issue keeps producing, so they are kept in the same format.
+        ctx.stderr.write(`${new Date().toISOString()} ⚠️  team watch: ${source} poll failed: ${reason}\n`);
       },
       onTickComplete: async (summary: WatcherTickSummary) => {
         try {

@@ -27,6 +27,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+- Timestamped the last two runtime log sites: the pidfile-write failure (on the
+  fetcher path — a failed pidfile breaks every liveness check the hooks make)
+  and the display sink's `poll failed`, a second site carrying the same text as
+  `InboxSink`'s. Fixing one of a duplicated pair and assuming both were done is
+  the mistake this issue kept producing.
 - Timestamped the two fetcher log lines that live in `InboxSink` rather than
   `runWatch` — `inbox append failed … (will retry)` and `<source> poll failed`.
   They write to the same log and were outside 6a47bee's scope. The first is the
