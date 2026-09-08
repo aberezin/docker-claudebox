@@ -627,8 +627,21 @@ Agent-team message bus over GitHub issue comments.
             repo,
           }));
         } catch { /* best-effort */ }
-        if (ctx.env.raw()["DEBUG"] === "true") {
-          ctx.stderr.write(`  tick: ${summary.kind}, seen=${summary.seen}, surfaced=${summary.surfaced}, ${summary.elapsedMs}ms\n`);
+        // NOT gated on DEBUG any more. This is the fetcher's flight
+        // recorder: when a message goes missing days later, this line is
+        // the only thing that can say whether a poll even ran and what it
+        // decided. Gated, the log held 66 lines of start/stop and could
+        // not answer "was the comment seen?" for #90.
+        //
+        // Quiet ticks (nothing seen) stay silent so a week-long log does
+        // not become 20k noise lines; anything that saw or refused an
+        // event always prints.
+        if (summary.seen > 0 || summary.failed > 0 || summary.kind === "poll-failed") {
+          ctx.stderr.write(
+            `${new Date().toISOString()} tick: ${summary.kind} seen=${summary.seen} ` +
+            `surfaced=${summary.surfaced} skipped=${summary.skipped} ` +
+            `deduped=${summary.deduped} failed=${summary.failed} ${Math.round(summary.elapsedMs)}ms\n`,
+          );
         }
       },
     };

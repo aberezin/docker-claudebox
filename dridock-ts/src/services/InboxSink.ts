@@ -62,31 +62,47 @@ export function makeInboxSink(deps: InboxSinkDeps): WatcherSink {
       try {
         const line = formatInboxLine(event, deps.repo);
         await deps.fs.appendText(deps.inboxPath, `${line}\n`);
+        return true;
       } catch (e) {
-        // Sink write failed — surface on stderr so the fetcher's log
-        // captures it. Don't crash the loop: the event is lost for this
-        // consumer, but the cursor/dedup state advances on the next
-        // tick regardless, so a re-poll wouldn't recover it either.
-        // Better to keep polling than to wedge the whole fetcher.
-        deps.stderr.write(`⚠️  inbox append failed for ${event.ref}: ${e instanceof Error ? e.message : String(e)}\n`);
+        // Report the failure to the loop instead of absorbing it. The old
+        // comment here reasoned "the event is lost for this consumer, but
+        // a re-poll wouldn't recover it either" -- true at the time, and
+        // the reason it was permanent: the loop marked it delivered and
+        // the cursor advanced past it regardless. The loop now leaves a
+        // refused event undelivered and rewinds the cursor to it, so
+        // returning false is what makes the next poll retry.
+        deps.stderr.write(`⚠️  inbox append failed for ${event.ref} (will retry): ${e instanceof Error ? e.message : String(e)}\n`);
+        return false;
       }
     },
     onPollFailed: (source, reason) => {
       deps.stderr.write(`⚠️  team watch: ${source} poll failed: ${reason}\n`);
     },
     onTickComplete: async (summary: WatcherTickSummary) => {
+      const record = JSON.stringify({
+        ...summary,
+        atIso: new Date().toISOString(),
+        self: deps.selfName,
+        repo: deps.repo,
+        inbox: deps.inboxPath,
+      });
+      // Current state: overwritten every tick, so "is it alive right now"
+      // stays a single cheap read.
       try {
-        await deps.fs.writeText(
-          deps.heartbeatPath,
-          JSON.stringify({
-            ...summary,
-            atIso: new Date().toISOString(),
-            self: deps.selfName,
-            repo: deps.repo,
-            inbox: deps.inboxPath,
-          }),
-        );
+        await deps.fs.writeText(deps.heartbeatPath, record);
       } catch { /* best-effort */ }
+
+      // History: append-only, but ONLY for ticks that did something. The
+      // heartbeat alone answers "alive?" and nothing else -- by the time
+      // anyone investigates a missing message it has been overwritten
+      // hundreds of times, which is why #90's post-mortem had nothing to
+      // read. Quiet ticks are excluded so this does not grow by 2,880
+      // lines a day saying "nothing happened".
+      if (summary.seen > 0 || summary.failed > 0 || summary.kind === "poll-failed") {
+        try {
+          await deps.fs.appendText(`${deps.heartbeatPath}.log`, `${record}\n`);
+        } catch { /* best-effort */ }
+      }
     },
   };
 }

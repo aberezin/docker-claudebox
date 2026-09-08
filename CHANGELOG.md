@@ -26,6 +26,28 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [5.8.0] - 2026-09-08
+
+### Fixed
+- **The team fetcher could lose a message permanently and silently.** When the
+  inbox append failed, `InboxSink` logged to stderr and returned normally, so the
+  loop marked the event delivered and advanced the cursor past it — it was never
+  offered again. The sink now reports failure, refused events are left
+  undelivered, and the cursor **rewinds to the earliest refusal** so the next
+  poll retries them. Not marking delivered was not enough on its own: the cursor
+  would still have moved past it.
+
+### Changed
+- Per-tick accounting is no longer gated behind `DEBUG=true`, and carries an ISO
+  timestamp. A fetcher log of 66 lines could not answer "was the comment even
+  seen?" during the #90 post-mortem. Quiet ticks stay silent.
+- Tick summaries gained `deduped` and `failed`, so
+  `seen === surfaced + skipped + deduped + failed` holds. Previously a
+  dedup-suppressed event incremented nothing, producing readings like
+  `seen: 1, surfaced: 0, skipped: 0` — the exact shape that hid the loss.
+- The heartbeat keeps an append-only `.log` of non-quiet ticks alongside the
+  overwritten current-state file, so a post-mortem has history to read.
+
 ## [5.7.3] - 2026-09-02
 
 ### Changed

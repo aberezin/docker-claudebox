@@ -64,7 +64,7 @@ describe("runOneTick — dedup + predicate composition", () => {
     const sink = new RecordingSink();
     const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
     const summary = await runOneTick({ source, store, sink, selfName: "Bear", now: fakeNow() });
-    expect(summary).toEqual({ source: "github", kind: "polled", seen: 1, surfaced: 1, skipped: 0, elapsedMs: 42 });
+    expect(summary).toEqual({ source: "github", kind: "polled", seen: 1, surfaced: 1, deduped: 0, failed: 0, skipped: 0, elapsedMs: 42 });
     expect(sink.events).toHaveLength(1);
     expect(sink.events[0]!.summary).toBe("Arfy->Bear: verified");
   });
@@ -289,3 +289,78 @@ function fakeNow(): () => number {
   let i = 0;
   return () => (i < seq.length ? seq[i++]! : 42);
 }
+
+
+describe("runOneTick — a refused event is retried, not lost (#90 post-mortem)", () => {
+  // The bug: InboxSink caught its own write failure, returned normally, the
+  // loop marked the event delivered and advanced the cursor past it. A #90
+  // comment asking my opinion vanished exactly this way — cursor 1ms past
+  // the comment, nothing in the inbox, and the log silent because per-tick
+  // accounting was DEBUG-gated.
+  const refused: WatcherSink = { onEvent: () => false };
+  const throwing: WatcherSink = { onEvent: () => { throw new Error("ENOSPC"); } };
+
+  function oneEvent(ref: string, at = "2026-09-03T16:40:38Z") {
+    const source = new FakeSource();
+    const e = ev({ ref, body: "Bear->Arfy: opinion sought", observedAt: at });
+    source.outcome = { kind: "ok", newCursor: "2026-09-03T17:00:00.000Z", events: [e] };
+    return { source, e };
+  }
+
+  test("sink returning false → NOT marked delivered, cursor rewinds to it", async () => {
+    const { source, e } = oneEvent("github:#90#comment-1");
+    const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
+    const summary = await runOneTick({ source, store, sink: refused, selfName: "Arfy", now: fakeNow() });
+    expect(summary.failed).toBe(1);
+    expect(summary.surfaced).toBe(0);
+    // Both halves of the fix; either alone is useless.
+    const saved = await store.load();
+    expect(saved.delivered).not.toContain(e.eventHash);  // retryable
+    expect(saved.cursor).toBe(e.cursor);                 // will be re-polled
+  });
+
+  test("sink THROWING is treated the same as returning false", async () => {
+    const { source, e } = oneEvent("github:#90#comment-2");
+    const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
+    const summary = await runOneTick({ source, store, sink: throwing, selfName: "Arfy", now: fakeNow() });
+    expect(summary.failed).toBe(1);
+    expect((await store.load()).delivered).not.toContain(e.eventHash);
+  });
+
+  test("a retry after a failure marks it delivered", async () => {
+    const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
+    let attempt = 0;
+    const flaky: WatcherSink = { onEvent: () => { attempt++; return attempt > 1; } };
+    const first = oneEvent("github:#90#comment-3");
+    await runOneTick({ source: first.source, store, sink: flaky, selfName: "Arfy", now: fakeNow() });
+    const again = oneEvent("github:#90#comment-3");
+    const second = await runOneTick({ source: again.source, store, sink: flaky, selfName: "Arfy", now: fakeNow() });
+    expect(second.surfaced).toBe(1);
+    expect((await store.load()).delivered).toContain(again.e.eventHash);
+  });
+});
+
+describe("runOneTick — every event lands in exactly one bucket", () => {
+  // The single assertion that would have caught the #90 loss. The heartbeat
+  // read `seen: 1, surfaced: 0, skipped: 0` — numbers that cannot be right,
+  // because the deduped `continue` incremented nothing.
+  test("seen === surfaced + skipped + deduped + failed on a mixed tick", async () => {
+    const mine    = ev({ ref: "a", body: "Bear->Arfy: mine",    observedAt: "2026-09-03T16:00:01Z" });
+    const notMine = ev({ ref: "b", body: "Arfy->Bear: not mine", observedAt: "2026-09-03T16:00:02Z" });
+    const already = ev({ ref: "c", body: "Bear->Arfy: dup",     observedAt: "2026-09-03T16:00:03Z" });
+
+    const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
+    await store.save({ cursor: "2026-09-03T15:00:00.000Z", delivered: [already.eventHash] });
+
+    const source = new FakeSource();
+    source.outcome = { kind: "ok", newCursor: "2026-09-03T17:00:00.000Z", events: [mine, notMine, already] };
+    const s = await runOneTick({ source, store, sink: new RecordingSink(), selfName: "Arfy", now: fakeNow() });
+
+    expect(s.seen).toBe(3);
+    expect(s.surfaced).toBe(1);
+    expect(s.skipped).toBe(1);
+    expect(s.deduped).toBe(1);
+    expect(s.failed).toBe(0);
+    expect(s.surfaced + s.skipped + s.deduped + s.failed).toBe(s.seen);
+  });
+});

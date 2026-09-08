@@ -35,8 +35,13 @@ import { surfacesForAgent } from "./AgentTeamHeader.ts";
  *  it. Each method fires per tick. */
 export interface WatcherSink {
   /** Fires once per event that survived dedup + predicate. In-order
-   *  by `observedAt`. */
-  onEvent(event: WatcherEvent): void | Promise<void>;
+   *  by `observedAt`.
+   *
+   *  Return `false` (or throw) when the event was NOT durably handed off.
+   *  The loop then leaves it UNdelivered so the next poll retries it.
+   *  Returning void/true means "I have it" and the loop marks it
+   *  delivered — which is permanent, so only say so when it is true. */
+  onEvent(event: WatcherEvent): void | boolean | Promise<void | boolean>;
   /** Fires once per source-poll failure. Called BEFORE the tick ends;
    *  a chatty sink can rate-limit; a strict sink can escalate. */
   onPollFailed?(source: string, reason: string): void | Promise<void>;
@@ -67,6 +72,28 @@ export interface WatcherTickSummary {
    * which is how a diagnostic dies.
    */
   readonly skipped: number;
+  /**
+   * Already-delivered events suppressed this tick.
+   *
+   * The note above is right that folding these into `skipped` would turn a
+   * signal into noise. They still have to be COUNTED somewhere: with no
+   * bucket at all, `seen: 1, surfaced: 0, skipped: 0` is unreadable — the
+   * exact shape that hid a dropped comment on #90, and the same shape the
+   * note above cites for #65. A separate field keeps `skipped` clean and
+   * still lets the invariant hold:
+   *
+   *     seen === surfaced + skipped + deduped + failed
+   */
+  readonly deduped: number;
+  /**
+   * Events the sink REFUSED this tick (e.g. the inbox append threw).
+   *
+   * These are NOT marked delivered and the cursor rewinds to the earliest
+   * one, so the next poll retries them. Before this existed, a failed inbox
+   * write was logged and then the event was marked delivered anyway —
+   * permanent, silent loss.
+   */
+  readonly failed: number;
   /** Wall-clock ms for this tick (start of poll → end of sink calls). */
   readonly elapsedMs: number;
 }
@@ -103,6 +130,8 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
       seen: 0,
       surfaced: 0,
       skipped: 0,
+      deduped: 0,
+      failed: 0,
       elapsedMs: nowMs() - startMs,
     };
     if (deps.sink.onTickComplete !== undefined) {
@@ -114,12 +143,36 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
   let nextState: WatcherStoreState = state;
   let surfaced = 0;
   let skipped = 0;
+  // Counted so `seen` is fully accounted for. Every event must land in
+  // exactly one bucket; an untracked `continue` is how a lost message
+  // becomes invisible (see the deduped counter below).
+  let deduped = 0;
+  let failed = 0;
+  /** Cursor of the EARLIEST event the sink refused, so we can rewind to it. */
+  let earliestFailedCursor: string | undefined;
   // Events arrive from the source pre-sorted by observedAt; iterate in
   // that order so the sink sees them chronologically.
   for (const event of outcome.events) {
-    if (WatcherStore.isDelivered(nextState, event.eventHash)) continue;
+    if (WatcherStore.isDelivered(nextState, event.eventHash)) { deduped++; continue; }
     if (!surfacesForAgent(event.header, deps.selfName)) { skipped++; continue; }
-    await deps.sink.onEvent(event);
+    // Mark delivered ONLY when the sink confirms it took the event.
+    // Previously the sink swallowed its own write failure, returned
+    // normally, and the event was marked delivered anyway -- so a failed
+    // inbox append lost the message permanently and silently. Dedup state
+    // is a claim that someone HAS it; do not make that claim on a failure.
+    let accepted: boolean;
+    try {
+      accepted = (await deps.sink.onEvent(event)) !== false;
+    } catch {
+      accepted = false;
+    }
+    if (!accepted) {
+      failed++;
+      if (earliestFailedCursor === undefined || event.cursor < earliestFailedCursor) {
+        earliestFailedCursor = event.cursor;
+      }
+      continue;
+    }
     nextState = WatcherStore.markDelivered(nextState, event.eventHash, event.cursor);
     surfaced++;
   }
@@ -127,8 +180,16 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
   // Even if nothing surfaced, advance the cursor so we don't re-poll
   // the same window next tick. `outcome.newCursor` is the source's
   // advanced watermark (max(observedAt)+1ms for github).
+  //
+  // EXCEPT when the sink refused an event: rewind to the earliest refusal
+  // so the next poll re-fetches it. Not marking it delivered achieves
+  // nothing on its own -- the cursor would have moved past it and it would
+  // never be offered again. Re-polling is safe because the delivered set
+  // suppresses anything that DID land, so a rewind re-offers only the
+  // events that failed.
+  const cursorToSave = earliestFailedCursor ?? outcome.newCursor;
   await deps.store.save({
-    cursor: outcome.newCursor,
+    cursor: cursorToSave,
     delivered: nextState.delivered,
   });
 
@@ -138,6 +199,8 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
     seen: outcome.events.length,
     surfaced,
     skipped,
+    deduped,
+    failed,
     elapsedMs: nowMs() - startMs,
   };
   if (deps.sink.onTickComplete !== undefined) {
