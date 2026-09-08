@@ -27,6 +27,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+- Timestamped the two fetcher log lines that live in `InboxSink` rather than
+  `runWatch` — `inbox append failed … (will retry)` and `<source> poll failed`.
+  They write to the same log and were outside 6a47bee's scope. The first is the
+  highest-value line in the log (a message is being held) and had shipped
+  without a clock earlier the same day.
 
 ### Fixed
 - **`team watch` startup + FRESH-START + shutdown lines now carry ISO-8601

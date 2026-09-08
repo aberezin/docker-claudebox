@@ -189,3 +189,34 @@ describe("makeInboxSink — sink behaviors", () => {
     expect(hb.surfaced).toBe(1);
   });
 });
+
+
+describe("InboxSink — failure lines carry a timestamp (#90 residual)", () => {
+  // 6a47bee timestamped the lifetime lines in runWatch. These two live in
+  // the sink, write to the SAME fetcher log, and were missed — and one of
+  // them was added that same afternoon by 5.8.0's retry fix, so the most
+  // diagnostic line in the log shipped without a clock.
+  const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z /;
+
+  test("'inbox append failed (will retry)' is timestamped, and refuses the event", async () => {
+    const fs = new InMemoryFileSystem();
+    (fs as unknown as { appendText: () => Promise<void> }).appendText =
+      async () => { throw new Error("ENOSPC"); };
+    const stderr = stderrCapture();
+    const sink = makeInboxSink({ fs, inboxPath: INBOX, selfName: "Bear", repo: REPO, heartbeatPath: HEART, stderr });
+    const accepted = await sink.onEvent(commentEvent());
+    // Refusing is what makes the loop retry rather than lose it (5.8.0).
+    expect(accepted).toBe(false);
+    expect(stderr.lines.join("")).toMatch(ISO);
+    expect(stderr.lines.join("")).toContain("will retry");
+  });
+
+  test("'poll failed' is timestamped", () => {
+    const fs = new InMemoryFileSystem();
+    const stderr = stderrCapture();
+    const sink = makeInboxSink({ fs, inboxPath: INBOX, selfName: "Bear", repo: REPO, heartbeatPath: HEART, stderr });
+    sink.onPollFailed?.("github", "rate limited");
+    expect(stderr.lines.join("")).toMatch(ISO);
+    expect(stderr.lines.join("")).toContain("rate limited");
+  });
+});

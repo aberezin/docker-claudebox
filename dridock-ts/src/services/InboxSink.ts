@@ -56,6 +56,11 @@ export interface InboxSinkDeps {
 
 /** Build a `WatcherSink` that appends JSONL events to the inbox file
  *  instead of writing display lines to stdout. See file header. */
+// Log lines here are ISO-timestamped to match the per-tick and lifetime
+// lines (#90). These two are the highest-value entries in the whole fetcher
+// log -- "append failed (will retry)" means a message is being HELD, and
+// "poll failed" means a window may not have been covered. Both are useless
+// at post-mortem without a time to correlate against the inbox and cursor.
 export function makeInboxSink(deps: InboxSinkDeps): WatcherSink {
   return {
     onEvent: async (event) => {
@@ -71,12 +76,12 @@ export function makeInboxSink(deps: InboxSinkDeps): WatcherSink {
         // the cursor advanced past it regardless. The loop now leaves a
         // refused event undelivered and rewinds the cursor to it, so
         // returning false is what makes the next poll retry.
-        deps.stderr.write(`⚠️  inbox append failed for ${event.ref} (will retry): ${e instanceof Error ? e.message : String(e)}\n`);
+        deps.stderr.write(`${new Date().toISOString()} ⚠️  inbox append failed for ${event.ref} (will retry): ${e instanceof Error ? e.message : String(e)}\n`);
         return false;
       }
     },
     onPollFailed: (source, reason) => {
-      deps.stderr.write(`⚠️  team watch: ${source} poll failed: ${reason}\n`);
+      deps.stderr.write(`${new Date().toISOString()} ⚠️  team watch: ${source} poll failed: ${reason}\n`);
     },
     onTickComplete: async (summary: WatcherTickSummary) => {
       const record = JSON.stringify({
