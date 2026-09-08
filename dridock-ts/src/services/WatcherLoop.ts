@@ -42,6 +42,9 @@ export interface WatcherSink {
    *  Returning void/true means "I have it" and the loop marks it
    *  delivered — which is permanent, so only say so when it is true. */
   onEvent(event: WatcherEvent): void | boolean | Promise<void | boolean>;
+  /** Fires when an event is given up on after repeated refusals. This is
+   *  message LOSS — sinks should make it impossible to miss. */
+  onEventAbandoned?(event: WatcherEvent, attempts: number): void | Promise<void>;
   /** Fires once per source-poll failure. Called BEFORE the tick ends;
    *  a chatty sink can rate-limit; a strict sink can escalate. */
   onPollFailed?(source: string, reason: string): void | Promise<void>;
@@ -50,6 +53,21 @@ export interface WatcherSink {
    *  file + optional debug output. */
   onTickComplete?(summary: WatcherTickSummary): void | Promise<void>;
 }
+
+/**
+ * How many consecutive ticks an event may be refused before the loop gives up
+ * on it and lets the cursor move on.
+ *
+ * The rewind added in 5.8.0 stops a refused event being lost — but with no
+ * bound it stalls the cursor forever, so one undeliverable event silently
+ * blocks EVERY later message. Losing one message loudly is better than losing
+ * all of them quietly.
+ *
+ * 10 ticks ≈ 5 minutes at the default 30s interval: long enough to ride out a
+ * transient permission or disk blip, short enough that a real outage surfaces
+ * while someone is still around to see it.
+ */
+export const MAX_DELIVERY_ATTEMPTS = 10;
 
 export interface WatcherTickSummary {
   readonly source: string;
@@ -94,6 +112,17 @@ export interface WatcherTickSummary {
    * permanent, silent loss.
    */
   readonly failed: number;
+  /**
+   * Events given up on after `MAX_DELIVERY_ATTEMPTS` consecutive refusals.
+   *
+   * The one case where the loop discards rather than holds. Without a bound,
+   * the 5.8.0 rewind would stall the cursor forever on a single undeliverable
+   * event, silently blocking every later message — losing one message loudly
+   * beats losing all of them quietly. Counted, announced via
+   * `onEventAbandoned`, and bounded, which is the whole difference from the
+   * silent loss this machinery exists to prevent.
+   */
+  readonly abandoned: number;
   /** Wall-clock ms for this tick (start of poll → end of sink calls). */
   readonly elapsedMs: number;
 }
@@ -132,6 +161,7 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
       skipped: 0,
       deduped: 0,
       failed: 0,
+      abandoned: 0,
       elapsedMs: nowMs() - startMs,
     };
     if (deps.sink.onTickComplete !== undefined) {
@@ -148,6 +178,9 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
   // becomes invisible (see the deduped counter below).
   let deduped = 0;
   let failed = 0;
+  let abandoned = 0;
+  // Mutable copy of the persisted retry budget.
+  const attempts: Record<string, number> = { ...(state.attempts ?? {}) };
   /** Cursor of the EARLIEST event the sink refused, so we can rewind to it. */
   let earliestFailedCursor: string | undefined;
   // Events arrive from the source pre-sorted by observedAt; iterate in
@@ -167,12 +200,29 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
       accepted = false;
     }
     if (!accepted) {
+      const tries = (attempts[event.eventHash] ?? 0) + 1;
+      if (tries >= MAX_DELIVERY_ATTEMPTS) {
+        // Give up on THIS event so later ones can flow. Marking it
+        // delivered is what stops it blocking again on the next poll.
+        // This is acknowledged loss: counted, announced, and bounded.
+        abandoned++;
+        delete attempts[event.eventHash];
+        nextState = WatcherStore.markDelivered(nextState, event.eventHash, event.cursor);
+        if (deps.sink.onEventAbandoned !== undefined) {
+          await deps.sink.onEventAbandoned(event, tries);
+        }
+        continue;
+      }
+      attempts[event.eventHash] = tries;
       failed++;
       if (earliestFailedCursor === undefined || event.cursor < earliestFailedCursor) {
         earliestFailedCursor = event.cursor;
       }
       continue;
     }
+    // Delivered: clear any retry history so a later unrelated failure
+    // starts from a full budget rather than inheriting an old count.
+    delete attempts[event.eventHash];
     nextState = WatcherStore.markDelivered(nextState, event.eventHash, event.cursor);
     surfaced++;
   }
@@ -191,6 +241,7 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
   await deps.store.save({
     cursor: cursorToSave,
     delivered: nextState.delivered,
+    attempts,
   });
 
   const summary: WatcherTickSummary = {
@@ -201,6 +252,7 @@ export async function runOneTick(deps: WatcherLoopDeps): Promise<WatcherTickSumm
     skipped,
     deduped,
     failed,
+    abandoned,
     elapsedMs: nowMs() - startMs,
   };
   if (deps.sink.onTickComplete !== undefined) {

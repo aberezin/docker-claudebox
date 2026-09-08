@@ -11,35 +11,35 @@ describe("WatcherStore.load — reads or defaults", () => {
   test("absent file → empty defaults (cursor='', delivered=[])", async () => {
     const fs = new InMemoryFileSystem();
     const store = new WatcherStore(fs, BASE, "github");
-    expect(await store.load()).toEqual({ cursor: "", delivered: [] });
+    expect(await store.load()).toEqual({ cursor: "", delivered: [], attempts: {} });
   });
 
   test("valid JSON → cursor + delivered restored", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed(path("github"), JSON.stringify({ cursor: "2026-07-26T15:00:00Z", delivered: ["h1", "h2"] }));
     const store = new WatcherStore(fs, BASE, "github");
-    expect(await store.load()).toEqual({ cursor: "2026-07-26T15:00:00Z", delivered: ["h1", "h2"] });
+    expect(await store.load()).toEqual({ cursor: "2026-07-26T15:00:00Z", delivered: ["h1", "h2"] , attempts: {} });
   });
 
   test("corrupt JSON → empty defaults (never throws — degrades to re-deliver, not crash)", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed(path("github"), "{not json");
     const store = new WatcherStore(fs, BASE, "github");
-    expect(await store.load()).toEqual({ cursor: "", delivered: [] });
+    expect(await store.load()).toEqual({ cursor: "", delivered: [], attempts: {} });
   });
 
   test("empty file → empty defaults", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed(path("github"), "");
     const store = new WatcherStore(fs, BASE, "github");
-    expect(await store.load()).toEqual({ cursor: "", delivered: [] });
+    expect(await store.load()).toEqual({ cursor: "", delivered: [], attempts: {} });
   });
 
   test("state with non-string entries in delivered → filtered out (defensive)", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed(path("github"), JSON.stringify({ cursor: "x", delivered: ["h1", 42, null, "h2"] }));
     const store = new WatcherStore(fs, BASE, "github");
-    expect(await store.load()).toEqual({ cursor: "x", delivered: ["h1", "h2"] });
+    expect(await store.load()).toEqual({ cursor: "x", delivered: ["h1", "h2"] , attempts: {} });
   });
 
   test("load respects the cap when persisted state exceeds it (past truncation)", async () => {
@@ -60,7 +60,7 @@ describe("WatcherStore.save — atomic, capped", () => {
     const fs = new InMemoryFileSystem();
     const store = new WatcherStore(fs, BASE, "github");
     await store.save({ cursor: "cursor-1", delivered: ["h1", "h2", "h3"] });
-    expect(await store.load()).toEqual({ cursor: "cursor-1", delivered: ["h1", "h2", "h3"] });
+    expect(await store.load()).toEqual({ cursor: "cursor-1", delivered: ["h1", "h2", "h3"] , attempts: {} });
   });
 
   test("save creates the baseDir if missing (mkdir -p semantics)", async () => {
@@ -87,7 +87,7 @@ describe("WatcherStore.save — atomic, capped", () => {
     const store = new WatcherStore(fs, BASE, "github");
     await store.save({ cursor: "a", delivered: ["h1"] });
     await store.save({ cursor: "b", delivered: ["h2"] });
-    expect(await store.load()).toEqual({ cursor: "b", delivered: ["h2"] });
+    expect(await store.load()).toEqual({ cursor: "b", delivered: ["h2"] , attempts: {} });
   });
 
   test("per-source isolation — github state doesn't affect consult state", async () => {
@@ -96,8 +96,8 @@ describe("WatcherStore.save — atomic, capped", () => {
     const cs = new WatcherStore(fs, BASE, "consult");
     await gh.save({ cursor: "gh-cursor", delivered: ["gh-1"] });
     await cs.save({ cursor: "cs-cursor", delivered: ["cs-1"] });
-    expect(await gh.load()).toEqual({ cursor: "gh-cursor", delivered: ["gh-1"] });
-    expect(await cs.load()).toEqual({ cursor: "cs-cursor", delivered: ["cs-1"] });
+    expect(await gh.load()).toEqual({ cursor: "gh-cursor", delivered: ["gh-1"] , attempts: {} });
+    expect(await cs.load()).toEqual({ cursor: "cs-cursor", delivered: ["cs-1"] , attempts: {} });
   });
 });
 

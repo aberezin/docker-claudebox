@@ -657,11 +657,12 @@ Agent-team message bus over GitHub issue comments.
         // Quiet ticks (nothing seen) stay silent so a week-long log does
         // not become 20k noise lines; anything that saw or refused an
         // event always prints.
-        if (summary.seen > 0 || summary.failed > 0 || summary.kind === "poll-failed") {
+        if (summary.seen > 0 || summary.failed > 0 || summary.abandoned > 0 || summary.kind === "poll-failed") {
           ctx.stderr.write(
             `${new Date().toISOString()} tick: ${summary.kind} seen=${summary.seen} ` +
             `surfaced=${summary.surfaced} skipped=${summary.skipped} ` +
-            `deduped=${summary.deduped} failed=${summary.failed} ${Math.round(summary.elapsedMs)}ms\n`,
+            `deduped=${summary.deduped} failed=${summary.failed} abandoned=${summary.abandoned} ` +
+            `${Math.round(summary.elapsedMs)}ms\n`,
           );
         }
       },

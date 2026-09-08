@@ -39,6 +39,16 @@ export interface WatcherStoreState {
   /** Newest first — index 0 was the most recently added event. Bounded
    *  by `cap`. */
   readonly delivered: readonly string[];
+  /**
+   * Consecutive delivery attempts per event hash, for events the sink has
+   * refused. Persisted because the retry budget has to survive restarts —
+   * a fetcher that is restarted every few minutes (the version-stale hook
+   * does exactly that) would otherwise reset its budget forever and retry
+   * the same doomed event indefinitely.
+   *
+   * Entries are removed on success or on abandonment, so this stays small.
+   */
+  readonly attempts?: Readonly<Record<string, number>>;
 }
 
 export class WatcherStore {
@@ -58,7 +68,7 @@ export class WatcherStore {
     const path = this.path();
     const text = await this.fs.readTextOrUndefined(path);
     if (text === undefined || text.trim() === "") {
-      return { cursor: "", delivered: [] };
+      return { cursor: "", delivered: [], attempts: {} };
     }
     try {
       const parsed = JSON.parse(text) as Partial<WatcherStoreState>;
@@ -66,14 +76,20 @@ export class WatcherStore {
       const delivered = Array.isArray(parsed.delivered)
         ? parsed.delivered.filter((h): h is string => typeof h === "string").slice(0, this.cap)
         : [];
-      return { cursor, delivered };
+      const attempts: Record<string, number> = {};
+      if (parsed.attempts !== null && typeof parsed.attempts === "object") {
+        for (const [k, v] of Object.entries(parsed.attempts as Record<string, unknown>)) {
+          if (typeof v === "number" && Number.isFinite(v) && v > 0) attempts[k] = v;
+        }
+      }
+      return { cursor, delivered, attempts };
     } catch {
       // Corrupt state file — treat as absent. Watcher's next poll
       // re-fetches from the beginning of the cursor window, dedup
       // starts fresh. Worst case: duplicate delivery of events the
       // catch-up layer would have suppressed — not a correctness bug,
       // just a one-time UX blip.
-      return { cursor: "", delivered: [] };
+      return { cursor: "", delivered: [], attempts: {} };
     }
   }
 
@@ -87,6 +103,9 @@ export class WatcherStore {
     const bounded: WatcherStoreState = {
       cursor: state.cursor,
       delivered: state.delivered.slice(0, this.cap),
+      ...(state.attempts !== undefined && Object.keys(state.attempts).length > 0
+        ? { attempts: state.attempts }
+        : {}),
     };
     await this.fs.writeTextAtomic(this.path(), JSON.stringify(bounded), { mode: 0o644 });
   }

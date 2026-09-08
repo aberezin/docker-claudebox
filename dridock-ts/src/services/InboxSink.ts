@@ -80,6 +80,16 @@ export function makeInboxSink(deps: InboxSinkDeps): WatcherSink {
         return false;
       }
     },
+    onEventAbandoned: (event, attempts) => {
+      // The loudest line this sink emits, because it is the only one that
+      // means a message was LOST. Everything else in this file is either
+      // routine or recoverable. Phrased so it is obvious in a log skim and
+      // carries the ref needed to go read the original by hand.
+      deps.stderr.write(
+        `${new Date().toISOString()} ❌❌ team watch: GAVE UP on ${event.ref} after ${attempts} failed delivery attempts — ` +
+        `THIS MESSAGE WAS NOT DELIVERED. Read it directly: ${event.ref}\n`,
+      );
+    },
     onPollFailed: (source, reason) => {
       deps.stderr.write(`${new Date().toISOString()} ⚠️  team watch: ${source} poll failed: ${reason}\n`);
     },
@@ -103,7 +113,7 @@ export function makeInboxSink(deps: InboxSinkDeps): WatcherSink {
       // hundreds of times, which is why #90's post-mortem had nothing to
       // read. Quiet ticks are excluded so this does not grow by 2,880
       // lines a day saying "nothing happened".
-      if (summary.seen > 0 || summary.failed > 0 || summary.kind === "poll-failed") {
+      if (summary.seen > 0 || summary.failed > 0 || summary.abandoned > 0 || summary.kind === "poll-failed") {
         try {
           await deps.fs.appendText(`${deps.heartbeatPath}.log`, `${record}\n`);
         } catch { /* best-effort */ }

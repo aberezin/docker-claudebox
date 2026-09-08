@@ -27,6 +27,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+- Bounded the delivery retry introduced in 5.8.0. The cursor rewind stopped
+  silent loss but had no limit, so one undeliverable event stalled the cursor
+  indefinitely and silently blocked every later message. After
+  `MAX_DELIVERY_ATTEMPTS` (10 ticks ≈ 5 min) the loop gives up on that event,
+  announces it via `onEventAbandoned` as the loudest line the fetcher log
+  emits, and moves on. Losing one message loudly beats losing all of them
+  quietly. The retry budget is persisted, so the routine version-stale fetcher
+  restarts cannot reset it and recreate the stall by another route.
 - Added `FetcherLogTimestamps.test.ts`, which enumerates the fetcher's log-write
   sites and fails on any new untimed one. #90 was declared fixed three times in
   one afternoon and was incomplete each time — every miss was caught by a human

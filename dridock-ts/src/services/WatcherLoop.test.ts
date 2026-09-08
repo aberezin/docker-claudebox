@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { runOneTick, type WatcherSink, type WatcherTickSummary } from "./WatcherLoop.ts";
+import { runOneTick, MAX_DELIVERY_ATTEMPTS, type WatcherSink, type WatcherTickSummary } from "./WatcherLoop.ts";
 import { WatcherStore } from "./WatcherStore.ts";
 import { eventHashOf, type WatcherEvent } from "./WatcherEvent.ts";
 import type { WatchSource, WatchSourcePollOutcome } from "./GithubWatchSource.ts";
@@ -64,7 +64,7 @@ describe("runOneTick — dedup + predicate composition", () => {
     const sink = new RecordingSink();
     const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
     const summary = await runOneTick({ source, store, sink, selfName: "Bear", now: fakeNow() });
-    expect(summary).toEqual({ source: "github", kind: "polled", seen: 1, surfaced: 1, deduped: 0, failed: 0, skipped: 0, elapsedMs: 42 });
+    expect(summary).toEqual({ source: "github", kind: "polled", seen: 1, surfaced: 1, deduped: 0, failed: 0, abandoned: 0, skipped: 0, elapsedMs: 42 });
     expect(sink.events).toHaveLength(1);
     expect(sink.events[0]!.summary).toBe("Arfy->Bear: verified");
   });
@@ -362,5 +362,75 @@ describe("runOneTick — every event lands in exactly one bucket", () => {
     expect(s.deduped).toBe(1);
     expect(s.failed).toBe(0);
     expect(s.surfaced + s.skipped + s.deduped + s.failed).toBe(s.seen);
+  });
+});
+
+describe("runOneTick — head-of-line: a permanently-failing event must not block forever", () => {
+  // 5.8.0's rewind fixed silent loss but introduced a stall: one undeliverable
+  // event held the cursor indefinitely, so EVERY later message was silently
+  // blocked behind it. Losing one message loudly beats losing all quietly.
+  const alwaysRefuse: WatcherSink = { onEvent: () => false };
+
+  function tickWith(sink: WatcherSink, store: WatcherStore, ref = "github:#1#c1") {
+    const source = new FakeSource();
+    source.outcome = {
+      kind: "ok",
+      newCursor: "2026-09-08T18:00:00.000Z",
+      events: [ev({ ref, body: "Bear->Arfy: blocked", observedAt: "2026-09-08T17:00:00Z" })],
+    };
+    return runOneTick({ source, store, sink, selfName: "Arfy", now: fakeNow() });
+  }
+
+  test("gives up after MAX_DELIVERY_ATTEMPTS and lets the cursor advance", async () => {
+    const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
+    let last;
+    for (let i = 0; i < MAX_DELIVERY_ATTEMPTS; i++) last = await tickWith(alwaysRefuse, store);
+    expect(last!.abandoned).toBe(1);
+    expect(last!.failed).toBe(0);
+    // The point of the bound: the cursor is free again, so later messages flow.
+    expect((await store.load()).cursor).toBe("2026-09-08T18:00:00.000Z");
+  });
+
+  test("before the budget runs out it still holds the cursor (the 5.8.0 guarantee)", async () => {
+    const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
+    const first = await tickWith(alwaysRefuse, store);
+    expect(first.failed).toBe(1);
+    expect(first.abandoned).toBe(0);
+    expect((await store.load()).cursor).toBe("2026-09-08T17:00:00Z"); // rewound, not advanced
+  });
+
+  test("abandonment is ANNOUNCED — it is real loss and must never be silent", async () => {
+    const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
+    const seen: { ref: string; attempts: number }[] = [];
+    const sink: WatcherSink = {
+      onEvent: () => false,
+      onEventAbandoned: (e, attempts) => { seen.push({ ref: e.ref, attempts }); },
+    };
+    for (let i = 0; i < MAX_DELIVERY_ATTEMPTS; i++) await tickWith(sink, store);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.attempts).toBe(MAX_DELIVERY_ATTEMPTS);
+  });
+
+  test("the retry budget survives restarts — a restart loop must not reset it", async () => {
+    // The version-stale hook restarts the fetcher routinely. If the budget
+    // lived in memory, a restart every few minutes would reset it forever and
+    // the stall would be permanent by another route.
+    const fs = new InMemoryFileSystem();
+    for (let i = 0; i < MAX_DELIVERY_ATTEMPTS - 1; i++) {
+      await tickWith(alwaysRefuse, new WatcherStore(fs, BASE, "github")); // fresh store each time
+    }
+    const final = await tickWith(alwaysRefuse, new WatcherStore(fs, BASE, "github"));
+    expect(final.abandoned).toBe(1);
+  });
+
+  test("a success clears the budget so an unrelated later failure starts fresh", async () => {
+    const store = new WatcherStore(new InMemoryFileSystem(), BASE, "github");
+    let ok = false;
+    const flaky: WatcherSink = { onEvent: () => ok };
+    for (let i = 0; i < MAX_DELIVERY_ATTEMPTS - 1; i++) await tickWith(flaky, store);
+    ok = true;
+    await tickWith(flaky, store);              // delivered — budget cleared
+    const state = await store.load();
+    expect(state.attempts ?? {}).toEqual({});
   });
 });

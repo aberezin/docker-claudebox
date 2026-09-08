@@ -70,12 +70,20 @@ function writeSites(path: string): Site[] {
   const src = readFileSync(path, "utf8");
   const { start, end } = fetcherRegion(path, src);
   const out: Site[] = [];
-  src.split("\n").forEach((raw, i) => {
-    if (i < start || i >= end) return;
-    // Only lines that actually emit to the log stream.
-    if (!/\b(?:ctx|deps)\.stderr\.write\(|^\s*logLine\(/.test(raw)) return;
-    out.push({ file: path.split("/").slice(-1)[0]!, line: i + 1, text: raw.trim() });
-  });
+  const lines = src.split("\n");
+  for (let i = start; i < end; i++) {
+    const raw = lines[i]!;
+    if (!/\b(?:ctx|deps)\.stderr\.write\(|^\s*logLine\(/.test(raw)) continue;
+    // A write can span several lines, with the timestamp on a later one.
+    // Checking only the first line reports a false positive — which this
+    // test did to its own author on the very next commit. Gather the whole
+    // statement (to the closing `);`) before judging it.
+    let text = raw.trim();
+    for (let j = i + 1; j < end && !/\);\s*$/.test(lines[j - 1]!); j++) {
+      text += " " + lines[j]!.trim();
+    }
+    out.push({ file: path.split("/").slice(-1)[0]!, line: i + 1, text });
+  }
   return out;
 }
 
