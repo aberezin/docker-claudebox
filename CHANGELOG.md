@@ -27,6 +27,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+- `GithubWatchSource.poll` now returns at most `MAX_EVENTS_PER_POLL` (250)
+  events, truncating after the merge-and-sort and deriving the cursor from the
+  last **kept** event so the remainder resumes on the next tick (#92). Without
+  a bound, a cursor rewind could re-poll a window larger than the 500-entry
+  dedup ring, evicting its own head and re-delivering it on every retry.
+  Measured first: this repo's whole history is 435 events and a 6-week gap
+  returned 12, so eviction was not yet reachable — but at ~50 events/month the
+  65-event headroom was one or two active months away.
 - `WatcherStore.markDelivered` now carries `attempts` through instead of
   dropping it. The retry budget added in 5.8.0 survived only because
   `runOneTick` tracks it in a local and passes it to `save()` itself — a

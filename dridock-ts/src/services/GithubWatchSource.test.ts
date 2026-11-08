@@ -1,6 +1,8 @@
 import { test, expect, describe } from "bun:test";
+import { DEFAULT_DEDUP_CAP } from "./WatcherStore.ts";
 import {
   GithubWatchSource,
+  MAX_EVENTS_PER_POLL,
   issueNumberFromUrl,
   firstLineTruncated,
   bumpIso1ms,
@@ -218,5 +220,70 @@ describe("bumpIso1ms — advance cursor by 1ms to escape inclusive `since=`", ()
   });
   test("malformed → returns input unchanged (never crashes)", () => {
     expect(bumpIso1ms("not a date")).toBe("not a date");
+  });
+});
+
+describe("GithubWatchSource.poll — bounded window (#92)", () => {
+  // A refused event rewinds the cursor, so a window is re-polled until it
+  // succeeds or the budget runs out. Dedup lives in a 500-entry newest-first
+  // ring, so a window LARGER than the cap evicts its own head and re-delivers
+  // it on every retry. Bounding the window is what makes the rewind safe.
+
+  /** N comments one second apart, oldest first. */
+  function manyComments(n: number, startSec = 1): object[] {
+    return Array.from({ length: n }, (_, i) => ({
+      id: 1000 + i,
+      body: `Bear->Arfy: msg ${i}`,
+      issue_url: "https://api.github.com/repos/aberezin/docker-claudebox/issues/42",
+      updated_at: `2026-07-26T15:${String(Math.floor((startSec + i) / 60)).padStart(2, "0")}:${String((startSec + i) % 60).padStart(2, "0")}Z`,
+    }));
+  }
+
+  test("a poll never returns more than MAX_EVENTS_PER_POLL", async () => {
+    const runner = new StubHostCommandRunner();
+    const since = "2026-07-26T14:00:00.000Z";
+    seed(runner, since, manyComments(MAX_EVENTS_PER_POLL + 75), []);
+    const out = await new GithubWatchSource(runner, REPO, () => NOW).poll(since);
+    expect(out.kind).toBe("ok");
+    if (out.kind !== "ok") return;
+    expect(out.events.length).toBe(MAX_EVENTS_PER_POLL);
+  });
+
+  // THE test. Truncating is only safe if nothing is skipped — a cursor taken
+  // from the latest FETCHED event rather than the last KEPT one would claim
+  // the whole window was handled while dropping most of it.
+  test("the cursor comes from the last KEPT event, so the tail is not skipped", async () => {
+    const runner = new StubHostCommandRunner();
+    const since = "2026-07-26T14:00:00.000Z";
+    const all = manyComments(MAX_EVENTS_PER_POLL + 10);
+    seed(runner, since, all, []);
+    const out = await new GithubWatchSource(runner, REPO, () => NOW).poll(since);
+    expect(out.kind).toBe("ok");
+    if (out.kind !== "ok") return;
+
+    const lastKept = out.events[out.events.length - 1]!;
+    // Cursor is 1ms past the last KEPT event...
+    expect(out.newCursor).toBe(new Date(Date.parse(lastKept.observedAt) + 1).toISOString());
+    // ...and therefore strictly BEFORE the events that were truncated, so the
+    // next poll re-requests them rather than stepping over them.
+    const firstDropped = (all[MAX_EVENTS_PER_POLL] as { updated_at: string }).updated_at;
+    expect(out.newCursor < new Date(Date.parse(firstDropped) + 1).toISOString()).toBe(true);
+  });
+
+  test("the bound is at or under the dedup cap — the property that makes rewind safe", () => {
+    // If this ever inverts, a rewound window can evict its own head and the
+    // #92 duplicate storm comes back. Asserted against the real constant
+    // rather than a copy of the number.
+    expect(MAX_EVENTS_PER_POLL).toBeLessThanOrEqual(DEFAULT_DEDUP_CAP);
+  });
+
+  test("an under-bound poll is unaffected — no truncation, cursor from the true latest", async () => {
+    const runner = new StubHostCommandRunner();
+    const since = "2026-07-26T14:00:00.000Z";
+    seed(runner, since, manyComments(3), []);
+    const out = await new GithubWatchSource(runner, REPO, () => NOW).poll(since);
+    expect(out.kind).toBe("ok");
+    if (out.kind !== "ok") return;
+    expect(out.events.length).toBe(3);
   });
 });

@@ -35,6 +35,37 @@ export type WatchSourcePollOutcome =
  * (soft), never throws. Watcher's live loop logs + continues with the
  * old cursor. Fail-loud on the user side (stderr), never crash.
  */
+/**
+ * Maximum events one poll may return.
+ *
+ * WHY A BOUND EXISTS (#92)
+ * ------------------------
+ * A refused event rewinds the cursor (5.8.0), so the window is re-polled until
+ * it succeeds or the retry budget runs out. Dedup suppression comes from
+ * `delivered`, a newest-first ring capped at `DEFAULT_DEDUP_CAP` (500). For a
+ * rewind to be duplicate-free, every event in the re-polled window must still
+ * be in that ring — and after delivering a window of W events those W ARE the
+ * newest entries, so they survive iff **W <= cap**. Older entries evicting is
+ * harmless: the cursor is already past them, and a rewind only returns to an
+ * event from the current poll.
+ *
+ * So the condition is W <= 500. 250 is half of it: margin for the ring also
+ * holding entries from earlier ticks, and it caps memory and tick latency on a
+ * long catch-up.
+ *
+ * MEASURED rather than guessed: this repo's entire history is 435 events (340
+ * comments + 95 issues) and the 6-week idle gap from 2026-09-23 returned 12.
+ * The unbounded version was never actually evicting here — but at ~50
+ * events/month the 65-event headroom was one or two active months away, with
+ * "keep working" as the trigger.
+ *
+ * There is no remainder problem. Events are merged and sorted ascending and
+ * the cursor comes from the LAST KEPT event, so a truncated poll resumes
+ * exactly where it stopped on the next tick: catch-up takes several ticks
+ * instead of one.
+ */
+export const MAX_EVENTS_PER_POLL = 250;
+
 export class GithubWatchSource implements WatchSource {
   readonly source = "github" as const;
 
@@ -58,11 +89,19 @@ export class GithubWatchSource implements WatchSource {
     const issueOutcome = await this.fetchIssues(since);
     if (issueOutcome.kind === "poll-failed") return issueOutcome;
 
-    const events = [...commentOutcome.events, ...issueOutcome.events]
+    const merged = [...commentOutcome.events, ...issueOutcome.events]
       .sort((a, b) => a.observedAt.localeCompare(b.observedAt));
 
-    // New cursor = the latest observedAt we saw, or the previous cursor
-    // if we saw nothing new. Never regress the cursor.
+    // Truncate AFTER the merge+sort, never per-source: bounding each fetch
+    // separately could keep 250 comments and drop issues OLDER than them, so
+    // the cursor would advance past events that were never seen.
+    const events = merged.slice(0, MAX_EVENTS_PER_POLL);
+
+    // New cursor = the latest observedAt we KEPT, not the latest fetched. If
+    // it came from `merged` the truncated tail would be skipped permanently —
+    // the cursor would claim a window was handled when most of it was
+    // dropped, which is the silent-discard class this repo prohibits.
+    // Never regress the cursor.
     const latest = events.length === 0
       ? since
       : events[events.length - 1]!.observedAt;
