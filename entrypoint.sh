@@ -1213,6 +1213,82 @@ _maybe_install_default_plugin() {
 }
 _maybe_install_default_plugin "$@"
 
+# Install the project's per-project Claude Code plugins (#96). The host wrapper
+# writes the list to ~/.claude/.plugins from the `.dridock/config.yml`
+# `plugins:` key — one `name@owner/marketplace` entry per space-separated token.
+# ADDITIVE semantics: these install on TOP of the hardcoded default
+# (`_maybe_install_default_plugin` above). `DRIDOCK_DEFAULT_PLUGINS=0` opts out
+# of EVERYTHING — the default AND the per-project list — matching the knob's
+# pre-#96 meaning. See docs/design/plugins-system.md.
+#
+# Gate matches the default-plugin installer's gate: skip for setup-token, skip
+# for programmatic subsequent runs (ARGS_FILE present), skip for `-p`/`--print`.
+# Per-plugin marker on the mount (`.plugin-<slug>`) — set ONLY on successful
+# install, so an offline retry on next start is automatic AND a user who later
+# `plugin uninstall`s an entry isn't fought. One failed install does NOT mark
+# siblings done (the fetcher drop-one-permanently class, #90).
+_install_project_plugins() {
+	case "${DRIDOCK_DEFAULT_PLUGINS:-1}" in 0|false) return 0 ;; esac
+	[ "${1:-}" = "setup-token" ] && return 0
+	[ -f "$ARGS_FILE" ] && return 0
+	local a; for a in "$@"; do case "$a" in -p|--print) return 0 ;; esac; done
+	local pf="$CLAUDE_CONFIG_DIR/.plugins"
+	[ -f "$pf" ] || return 0
+	local entry name marketplace_full marketplace_short install_spec marker slug
+	# Disable globbing for the word-split: an entry containing `*`/`?` would
+	# otherwise glob-expand against the cwd before the shape check sees it
+	# (Arfy's secondary finding on the #96 injection). Restored at loop exit.
+	set -f
+	for entry in $(cat "$pf" 2>/dev/null); do
+		# Shape check: `name@owner/repo` with each segment restricted to
+		# `[A-Za-z0-9._-]` — the actual legal char class for GitHub
+		# owner/repo and plugin names. The TS write-side (parsePlugins)
+		# already filtered this shape, but the entrypoint is downstream of
+		# a user-editable sidecar (`~/.claude/.plugins` lives on the
+		# bind-mounted claude dir) — don't trust, re-validate. The tight
+		# class rejects single quotes, `;`, spaces, `$`, backticks, globs
+		# by construction, so there is no way for a hostile `plugins:`
+		# entry to break out of the `bash -c` single-quote context below.
+		# Arfy's #96 review caught the original permissive `case *@*/*`
+		# allowing `x@a/b';touch /tmp/INJECTED;'`. Malformed → loud stderr,
+		# per `_install_features`'s #37 Tier 1 #8 discipline.
+		if ! [[ "$entry" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+			echo "dridock: ignoring malformed plugin entry '$entry' in $pf (expected name@owner/repo, chars [A-Za-z0-9._-])" >&2
+			continue
+		fi
+		name="${entry%%@*}"
+		marketplace_full="${entry#*@}"
+		# Marketplace short name = the repo portion (last segment after /).
+		# The `marketplace add` call registers it under that short name,
+		# which `plugin install` then references. Mirrors what the
+		# hardcoded default installer does: adds `anthropics/claude-plugins-official`
+		# and installs `commit-commands@claude-plugins-official`.
+		marketplace_short="${marketplace_full##*/}"
+		install_spec="$name@$marketplace_short"
+		# Per-plugin marker — slug the entry to stay filesystem-safe.
+		# Replace `/` with `_`. Namespace `.plugin-*` so a future mechanism
+		# can enumerate them uniformly.
+		slug="$(printf '%s' "$entry" | tr '/' '_')"
+		marker="$CLAUDE_CONFIG_DIR/.plugin-$slug"
+		[ -f "$marker" ] && continue
+		dbg "installing project plugin $entry (first run)…"
+		# </dev/null + timeout 90 for the same PID-1-owns-tty reason as the
+		# default installer above (#17). `plugin install` alone fails
+		# without the marketplace being added first, so we chain them.
+		if timeout 90 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
+			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:\$PATH; claude plugin marketplace add '$marketplace_full' && exec claude plugin install '$install_spec' --scope user" \
+			</dev/null >/dev/null 2>&1
+		then
+			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
+			dbg "project plugin installed: $entry"
+		else
+			echo "note: project plugin ($entry) not installed (offline, timed out, or marketplace unreachable) — will retry next start; set DRIDOCK_DEFAULT_PLUGINS=0 to silence" >&2
+		fi
+	done
+	set +f
+}
+_install_project_plugins "$@"
+
 # Install the project's enabled features (wrapper writes the list to ~/.claude/.features
 # — with legacy ~/.claude/.profiles read as fallback — from the .dridock config
 # `features:` field / `profiles:` alias). Each is a baked bundle at

@@ -195,6 +195,8 @@ mode (-p) they are validated against an allowlist first.
     await auth.writeSecretsSidecars(`${project.dotDir}/secrets.env`);
     const features = await projectCfg.features(project.configPath);
     await auth.writeFeaturesSidecar(features);
+    const plugins = await projectCfg.plugins(project.configPath);
+    await auth.writePluginsSidecar(plugins);
 
     // Env passthrough (DRIDOCK_ENV_*) → both -e + sidecar
     const envPassthrough = collectEnvPassthrough(ctx.env.raw());

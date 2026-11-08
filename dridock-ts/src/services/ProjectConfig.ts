@@ -97,6 +97,35 @@ export class ProjectConfig {
     if (text === undefined) return [];
     return parseFeatures(text);
   }
+
+  /**
+   * Enabled Claude Code **plugins** from `configPath` (#96).
+   *
+   * Same flow/block shape as `features(...)`, different key and different
+   * character class: a plugin entry is `name@owner/repo` (full form —
+   * `owner/repo` is BOTH what `claude plugin marketplace add` takes and
+   * the source from which the entrypoint derives the marketplace short
+   * name for `claude plugin install`). The sanitizer allows `@` `/` `.`
+   * on top of what features allows; shape filter rejects bare names
+   * (no `@`) and short-form `name@marketplace` (no `/`).
+   *
+   *   plugins: [commit-commands@anthropics/claude-plugins-official, superpowers@aberezin/superpowers]
+   *
+   *   plugins:
+   *     - commit-commands@anthropics/claude-plugins-official
+   *     - superpowers@aberezin/superpowers
+   *
+   * Missing config / unreadable → `[]` (matches `features(...)` and the
+   * bash `[ -f "$cfg" ] || return 0` pattern). Order is preserved,
+   * duplicates deduped, malformed entries silently dropped — same
+   * discipline as features. There is no legacy key fallback here (the
+   * `plugins:` idea didn't exist before 3.x).
+   */
+  async plugins(configPath: string): Promise<string[]> {
+    const text = await this.fs.readTextOrUndefined(configPath);
+    if (text === undefined) return [];
+    return parsePlugins(text);
+  }
 }
 
 /**
@@ -247,6 +276,65 @@ export function parseFeatures(text: string): string[] {
       // Blank / comment line inside a block — stay in block.
       if (/^\s*(?:#.*)?$/.test(rawLine)) continue;
       // Anything else exits the block.
+      inBlock = false;
+    }
+  }
+  return result;
+}
+
+/**
+ * Extract plugin names from the config-file text (#96). Shape mirrors
+ * `parseFeatures` with two deltas:
+ *
+ *   1. Key is `plugins:` only — no legacy alias (the mechanism didn't
+ *      exist before this).
+ *   2. Sanitizer allows `@` `/` `.` on top of the features alphabet, so
+ *      `name@owner/marketplace` and `anthropics/claude-plugins-official`
+ *      survive. Anything outside `[A-Za-z0-9_@/.-]` is stripped. An
+ *      entry without `@<marketplace>` is dropped — `claude plugin
+ *      install` fails on bare names, and silent acceptance would echo
+ *      the bash `cb-report-bug` lesson about never-silently-discarding
+ *      user input.
+ */
+export function parsePlugins(text: string): string[] {
+  const lines = text.split(/\r?\n/);
+  const seen = new Set<string>();
+  const result: string[] = [];
+  let inBlock = false;
+
+  const emit = (raw: string): void => {
+    const trimmed = raw.trim();
+    if (trimmed === "" || seen.has(trimmed)) return;
+    // Shape: `<name>@<owner>/<repo>` with each segment restricted to the
+    // actual legal char class for GitHub owner/repo and plugin names:
+    // `[A-Za-z0-9._-]`. Rejects by construction: single quotes, semicolons,
+    // spaces, `$`, backticks, `*`/`?` globs — anything that would let a
+    // hostile `plugins:` entry escape the entrypoint's `bash -c` single-
+    // quote context and execute as the claudebot user at entrypoint time.
+    // Arfy caught the original permissive regex (`^[^@]+@[^/]+\/[^@]+$`)
+    // allowing `x@a/b';touch /tmp/INJECTED;'` during #96 review — the fix
+    // is the char class in BOTH layers (TS here, bash `[[ =~ ]]` in
+    // entrypoint), not escaping.
+    if (!/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(trimmed)) return;
+    seen.add(trimmed);
+    result.push(trimmed);
+  };
+
+  for (const rawLine of lines) {
+    const flow = rawLine.match(/^\s*plugins:\s*\[([^\]]*)\]/);
+    if (flow) {
+      for (const name of flow[1]!.split(",")) emit(name.trim());
+      inBlock = false;
+      continue;
+    }
+    if (/^\s*plugins:\s*(?:#.*)?$/.test(rawLine)) {
+      inBlock = true;
+      continue;
+    }
+    if (inBlock) {
+      const item = rawLine.match(/^\s*-\s*([^#]*)(?:#.*)?$/);
+      if (item) { emit(item[1]!.trim()); continue; }
+      if (/^\s*(?:#.*)?$/.test(rawLine)) continue;
       inBlock = false;
     }
   }

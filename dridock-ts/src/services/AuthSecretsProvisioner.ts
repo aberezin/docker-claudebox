@@ -76,6 +76,29 @@ export class AuthSecretsProvisioner {
       await this.fs.removeFile(legacyProfilesPath);
     }
   }
+
+  /**
+   * Write the per-project plugins list to `<dataDir>/.plugins` — the
+   * entrypoint reads this to install each `name@owner/marketplace` entry
+   * marker-guarded (#96). Empty list → remove the sidecar so an upgrade
+   * from a prior `plugins: [...]` to an empty one doesn't leave stale
+   * content (same discipline as features). No legacy sidecar to clean up;
+   * this is a new mechanism in this release.
+   *
+   * ADDITIVE semantics (vs features which is authoritative): the hardcoded
+   * default plugin set in the entrypoint still installs unless
+   * `DRIDOCK_DEFAULT_PLUGINS=0`. This sidecar carries the project's
+   * *additional* opt-ins — removal here is NOT uninstall. Removing a
+   * plugin is a destructive action owned by the user, not the harness.
+   */
+  async writePluginsSidecar(plugins: readonly string[]): Promise<void> {
+    const pluginsPath = `${this.dataDir}/.plugins`;
+    if (plugins.length > 0) {
+      await this.fs.writeText(pluginsPath, plugins.join(" ") + "\n", { mode: 0o644 });
+    } else {
+      await this.fs.removeFile(pluginsPath);
+    }
+  }
 }
 
 function truthy(v: string | undefined): boolean {

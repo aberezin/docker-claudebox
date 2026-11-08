@@ -27,6 +27,42 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+
+## [5.9.0] - 2026-11-08
+
+### Added
+- **Per-project Claude Code plugins via `plugins:` in `.dridock/config.yml`** (#96).
+  Projects can now declare which Claude Code plugins the container should install
+  — same flow/block YAML shape features uses, different key:
+  ```yaml
+  plugins:
+    - commit-commands@anthropics/claude-plugins-official
+    - superpowers@aberezin/superpowers
+  ```
+  Each entry is `name@owner/repo` (full form); the entrypoint derives the
+  marketplace short name from the trailing `<repo>` segment, runs
+  `claude plugin marketplace add owner/repo` + `claude plugin install name@repo`,
+  and marks success per-plugin at `~/.claude/.plugin-<slug>` so one failure
+  doesn't mark siblings done and a user-side `plugin uninstall` isn't fought on
+  next start. **Additive semantics**: the hardcoded default plugin
+  (`commit-commands@claude-plugins-official`) still installs unless
+  `DRIDOCK_DEFAULT_PLUGINS=0`; `plugins:` adds to it. Removing an entry does NOT
+  run `claude plugin uninstall` — destructive and owned by the user. Gating
+  matches the default installer (skip for setup-token, programmatic subsequent
+  runs, `-p`/`--print`). Shape is `[A-Za-z0-9._-]+@[A-Za-z0-9._-]+/[A-Za-z0-9._-]+`
+  in both the TS parser and the entrypoint shell check — tight enough to reject
+  shell metacharacters by construction (Arfy caught a `plugins: [x@a/b';...]`
+  injection during #96 review; the fix is the char class, not escaping). New
+  sidecar `~/.claude/.plugins` is a host↔image IPC addition — hence the VERSION
+  bump. New doc at `docs/design/plugins-system.md`. Motivated by #95's
+  superpowers filing; this ships the mechanism, not the default plugin set
+  (which stays unchanged for one deprecation cycle).
+
+### Changed
+- `VERSION` + `dridockVersion.ts` → `5.9.0` (host↔image contract change: new
+  `.plugins` sidecar).
+
+### Fetcher follow-ups (shipped since 5.8.0, rolled into this release)
 - `GithubWatchSource.poll` now returns at most `MAX_EVENTS_PER_POLL` (250)
   events, truncating after the merge-and-sort and deriving the cursor from the
   last **kept** event so the remainder resumes on the next tick (#92). Without

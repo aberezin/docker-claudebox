@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { ProjectConfig, parseFeatures, parseTopLevelString, stripFeaturesBlock } from "./ProjectConfig.ts";
+import { ProjectConfig, parseFeatures, parsePlugins, parseTopLevelString, stripFeaturesBlock } from "./ProjectConfig.ts";
 import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 
 describe("parseFeatures — YAML tolerance (matches wrapper.sh awk)", () => {
@@ -79,6 +79,112 @@ describe("parseFeatures — YAML tolerance (matches wrapper.sh awk)", () => {
       "  - typescript",
       "",
     ].join("\n"))).toEqual(["typescript", "python"]);
+  });
+});
+
+// #96: per-project Claude Code plugins. Same YAML shape as features, different
+// key + different character class (plugin names carry `@` and `/`).
+describe("parsePlugins — per-project `plugins:` key (#96)", () => {
+  test("flow style", () => {
+    expect(parsePlugins("plugins: [commit-commands@anthropics/claude-plugins-official, superpowers@aberezin/superpowers]\n"))
+      .toEqual(["commit-commands@anthropics/claude-plugins-official", "superpowers@aberezin/superpowers"]);
+  });
+
+  test("block style", () => {
+    expect(parsePlugins([
+      "plugins:",
+      "  - commit-commands@anthropics/claude-plugins-official",
+      "  - superpowers@aberezin/superpowers",
+      "",
+    ].join("\n"))).toEqual([
+      "commit-commands@anthropics/claude-plugins-official",
+      "superpowers@aberezin/superpowers",
+    ]);
+  });
+
+  test("empty flow list → []", () => {
+    expect(parsePlugins("plugins: []\n")).toEqual([]);
+  });
+
+  test("absent key → []", () => {
+    expect(parsePlugins("features: [typescript]\nvm:\n  disk: 60G\n")).toEqual([]);
+  });
+
+  test("malformed entry (no @marketplace) silently dropped — CLI would reject it anyway", () => {
+    expect(parsePlugins("plugins: [commit-commands, good@owner/repo]\n"))
+      .toEqual(["good@owner/repo"]);
+  });
+
+  test("malformed entry (no marketplace path after @) dropped", () => {
+    expect(parsePlugins("plugins: [bad@noslash, good@owner/repo]\n"))
+      .toEqual(["good@owner/repo"]);
+  });
+
+  test("duplicates deduped, order preserved", () => {
+    expect(parsePlugins([
+      "plugins:",
+      "  - a@owner/repo",
+      "  - b@owner/repo",
+      "  - a@owner/repo",
+      "",
+    ].join("\n"))).toEqual(["a@owner/repo", "b@owner/repo"]);
+  });
+
+  test("legacy `profiles:` is NOT accepted (plugins is a new key — no legacy fallback)", () => {
+    expect(parsePlugins("profiles: [commit-commands@anthropics/claude-plugins-official]\n")).toEqual([]);
+  });
+
+  test("block item with comment on same line", () => {
+    expect(parsePlugins([
+      "plugins:",
+      "  - commit-commands@anthropics/claude-plugins-official  # the default",
+      "  - superpowers@aberezin/superpowers",
+      "",
+    ].join("\n"))).toEqual([
+      "commit-commands@anthropics/claude-plugins-official",
+      "superpowers@aberezin/superpowers",
+    ]);
+  });
+
+  // Arfy caught this during #96 review (2026-11-08). The ORIGINAL regex
+  // `^[^@]+@[^/]+\/[^@]+$` passed strings containing single quotes and
+  // semicolons; the entrypoint interpolates the entry into a `bash -c`
+  // single-quote context, so a hostile `plugins:` entry traveling with a
+  // repository could execute arbitrary commands at entrypoint time as the
+  // claudebot user. Fix: char class restricted to `[A-Za-z0-9._-]` in both
+  // layers. This test pins the regression at the TS boundary with Arfy's
+  // exact proof-of-concept string.
+  test("injection string from #96 review → rejected (shell-metacharacter rejection by char class)", () => {
+    const injection = "x@a/b';touch /tmp/INJECTED;'";
+    expect(parsePlugins(`plugins: [${injection}, safe@owner/repo]\n`))
+      .toEqual(["safe@owner/repo"]);
+  });
+
+  test("entries with shell metachars (quote, semicolon, backtick, dollar, space, glob) → all rejected", () => {
+    const hostile = [
+      "x@a/b';rm -rf /;'",
+      "x@a/`id`",
+      "x@a/$(id)",
+      "x@a/b c",
+      "x@a/*",
+      "x@a/b?",
+      "x@a/b|c",
+    ];
+    for (const h of hostile) {
+      expect(parsePlugins(`plugins: [${h}]\n`)).toEqual([]);
+    }
+  });
+
+  test("features: and plugins: coexist — each read independently", () => {
+    const text = [
+      "features:",
+      "  - typescript",
+      "plugins:",
+      "  - commit-commands@anthropics/claude-plugins-official",
+      "",
+    ].join("\n");
+    expect(parseFeatures(text)).toEqual(["typescript"]);
+    expect(parsePlugins(text)).toEqual(["commit-commands@anthropics/claude-plugins-official"]);
   });
 });
 

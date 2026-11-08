@@ -135,3 +135,30 @@ describe("AuthSecretsProvisioner.writeFeaturesSidecar", () => {
     await prov.writeFeaturesSidecar([]);   // idempotent — nothing to remove
   });
 });
+
+// #96: per-project `plugins:` sidecar — same shape as features' writer.
+describe("AuthSecretsProvisioner.writePluginsSidecar (#96)", () => {
+  test("non-empty list → `.plugins` written with space-separated entries, chmod 644", async () => {
+    const { fs, prov } = makeProvisioner({});
+    await prov.writePluginsSidecar([
+      "commit-commands@anthropics/claude-plugins-official",
+      "superpowers@aberezin/superpowers",
+    ]);
+    expect(await fs.readText("/data/.plugins")).toBe(
+      "commit-commands@anthropics/claude-plugins-official superpowers@aberezin/superpowers\n",
+    );
+    expect(fs.modeOf("/data/.plugins")).toBe(0o644);
+  });
+
+  test("empty list → `.plugins` removed (project cleared its plugins: list)", async () => {
+    const { fs, prov } = makeProvisioner({});
+    fs.seed("/data/.plugins", "commit-commands@anthropics/claude-plugins-official\n");
+    await prov.writePluginsSidecar([]);
+    expect(await fs.exists("/data/.plugins")).toBe(false);
+  });
+
+  test("empty list on a project that never had any → no-op, no throw", async () => {
+    const { prov } = makeProvisioner({});
+    await prov.writePluginsSidecar([]);   // idempotent — nothing to remove
+  });
+});
