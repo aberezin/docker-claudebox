@@ -19,9 +19,15 @@ import { cbH } from "../../domain/units.ts";
  */
 export class VmCommand implements Command {
   readonly verb = "vm" as const;
-  readonly usage = `dridock vm [list|start|stop|delete]
+  readonly usage = `dridock vm [list|ls|usage|df|gc]
 
-Manage this project's Colima VM.`;
+Inspect this project's Colima VMs. Read-only apart from "gc", which reclaims
+space from stopped or orphaned VMs.
+
+Starting and stopping a VM is NOT here: that is driven by the lifecycle verbs
+("dridock start", "down", "destroy"), because a VM's state has to stay in step
+with the container's. The usage line previously advertised
+"[list|start|stop|delete]" — three of those four have never existed.`;
   readonly subverbs = [
     { name: "list",   synopsis: "dridock vm list\n\nList this project's VMs. Alias: ls." },
     { name: "ls",     synopsis: "dridock vm ls\n\nList this project's VMs." },

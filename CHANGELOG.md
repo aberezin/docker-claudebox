@@ -27,6 +27,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+- Fixed two `--help` texts that advertised subverbs which have never existed:
+  `browser-bridge` offered `[status|stop]` against a dispatcher accepting only
+  `up|down`, and `vm` offered `[list|start|stop|delete]` against `ls|usage|gc`
+  (plus `list`/`df` aliases). Following either one produced a rejected command.
+- Added `dridock-ts/src/cli/UsageSubverbs.test.ts`, which drives the real
+  command registry and fails when a verb's usage line advertises a subverb its
+  dispatcher does not accept. #60 made `usage` a required field so every verb
+  documents itself; nothing checked the documentation was true.
 - Bounded the delivery retry introduced in 5.8.0. The cursor rewind stopped
   silent loss but had no limit, so one undeliverable event stalled the cursor
   indefinitely and silently blocked every later message. After

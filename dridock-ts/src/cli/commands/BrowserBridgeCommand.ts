@@ -16,9 +16,37 @@ import { BrowserBridgeService } from "../../services/BrowserBridgeService.ts";
  */
 export class BrowserBridgeCommand implements Command {
   readonly verb = "browser-bridge" as const;
-  readonly usage = `dridock browser-bridge [status|stop]
+  readonly usage = `dridock browser-bridge up|down
 
-Host-side browser bridge the container drives via cb-browser.`;
+Host-side browser bridge the container drives via cb-browser. Opt-in: "up"
+attaches your REAL Chrome over CDP, so the claudebot sees the session you are
+logged into. "down" detaches it.
+
+There is deliberately no "status" verb yet — see #94. Until then the only
+side-effect-free check is whether anything is listening on the CDP port.`;
+
+  // Declared so the usage text and the dispatcher below cannot drift apart:
+  // `tests/.../UsageSubverbs.test.ts` asserts every name here is accepted by
+  // run(). The previous usage string advertised `[status|stop]`, neither of
+  // which has ever existed, so `--help` told the reader to type commands the
+  // dispatcher rejects. #60 made `usage` required so each verb documents
+  // itself; nothing yet checked that the documentation was TRUE.
+  readonly subverbs = [
+    {
+      name: "up",
+      synopsis: `dridock browser-bridge up
+
+Attach your REAL Chrome over CDP so the claudebot can drive it. Opt-in: it
+sees whatever you are logged into, so bring it up deliberately, not as a
+status check.`,
+    },
+    {
+      name: "down",
+      synopsis: `dridock browser-bridge down
+
+Detach the bridge. Leaves Chrome running.`,
+    },
+  ] as const;
 
   constructor(
     private readonly deps: Partial<BrowserBridgeCommandDeps> = {},
