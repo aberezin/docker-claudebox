@@ -443,4 +443,34 @@ describe("BrowserBridgeService.up — CDP socket probe (#94)", () => {
     expect(out.attempts).toBe(1);              // reuse: one shot, no retries
     expect(bad.calls()).toBe(1);
   });
+
+  // #94 follow-up (Arfy's review of `88322d0`): the documented recovery
+  // for a probe-failed `up` is `dridock browser-bridge down && up`. For that
+  // to work, `down` must survive the absent marker — the probe-failed path
+  // never writes one. This is LOAD-BEARING on `FileSystem.removeFile`'s
+  // ENOENT-idempotency (explicit in RealFileSystem's "matches rm -f" comment;
+  // InMemoryFileSystem mirrors it). If anyone ever "tightens" removeFile to
+  // throw on absent paths, `down` would throw on the probe-failed recovery
+  // path and the only remediation becomes a manual pkill. This test pins
+  // that assumption — if removeFile's ENOENT behavior ever inverts, THIS
+  // test fails at the boundary that would otherwise break silently.
+  test("down after a probe-failed up does NOT throw (recovery path depends on removeFile ENOENT-idempotency)", async () => {
+    // Fresh-spawn probe fails all 6 attempts → marker never written, pids are.
+    const { probe } = makeCountingProbe(999);
+    const { svc, fs } = build({ probe });
+    const upOut = await svc.up("abc12345");
+    expect(upOut.kind).toBe("probe-failed");
+    // Sanity: marker is absent, so `down`'s removeFile of the marker path
+    // is hitting ENOENT.
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc12345/.cdp-url")).toBe(false);
+
+    // The documented recovery: `down` reclaims the spawned pids + leftover
+    // state files, even though the marker was never written. MUST NOT throw.
+    const downOut = await svc.down("abc12345");
+    expect(downOut.pidsKilled.sort()).toEqual([1000, 1001]);
+    // And calling it again is still idempotent — a user who runs
+    // `down && up` and then re-runs `down` must not see a crash either.
+    const downAgain = await svc.down("abc12345");
+    expect(downAgain.pidsKilled).toEqual([]);
+  });
 });
