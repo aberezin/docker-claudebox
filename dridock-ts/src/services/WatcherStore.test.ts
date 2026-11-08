@@ -135,3 +135,49 @@ describe("WatcherStore.isDelivered / .markDelivered — pure helpers", () => {
     expect(DEFAULT_DEDUP_CAP).toBe(500);
   });
 });
+
+describe("markDelivered — carries the retry budget through (#92)", () => {
+  // It used to return only { cursor, delivered }, dropping `attempts`. No test
+  // caught it because the sole caller tracks `attempts` in a local and passes
+  // it to save() itself — so the drop was invisible by coincidence of one call
+  // site. These tests make the property real rather than incidental.
+
+  test("attempts survives a delivery", () => {
+    const state: WatcherStoreState = {
+      cursor: "c0",
+      delivered: ["h1"],
+      attempts: { "stuck-event": 7 },
+    };
+    const next = WatcherStore.markDelivered(state, "h2", "c1");
+    expect(next.attempts).toEqual({ "stuck-event": 7 });
+    expect(next.delivered).toEqual(["h2", "h1"]);
+    expect(next.cursor).toBe("c1");
+  });
+
+  test("absent attempts stays ABSENT, not undefined", () => {
+    // save() only persists `attempts` when non-empty, and the round-trip
+    // tests compare with toEqual — an explicit `attempts: undefined` key is a
+    // different shape from an absent one and would break them.
+    const next = WatcherStore.markDelivered({ cursor: "c0", delivered: [] }, "h1", "c1");
+    expect("attempts" in next).toBe(false);
+  });
+
+  test("still pure — the input's attempts object is not mutated or aliased away", () => {
+    const attempts = { "stuck-event": 3 };
+    const state: WatcherStoreState = { cursor: "c0", delivered: [], attempts };
+    WatcherStore.markDelivered(state, "h1", "c1");
+    expect(state.attempts).toEqual({ "stuck-event": 3 });
+    expect(state.cursor).toBe("c0");
+  });
+
+  // The consequence, stated so the next reader sees why this matters: losing
+  // `attempts` here resets every event's retry count on each delivery, so the
+  // #90 head-of-line bound would never reach MAX_DELIVERY_ATTEMPTS. The
+  // failure mode is a permanently-refused event holding the cursor while
+  // later messages are silently blocked.
+  test("a budget mid-countdown is not reset by an unrelated delivery", () => {
+    let state: WatcherStoreState = { cursor: "c0", delivered: [], attempts: { bad: 9 } };
+    for (const h of ["a", "b", "c"]) state = WatcherStore.markDelivered(state, h, "c1");
+    expect(state.attempts).toEqual({ bad: 9 });
+  });
+});

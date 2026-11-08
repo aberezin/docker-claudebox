@@ -119,14 +119,34 @@ export class WatcherStore {
 
   /** Convenience: return a new state with `eventHash` prepended to
    *  `delivered` (newest-first) + `cursor` updated. Pure — doesn't
-   *  mutate `state`. Caps the delivered list at `cap` entries. */
+   *  mutate `state`. Caps the delivered list at `cap` entries.
+   *
+   *  CARRIES `attempts` THROUGH. It used to return only
+   *  `{ cursor, delivered }`, dropping the retry budget added in 5.8.0.
+   *  That was harmless only because `runOneTick` happens to track
+   *  `attempts` in a local and pass it to `save()` itself, so the dropped
+   *  copy was never read — a coincidence of one call site, not a
+   *  property of this function. The next caller to treat this return as
+   *  the whole state would reset every event's retry count on each
+   *  delivery, and the symptom would be the #90 head-of-line bound
+   *  quietly never firing: an event refused forever, the cursor held,
+   *  later messages blocked, and nothing saying so. Preserving it costs
+   *  one spread. */
   static markDelivered(state: WatcherStoreState, eventHash: string, newCursor: string, cap: number = DEFAULT_DEDUP_CAP): WatcherStoreState {
     // De-dupe on prepend so a hash re-notified in the same session
     // doesn't take up multiple slots (rare but possible with source
     // adapters that re-emit).
     const filtered = state.delivered.filter((h) => h !== eventHash);
     const next = [eventHash, ...filtered].slice(0, cap);
-    return { cursor: newCursor, delivered: next };
+    // `attempts` is only present when non-empty (see save()), so spread
+    // conditionally rather than writing `attempts: undefined` — the
+    // existing round-trip tests compare with toEqual and an explicit
+    // undefined key is not the same shape as an absent one.
+    return {
+      cursor: newCursor,
+      delivered: next,
+      ...(state.attempts !== undefined ? { attempts: state.attempts } : {}),
+    };
   }
 
   private path(): string {

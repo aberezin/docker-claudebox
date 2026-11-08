@@ -27,6 +27,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+- `WatcherStore.markDelivered` now carries `attempts` through instead of
+  dropping it. The retry budget added in 5.8.0 survived only because
+  `runOneTick` tracks it in a local and passes it to `save()` itself — a
+  coincidence of the single call site, not a property of the function. A caller
+  treating the return as the whole state would reset every event's retry count
+  on each delivery, so the #90 head-of-line bound would never fire: an event
+  refused forever, the cursor held, later messages silently blocked. Found
+  while enumerating known fetcher issues (#92), not by hitting it.
 - **New verb: `dridock browser-bridge status [--json]`** (#93). Read-only snapshot
   of the bridge — no spawn, no marker write, no CDP connection that could create
   a target. Three distinguishable states on stdout (rc 0 for ALL of them, since
