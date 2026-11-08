@@ -16,14 +16,12 @@ import { BrowserBridgeService } from "../../services/BrowserBridgeService.ts";
  */
 export class BrowserBridgeCommand implements Command {
   readonly verb = "browser-bridge" as const;
-  readonly usage = `dridock browser-bridge up|down
+  readonly usage = `dridock browser-bridge up|down|status
 
 Host-side browser bridge the container drives via cb-browser. Opt-in: "up"
 attaches your REAL Chrome over CDP, so the claudebot sees the session you are
-logged into. "down" detaches it.
-
-There is deliberately no "status" verb yet — see #93. Until then the only
-side-effect-free check is whether anything is listening on the CDP port.`;
+logged into. "down" detaches it. "status" reports the current state
+side-effect-free (read-only; exits 0 whether up or down).`;
 
   // Declared so the usage text and the dispatcher below cannot drift apart:
   // `tests/.../UsageSubverbs.test.ts` asserts every name here is accepted by
@@ -46,6 +44,22 @@ status check.`,
 
 Detach the bridge. Leaves Chrome running.`,
     },
+    {
+      name: "status",
+      synopsis: `dridock browser-bridge status [--json]
+
+Read-only snapshot of the bridge: pids alive (with cmdline check), does the
+CDP socket answer, is this project's marker in place. Exits 0 whether up or
+down — the point of the verb is a caller asking before deciding, so a
+non-zero "not running" would make "down" indistinguishable from "the command
+failed". --json for a machine-readable single line.
+
+Three distinguishable states:
+  down                 — nothing running, or recorded pids don't match
+  up-and-responding    — pids alive, cmdline matches, socket answers
+  up-but-socket-dead   — pids alive but the CDP socket doesn't respond
+                         (the #94 case; recovery is 'down && up').`,
+    },
   ] as const;
 
   constructor(
@@ -54,8 +68,8 @@ Detach the bridge. Leaves Chrome running.`,
 
   async run(args: readonly string[], ctx: Context): Promise<number> {
     const sub = args[0];
-    if (sub !== "up" && sub !== "down") {
-      ctx.stderr.write(`usage: ${ctx.binName} browser-bridge up|down  (opt-in: let claudebot drive your real Chrome via CDP)\n`);
+    if (sub !== "up" && sub !== "down" && sub !== "status") {
+      ctx.stderr.write(`usage: ${ctx.binName} browser-bridge up|down|status  (opt-in: let claudebot drive your real Chrome via CDP)\n`);
       return 1;
     }
 
@@ -76,10 +90,57 @@ Detach the bridge. Leaves Chrome running.`,
       randomHex: this.deps.randomHex,
       sleep: this.deps.sleep,
       cdpProbe: this.deps.cdpProbe,
+      processProbe: this.deps.processProbe,
     });
 
     if (sub === "up") return await this.runUp(svc, projectId, ctx);
+    if (sub === "status") return await this.runStatus(svc, projectId, ctx, args.slice(1));
     return await this.runDown(svc, projectId, ctx);
+  }
+
+  /**
+   * `dridock browser-bridge status [--json]` (#93) — rc 0 in both states so a
+   * caller can branch on stdout, not on whether the command "succeeded".
+   * Non-zero only for genuine failures (unknown flag, etc.).
+   */
+  private async runStatus(
+    svc: BrowserBridgeService,
+    projectId: string,
+    ctx: Context,
+    rest: readonly string[],
+  ): Promise<number> {
+    let asJson = false;
+    for (const a of rest) {
+      if (a === "--json") { asJson = true; continue; }
+      ctx.stderr.write(`❌ browser-bridge status: unexpected argument '${a}' (allowed: --json)\n`);
+      return 1;
+    }
+    const out = await svc.status(projectId);
+    if (asJson) {
+      ctx.stdout.write(JSON.stringify(out) + "\n");
+      return 0;
+    }
+    // Text: one line per field, grep-friendly. Use `state:` as the key the
+    // caller branches on so `--json` and text both expose the same primary.
+    ctx.stdout.write(`state: ${out.kind}\n`);
+    ctx.stdout.write(`bind: ${out.bind}\n`);
+    ctx.stdout.write(`port: ${out.port}\n`);
+    ctx.stdout.write(`url: ${out.url}\n`);
+    ctx.stdout.write(`pidsFile: ${out.pidsFilePath} (${out.pidsFileExists ? "present" : "absent"})\n`);
+    for (let i = 0; i < out.pids.length; i++) {
+      const p = out.pids[i]!;
+      const cmdlineNote =
+        p.cmdlineMatches === true  ? "cmdline matches"
+        : p.cmdlineMatches === false ? "cmdline MISMATCH"
+        :                              "cmdline unknown";
+      ctx.stdout.write(`pid[${i}]: ${p.pid} ${p.alive ? "alive" : "DEAD"}, ${cmdlineNote} (expected: ${p.expectedCmdline})\n`);
+    }
+    ctx.stdout.write(`project: ${out.projectId}\n`);
+    ctx.stdout.write(`marker: ${out.markerPath} (${out.markerExists ? out.markerUrl ?? "empty" : "absent"})\n`);
+    if (out.kind === "up-but-socket-dead") {
+      ctx.stdout.write(`\n⚠  pids are alive but the CDP socket isn't responding — recover with: ${ctx.binName} browser-bridge down && ${ctx.binName} browser-bridge up\n`);
+    }
+    return 0;
   }
 
   private async runUp(svc: BrowserBridgeService, projectId: string, ctx: Context): Promise<number> {
@@ -135,6 +196,8 @@ export interface BrowserBridgeCommandDeps {
   readonly randomHex?: (byteCount: number) => string;
   /** Injected in tests to avoid a real fetch to localhost. */
   readonly cdpProbe?: (url: string, timeoutMs: number) => Promise<boolean>;
+  /** Injected in tests for the status verb's cmdline-check path (#93). */
+  readonly processProbe?: import("../../services/PidLiveness.ts").ProcessProbe;
 }
 
 // Re-exports for tests.

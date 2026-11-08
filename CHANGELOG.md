@@ -27,6 +27,22 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+- **New verb: `dridock browser-bridge status [--json]`** (#93). Read-only snapshot
+  of the bridge — no spawn, no marker write, no CDP connection that could create
+  a target. Three distinguishable states on stdout (rc 0 for ALL of them, since
+  a caller asking "is it on?" needs to branch on stdout, not on whether the
+  command "succeeded"):
+    - `down`               — nothing running, or recorded pids don't survive
+                             the kill-0 + cmdline check (the pid-reuse hazard
+                             #90 named)
+    - `up-and-responding`  — pids pass live+cmdline AND the CDP socket answers
+    - `up-but-socket-dead` — pids pass live+cmdline BUT the socket refuses
+                             (the #94 stale-bind case; the recovery is
+                             `down && up`, which the text output prints)
+  Reuses #94's `cdpProbe` so the socket check is HTTP GET `/json/version`
+  (documented side-effect-free) rather than a raw CDP connect that might
+  create a target. `--json` for a machine-readable single line. Implements
+  Arfy's filing + pre-review spec for #93.
 - **`browser-bridge up` now probes the CDP socket before claiming success** (#94).
   Previously, `up` reported "up" (fresh spawn) or "already running" (reuse) based
   only on `kill -0` of the recorded pids. Observed today: `up` said "already up on

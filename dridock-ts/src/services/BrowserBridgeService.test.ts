@@ -2,6 +2,15 @@ import { test, expect, describe } from "bun:test";
 import { BrowserBridgeService, forwarderPython, quietProfilePreferences } from "./BrowserBridgeService.ts";
 import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 import { InMemoryHostProcessManager } from "../test/fakes/InMemoryHostProcessManager.ts";
+import type { ProcessProbe } from "./PidLiveness.ts";
+
+/** Minimal in-memory ProcessProbe for #93 status tests. Mirrors the shape of
+ *  PidLiveness.test.ts's FakeProbe — sync, pre-seeded cmdline table. */
+class FakeProcessProbe implements ProcessProbe {
+  constructor(private readonly cmdlines: Map<number, string> = new Map()) {}
+  isRunning(pid: number): boolean { return this.cmdlines.has(pid); }
+  getCommandLine(pid: number): string | undefined { return this.cmdlines.get(pid); }
+}
 
 /** Build a service with sensible test defaults — Chrome present, cdp home
  *  under a fake XDG dir, no real sleep, deterministic hash, and a cdpProbe
@@ -444,6 +453,165 @@ describe("BrowserBridgeService.up — CDP socket probe (#94)", () => {
     expect(bad.calls()).toBe(1);
   });
 
+});
+
+// #93: `dridock browser-bridge status` — read-only snapshot. Three states,
+// no side effects, cmdline-verified liveness. Arfy's five acceptance checks
+// (from her pre-review on #93, 2026-11-08) line up with the tests below.
+describe("BrowserBridgeService.status — read-only snapshot (#93)", () => {
+  const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+  const FORWARD_PY = "/home/alan/.config/dridock/cdp/forward.py";
+  const UP_CMDLINE_CHROME = `${CHROME_PATH} --remote-debugging-port=9222 --user-data-dir=...`;
+  const UP_CMDLINE_FORWARDER = `python3 ${FORWARD_PY}`;
+
+  test("no pidsfile → 'down', no pids reported, probe NOT called", async () => {
+    let probeCalls = 0;
+    const { svc } = build({ probe: async () => { probeCalls++; return true; } });
+    // Fresh fs — no prior up, no pids, no marker.
+    const out = await svc.status("abc12345");
+    expect(out.kind).toBe("down");
+    expect(out.pidsFileExists).toBe(false);
+    expect(out.pids).toEqual([]);
+    expect(out.markerExists).toBe(false);
+    // The probe must not be called in the "down" case — snapshot, not attempt.
+    expect(probeCalls).toBe(0);
+  });
+
+  test("pidsfile exists but pids dead → 'down' (not 'up-*')", async () => {
+    let probeCalls = 0;
+    const fs = new InMemoryFileSystem();
+    fs.seed(CHROME_PATH, "");
+    fs.seed("/home/alan/.config/dridock/cdp/pids", "500 501");    // pids NOT in the probe's running set
+    const processes = new InMemoryHostProcessManager();
+    const svc = new BrowserBridgeService({
+      fs, processes,
+      env: { XDG_CONFIG_HOME: "/home/alan/.config" },
+      home: "/home/alan",
+      cdpProbe: async () => { probeCalls++; return true; },
+      processProbe: new FakeProcessProbe(/* nothing running */),
+    });
+    const out = await svc.status("abc12345");
+    expect(out.kind).toBe("down");
+    expect(out.pidsFileExists).toBe(true);
+    expect(out.pids.length).toBe(2);
+    expect(out.pids[0]!.alive).toBe(false);
+    expect(out.pids[1]!.alive).toBe(false);
+    // Short-circuit before probe — nothing to probe.
+    expect(probeCalls).toBe(0);
+  });
+
+  test("pids alive but cmdline MISMATCH (pid reuse) → 'down' with cmdlineMatches=false", async () => {
+    // Pid-reuse hazard: kernel reassigned 500/501 to unrelated processes
+    // (sshd, sleep). kill -0 succeeds but cmdline doesn't match our
+    // expected Chrome/python3 forwarder. Must report 'down', not 'up-*'.
+    let probeCalls = 0;
+    const fs = new InMemoryFileSystem();
+    fs.seed(CHROME_PATH, "");
+    fs.seed("/home/alan/.config/dridock/cdp/pids", "500 501");
+    const processes = new InMemoryHostProcessManager();
+    processes.alive.add(500);
+    processes.alive.add(501);
+    const probe = new FakeProcessProbe(new Map([
+      [500, "/usr/sbin/sshd -D"],
+      [501, "sleep 3600"],
+    ]));
+    const svc = new BrowserBridgeService({
+      fs, processes,
+      env: { XDG_CONFIG_HOME: "/home/alan/.config" },
+      home: "/home/alan",
+      cdpProbe: async () => { probeCalls++; return true; },
+      processProbe: probe,
+    });
+    const out = await svc.status("abc12345");
+    expect(out.kind).toBe("down");
+    expect(out.pids[0]!.alive).toBe(true);
+    expect(out.pids[0]!.cmdlineMatches).toBe(false);
+    expect(out.pids[1]!.cmdlineMatches).toBe(false);
+    expect(probeCalls).toBe(0);     // skipped — pids aren't healthy
+  });
+
+  test("pids alive + cmdline match + socket responds → 'up-and-responding'", async () => {
+    const { probe: cdpProbeFn } = makeCountingProbe(0);
+    const fs = new InMemoryFileSystem();
+    fs.seed(CHROME_PATH, "");
+    fs.seed("/home/alan/.config/dridock/cdp/pids", "1000 1001");
+    fs.seed("/home/alan/.config/dridock/projects/abc12345/.cdp-url", "http://192.168.64.1:9223");
+    const processes = new InMemoryHostProcessManager();
+    processes.alive.add(1000);
+    processes.alive.add(1001);
+    const svc = new BrowserBridgeService({
+      fs, processes,
+      env: { XDG_CONFIG_HOME: "/home/alan/.config" },
+      home: "/home/alan",
+      cdpProbe: cdpProbeFn,
+      processProbe: new FakeProcessProbe(new Map([
+        [1000, UP_CMDLINE_CHROME],
+        [1001, UP_CMDLINE_FORWARDER],
+      ])),
+    });
+    const out = await svc.status("abc12345");
+    expect(out.kind).toBe("up-and-responding");
+    expect(out.pids[0]!.cmdlineMatches).toBe(true);
+    expect(out.pids[1]!.cmdlineMatches).toBe(true);
+    expect(out.markerExists).toBe(true);
+    expect(out.markerUrl).toBe("http://192.168.64.1:9223");
+  });
+
+  test("pids alive + cmdline match + socket dead → 'up-but-socket-dead' (the #94 stale-bind case)", async () => {
+    const { probe: cdpProbeFn } = makeCountingProbe(999);   // never succeeds
+    const fs = new InMemoryFileSystem();
+    fs.seed(CHROME_PATH, "");
+    fs.seed("/home/alan/.config/dridock/cdp/pids", "1000 1001");
+    const processes = new InMemoryHostProcessManager();
+    processes.alive.add(1000);
+    processes.alive.add(1001);
+    const svc = new BrowserBridgeService({
+      fs, processes,
+      env: { XDG_CONFIG_HOME: "/home/alan/.config" },
+      home: "/home/alan",
+      cdpProbe: cdpProbeFn,
+      processProbe: new FakeProcessProbe(new Map([
+        [1000, UP_CMDLINE_CHROME],
+        [1001, UP_CMDLINE_FORWARDER],
+      ])),
+    });
+    const out = await svc.status("abc12345");
+    expect(out.kind).toBe("up-but-socket-dead");
+    expect(out.pids[0]!.alive).toBe(true);
+    expect(out.pids[0]!.cmdlineMatches).toBe(true);
+  });
+
+  // Arfy's #93 pre-review check: a status must not mutate state. Mirrors the
+  // `fs.allPaths()` before/after pattern used by HelpConformance.
+  test("status makes ZERO filesystem writes (allPaths unchanged before/after)", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed(CHROME_PATH, "");
+    fs.seed("/home/alan/.config/dridock/cdp/pids", "1000 1001");
+    fs.seed("/home/alan/.config/dridock/projects/abc12345/.cdp-url", "http://192.168.64.1:9223");
+    const processes = new InMemoryHostProcessManager();
+    processes.alive.add(1000);
+    processes.alive.add(1001);
+    const svc = new BrowserBridgeService({
+      fs, processes,
+      env: { XDG_CONFIG_HOME: "/home/alan/.config" },
+      home: "/home/alan",
+      cdpProbe: async () => true,
+      processProbe: new FakeProcessProbe(new Map([
+        [1000, UP_CMDLINE_CHROME],
+        [1001, UP_CMDLINE_FORWARDER],
+      ])),
+    });
+    const before = fs.allPaths();
+    await svc.status("abc12345");
+    const after = fs.allPaths();
+    expect(after).toEqual(before);
+    // Also: no spawns, no kills — the whole point of "read-only snapshot".
+    expect(processes.spawns).toEqual([]);
+    expect(processes.kills).toEqual([]);
+  });
+});
+
+describe("BrowserBridgeService — down-after-probe-failed recovery (#94 follow-up)", () => {
   // #94 follow-up (Arfy's review of `88322d0`): the documented recovery
   // for a probe-failed `up` is `dridock browser-bridge down && up`. For that
   // to work, `down` must survive the absent marker — the probe-failed path

@@ -242,3 +242,132 @@ describe("BrowserBridgeCommand.up — probe-failed surfacing (#94)", () => {
     expect(err).not.toContain("chrome.log");      // NOT the fresh-spawn hint
   });
 });
+
+// #93: `dridock browser-bridge status [--json]`. Per Arfy's pre-review:
+// rc 0 in both states, no side effects, three states distinguishable.
+describe("BrowserBridgeCommand.status — read-only snapshot (#93)", () => {
+  const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+
+  /** Build a FakeProcessProbe inline (same shape as PidLiveness's) so the
+   *  command tests don't depend on the service test's helper. */
+  function fakeProbe(cmdlines: Record<number, string>): import("../../services/PidLiveness.ts").ProcessProbe {
+    const map = new Map<number, string>(Object.entries(cmdlines).map(([k, v]) => [Number(k), v]));
+    return {
+      isRunning: (pid) => map.has(pid),
+      getCommandLine: (pid) => map.get(pid),
+    };
+  }
+
+  test("down (no pidsfile) → rc 0, stdout state=down, nothing on stderr", async () => {
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/.dridock/config.yml", "id: abc12345\n");
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new BrowserBridgeCommand({
+      git: new StubGitToplevel("/repo"),
+      processes: new InMemoryHostProcessManager(),
+      cdpProbe: async () => true,          // won't be called in down case
+    }).run(["status"], ctx);
+    expect(rc).toBe(0);
+    expect(stderr.text()).toBe("");
+    expect(stdout.text()).toContain("state: down");
+    expect(stdout.text()).toContain("pidsFile: ");
+    expect(stdout.text()).toContain("(absent)");
+    expect(stdout.text()).not.toContain("recover with");   // no recovery hint when just down
+  });
+
+  test("up-and-responding → rc 0, stdout state matches, pids both 'alive, cmdline matches'", async () => {
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/.dridock/config.yml", "id: abc12345\n");
+    fs.seed(CHROME_PATH, "");
+    fs.seed("/home/alan/.config/dridock/cdp/pids", "1000 1001");
+    const processes = new InMemoryHostProcessManager();
+    processes.alive.add(1000);
+    processes.alive.add(1001);
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new BrowserBridgeCommand({
+      git: new StubGitToplevel("/repo"), processes,
+      cdpProbe: async () => true,
+      processProbe: fakeProbe({
+        1000: CHROME_PATH + " --remote-debugging-port=9222",
+        1001: "python3 /home/alan/.config/dridock/cdp/forward.py",
+      }),
+    }).run(["status"], ctx);
+    expect(rc).toBe(0);
+    const out = stdout.text();
+    expect(out).toContain("state: up-and-responding");
+    expect(out).toContain("pid[0]: 1000 alive, cmdline matches");
+    expect(out).toContain("pid[1]: 1001 alive, cmdline matches");
+    expect(out).not.toContain("recover with");
+  });
+
+  test("up-but-socket-dead (the #94 case) → rc 0, stdout state + down+up recovery hint", async () => {
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/.dridock/config.yml", "id: abc12345\n");
+    fs.seed(CHROME_PATH, "");
+    fs.seed("/home/alan/.config/dridock/cdp/pids", "1000 1001");
+    const processes = new InMemoryHostProcessManager();
+    processes.alive.add(1000);
+    processes.alive.add(1001);
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new BrowserBridgeCommand({
+      git: new StubGitToplevel("/repo"), processes,
+      cdpProbe: async () => false,       // pids ok, socket dead
+      processProbe: fakeProbe({
+        1000: CHROME_PATH,
+        1001: "python3 /home/alan/.config/dridock/cdp/forward.py",
+      }),
+    }).run(["status"], ctx);
+    expect(rc).toBe(0);
+    const out = stdout.text();
+    expect(out).toContain("state: up-but-socket-dead");
+    expect(out).toContain("recover with:");
+    expect(out).toContain("dridock-ts browser-bridge down && dridock-ts browser-bridge up");
+  });
+
+  test("--json emits single-line JSON with state, pids, bind, port", async () => {
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/.dridock/config.yml", "id: abc12345\n");
+    fs.seed(CHROME_PATH, "");
+    fs.seed("/home/alan/.config/dridock/cdp/pids", "1000 1001");
+    const processes = new InMemoryHostProcessManager();
+    processes.alive.add(1000);
+    processes.alive.add(1001);
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new BrowserBridgeCommand({
+      git: new StubGitToplevel("/repo"), processes,
+      cdpProbe: async () => true,
+      processProbe: fakeProbe({
+        1000: CHROME_PATH,
+        1001: "python3 /home/alan/.config/dridock/cdp/forward.py",
+      }),
+    }).run(["status", "--json"], ctx);
+    expect(rc).toBe(0);
+    // Single-line JSON — strict parse, state key present.
+    const payload = JSON.parse(stdout.text().trim());
+    expect(payload.kind).toBe("up-and-responding");
+    expect(payload.bind).toBe("192.168.64.1");
+    expect(payload.port).toBe("9223");
+    expect(payload.pids).toHaveLength(2);
+    expect(payload.pids[0].pid).toBe(1000);
+    expect(payload.pids[0].alive).toBe(true);
+    expect(payload.pids[0].cmdlineMatches).toBe(true);
+  });
+
+  test("unknown flag → rc 1 on stderr (genuine failure is not the same as 'down')", async () => {
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/.dridock/config.yml", "id: abc12345\n");
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new BrowserBridgeCommand({
+      git: new StubGitToplevel("/repo"),
+      processes: new InMemoryHostProcessManager(),
+    }).run(["status", "--bogus"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("unexpected argument '--bogus'");
+    expect(stderr.text()).toContain("--json");
+  });
+});

@@ -1,6 +1,8 @@
 import type { FileSystem } from "../infra/FileSystem.ts";
 import type { HostProcessManager } from "../infra/HostProcessManager.ts";
 import { stateHome, xdgRoot } from "../domain/paths.ts";
+import type { ProcessProbe } from "./PidLiveness.ts";
+import { RealProcessProbe } from "./PidLiveness.ts";
 
 /**
  * `dridock browser-bridge up|down` — port of wrapper.sh:1592-1670
@@ -33,6 +35,13 @@ export interface BrowserBridgeDeps {
    *  true iff the response is OK within `timeoutMs`. Defaults to a
    *  `fetch`-based GET; tests inject a stub. */
   readonly cdpProbe?: (url: string, timeoutMs: number) => Promise<boolean>;
+  /** Cmdline reader for the `status` verb's liveness check (#93). Pids under
+   *  `~/.config/dridock/cdp/pids` outlive the processes they describe (the
+   *  file is written at `up` and only removed at `down`), so "is this pid
+   *  our forwarder" needs cmdline verification, not just kill -0 — same
+   *  lesson as #90's fetcher check. Defaults to `RealProcessProbe`; tests
+   *  inject a fake. */
+  readonly processProbe?: ProcessProbe;
 }
 
 export type BrowserBridgeUpOutcome =
@@ -60,6 +69,42 @@ export type BrowserBridgeUpOutcome =
       forwardLog: string;
       attempts: number;
     };
+
+/**
+ * Result shape for `BrowserBridgeService.status()` — read-only snapshot (#93).
+ * Three distinguishable states:
+ *   - `down`                 — no pidsfile, or none of the recorded pids pass
+ *                              the live+cmdline check. Includes the "nothing
+ *                              is running" case AND the "pidfile from a prior
+ *                              Chrome that quit" case; from the caller's
+ *                              perspective these are the same actionable
+ *                              state.
+ *   - `up-and-responding`    — pids pass live+cmdline AND the CDP socket
+ *                              responds within one probe (no retries — this
+ *                              is a snapshot, not an attempt).
+ *   - `up-but-socket-dead`   — pids pass live+cmdline BUT the CDP socket
+ *                              doesn't answer. The exact #94 stale-bind case,
+ *                              named so callers can surface the right
+ *                              remediation (`down && up`).
+ */
+export type BrowserBridgeStatusOutcome = {
+  kind: "down" | "up-and-responding" | "up-but-socket-dead";
+  bind: string;
+  port: string;
+  url: string;
+  pidsFilePath: string;
+  pidsFileExists: boolean;
+  pids: readonly {
+    pid: number;
+    alive: boolean;
+    cmdlineMatches: boolean | undefined;   // undefined = couldn't check cmdline
+    expectedCmdline: string;
+  }[];
+  projectId: string;
+  markerPath: string;
+  markerExists: boolean;
+  markerUrl: string | undefined;
+};
 
 export class BrowserBridgeService {
   constructor(private readonly deps: BrowserBridgeDeps) {}
@@ -172,6 +217,104 @@ export class BrowserBridgeService {
     await this.deps.fs.writeText(markerPath, url);
 
     return { kind: "up", windowTitle, url, profile, alreadyRunning: anyAlive, markerPath };
+  }
+
+  /**
+   * `dridock browser-bridge status` — read-only snapshot (#93).
+   *
+   * MUST NOT mutate state: no pidsfile write, no marker write, no spawn, no
+   * `down` call. Read-only is the whole point — a caller asking "is the
+   * bridge up?" without the question itself becoming the answer.
+   *
+   * Three states — see `BrowserBridgeStatusOutcome` for the taxonomy. The
+   * `up-but-socket-dead` case is why this verb exists: #94's exact scenario
+   * (pids alive, socket refuses from the VM). `status` must name it so the
+   * caller can surface `down && up` as the recovery, rather than collapsing
+   * it into "up" and leaving #94 reintroduced.
+   *
+   * Liveness is derived from the CURRENT state, not the pidsfile's existence
+   * — a pidfile under `<xdg>/` outlives the Chrome it describes, so "up
+   * because the file exists" would flip to the opposite of the truth after
+   * Chrome quits. Same pattern + motivation as #90's fetcher check: kill -0
+   * plus a cmdline match. Chrome and the forwarder have distinct expected
+   * cmdlines (the chrome binary path and `python3 <forward.py>` respectively),
+   * so we check each pid against its slot's expected string.
+   */
+  async status(projectId: string): Promise<BrowserBridgeStatusOutcome> {
+    const chromeBin = this.deps.env["DRIDOCK_CHROME"]
+      ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+    const port = this.envOr("DRIDOCK_CDP_PORT", "9223");
+    const bind = this.envOr("DRIDOCK_CDP_BIND", "192.168.64.1");
+    const url = `http://${bind}:${port}`;
+
+    const home = await stateHome(this.deps.fs, this.deps.env, this.deps.home, "cdp");
+    const pidsFile = `${home}/pids`;
+    const forwardPy = `${home}/forward.py`;
+
+    const markerPath = await this.markerFor(projectId);
+    const markerContents = await this.deps.fs.readTextOrUndefined(markerPath);
+    const markerExists = markerContents !== undefined;
+    const markerUrl = markerContents?.trim();
+
+    const pidsFileExists = await this.deps.fs.exists(pidsFile);
+    if (!pidsFileExists) {
+      return {
+        kind: "down",
+        bind, port, url,
+        pidsFilePath: pidsFile, pidsFileExists: false, pids: [],
+        projectId, markerPath, markerExists, markerUrl,
+      };
+    }
+
+    // `up` writes `<chromePid> <forwarderPid>` in that order. The expected
+    // cmdline for each slot is what spawnDetached was invoked with — chrome
+    // binary path for the Chrome slot, `python3 <forwardPy>` for the
+    // forwarder slot. Both cmdlines are unlikely to collide with unrelated
+    // processes the kernel happens to assign the same pid to post-restart,
+    // which is the #90-style wraparound hazard this check closes.
+    const priorPids = await this.readPids(pidsFile);
+    const expectedCmdlines = [chromeBin, `python3 ${forwardPy}`];
+    const probe = this.deps.processProbe ?? new RealProcessProbe();
+
+    const pidsDetail = await Promise.all(priorPids.map(async (pid, i) => {
+      const alive = await this.deps.processes.isAlive(pid);
+      const expected = expectedCmdlines[i] ?? "";
+      let cmdlineMatches: boolean | undefined = undefined;
+      if (alive && expected !== "") {
+        const cmdline = probe.getCommandLine(pid);
+        cmdlineMatches = cmdline === undefined ? undefined : cmdline.includes(expected);
+      }
+      return { pid, alive, cmdlineMatches, expectedCmdline: expected };
+    }));
+
+    // Healthy iff EVERY slot is alive AND its cmdline matches. An undefined
+    // cmdlineMatches (couldn't read /proc or `ps`) is treated as NOT healthy
+    // — refuse to claim "up" on missing evidence, same discipline as #90.
+    const bothSlotsHealthy = pidsDetail.length === 2
+      && pidsDetail.every((p) => p.alive && p.cmdlineMatches === true);
+
+    if (!bothSlotsHealthy) {
+      return {
+        kind: "down",
+        bind, port, url,
+        pidsFilePath: pidsFile, pidsFileExists: true, pids: pidsDetail,
+        projectId, markerPath, markerExists, markerUrl,
+      };
+    }
+
+    // Pids healthy — now does the socket answer? Single probe (no retries):
+    // this is a snapshot, not an attempt. `cdpProbe` is the #94 primitive;
+    // reuse removes the "status attempts a raw CDP connect that might create
+    // a target" side-effect hazard Arfy flagged in the #93 filing.
+    const cdpProbeFn = this.deps.cdpProbe ?? defaultCdpProbe;
+    const socketOk = await cdpProbeFn(`${url}/json/version`, 2000);
+
+    return {
+      kind: socketOk ? "up-and-responding" : "up-but-socket-dead",
+      bind, port, url,
+      pidsFilePath: pidsFile, pidsFileExists: true, pids: pidsDetail,
+      projectId, markerPath, markerExists, markerUrl,
+    };
   }
 
   async down(projectId: string): Promise<{ markerPath: string; pidsKilled: number[] }> {
