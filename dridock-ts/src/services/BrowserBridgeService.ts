@@ -26,6 +26,13 @@ export interface BrowserBridgeDeps {
    *  does `sleep 2` here for Chrome to bind its port before the
    *  forwarder connects. Tests pass a no-op; prod uses `Bun.sleep(2000)`. */
   readonly sleep?: (ms: number) => Promise<void>;
+  /** CDP socket probe. After spawning (or on reuse) `up()` verifies that
+   *  `http://${bind}:${port}/json/version` actually responds — pids being
+   *  alive doesn't mean the socket is alive (#94: a stale-bind after colima
+   *  restart gives "listener exists but VM gets Connection refused"). Returns
+   *  true iff the response is OK within `timeoutMs`. Defaults to a
+   *  `fetch`-based GET; tests inject a stub. */
+  readonly cdpProbe?: (url: string, timeoutMs: number) => Promise<boolean>;
 }
 
 export type BrowserBridgeUpOutcome =
@@ -37,6 +44,21 @@ export type BrowserBridgeUpOutcome =
       profile: string;
       alreadyRunning: boolean;
       markerPath: string;
+    }
+  | {
+      /** Pids may be alive (reuse path: they ARE alive by definition) but the
+       *  CDP socket didn't answer within the retry budget. Marker is NOT
+       *  written on this path — pointing it at a dead socket is the silent-
+       *  success class the project rejects. Caller surfaces with the right
+       *  remediation (`down && up` on alreadyRunning, chromeLog/forwardLog
+       *  inspection on a fresh spawn). */
+      kind: "probe-failed";
+      bind: string;
+      port: string;
+      alreadyRunning: boolean;
+      chromeLog: string;
+      forwardLog: string;
+      attempts: number;
     };
 
 export class BrowserBridgeService {
@@ -111,6 +133,37 @@ export class BrowserBridgeService {
         { logFile: forwardLog },
       );
       await this.deps.fs.writeText(pidsFile, `${chromePid} ${forwardPid}`);
+    }
+
+    // Probe the CDP socket before claiming success (#94). Fresh spawn: retry
+    // because Chrome needs a moment to bind post-exec. Reuse path: one shot —
+    // if the "already up" pids can't serve, something is wrong NOW and
+    // retrying won't resolve it (stale bind after colima restart, zombie
+    // forwarder, firewall change). Writing the marker before probing would
+    // leave a working-looking url pointing at a dead socket.
+    const probe = this.deps.cdpProbe ?? defaultCdpProbe;
+    const probeUrl = `http://${bind}:${port}/json/version`;
+    const maxAttempts = anyAlive ? 1 : 6;      // reuse: 1. fresh: 6×500ms = 3s
+    let attempts = 0;
+    let probeOk = false;
+    for (; attempts < maxAttempts; attempts++) {
+      if (await probe(probeUrl, 2000)) {
+        probeOk = true;
+        attempts++;
+        break;
+      }
+      if (attempts + 1 < maxAttempts) {
+        await (this.deps.sleep ?? defaultSleep)(500);
+      }
+    }
+    if (!probeOk) {
+      return {
+        kind: "probe-failed",
+        bind, port,
+        alreadyRunning: anyAlive,
+        chromeLog, forwardLog,
+        attempts,
+      };
     }
 
     const url = `http://${bind}:${port}`;
@@ -265,6 +318,21 @@ function defaultRandomHex(byteCount: number): string {
 
 async function defaultSleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Default CDP probe: GET `url` with a bounded timeout. Any non-ok response or
+ * network error is treated as a probe failure (fetch throws on refused/timeout/
+ * DNS; we catch and return false). Deliberately swallows the error class —
+ * callers only need the boolean to decide retry vs give-up (#94).
+ */
+async function defaultCdpProbe(url: string, timeoutMs: number): Promise<boolean> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 function dirOf(path: string): string {

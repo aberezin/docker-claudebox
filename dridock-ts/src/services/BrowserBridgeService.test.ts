@@ -4,10 +4,13 @@ import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 import { InMemoryHostProcessManager } from "../test/fakes/InMemoryHostProcessManager.ts";
 
 /** Build a service with sensible test defaults — Chrome present, cdp home
- *  under a fake XDG dir, no real sleep, deterministic hash. */
+ *  under a fake XDG dir, no real sleep, deterministic hash, and a cdpProbe
+ *  that returns true (healthy socket) by default. Tests that need a failing
+ *  probe override `probe`. */
 function build(overrides: {
   env?: Record<string, string | undefined>;
   chromePresent?: boolean;
+  probe?: (url: string, timeoutMs: number) => Promise<boolean>;
 } = {}): {
   svc: BrowserBridgeService;
   fs: InMemoryFileSystem;
@@ -23,8 +26,25 @@ function build(overrides: {
     home: "/home/alan",
     randomHex: (n) => "ab".repeat(n),   // deterministic 4-byte → "abababab"
     sleep: async () => { /* no real wait */ },
+    // Default: probe succeeds — the common test path is "spawn completed and
+    // the socket works". Tests exercising the failure arm inject their own.
+    cdpProbe: overrides.probe ?? (async () => true),
   });
   return { svc, fs, processes };
+}
+
+/** Build a probe that fails for the first N calls, then succeeds. Lets tests
+ *  cover "fresh-spawn retried and eventually succeeded" vs "all retries
+ *  exhausted". Returns the probe fn + a getter for the call count. */
+function makeCountingProbe(failCount: number): {
+  probe: (url: string, timeoutMs: number) => Promise<boolean>;
+  calls: () => number;
+} {
+  let n = 0;
+  return {
+    probe: async () => { n++; return n > failCount; },
+    calls: () => n,
+  };
 }
 
 describe("BrowserBridgeService.up — first-time launch (cold start)", () => {
@@ -328,5 +348,99 @@ describe("quietProfilePreferences — merges, never replaces", () => {
       const after = JSON.parse(quietProfilePreferences(junk));
       expect(after.profile.exit_type).toBe("Normal");
     }
+  });
+});
+
+// #94: `up` must verify the CDP socket actually responds before claiming
+// success. Pids being alive isn't the same as socket being alive — today we
+// hit exactly this: `up` reported "already running", lsof confirmed the
+// forwarder was listening on the Mac, and the VM still got Connection
+// refused. No marker is written on probe failure: writing a url pointing at
+// a dead socket is the silent-success-over-discarded-work class the project
+// rejects.
+describe("BrowserBridgeService.up — CDP socket probe (#94)", () => {
+  test("fresh spawn, probe succeeds first try → 'up', marker written, probe called once", async () => {
+    const { probe, calls } = makeCountingProbe(0);
+    const { svc, fs } = build({ probe });
+    const out = await svc.up("abc12345");
+    expect(out.kind).toBe("up");
+    expect(calls()).toBe(1);
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc12345/.cdp-url"))
+      .toBe("http://192.168.64.1:9223");
+  });
+
+  test("fresh spawn, probe fails 3 times then succeeds → 'up', marker written, probe called 4 times", async () => {
+    const { probe, calls } = makeCountingProbe(3);
+    const { svc, fs } = build({ probe });
+    const out = await svc.up("abc12345");
+    expect(out.kind).toBe("up");
+    expect(calls()).toBe(4);
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc12345/.cdp-url"))
+      .toBe("http://192.168.64.1:9223");
+  });
+
+  test("fresh spawn, probe fails all 6 attempts → 'probe-failed', NO marker written", async () => {
+    const { probe, calls } = makeCountingProbe(999);        // always fail
+    const { svc, fs } = build({ probe });
+    const out = await svc.up("abc12345");
+    expect(out.kind).toBe("probe-failed");
+    if (out.kind !== "probe-failed") return;
+    expect(out.bind).toBe("192.168.64.1");
+    expect(out.port).toBe("9223");
+    expect(out.alreadyRunning).toBe(false);
+    expect(out.attempts).toBe(6);
+    expect(out.chromeLog).toBe("/home/alan/.config/dridock/cdp/chrome.log");
+    expect(out.forwardLog).toBe("/home/alan/.config/dridock/cdp/forward.log");
+    expect(calls()).toBe(6);
+    // Marker MUST NOT have been written on the failure path.
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc12345/.cdp-url")).toBe(false);
+  });
+
+  test("reuse path, probe succeeds → 'up' with alreadyRunning=true, probe called ONCE (no retries on reuse)", async () => {
+    const { probe, calls } = makeCountingProbe(0);
+    const { svc, fs, processes } = build({ probe });
+    // First up — cold start, seeds state and the live-pids record.
+    await svc.up("abc12345");
+    const callsAfterFirst = calls();
+    // Second up — bridge still alive (InMemoryHostProcessManager keeps spawned
+    // pids in .alive by default). MUST reuse AND MUST probe once.
+    const out = await svc.up("abc12345");
+    expect(out.kind).toBe("up");
+    if (out.kind !== "up") return;
+    expect(out.alreadyRunning).toBe(true);
+    expect(calls() - callsAfterFirst).toBe(1);
+    // No additional spawns on reuse.
+    expect(processes.spawns).toHaveLength(2);
+    // Marker still refreshed.
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc12345/.cdp-url"))
+      .toBe("http://192.168.64.1:9223");
+  });
+
+  test("reuse path, probe fails → 'probe-failed' with alreadyRunning=true, attempts=1 (no retry on reuse)", async () => {
+    // First up to establish live pids with a working probe.
+    const good = makeCountingProbe(0);
+    const { svc, fs } = build({ probe: good.probe });
+    await svc.up("abc12345");
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc12345/.cdp-url"))
+      .toBe("http://192.168.64.1:9223");
+
+    // Now rebuild a new service with the SAME fs state but a failing probe,
+    // simulating "pids are alive from before, but the socket is dead now".
+    const bad = makeCountingProbe(999);
+    const svc2 = new BrowserBridgeService({
+      fs,
+      processes: (svc as unknown as { deps: { processes: InMemoryHostProcessManager } }).deps.processes,
+      env: { XDG_CONFIG_HOME: "/home/alan/.config" },
+      home: "/home/alan",
+      randomHex: (n) => "ab".repeat(n),
+      sleep: async () => {},
+      cdpProbe: bad.probe,
+    });
+    const out = await svc2.up("abc12345");
+    expect(out.kind).toBe("probe-failed");
+    if (out.kind !== "probe-failed") return;
+    expect(out.alreadyRunning).toBe(true);     // <-- distinguishes from fresh-spawn failure
+    expect(out.attempts).toBe(1);              // reuse: one shot, no retries
+    expect(bad.calls()).toBe(1);
   });
 });

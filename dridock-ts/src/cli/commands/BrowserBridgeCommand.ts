@@ -75,6 +75,7 @@ Detach the bridge. Leaves Chrome running.`,
       home: ctx.home,
       randomHex: this.deps.randomHex,
       sleep: this.deps.sleep,
+      cdpProbe: this.deps.cdpProbe,
     });
 
     if (sub === "up") return await this.runUp(svc, projectId, ctx);
@@ -86,6 +87,22 @@ Detach the bridge. Leaves Chrome running.`,
     if (out.kind === "chrome-not-found") {
       ctx.stderr.write(`❌ Chrome not found at: ${out.chromePath} (set DRIDOCK_CHROME)\n`);
       return 1;
+    }
+    if (out.kind === "probe-failed") {
+      // #94: pids may be alive (reuse path: they ARE) but the CDP socket isn't
+      // answering. Different remediation depending on which path we're on —
+      // reuse-path fail is almost always a stale bind the user can reset with
+      // down+up; fresh-spawn fail wants the chrome/forwarder logs.
+      ctx.stderr.write(`❌ CDP bridge probe failed: ${out.bind}:${out.port} didn't respond after ${out.attempts} ${out.attempts === 1 ? "attempt" : "attempts"}.\n`);
+      if (out.alreadyRunning) {
+        ctx.stderr.write(`   The 'already running' pids are alive but the socket is dead (stale bind after a colima restart, zombie forwarder, or firewall change).\n`);
+        ctx.stderr.write(`   Recover:  ${ctx.binName} browser-bridge down && ${ctx.binName} browser-bridge up\n`);
+      } else {
+        ctx.stderr.write(`   Fresh spawn didn't bind within the retry budget. Inspect:\n`);
+        ctx.stderr.write(`     ${out.chromeLog}\n`);
+        ctx.stderr.write(`     ${out.forwardLog}\n`);
+      }
+      return 2;
     }
     if (out.alreadyRunning) {
       ctx.stdout.write(`🔗 CDP bridge already running\n`);
@@ -116,6 +133,8 @@ export interface BrowserBridgeCommandDeps {
   readonly sleep?: (ms: number) => Promise<void>;
   /** Injected in tests for deterministic window-hash. */
   readonly randomHex?: (byteCount: number) => string;
+  /** Injected in tests to avoid a real fetch to localhost. */
+  readonly cdpProbe?: (url: string, timeoutMs: number) => Promise<boolean>;
 }
 
 // Re-exports for tests.

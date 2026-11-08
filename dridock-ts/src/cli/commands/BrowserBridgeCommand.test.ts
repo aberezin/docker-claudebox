@@ -82,6 +82,7 @@ describe("BrowserBridgeCommand.up — end-to-end wire (fake processes)", () => {
       processes,
       sleep: async () => {},
       randomHex: () => "abababab",
+      cdpProbe: async () => true,
     }).run(["up"], ctx);
     expect(rc).toBe(0);
     expect(stderr.text()).toBe("");
@@ -104,6 +105,7 @@ describe("BrowserBridgeCommand.up — end-to-end wire (fake processes)", () => {
     const rc = await new BrowserBridgeCommand({
       git: new StubGitToplevel("/repo"), processes,
       sleep: async () => {}, randomHex: () => "abababab",
+      cdpProbe: async () => true,
     }).run(["up"], ctx);
     expect(rc).toBe(1);
     expect(stderr.text()).toContain("Chrome not found");
@@ -128,6 +130,7 @@ describe("BrowserBridgeCommand.up — end-to-end wire (fake processes)", () => {
     const rc = await new BrowserBridgeCommand({
       git: new StubGitToplevel("/repo"), processes,
       sleep: async () => {}, randomHex: () => "abababab",
+      cdpProbe: async () => true,
     }).run(["up"], ctx);
     expect(rc).toBe(0);
     expect(processes.spawns).toHaveLength(2);   // no additional spawn
@@ -175,5 +178,67 @@ describe("BrowserBridgeCommand.down — end-to-end", () => {
     expect(rc).toBe(0);
     expect(stdout.text()).toContain("CDP bridge down");
     expect(processes.kills).toEqual([]);
+  });
+});
+
+// #94: probe-failed must surface with the right remediation hint — down+up
+// for the reuse case, chrome/forward log paths for the fresh-spawn case.
+describe("BrowserBridgeCommand.up — probe-failed surfacing (#94)", () => {
+  test("fresh spawn, probe never responds → rc 2, stderr names the port + the log paths", async () => {
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/.dridock/config.yml", "id: abc12345\n");
+    fs.seed("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "");
+    const processes = new InMemoryHostProcessManager();
+    const { ctx, stdout, stderr } = makeCtx(fs);
+    const rc = await new BrowserBridgeCommand({
+      git: new StubGitToplevel("/repo"), processes,
+      sleep: async () => {}, randomHex: () => "abababab",
+      cdpProbe: async () => false,                // never succeeds
+    }).run(["up"], ctx);
+    expect(rc).toBe(2);
+    expect(stdout.text()).toBe("");
+    const err = stderr.text();
+    expect(err).toContain("CDP bridge probe failed");
+    expect(err).toContain("192.168.64.1:9223");
+    expect(err).toContain("6 attempts");          // fresh = 6 attempts
+    expect(err).toContain("chrome.log");          // points at the chrome log
+    expect(err).toContain("forward.log");         // points at the forwarder log
+    expect(err).not.toContain("down && dridock-ts browser-bridge up");  // NOT the reuse-case hint
+    // Marker must NOT have been written.
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc12345/.cdp-url")).toBe(false);
+  });
+
+  test("reuse path, probe fails → rc 2, stderr names the 'down && up' recovery and alreadyRunning cause", async () => {
+    setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
+    const fs = new InMemoryFileSystem();
+    fs.seed("/repo/.dridock/config.yml", "id: abc12345\n");
+    fs.seed("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "");
+    const processes = new InMemoryHostProcessManager();
+
+    // First up with a working probe — establishes live pids.
+    const okCtx = makeCtx(fs);
+    const rc1 = await new BrowserBridgeCommand({
+      git: new StubGitToplevel("/repo"), processes,
+      sleep: async () => {}, randomHex: () => "abababab",
+      cdpProbe: async () => true,
+    }).run(["up"], okCtx.ctx);
+    expect(rc1).toBe(0);
+
+    // Second up: pids still alive, but socket now dead — the exact case that
+    // motivated this issue.
+    const { ctx, stderr } = makeCtx(fs);
+    const rc2 = await new BrowserBridgeCommand({
+      git: new StubGitToplevel("/repo"), processes,
+      sleep: async () => {}, randomHex: () => "abababab",
+      cdpProbe: async () => false,
+    }).run(["up"], ctx);
+    expect(rc2).toBe(2);
+    const err = stderr.text();
+    expect(err).toContain("CDP bridge probe failed");
+    expect(err).toContain("1 attempt");           // reuse path: single probe
+    expect(err).toContain("pids are alive but the socket is dead");
+    expect(err).toContain("dridock-ts browser-bridge down && dridock-ts browser-bridge up");
+    expect(err).not.toContain("chrome.log");      // NOT the fresh-spawn hint
   });
 });

@@ -27,6 +27,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > [docs/versioning.md](docs/versioning.md).
 
 ## [Unreleased]
+- **`browser-bridge up` now probes the CDP socket before claiming success** (#94).
+  Previously, `up` reported "up" (fresh spawn) or "already running" (reuse) based
+  only on `kill -0` of the recorded pids. Observed today: `up` said "already up on
+  192.168.64.1:9223", lsof confirmed the Python forwarder was listening on the
+  Mac, Mac-local curl to that URL worked — but the VM got Connection refused. A
+  stale bind after a colima interface change, pids still alive. No signal told
+  anyone to `down && up`. Now `up` GETs `http://${bind}:${port}/json/version` and
+  refuses success on refusal: 6 attempts × 500ms (3 s) on fresh spawn to tolerate
+  Chrome's bind warmup, 1 attempt on reuse (retrying "already up" that's broken
+  won't help). On failure, exit code 2, no marker written (a marker pointing at
+  a dead socket is the silent-success class the project rejects), and the stderr
+  message names the right remediation — `down && up` for the reuse case, the
+  `chrome.log`/`forward.log` paths for a fresh-spawn case. Injectable `cdpProbe`
+  dep keeps the tests hermetic. Foundation for #93's `status` verb.
 - Fixed two `--help` texts that advertised subverbs which have never existed:
   `browser-bridge` offered `[status|stop]` against a dispatcher accepting only
   `up|down`, and `vm` offered `[list|start|stop|delete]` against `ls|usage|gc`
