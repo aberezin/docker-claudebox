@@ -80,6 +80,27 @@ describe("CLI — advertised subverbs are accepted by their dispatcher", () => {
     });
   }
 
+  test("no usage text references an issue number that was guessed, not filed", () => {
+    // I wrote "see #94" into browser-bridge's usage BEFORE filing the issue,
+    // guessed the number, and the real one came back #93 — so the shipped
+    // help text pointed at a closed issue about a different thing. Exactly
+    // the defect this file exists to catch, one layer over: not a wrong
+    // subverb, a wrong pointer.
+    //
+    // Verifying an issue number is OPEN and on-topic needs the network, which
+    // would make this suite flaky. What is checkable offline: the numbers are
+    // plausible and nobody left a placeholder behind. The process rule the
+    // incident actually argues for — file first, then cite the number you got
+    // back — belongs in review, not here.
+    const refs = buildRegistry()
+      .all()
+      .flatMap((c) => [...c.usage.matchAll(/#(\d+)/g)].map((m) => ({ verb: c.verb, n: Number(m[1]) })));
+    const bogus = refs.filter((r) => !Number.isInteger(r.n) || r.n <= 0 || r.n > 100000);
+    expect(bogus.map((r) => `${r.verb}:#${r.n}`), "implausible issue refs in usage text").toEqual([]);
+    const placeholders = buildRegistry().all().filter((c) => /#(NN|XX|TODO|\?)/i.test(c.usage));
+    expect(placeholders.map((c) => c.verb), "placeholder issue refs left in usage text").toEqual([]);
+  });
+
   test("every PROSE_ALLOWLIST entry still refers to a registered verb", () => {
     // A stale exemption silently widens the hole it was carved for.
     const verbs = new Set(registry.all().map((c) => c.verb as string));

@@ -22,7 +22,7 @@ Host-side browser bridge the container drives via cb-browser. Opt-in: "up"
 attaches your REAL Chrome over CDP, so the claudebot sees the session you are
 logged into. "down" detaches it.
 
-There is deliberately no "status" verb yet — see #94. Until then the only
+There is deliberately no "status" verb yet — see #93. Until then the only
 side-effect-free check is whether anything is listening on the CDP port.`;
 
   // Declared so the usage text and the dispatcher below cannot drift apart:
