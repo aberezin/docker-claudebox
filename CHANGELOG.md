@@ -28,6 +28,19 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [5.11.0] - 2026-11-09
+
+### Changed
+- Claude Code CLI pin raised **2.1.258 → 2.1.319** (`ARG CLAUDE_VERSION`), resolved
+  from the official `latest` release channel at bump time (`2.1.311` is current
+  `stable`). Well above the `--remote-control` floor (2.1.206), so the #17
+  capability probe is unchanged.
+- Motivated by #89 (native cross-session messaging: silent loss, an uninformative
+  delivery-confirmation flag, stale `ListAgents` labels) — re-testing those
+  findings against a current CLI once this image is built and running. #89 stays
+  open regardless of outcome; it documents upstream behavior dridock does not
+  control, not something this bump "fixes."
+
 ## [5.10.1] - 2026-11-09
 
 ### Fixed
