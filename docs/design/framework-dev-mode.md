@@ -47,6 +47,7 @@ Inventory of every framework-dev behavior baked in as of 2.21.1, with pointers:
 | **Skip** the "cb-infra image is behind wrapper" drift warning | `wrapper.sh:cb_check_infra_drift` | 2.19.0 |
 | `dridock harness sync` — rebuild cb-infra from the current wrapper checkout | `wrapper.sh:cb_harness_sync` + dispatch under `harness)` | 2.20.0 |
 | `dridock harness sync --repair` — auto-recover from BuildKit snapshotter corruption | `wrapper.sh:cb_harness_sync` (flag) | 2.21.0 |
+| `dridock harness update-cli <version\|latest\|stable>` — raise the baked Claude CLI pin + VERSION + dridockVersion.ts in lockstep, validated by building and reading the version back out of the image | `dridock-ts/src/cli/commands/HarnessCommand.ts` | 5.11.0 (#100) |
 | `cb_is_framework_dev` helper (the fingerprint check + env-var override) | `wrapper.sh` (single source of truth) | 2.20.0 (extracted from 2.19.0's inline check); env override unified in 2.22.0 |
 | **`cb-harness-watch-consults`** — in-container watcher for cross-project `awaiting-framework` consults + new unreviewed framework-bug reports; run as background task | new baked helper (`cb-harness-<name>`, first application of this doc's convention) | 2.22.0 |
 

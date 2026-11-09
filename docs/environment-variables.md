@@ -38,6 +38,7 @@ All dridock config uses the `DRIDOCK_*` prefix. Anything you want available **in
 | `DRIDOCK_CONTAINER_NAME`   | Override the per-workspace container name                                                  | derived from `$PWD`       |
 | `DRIDOCK_ENV_*`            | Forward env vars into the container (prefix stripped: `DRIDOCK_ENV_FOO=bar` → `FOO=bar`)   | _(none)_                  |
 | `DRIDOCK_MOUNT_*`          | Mount extra host directories into the container                                            | _(none)_                  |
+| `DRIDOCK_CLAUDE_RELEASES_URL` | Base URL for resolving the `latest`/`stable` Claude CLI release channels (`install.sh --claude-version latest\|stable`, `dridock harness update-cli latest\|stable` — #100). Override for testing against a fixture, or if the official endpoint moves. | `https://downloads.claude.ai/claude-code-releases` |
 
 `DRIDOCK_*` is the only prefix read. The legacy `CLAUDEBOX_*` / `CLAUDE_*` equivalents were removed in 5.0.0 and are now inert — see the note at the top.
 

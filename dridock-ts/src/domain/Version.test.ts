@@ -82,3 +82,24 @@ describe("Version.skewSeverity", () => {
     expect(Version.skewSeverity(Version.parse(a), Version.parse(b))).toBe(sev);
   });
 });
+
+describe("Version.bumpMinor (#100)", () => {
+  test("increments minor, resets patch to 0", () => {
+    expect(Version.parse("5.10.1").bumpMinor().toString()).toBe("5.11.0");
+  });
+
+  test("patch of 0 still resets to 0 (idempotent shape, not a no-op on minor)", () => {
+    expect(Version.parse("2.3.0").bumpMinor().toString()).toBe("2.4.0");
+  });
+
+  test("major is unaffected", () => {
+    expect(Version.parse("9.9.9").bumpMinor().major).toBe(9);
+  });
+
+  test("returns a new Version, does not mutate the receiver", () => {
+    const v = Version.parse("1.2.3");
+    const bumped = v.bumpMinor();
+    expect(v.toString()).toBe("1.2.3");
+    expect(bumped.toString()).toBe("1.3.0");
+  });
+});

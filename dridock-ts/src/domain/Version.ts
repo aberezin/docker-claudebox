@@ -63,6 +63,15 @@ export class Version {
   toString(): string { return `${this.major}.${this.minor}.${this.patch}`; }
 
   /**
+   * Next MINOR version: bump minor, reset patch to 0. Used for release bumps
+   * that change the host↔image contract without a breaking change (#100) —
+   * e.g. `dridock harness update-cli` raising the baked Claude CLI pin.
+   */
+  bumpMinor(): Version {
+    return new Version(this.major, this.minor + 1, 0);
+  }
+
+  /**
    * Structural compare — returns `gt`/`lt`/`eq` to match wrapper.sh's
    * cb_semver_cmp output vocabulary directly.
    */

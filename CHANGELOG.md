@@ -28,6 +28,24 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`dridock harness update-cli <version|latest|stable> [--skip-build]`** (#100).
+  Bumping the baked Claude CLI version was a five-step manual dance (done by hand
+  for #89/5.11.0): edit the Dockerfile pin, bump `VERSION`, bump
+  `dridockVersion.ts` to match, write a CHANGELOG entry, then validate with
+  `make build-minimal` and manually check the built image's baked version. This
+  does all five in one verb. Resolves `latest`/`stable` via the same release
+  channel `install.sh` already uses (now overridable via the newly-documented
+  `DRIDOCK_CLAUDE_RELEASES_URL`); refuses to regress below
+  `CLAUDE_CLI_REMOTE_CONTROL_FLOOR` (#17's failure class); validates by default
+  — builds and reads the ACTUAL baked version back out of the image rather than
+  trusting a green `make` exit code, since a cached layer can silently reuse the
+  old npm install. Framework-dev-only, alongside the existing `dridock harness
+  sync`. Never commits — same convention as `dridock plugins add` / `features
+  enable`.
+- `Version.bumpMinor()` — the semver-bump primitive `update-cli` needed; no
+  behavior change for existing callers.
+
 ## [5.11.0] - 2026-11-09
 
 ### Changed
