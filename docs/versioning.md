@@ -113,9 +113,18 @@ entry is that record**, and it is in the commit itself.
 
 - **Only for a cut that spans already-merged work.** A bump that belongs to one issue's
   work still rides in that issue's branch, which is how every release before 5.12.0
-  happened (5.10.0 in `97-project-level-config`, 5.11.0 in `89-claude-cli-2-1-258`).
+  happened — 5.10.0 came with #97 (`3567e8e`) and 5.11.0 with #89 (`7a0ea65`).
   Reach for `release-X.Y.Z` when the release covers issues that each shipped without a
   bump of their own — as #100/#101/#102 did, all being host-TS or hook-only.
+
+  Those precedents are cited by **issue and commit, not branch name**, deliberately:
+  work branches are deleted on merge, so a branch name is the one identifier that
+  stops resolving the moment the work lands. Citing one as a precedent for others to
+  follow sends them looking for something that no longer exists — and the first draft
+  of this section got it wrong in exactly that way, naming a branch that had shipped a
+  *different* release (`89-claude-cli-2-1-258` carried the 5.4.0 pin bump to 2.1.258;
+  5.11.0's bump to 2.1.319 came from a separate #89 branch). The issue number and the
+  commit sha both survive.
 - **Whoever cuts it owns it**: ff-merge to `master`, tag the merged commit, delete the
   branch. Same ownership rule as any other branch.
 - **Don't use `DRIDOCK_ALLOW_MASTER_COMMIT=1` instead.** The override exists, but the
