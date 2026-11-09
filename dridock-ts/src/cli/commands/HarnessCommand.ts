@@ -56,6 +56,15 @@ export interface HarnessDeps {
    *  resolution — kept here too because install.sh is a bootstrap script
    *  that must work before dridock-ts exists, so it can't call into this. */
   readonly resolveChannel: (channel: string, releasesUrl: string) => Promise<string | undefined>;
+  /** Read a file's content as committed at HEAD, via `git show HEAD:<path>`
+   *  relative to `root`. Used by update-cli's idempotency guard (#101/F3):
+   *  if VERSION on disk already differs from HEAD, a PRIOR uncommitted
+   *  update-cli run already bumped it, and this run should reuse that bump
+   *  rather than stacking another one. Returns undefined if the file
+   *  doesn't exist at HEAD or git/the repo is unavailable — never throws.
+   *  An idempotency nicety, not a correctness guarantee: callers fall back
+   *  to the pre-#101 always-bump behavior on undefined rather than failing. */
+  readonly readFileAtHead: (root: string, relativePath: string) => Promise<string | undefined>;
 }
 
 export class HarnessCommand implements Command {
@@ -339,8 +348,6 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
       ctx.stderr.write(`   Pass --allow-downgrade if this is intentional.\n`);
       return 1;
     }
-    const direction = isDowngrade ? "lowered" : "raised";
-
     // Read + bump the repo's own version in lockstep with the CLI pin.
     const versionPath = `${project.root}/VERSION`;
     const versionText = await ctx.fs.readTextOrUndefined(versionPath);
@@ -355,7 +362,18 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
       ctx.stderr.write(`❌ harness update-cli: ${versionPath} doesn't parse as semver: ${e instanceof Error ? e.message : String(e)}\n`);
       return 1;
     }
-    const newDridockVersion = currentDridockVersion.bumpMinor();
+    // Idempotency guard (#101/F3): if VERSION on disk already differs from
+    // what's committed at HEAD, a PRIOR uncommitted update-cli run already
+    // bumped it — running update-cli twice with two different targets
+    // before committing should converge on ONE release, not stack a second
+    // minor bump + CHANGELOG header on top of the first. Reuse that bump
+    // instead. Falls back to the old always-bump behavior when HEAD's
+    // VERSION can't be read (no git, untracked file, shallow clone) — this
+    // is an idempotency nicety, not a correctness guarantee worth failing
+    // loudly over.
+    const versionAtHead = await deps.readFileAtHead(project.root, "VERSION");
+    const isFreshIteration = versionAtHead === undefined || versionAtHead.trim() === currentDridockVersion.toString();
+    const newDridockVersion = isFreshIteration ? currentDridockVersion.bumpMinor() : currentDridockVersion;
 
     const dridockVersionPath = `${project.root}/dridock-ts/src/domain/dridockVersion.ts`;
     const dridockVersionText = await ctx.fs.readTextOrUndefined(dridockVersionPath);
@@ -382,21 +400,63 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
       dridockVersionText.replace(tsVersionLineRe, `export const DRIDOCK_TS_VERSION = "${newDridockVersion.toString()}";`),
     );
 
+    // The CHANGELOG entry describes what the eventual commit will contain,
+    // so on a repeated (non-fresh) iteration it should read as the
+    // CUMULATIVE change since HEAD (the pin committed last time), not this
+    // one invocation's delta off an intermediate uncommitted value nobody
+    // will ever see once this settles. Fetch HEAD's Dockerfile only when it
+    // matters (non-fresh); fall back to currentPin if it can't be read.
+    let pinAtHeadForEntry = currentPin;
+    if (!isFreshIteration) {
+      const dockerfileAtHead = await deps.readFileAtHead(project.root, "Dockerfile");
+      const headPinMatch = dockerfileAtHead !== undefined ? /^ARG CLAUDE_VERSION=(\S+)$/m.exec(dockerfileAtHead) : undefined;
+      if (headPinMatch) pinAtHeadForEntry = headPinMatch[1]!;
+    }
+    const entryDirection = targetVer.compareTo(Version.parseLoose(pinAtHeadForEntry)) === "lt" ? "lowered" : "raised";
+
     const changelogPath = `${project.root}/CHANGELOG.md`;
     const changelogText = await ctx.fs.readTextOrUndefined(changelogPath);
     if (changelogText !== undefined && changelogText.includes("## [Unreleased]")) {
       const today = new Date().toISOString().slice(0, 10);
-      const entry = [
-        `## [${newDridockVersion.toString()}] - ${today}`,
-        ``,
-        `### Changed`,
-        `- Claude Code CLI pin ${direction} **${currentPin} → ${resolvedVersion}** (\`ARG CLAUDE_VERSION\`)${target === "latest" || target === "stable" ? `, resolved from the \`${target}\` release channel` : ""}. Above the \`--remote-control\` floor (${CLAUDE_CLI_REMOTE_CONTROL_FLOOR}).`,
-        ``,
-      ].join("\n");
-      await ctx.fs.writeText(changelogPath, changelogText.replace("## [Unreleased]\n", `## [Unreleased]\n\n${entry}`));
+      const pinLine = `- Claude Code CLI pin ${entryDirection} **${pinAtHeadForEntry} → ${resolvedVersion}** (\`ARG CLAUDE_VERSION\`)${target === "latest" || target === "stable" ? `, resolved from the \`${target}\` release channel` : ""}. Above the \`--remote-control\` floor (${CLAUDE_CLI_REMOTE_CONTROL_FLOOR}).`;
+      // Matches exactly the shape this command itself always writes (date
+      // stamp aside) — safe to re-match our own prior output, not a general
+      // CHANGELOG parser. If a non-fresh iteration's expected prior block
+      // isn't found (warn-and-skip hit last time, hand-edited in between),
+      // fall back to inserting a new entry rather than risking a corrupt
+      // rewrite — no worse than the pre-#101 behavior in that edge case.
+      const versionHeaderEsc = newDridockVersion.toString().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const existingBlockRe = new RegExp(`## \\[${versionHeaderEsc}\\] - \\d{4}-\\d{2}-\\d{2}\\n\\n### Changed\\n- Claude Code CLI pin [^\\n]*\\n\\n`);
+      const existingBlockMatch = !isFreshIteration ? existingBlockRe.exec(changelogText) : null;
+      if (existingBlockMatch) {
+        // existingBlockRe's match ends in TWO newlines (the blank line
+        // separating this entry from whatever follows) -- the replacement
+        // must end in two as well, or that separator blank line gets eaten.
+        // Caught live: dogfooding against the real CHANGELOG.md on a second
+        // iteration merged this entry straight into the next "### Fixed"
+        // section with no blank line between them.
+        const replacement = [
+          `## [${newDridockVersion.toString()}] - ${today}`,
+          ``,
+          `### Changed`,
+          pinLine,
+          ``,
+          ``,
+        ].join("\n");
+        await ctx.fs.writeText(changelogPath, changelogText.replace(existingBlockMatch[0], replacement));
+      } else {
+        const entry = [
+          `## [${newDridockVersion.toString()}] - ${today}`,
+          ``,
+          `### Changed`,
+          pinLine,
+          ``,
+        ].join("\n");
+        await ctx.fs.writeText(changelogPath, changelogText.replace("## [Unreleased]\n", `## [Unreleased]\n\n${entry}`));
+      }
     } else {
       ctx.stderr.write(`⚠️  harness update-cli: no '## [Unreleased]' anchor found in ${changelogPath} — skipped the CHANGELOG entry. Add one by hand:\n`);
-      ctx.stderr.write(`   Claude Code CLI pin ${direction} ${currentPin} → ${resolvedVersion}.\n`);
+      ctx.stderr.write(`   Claude Code CLI pin ${entryDirection} ${pinAtHeadForEntry} → ${resolvedVersion}.\n`);
     }
 
     ctx.stdout.write(`✏️  harness update-cli: pin ${currentPin} → ${resolvedVersion}; dridock ${currentDridockVersion.toString()} → ${newDridockVersion.toString()}.\n`);
@@ -447,6 +507,7 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
       runMakeBuildMinimal: this.depsOverride?.runMakeBuildMinimal ?? defaultRunMakeBuildMinimal,
       readBakedClaudeVersion: this.depsOverride?.readBakedClaudeVersion ?? defaultReadBakedClaudeVersion,
       resolveChannel: this.depsOverride?.resolveChannel ?? defaultResolveChannel,
+      readFileAtHead: this.depsOverride?.readFileAtHead ?? defaultReadFileAtHead,
     };
   }
 }
@@ -533,6 +594,22 @@ async function defaultResolveChannel(channel: string, releasesUrl: string): Prom
     if (!res.ok) return undefined;
     const body = await res.text();
     return body.split("\n")[0]?.trim();
+  } catch {
+    return undefined;
+  }
+}
+
+/** `git show HEAD:<relativePath>` under `root`. Returns undefined on any
+ *  failure (not a repo, file doesn't exist at HEAD, git unavailable) —
+ *  never throws. */
+async function defaultReadFileAtHead(root: string, relativePath: string): Promise<string | undefined> {
+  try {
+    const proc = Bun.spawn(["git", "-C", root, "show", `HEAD:${relativePath}`], {
+      stdout: "pipe", stderr: "ignore",
+    });
+    const text = await new Response(proc.stdout).text();
+    const rc = await proc.exited;
+    return rc === 0 ? text : undefined;
   } catch {
     return undefined;
   }

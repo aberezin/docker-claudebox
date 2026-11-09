@@ -213,6 +213,15 @@ describe("HarnessCommand.update-cli", () => {
       runMakeBuildMinimal: async () => ({ rc: 0, output: "" }),
       readBakedClaudeVersion: async () => "2.1.319",
       resolveChannel: async () => undefined,
+      // Default: HEAD matches whatever seedRepo() put on disk — i.e. every
+      // pre-#101-F3 test is a "fresh" iteration (no prior uncommitted bump),
+      // matching their pre-F3 expectations. F3's own tests override this to
+      // simulate a prior uncommitted update-cli run.
+      readFileAtHead: async (_root, relativePath) => {
+        if (relativePath === "VERSION") return VERSION_BODY;
+        if (relativePath === "Dockerfile") return DOCKERFILE_BODY;
+        return undefined;
+      },
       ...overrides,
     };
   }
@@ -596,5 +605,128 @@ describe("HarnessCommand.update-cli", () => {
     const rc = await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.319", "--skip-build"], ctx);
     expect(rc).toBe(1);
     expect(stderr.text()).toContain("DRIDOCK_BACKEND='podman'");
+  });
+
+  // --- F3 (#101): idempotency across repeated different targets ---
+
+  /** Simulate the on-disk state right after a PRIOR, uncommitted
+   *  `update-cli stable` run resolved to 2.1.300 (first iteration), while
+   *  HEAD (what's actually committed) is still at the original seedRepo()
+   *  state (pin 2.1.258, dridock 5.10.1). */
+  function seedPriorUncommittedIteration(fs: InMemoryFileSystem): void {
+    seedRepo(fs);
+    fs.seed("/repo/Dockerfile", DOCKERFILE_BODY.replace("2.1.258", "2.1.300"));
+    fs.seed("/repo/VERSION", "5.11.0\n");
+    fs.seed(HARNESS_FINGERPRINT, DRIDOCK_VERSION_TS_BODY.replace("5.10.1", "5.11.0"));
+    fs.seed(
+      "/repo/CHANGELOG.md",
+      CHANGELOG_BODY.replace(
+        "## [Unreleased]\n",
+        "## [Unreleased]\n\n## [5.11.0] - 2026-11-09\n\n### Changed\n- Claude Code CLI pin raised **2.1.258 → 2.1.300** (`ARG CLAUDE_VERSION`), resolved from the `stable` release channel. Above the `--remote-control` floor (2.1.206).\n",
+      ),
+    );
+  }
+
+  /** HEAD never moved in this scenario — it's still exactly seedRepo()'s
+   *  original state, regardless of what's now on disk. */
+  function depsWithHeadAtSeedRepo(overrides: Partial<import("./HarnessCommand.ts").HarnessDeps> = {}): import("./HarnessCommand.ts").HarnessDeps {
+    return baseDeps({
+      readFileAtHead: async (_root, relativePath) => {
+        if (relativePath === "VERSION") return VERSION_BODY;
+        if (relativePath === "Dockerfile") return DOCKERFILE_BODY;
+        return undefined;
+      },
+      ...overrides,
+    });
+  }
+
+  test("F3: a second iteration with a different target reuses the prior uncommitted VERSION bump instead of stacking another", async () => {
+    const fs = new InMemoryFileSystem();
+    seedPriorUncommittedIteration(fs);
+    const { ctx } = makeCtx(fs);
+    const rc = await new HarnessCommand(depsWithHeadAtSeedRepo({
+      readBakedClaudeVersion: async () => "2.1.320",
+    })).run(["update-cli", "2.1.320"], ctx);
+    expect(rc).toBe(0);
+    // Dockerfile always reflects the LATEST target.
+    expect(await fs.readText("/repo/Dockerfile")).toContain("ARG CLAUDE_VERSION=2.1.320");
+    // VERSION is REUSED (still 5.11.0), not bumped again to 5.12.0.
+    expect(await fs.readText("/repo/VERSION")).toBe("5.11.0\n");
+    expect(await fs.readText(HARNESS_FINGERPRINT)).toContain(`DRIDOCK_TS_VERSION = "5.11.0"`);
+  });
+
+  test("F3: the CHANGELOG entry is replaced in place, not stacked, and describes the CUMULATIVE change since HEAD", async () => {
+    const fs = new InMemoryFileSystem();
+    seedPriorUncommittedIteration(fs);
+    const { ctx } = makeCtx(fs);
+    const rc = await new HarnessCommand(depsWithHeadAtSeedRepo({
+      readBakedClaudeVersion: async () => "2.1.320",
+    })).run(["update-cli", "2.1.320"], ctx);
+    expect(rc).toBe(0);
+    const changelog = await fs.readText("/repo/CHANGELOG.md");
+    // Still exactly ONE [5.11.0] header -- not two.
+    expect(changelog.match(/## \[5\.11\.0\]/g)).toHaveLength(1);
+    // The pin line describes the FULL span since HEAD (2.1.258, what's
+    // actually committed), not the intermediate 2.1.300 nobody will ever see.
+    expect(changelog).toContain("Claude Code CLI pin raised **2.1.258 → 2.1.320**");
+    expect(changelog).not.toContain("2.1.300");
+    // Prior unrelated entries below are untouched.
+    expect(changelog).toContain("## [5.10.1]");
+  });
+
+  test("F3: fresh iteration (first run, nothing uncommitted yet) still bumps VERSION normally", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs); // VERSION on disk === VERSION at HEAD: this IS fresh
+    const { ctx } = makeCtx(fs);
+    const rc = await new HarnessCommand(depsWithHeadAtSeedRepo()).run(["update-cli", "2.1.319"], ctx);
+    expect(rc).toBe(0);
+    expect(await fs.readText("/repo/VERSION")).toBe("5.11.0\n");
+  });
+
+  test("F3: readFileAtHead unavailable (no git) falls back to the pre-#101 always-bump behavior", async () => {
+    const fs = new InMemoryFileSystem();
+    seedPriorUncommittedIteration(fs); // on-disk VERSION is already 5.11.0
+    const { ctx } = makeCtx(fs);
+    const rc = await new HarnessCommand(baseDeps({
+      readBakedClaudeVersion: async () => "2.1.320",
+      readFileAtHead: async () => undefined, // git unavailable
+    })).run(["update-cli", "2.1.320"], ctx);
+    expect(rc).toBe(0);
+    // Can't tell this is a repeat, so it bumps again from whatever's on disk
+    // -- the safe, previously-shipped behavior, not a new failure mode.
+    expect(await fs.readText("/repo/VERSION")).toBe("5.12.0\n");
+  });
+
+  test("F3: the replaced entry still ends in a blank line before whatever follows (regression: an earlier version of this fix ate the separator)", async () => {
+    const fs = new InMemoryFileSystem();
+    seedPriorUncommittedIteration(fs);
+    const { ctx } = makeCtx(fs);
+    const rc = await new HarnessCommand(depsWithHeadAtSeedRepo({
+      readBakedClaudeVersion: async () => "2.1.320",
+    })).run(["update-cli", "2.1.320"], ctx);
+    expect(rc).toBe(0);
+    const changelog = await fs.readText("/repo/CHANGELOG.md");
+    // Exactly the shape that follows: pin line, ONE blank line, next header.
+    // Caught live against the real CHANGELOG.md: the first version of this
+    // replace merged the pin line straight into the next section with no
+    // separator at all.
+    expect(changelog).toMatch(/Claude Code CLI pin raised \*\*2\.1\.258 → 2\.1\.320\*\*[^\n]*\n\n## \[5\.10\.1\]/);
+  });
+
+  test("F3: non-fresh but the prior entry's exact shape isn't found in the CHANGELOG → falls back to inserting a new entry rather than risking corruption", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    // VERSION already bumped (non-fresh) but CHANGELOG was never updated to
+    // match -- e.g. the warn-and-skip path hit on the prior run.
+    fs.seed("/repo/VERSION", "5.11.0\n");
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new HarnessCommand(depsWithHeadAtSeedRepo({
+      readBakedClaudeVersion: async () => "2.1.320",
+    })).run(["update-cli", "2.1.320"], ctx);
+    expect(rc).toBe(0);
+    const changelog = await fs.readText("/repo/CHANGELOG.md");
+    expect(changelog).toContain("## [5.11.0]");
+    expect(changelog).toContain("Claude Code CLI pin raised **2.1.258 → 2.1.320**");
+    expect(stdout.text()).toContain("validated");
   });
 });

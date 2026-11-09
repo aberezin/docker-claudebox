@@ -91,6 +91,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
   No `VERSION` bump: host-TS only, no host↔image contract change (same
   precedent as #93/#94 and #100's own CLI-only commits).
+- **`dridock harness update-cli` stacked a release per invocation when run
+  twice with different targets before committing** (#101, part 1). The no-op
+  guard only caught re-running the *same* target; three different targets in
+  a row produced three `VERSION` minor bumps and three CHANGELOG headers for
+  what should converge on one uncommitted release. Now compares on-disk
+  `VERSION` against what's committed at `HEAD` (`git show HEAD:VERSION`): if
+  they already differ, a prior uncommitted run is in progress, so this run
+  reuses that bump instead of stacking another, and replaces (rather than
+  re-inserts) that run's own CHANGELOG entry — reworded to describe the
+  CUMULATIVE pin change since `HEAD`, not an intermediate value nobody will
+  ever see once this settles. Falls back to the old always-bump behavior
+  when `HEAD`'s `VERSION` can't be read (no git, untracked file, shallow
+  clone) — an idempotency nicety, not a correctness guarantee worth failing
+  loudly over. No `VERSION` bump: same precedent as above.
 
 ### Added
 - **`dridock harness update-cli <version|latest|stable> [--skip-build]`** (#100).
