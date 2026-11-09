@@ -1227,6 +1227,40 @@ _maybe_install_default_plugin "$@"
 # install, so an offline retry on next start is automatic AND a user who later
 # `plugin uninstall`s an entry isn't fought. One failed install does NOT mark
 # siblings done (the fetcher drop-one-permanently class, #90).
+# Resolve the name Claude Code ACTUALLY registered a marketplace under (#98).
+#
+# `claude plugin install` addresses a marketplace by the `name` field inside
+# that marketplace's `.claude-plugin/marketplace.json` -- NOT by the repo it
+# was cloned from. #96 derived the name from the repo slug
+# (`${marketplace_full##*/}`), which is correct only when a marketplace happens
+# to declare a name matching its repo. `anthropics/claude-plugins-official`
+# does, so the hardcoded default always worked BY COINCIDENCE and the bug was
+# invisible until a second marketplace appeared: `aberezin/superpowers`
+# declares `name: superpowers-dev`, so `superpowers@superpowers` addressed
+# nothing and the install failed silently (output goes to /dev/null, and the
+# marker is only touched on success).
+#
+# After a successful `marketplace add`, the authoritative mapping is on disk.
+# Match on `.source.repo` and take the key.
+#
+# $1 = "<owner>/<repo>". Echoes the registered name, or nothing if it cannot be
+# determined -- the caller falls back to the old derivation rather than
+# refusing to install, so a missing/garbled file degrades to pre-#98 behavior
+# instead of breaking a project that works today.
+_resolve_marketplace_name() {
+	local repo="$1"
+	local km="$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json"
+	[ -f "$km" ] || return 0
+	command -v jq >/dev/null 2>&1 || return 0
+	# --arg (not string interpolation) so the repo value is data to jq, never
+	# program text -- same discipline as the shape check above.
+	jq -r --arg repo "$repo" '
+		to_entries
+		| map(select(.value.source.repo == $repo))
+		| .[0].key // empty
+	' "$km" 2>/dev/null
+}
+
 _install_project_plugins() {
 	case "${DRIDOCK_DEFAULT_PLUGINS:-1}" in 0|false) return 0 ;; esac
 	[ "${1:-}" = "setup-token" ] && return 0
@@ -1258,13 +1292,6 @@ _install_project_plugins() {
 		fi
 		name="${entry%%@*}"
 		marketplace_full="${entry#*@}"
-		# Marketplace short name = the repo portion (last segment after /).
-		# The `marketplace add` call registers it under that short name,
-		# which `plugin install` then references. Mirrors what the
-		# hardcoded default installer does: adds `anthropics/claude-plugins-official`
-		# and installs `commit-commands@claude-plugins-official`.
-		marketplace_short="${marketplace_full##*/}"
-		install_spec="$name@$marketplace_short"
 		# Per-plugin marker — slug the entry to stay filesystem-safe.
 		# Replace `/` with `_`. Namespace `.plugin-*` so a future mechanism
 		# can enumerate them uniformly.
@@ -1272,17 +1299,37 @@ _install_project_plugins() {
 		marker="$CLAUDE_CONFIG_DIR/.plugin-$slug"
 		[ -f "$marker" ] && continue
 		dbg "installing project plugin $entry (first run)…"
+		# TWO steps, not one chained command (#98). The marketplace must be
+		# registered before we can learn what name it registered ITSELF under,
+		# and that name -- not the repo slug -- is what `plugin install`
+		# addresses. See _resolve_marketplace_name.
+		#
 		# </dev/null + timeout 90 for the same PID-1-owns-tty reason as the
-		# default installer above (#17). `plugin install` alone fails
-		# without the marketplace being added first, so we chain them.
+		# default installer above (#17).
+		if ! timeout 90 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
+			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:\$PATH; exec claude plugin marketplace add '$marketplace_full'" \
+			</dev/null >/dev/null 2>&1
+		then
+			echo "note: project plugin ($entry) not installed — marketplace '$marketplace_full' could not be added (offline, timed out, or unreachable); will retry next start; set DRIDOCK_DEFAULT_PLUGINS=0 to silence" >&2
+			continue
+		fi
+		# Authoritative name, with the pre-#98 derivation as the fallback so a
+		# missing/garbled known_marketplaces.json degrades instead of breaking.
+		marketplace_short="$(_resolve_marketplace_name "$marketplace_full")"
+		if [ -z "$marketplace_short" ]; then
+			marketplace_short="${marketplace_full##*/}"
+			dbg "could not resolve registered marketplace name for $marketplace_full — falling back to repo slug '$marketplace_short'"
+		fi
+		install_spec="$name@$marketplace_short"
+		dbg "installing $install_spec (marketplace $marketplace_full registered as '$marketplace_short')"
 		if timeout 90 setpriv --reuid="$(id -u claude)" --regid="$(id -g claude)" --init-groups \
-			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:\$PATH; claude plugin marketplace add '$marketplace_full' && exec claude plugin install '$install_spec' --scope user" \
+			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:\$PATH; exec claude plugin install '$install_spec' --scope user" \
 			</dev/null >/dev/null 2>&1
 		then
 			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
 			dbg "project plugin installed: $entry"
 		else
-			echo "note: project plugin ($entry) not installed (offline, timed out, or marketplace unreachable) — will retry next start; set DRIDOCK_DEFAULT_PLUGINS=0 to silence" >&2
+			echo "note: project plugin ($entry) not installed — 'claude plugin install $install_spec' failed (marketplace '$marketplace_full' registered as '$marketplace_short'); will retry next start; set DRIDOCK_DEFAULT_PLUGINS=0 to silence" >&2
 		fi
 	done
 	set +f

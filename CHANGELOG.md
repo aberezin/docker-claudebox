@@ -28,6 +28,43 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [5.10.1] - 2026-11-09
+
+### Fixed
+- **A per-project plugin whose marketplace declares a name different from its
+  repo never installed** (#98). `claude plugin install` addresses a marketplace
+  by the `name` field inside its `.claude-plugin/marketplace.json`, but
+  `entrypoint.sh` derived that name from the repo slug — so
+  `superpowers@aberezin/superpowers`, whose manifest declares
+  `name: superpowers-dev`, produced the spec `superpowers@superpowers`, which
+  addresses nothing. `marketplace add` succeeded, `plugin install` failed, output
+  went to `/dev/null`, and the success-only marker meant it retried and
+  re-failed on every start with nothing the user could see.
+
+  Invisible in #96 because `anthropics/claude-plugins-official` declares a name
+  matching its repo, so the repo-slug derivation coincided with the real key for
+  the only marketplace that had ever been exercised.
+
+  The entrypoint now registers the marketplace, then **reads the name it
+  registered itself under** from `~/.claude/plugins/known_marketplaces.json`
+  (matched on `.source.repo`), and installs against that — falling back to the
+  old derivation if the file is absent or unparseable, so a project that works
+  today cannot be broken by the fix. `add` and `install` are consequently two
+  steps rather than one chained command: the name is unknowable until the add
+  has run. Both failure paths now say which stage failed and what spec was
+  attempted.
+
+  Found by live-verifying #96/#97 in a real container, which is what #95 was
+  waiting for. **Requires an image rebuild** (`./install.sh` or `make build`) —
+  `entrypoint.sh` is baked in.
+
+  New `tests/test_plugin_marketplace_name.sh` pins it: it extracts the resolver
+  from `entrypoint.sh` and runs it on the host against fixtures — no Docker, no
+  token — including the verbatim payload that exposed the bug, every
+  degradation path, and a hostile repo string (the value reaches `jq` via
+  `--arg`, as data, never as program text). Mutation-checked: restoring the
+  repo-slug derivation fails 7 of its 14 assertions.
+
 ## [5.10.0] - 2026-11-09
 
 ### Added

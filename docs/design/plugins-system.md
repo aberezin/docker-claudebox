@@ -39,6 +39,24 @@ plugins:
   - superpowers@aberezin/superpowers
 ```
 
+> **A marketplace is named by its own manifest, not by its repo (#98).**
+> `claude plugin install` addresses a marketplace by the `name` field inside
+> that marketplace's `.claude-plugin/marketplace.json`. Those often differ:
+> `aberezin/superpowers` declares `name: superpowers-dev`, so the install spec
+> is `superpowers@superpowers-dev`, not `superpowers@superpowers`.
+>
+> The entrypoint therefore **reads the registered name** out of
+> `~/.claude/plugins/known_marketplaces.json` after `marketplace add`, matching
+> on `.source.repo`, and falls back to the repo slug only if that cannot be
+> determined. Through 5.10.0 it derived the name from the repo slug
+> unconditionally, which worked solely because
+> `anthropics/claude-plugins-official` declares a name matching its repo — so
+> the one marketplace #96 exercised was the one case where the bug is
+> invisible, and `superpowers` failed silently.
+>
+> Consequence for the config syntax: you do **not** write the marketplace name
+> anywhere. The entry names the repo; the harness discovers the rest.
+
 Each entry is **`<plugin-name>@<owner>/<repo>`** — the full form. `<owner>/<repo>`
 is the GitHub slug the marketplace lives under; the entrypoint registers it
 with `claude plugin marketplace add <owner>/<repo>`, derives the marketplace's
