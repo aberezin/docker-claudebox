@@ -273,6 +273,7 @@ Use `~/.claude/init.d/*.sh` hooks (see [Init Hooks](docs/customization.md#init-h
 - Workspace trust dialog pre-accepted — no interactive prompts
 - Baked **`cb-*` helper commands** — `cb-browser` (self-contained browser testing), `cb-report-bug` (file a framework bug to the host), `cb-help` (list them). See [convenience scripts](docs/design/convenience-scripts.md).
 - **Profiles** — opt-in tool bundles (`profiles: [typescript, python, …]` in `.dridock/config.yml`) that enable code-intelligence plugins on first run. See [profiles](docs/design/profiles.md).
+- **Per-project Claude Code plugins** — list them in `.dridock/config.yml` under `plugins: [name@owner/repo, …]` and the entrypoint runs `claude plugin marketplace add` + `claude plugin install` for each on first container create, marker-guarded. Additive to the hardcoded default (`commit-commands`), opt out of everything with `DRIDOCK_DEFAULT_PLUGINS=0`. See [plugins-system.md](docs/design/plugins-system.md).
 - A container-side **`/dridock` skill** so the claudebot can self-report its harness version, tools, and environment.
 - Custom scripts via `~/.claude/bin` (added to PATH automatically)
 - Init hooks via `~/.claude/init.d/*.sh` (run once on first container create)

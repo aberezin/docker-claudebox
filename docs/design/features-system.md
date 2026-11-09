@@ -229,6 +229,7 @@ feature gets the placement rule wrong.
 - [Issue #5](https://github.com/aberezin/docker-claudebox/issues/5) — where this
   design tracks.
 - [profiles.md](profiles.md) — the current 2.x profile system this supersedes.
+- [plugins-system.md](plugins-system.md) — sibling mechanism for a different artifact: Claude Code plugins from external marketplaces (5.9.0, #96). Features and plugins are orthogonal — features own `on.sh`/`off.sh` scripts the harness ships; plugins invoke `claude plugin install` against someone else's marketplace.
 - [Issue #11](https://github.com/aberezin/docker-claudebox/issues/11) — the dridock
   rebrand; interacts with feature-name / directory naming decisions.
 - [Issue #10](https://github.com/aberezin/docker-claudebox/issues/10) — SSH-for-git;
