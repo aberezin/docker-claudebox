@@ -167,6 +167,25 @@ if [ ! -d "$SCRIPT_DIR/dridock-ts" ]; then
 	exit 1
 fi
 
+# ── git hooks (#104) ─────────────────────────────────────────────────────────
+# CLAUDE.md has required `make hooks` once per clone since 2026-09-01, and it is
+# a step people skip: Bear's clone still had only `.git/hooks/*.sample` two
+# months later, so the master-commit guard this repo documents as ENFORCED was
+# live in exactly one of the two clones that commit to it. install.sh is the
+# command everyone actually runs, so the guard rides along with it.
+#
+# Deliberately BEFORE the image build: the build takes minutes and can fail, and
+# a hook that only lands on a successful build is a hook that doesn't land.
+# Non-fatal — a missing hook must not stop someone installing the harness — but
+# it says so out loud rather than skipping in silence (CLAUDE.md house rule).
+if [ -f "$SCRIPT_DIR/.githooks/install.sh" ] && git -C "$SCRIPT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+	echo "🪝 Installing this repo's git hooks..."
+	if ! bash "$SCRIPT_DIR/.githooks/install.sh"; then
+		echo "⚠️  git hook install reported problems (above). Continuing the install —"
+		echo "    but the pre-commit guard may not be active in this clone."
+	fi
+fi
+
 # Build into a dedicated cb-infra colima profile (never the human's default VM).
 # Project VMs are seeded from it via save|load at run time. See
 # docs/design/per-project-vm.md.

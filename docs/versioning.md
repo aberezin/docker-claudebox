@@ -142,6 +142,51 @@ Merging is **fast-forward** where possible (`git merge --ff-only`); check with
 Note that landing anything on `master` while a long-lived branch is open puts that
 branch out of FF range, so prefer to hold unrelated commits until it merges.
 
+### Installing the guard — `make hooks`
+
+The pre-commit guard lives in `.githooks/`, which git does not read. It has to be
+copied into `.git/hooks/`, and that is what **`make hooks`** does — once per clone:
+
+```bash
+make hooks          # install / refresh every hook in .githooks/
+make hooks-check    # report missing, stale, or shadowed hooks; silent when clean
+```
+
+Since #104 you get it for free: `./install.sh` runs the installer before the image
+build, and a SessionStart hook nags when this clone's copies are missing or stale.
+Three layers because one wasn't enough — on 2026-11-09, two months after this file
+started requiring the step, one of the two clones that commit to this repo held only
+`.git/hooks/*.sample`. The guard was documented as enforced and was enforced in half
+the places it needed to be.
+
+**Staleness is the quieter half.** `.githooks/pre-commit` has changed twice (5.4.0
+reworded its refusal, #103 added the release-branch advice). A clone that installed
+the old copy has a guard that is present, executable, passing, and handing out advice
+this repo has retracted. `make hooks-check` is what notices.
+
+**Why not `core.hooksPath=.githooks`?** It looks like it deletes this whole problem.
+Two reasons it doesn't:
+
+- **Scope.** `git config core.hooksPath .githooks` writes to `.git/config` and applies
+  to **that repo only** — it is not global unless you pass `--global`, and you should
+  not: a relative `hooksPath` is resolved per-repo, so a global setting silently points
+  *every* repo you own at its own non-existent `.githooks/` and disables `.git/hooks/`
+  everywhere, including hooks other tools installed for you.
+- **It is worktree-relative, and it replaces rather than supplements.** `.githooks/`
+  only exists on branches that have it (it arrived in `437dc1c`), and `core.hooksPath`
+  does not fall back to `.git/hooks/` — so on a branch that predates the file there is
+  no guard at all. Tested exactly that way and the guard silently did nothing, which is
+  worse than no guard because you believe you are covered. `.git/hooks/` lives outside
+  the worktree and is therefore branch-independent.
+
+Because a set `hooksPath` makes an install a no-op with no other symptom, the installer
+refuses rather than reporting success, and names the scope that set it.
+
+Adding a **new** hook is one step: drop it in `.githooks/` under its real git hook name
+(no `.sh` extension — git never calls `pre-push.sh`). The installer walks the directory,
+so nothing else needs editing; it refuses a name git wouldn't recognise instead of
+copying it somewhere git never looks. Covered by `tests/test_githooks_install.sh`.
+
 ### Who merges
 
 **Whoever owns the branch merges it, and says so on the issue** — a close-note naming

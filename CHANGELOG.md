@@ -26,9 +26,49 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
-## [Unreleased]
+## [5.13.0] - 2026-11-09
 
 ### Added
+- **Git hooks install themselves, and a clone that missed it says so** (#104).
+  `make hooks` was `install -m 755 .githooks/pre-commit .git/hooks/pre-commit`:
+  one named hook, a once-per-clone step, and no detection of any kind.
+
+  All three were holes. `CLAUDE.md` has required the step since 2026-09-01; on
+  2026-11-09 one of the two clones that commit to this repo still held only
+  `.git/hooks/*.sample`, so the master-commit guard documented here as *enforced*
+  was live in half the places it needed to be. Re-running it is also required
+  whenever the hook itself changes — this file said so for 5.4.0 and the hook
+  changed again in #103 — and nothing detected a clone holding an installed,
+  executable, passing guard that prints advice the repo has since retracted.
+  And a hook added later would have needed a second `install` line in the
+  Makefile that nobody would remember to add: adding a hook and distributing it
+  were separate steps with nothing forcing the second, the same shape as the
+  unindexed-docs problem.
+
+  Now: **`.githooks/install.sh`** walks `.githooks/` and installs every hook it
+  finds, so a new hook is one file and no other edit. `make hooks` delegates to
+  it, `make hooks-check` reports without installing, **`./install.sh` runs it
+  before the image build** (a hook that only lands on a *successful* multi-minute
+  build is a hook that doesn't land), and a tracked SessionStart hook relays
+  `--check` so a missing or stale copy is named at the top of the session with
+  the literal command to fix it. It is not auto-installed from the session hook:
+  writing into `.git/hooks/` unasked is a side effect nobody requested.
+
+  Three things it refuses rather than doing silently, each otherwise symptomless:
+  a set **`core.hooksPath`** (it *replaces* `.git/hooks/`, so the install would be
+  a no-op — the message names the scope, since `--unset` in the wrong one reports
+  success and changes nothing); a hook named `pre-push.sh` (git never calls a hook
+  with an extension, and shell habit invites exactly that name); and a name git
+  does not recognise at all. An empty `.githooks/` also fails loudly instead of
+  reporting "0 problems".
+
+  `core.hooksPath=.githooks` is deliberately **not** the mechanism, and
+  `docs/versioning.md` now says why: it is worktree-relative, so the guard is
+  simply absent on any branch predating `.githooks/` (`437dc1c`), with no
+  fallback. `.git/hooks/` lives outside the worktree and is branch-independent.
+
+  `tests/test_githooks_install.sh` — 23 assertions over `git init` fixtures, so it
+  tests the installer rather than the operator's machine.
 - **`release-X.Y.Z` branch convention, and a real VERSION sync test** (#103).
   Cutting 5.12.0 exposed two gaps in `docs/versioning.md`:
 
