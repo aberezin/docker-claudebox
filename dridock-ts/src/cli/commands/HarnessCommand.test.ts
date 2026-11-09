@@ -713,13 +713,13 @@ describe("HarnessCommand.update-cli", () => {
     expect(changelog).toMatch(/Claude Code CLI pin raised \*\*2\.1\.258 → 2\.1\.320\*\*[^\n]*\n\n## \[5\.10\.1\]/);
   });
 
-  test("F3: non-fresh but the prior entry's exact shape isn't found in the CHANGELOG → falls back to inserting a new entry rather than risking corruption", async () => {
+  test("F3: non-fresh but the prior entry's exact shape isn't found in the CHANGELOG → falls back to inserting a new entry rather than risking corruption, LOUDLY (Arfy's #101 review)", async () => {
     const fs = new InMemoryFileSystem();
     seedRepo(fs);
     // VERSION already bumped (non-fresh) but CHANGELOG was never updated to
     // match -- e.g. the warn-and-skip path hit on the prior run.
     fs.seed("/repo/VERSION", "5.11.0\n");
-    const { ctx, stdout } = makeCtx(fs);
+    const { ctx, stdout, stderr } = makeCtx(fs);
     const rc = await new HarnessCommand(depsWithHeadAtSeedRepo({
       readBakedClaudeVersion: async () => "2.1.320",
     })).run(["update-cli", "2.1.320"], ctx);
@@ -728,5 +728,19 @@ describe("HarnessCommand.update-cli", () => {
     expect(changelog).toContain("## [5.11.0]");
     expect(changelog).toContain("Claude Code CLI pin raised **2.1.258 → 2.1.320**");
     expect(stdout.text()).toContain("validated");
+    // rc 0 is right (the operation did succeed) but this left the
+    // CHANGELOG with two headers for one version -- that must not be
+    // silent, per this repo's never-silently-override rule.
+    expect(stderr.text()).toContain("didn't match this command's own shape");
+    expect(stderr.text()).toContain("Merge the two before committing");
+  });
+
+  test("F3: the SAME fallback-insert path on a FRESH iteration stays silent (nothing to merge -- there was no prior entry at all)", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs); // fresh: VERSION on disk === VERSION at HEAD
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new HarnessCommand(depsWithHeadAtSeedRepo()).run(["update-cli", "2.1.319"], ctx);
+    expect(rc).toBe(0);
+    expect(stderr.text()).toBe("");
   });
 });

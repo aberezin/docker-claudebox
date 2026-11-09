@@ -445,6 +445,18 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
         ].join("\n");
         await ctx.fs.writeText(changelogPath, changelogText.replace(existingBlockMatch[0], replacement));
       } else {
+        // Arfy's #101 review: this is expected and silent on a FRESH
+        // iteration (there's nothing to replace yet). On a non-fresh one it
+        // means the prior entry didn't match this command's own expected
+        // shape (hand-edited in between, most likely) — inserting a SECOND
+        // entry instead of replacing is the right call (the alternative is
+        // risking a corrupt rewrite over a hand-written line), but it
+        // leaves the CHANGELOG with two headers for one version, which is
+        // malformed Keep-a-Changelog. That must be visible, not a silent
+        // rc=0 — same rule the no-anchor branch above already follows.
+        if (!isFreshIteration) {
+          ctx.stderr.write(`⚠️  harness update-cli: the existing ${newDridockVersion.toString()} entry didn't match this command's own shape (hand-edited?) — inserted a second entry instead of replacing. Merge the two before committing.\n`);
+        }
         const entry = [
           `## [${newDridockVersion.toString()}] - ${today}`,
           ``,
