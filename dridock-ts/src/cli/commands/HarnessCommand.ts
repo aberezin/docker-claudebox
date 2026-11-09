@@ -266,6 +266,30 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
       resolvedVersion = target;
     }
 
+    // Compute, once, the docker daemon + image name the validation step (or
+    // its --skip-build hint, N1) will use — mirroring the Makefile's own
+    // selection exactly (F1). Done early, before any file writes, so a
+    // malformed DRIDOCK_BACKEND fails fast rather than after editing four
+    // files. Unlike the Makefile's `ifeq ($(DRIDOCK_BACKEND),docker) … else
+    // colima` — where any non-"docker" value, including a typo, silently
+    // selects colima (N2) — this refuses an unrecognized explicit value
+    // outright: silently guessing which daemon the operator meant is exactly
+    // the "never silently discard user-supplied input" failure class (#17
+    // family), and the operator gets a different, confusing error from `make`
+    // itself a few seconds later rather than this clear one now.
+    const env = ctx.env.raw();
+    const explicitBackend = env["DRIDOCK_BACKEND"];
+    if (explicitBackend !== undefined && explicitBackend !== "docker" && explicitBackend !== "colima") {
+      ctx.stderr.write(`❌ harness update-cli: DRIDOCK_BACKEND='${explicitBackend}' isn't 'docker' or 'colima'.\n`);
+      ctx.stderr.write(`   Unset it to auto-detect, or fix the typo. (The Makefile itself is lenient here — anything but exactly 'docker' silently falls to the colima branch — this command isn't, on purpose.)\n`);
+      return 1;
+    }
+    const backend = explicitBackend === "docker" ? "docker" : explicitBackend === "colima" ? "colima" : (await deps.insideContainer()) ? "docker" : "colima";
+    const dockerArgs = backend === "docker" ? [] : ["--context", infraContext()];
+    const imageName = env["IMAGE_NAME"] ?? "dridock";
+    const tag = env["TAG"] ?? "latest";
+    const image = `${imageName}:${tag}-minimal`;
+
     // Read the current pin. The top-of-file default is the only line this
     // command edits; the bare mid-file `ARG CLAUDE_VERSION` re-declarations
     // (multi-stage builds re-import a build arg per stage) take no value
@@ -372,14 +396,14 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
       await ctx.fs.writeText(changelogPath, changelogText.replace("## [Unreleased]\n", `## [Unreleased]\n\n${entry}`));
     } else {
       ctx.stderr.write(`⚠️  harness update-cli: no '## [Unreleased]' anchor found in ${changelogPath} — skipped the CHANGELOG entry. Add one by hand:\n`);
-      ctx.stderr.write(`   Claude Code CLI pin raised ${currentPin} → ${resolvedVersion}.\n`);
+      ctx.stderr.write(`   Claude Code CLI pin ${direction} ${currentPin} → ${resolvedVersion}.\n`);
     }
 
     ctx.stdout.write(`✏️  harness update-cli: pin ${currentPin} → ${resolvedVersion}; dridock ${currentDridockVersion.toString()} → ${newDridockVersion.toString()}.\n`);
 
     if (skipBuild) {
       ctx.stdout.write(`\n⏭  --skip-build: not validating. Before relying on this, build + check:\n`);
-      ctx.stdout.write(`     make build-minimal && docker run --rm --entrypoint claude dridock:latest-minimal --version\n`);
+      ctx.stdout.write(`     make build-minimal && docker ${dockerArgs.join(" ")}${dockerArgs.length > 0 ? " " : ""}run --rm --entrypoint claude ${image} --version\n`);
       ctx.stdout.write(`\nThis only edited local files — nothing is committed. Mac-side propagation still needed:\n`);
       ctx.stdout.write(`  1. review + commit (this command never does)\n`);
       ctx.stdout.write(`  2. on the Mac: make build (or ./install.sh) to push the real image into cb-infra\n`);
@@ -395,24 +419,9 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
       return built.rc;
     }
 
-    // Read the built image back from the SAME daemon `make` just built it
-    // into, and under the SAME name/tag it used — both mirror Makefile's own
-    // selection logic exactly (Arfy's F1 on #100: a bare, context-less
-    // `docker run` happened to work in-container, where the ambient daemon
-    // IS the build daemon, but on the Mac it silently queries whatever
-    // context the operator's shell happens to be on, which need not be
-    // cb-infra; the read-back then returns undefined and gets misreported
-    // below as a stale-cache build failure that never happened).
-    const env = ctx.env.raw();
-    const explicitBackend = env["DRIDOCK_BACKEND"]; // Makefile's own `?=`: an exported value wins over auto-detection, without even running it.
-    const backend = explicitBackend === "docker" || explicitBackend === "colima"
-      ? explicitBackend
-      : (await deps.insideContainer()) ? "docker" : "colima";
-    const dockerArgs = backend === "docker" ? [] : ["--context", infraContext()];
-    const imageName = env["IMAGE_NAME"] ?? "dridock";
-    const tag = env["TAG"] ?? "latest";
-    const image = `${imageName}:${tag}-minimal`;
-
+    // Read the built image back from the SAME daemon + name `make` just
+    // built it into — `backend`/`dockerArgs`/`image` were already computed
+    // above, before any files were written.
     const bakedVersion = await deps.readBakedClaudeVersion(image, dockerArgs);
     if (bakedVersion !== resolvedVersion) {
       ctx.stderr.write(`\n❌ harness update-cli: build succeeded, but ${image}${dockerArgs.length > 0 ? ` (docker ${dockerArgs.join(" ")})` : ""} bakes claude ${bakedVersion ?? "(unreadable)"}, not ${resolvedVersion}.\n`);

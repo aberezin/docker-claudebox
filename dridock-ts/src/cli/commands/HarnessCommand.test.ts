@@ -554,4 +554,47 @@ describe("HarnessCommand.update-cli", () => {
     expect(rc).toBe(1);
     expect(stderr.text()).toContain("below the --remote-control floor");
   });
+
+  // --- N1/N2 (Arfy, #100 sign-off nits) ---
+
+  test("N1: --skip-build hint uses the SAME computed image/context as the real validation would", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    const { ctx, stdout } = makeCtx(fs, "/repo", { DRIDOCK_BACKEND: "colima", IMAGE_NAME: "myfork", TAG: "dev" });
+    const rc = await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.319", "--skip-build"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("docker --context colima-cb-infra run --rm --entrypoint claude myfork:dev-minimal --version");
+  });
+
+  test("N1: --skip-build hint is bare (no --context) on the docker backend", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    const { ctx, stdout } = makeCtx(fs, "/repo", { DRIDOCK_BACKEND: "docker" });
+    const rc = await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.319", "--skip-build"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("docker run --rm --entrypoint claude dridock:latest-minimal --version");
+    expect(stdout.text()).not.toContain("--context");
+  });
+
+  test("N2: invalid DRIDOCK_BACKEND value → rc 1, refuses loudly, no files touched (never silently falls to auto-detect)", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    const before = await fs.readText("/repo/Dockerfile");
+    const { ctx, stderr } = makeCtx(fs, "/repo", { DRIDOCK_BACKEND: "podman" });
+    const rc = await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.319"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("DRIDOCK_BACKEND='podman'");
+    expect(stderr.text()).toContain("isn't 'docker' or 'colima'");
+    expect(await fs.readText("/repo/Dockerfile")).toBe(before);
+    expect(await fs.readText("/repo/VERSION")).toBe(VERSION_BODY);
+  });
+
+  test("N2: invalid DRIDOCK_BACKEND is refused even under --skip-build (the value is wrong regardless of whether it's used for a real docker call)", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    const { ctx, stderr } = makeCtx(fs, "/repo", { DRIDOCK_BACKEND: "podman" });
+    const rc = await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.319", "--skip-build"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("DRIDOCK_BACKEND='podman'");
+  });
 });
