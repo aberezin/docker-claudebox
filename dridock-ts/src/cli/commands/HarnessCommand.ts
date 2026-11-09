@@ -37,10 +37,19 @@ export interface HarnessDeps {
    *  fast; tests inject their own. */
   readonly runMakeBuildMinimal: (root: string) => Promise<{ rc: number; output: string }>;
   /** Read the Claude CLI version baked into an already-built image, by
-   *  running `claude --version` inside it. Injectable so tests never shell
-   *  out to a real docker daemon. Mirrors #94's cdpProbe shape: a plain
-   *  async function dep, not a new infra class, for a single external call. */
-  readonly readBakedClaudeVersion: (image: string) => Promise<string | undefined>;
+   *  running `claude --version` inside it. `dockerArgs` is whatever must
+   *  precede `run` to reach the SAME daemon `make` just built into — e.g.
+   *  `["--context", "colima-cb-infra"]` on the colima backend, `[]` bare on
+   *  the docker backend. The command computes `dockerArgs`; this just runs
+   *  what it's told, so the context-selection logic stays testable without
+   *  a real docker daemon (Arfy's F1 on #100: a bare `docker run` silently
+   *  queries whatever the OPERATOR's ambient context happens to be, which
+   *  only coincidentally matched cb-infra in-container — on the Mac it can
+   *  be a completely different daemon, so the read-back returns undefined
+   *  and the command misreports a stale-cache build failure that never
+   *  happened). Mirrors #94's cdpProbe shape: a plain async function dep,
+   *  not a new infra class, for a single external call. */
+  readonly readBakedClaudeVersion: (image: string, dockerArgs: readonly string[]) => Promise<string | undefined>;
   /** Resolve a named release channel (`latest`/`stable`) to a concrete
    *  version string via `${releasesUrl}/${channel}`. Default impl is a real
    *  `fetch`; tests inject a fixture. Mirrors install.sh's own curl-based
@@ -73,12 +82,15 @@ build cache on BuildKit snapshotter corruption and retries once.`,
     },
     {
       name: "update-cli",
-      synopsis: `dridock harness update-cli <version|latest|stable> [--skip-build]
+      synopsis: `dridock harness update-cli <version|latest|stable> [--skip-build] [--allow-downgrade]
 
 Raise the baked Claude CLI pin (Dockerfile's ARG CLAUDE_VERSION) and this
 repo's own VERSION + dridockVersion.ts in lockstep, then validate by
 building and reading the version back out of the image. --skip-build writes
-the pin without validating it. Never commits.`,
+the pin without validating it. Refuses a downgrade from the CURRENT pin
+unless --allow-downgrade is passed (the --remote-control floor is a
+different, lower bar — 'stable' resolving below an already-newer 'latest'
+pin is a real case this guards, not a hypothetical). Never commits.`,
     },
   ] as const;
 
@@ -87,12 +99,12 @@ the pin without validating it. Never commits.`,
   async run(args: readonly string[], ctx: Context): Promise<number> {
     const sub = args[0];
     if (sub === undefined || sub === "") {
-      ctx.stderr.write(`usage: ${ctx.binName} harness <verb>  (framework-dev only; verbs: sync [--repair], update-cli <v|latest|stable> [--skip-build])\n`);
+      ctx.stderr.write(`usage: ${ctx.binName} harness <verb>  (framework-dev only; verbs: sync [--repair], update-cli <v|latest|stable> [--skip-build] [--allow-downgrade])\n`);
       return 1;
     }
     if (sub === "-h" || sub === "--help") {
       ctx.stdout.write(`usage: ${ctx.binName} harness sync [--repair]\n`);
-      ctx.stdout.write(`       ${ctx.binName} harness update-cli <version|latest|stable> [--skip-build]\n`);
+      ctx.stdout.write(`       ${ctx.binName} harness update-cli <version|latest|stable> [--skip-build] [--allow-downgrade]\n`);
       return 0;
     }
     if (sub === "update-cli") return await this.updateCli(args.slice(1), ctx);
@@ -187,14 +199,18 @@ the pin without validating it. Never commits.`,
   private async updateCli(args: readonly string[], ctx: Context): Promise<number> {
     let target: string | undefined;
     let skipBuild = false;
+    let allowDowngrade = false;
     for (const a of args) {
       if (a === "--skip-build") { skipBuild = true; continue; }
+      if (a === "--allow-downgrade") { allowDowngrade = true; continue; }
       if (a === "-h" || a === "--help") {
-        ctx.stdout.write(`usage: ${ctx.binName} harness update-cli <version|latest|stable> [--skip-build]\n`);
-        ctx.stdout.write(`  <version>     explicit MAJOR.MINOR.PATCH, e.g. 2.1.319\n`);
-        ctx.stdout.write(`  latest/stable resolve via the official release channel at run time\n`);
-        ctx.stdout.write(`  --skip-build  write the pin without validating it (default: validates via\n`);
-        ctx.stdout.write(`                'make build-minimal' and reads the baked version back out)\n`);
+        ctx.stdout.write(`usage: ${ctx.binName} harness update-cli <version|latest|stable> [--skip-build] [--allow-downgrade]\n`);
+        ctx.stdout.write(`  <version>          explicit MAJOR.MINOR.PATCH, e.g. 2.1.319\n`);
+        ctx.stdout.write(`  latest/stable      resolve via the official release channel at run time\n`);
+        ctx.stdout.write(`  --skip-build       write the pin without validating it (default: validates via\n`);
+        ctx.stdout.write(`                     'make build-minimal' and reads the baked version back out)\n`);
+        ctx.stdout.write(`  --allow-downgrade  permit a target OLDER than the current pin (refused by\n`);
+        ctx.stdout.write(`                     default -- e.g. 'stable' can trail an already-newer 'latest')\n`);
         return 0;
       }
       if (target !== undefined) {
@@ -225,6 +241,11 @@ the pin without validating it. Never commits.`,
     // network call. Named channel: resolve via the same release-channel URL
     // install.sh already uses, overridable for tests/ops.
     let resolvedVersion: string;
+    // Deliberately stricter than install.sh:56's bash regex, which also
+    // accepts a prerelease suffix (`2.2.0-rc1`). Arfy flagged the divergence
+    // on #100 (F5) since the issue frames this as mirroring the bash
+    // resolution; this command refuses a prerelease on purpose rather than
+    // writing a non-final version into a tracked Dockerfile pin.
     const SEMVER_RE = /^\d+\.\d+\.\d+$/;
     if (target === "latest" || target === "stable") {
       const releasesUrl = ctx.env.raw()["DRIDOCK_CLAUDE_RELEASES_URL"] ?? "https://downloads.claude.ai/claude-code-releases";
@@ -279,6 +300,23 @@ the pin without validating it. Never commits.`,
       return 1;
     }
 
+    // Downgrade guard: distinct from the floor check above. The floor is a
+    // capability minimum (#17's failure class); this catches the more common
+    // case of silently going BACKWARDS from whatever is already pinned —
+    // concretely, 'stable' resolving behind an already-newer 'latest' pin
+    // (Arfy's F2 on #100: this sailed through the floor check with a green
+    // rc=0, pin went 2.1.319 -> 2.1.311, and the CHANGELOG line it wrote said
+    // "raised"). Refused by default; --allow-downgrade opts in explicitly.
+    const currentPinVer = Version.parseLoose(currentPin);
+    const isDowngrade = targetVer.compareTo(currentPinVer) === "lt";
+    if (isDowngrade && !allowDowngrade) {
+      ctx.stderr.write(`❌ harness update-cli: refusing — resolved target ${resolvedVersion} is OLDER than the current pin ${currentPin}.\n`);
+      ctx.stderr.write(`   '${target}' may have moved backward relative to what's already pinned, or this is a deliberate downgrade.\n`);
+      ctx.stderr.write(`   Pass --allow-downgrade if this is intentional.\n`);
+      return 1;
+    }
+    const direction = isDowngrade ? "lowered" : "raised";
+
     // Read + bump the repo's own version in lockstep with the CLI pin.
     const versionPath = `${project.root}/VERSION`;
     const versionText = await ctx.fs.readTextOrUndefined(versionPath);
@@ -328,7 +366,7 @@ the pin without validating it. Never commits.`,
         `## [${newDridockVersion.toString()}] - ${today}`,
         ``,
         `### Changed`,
-        `- Claude Code CLI pin raised **${currentPin} → ${resolvedVersion}** (\`ARG CLAUDE_VERSION\`)${target === "latest" || target === "stable" ? `, resolved from the \`${target}\` release channel` : ""}. Above the \`--remote-control\` floor (${CLAUDE_CLI_REMOTE_CONTROL_FLOOR}).`,
+        `- Claude Code CLI pin ${direction} **${currentPin} → ${resolvedVersion}** (\`ARG CLAUDE_VERSION\`)${target === "latest" || target === "stable" ? `, resolved from the \`${target}\` release channel` : ""}. Above the \`--remote-control\` floor (${CLAUDE_CLI_REMOTE_CONTROL_FLOOR}).`,
         ``,
       ].join("\n");
       await ctx.fs.writeText(changelogPath, changelogText.replace("## [Unreleased]\n", `## [Unreleased]\n\n${entry}`));
@@ -357,15 +395,33 @@ the pin without validating it. Never commits.`,
       return built.rc;
     }
 
-    const bakedVersion = await deps.readBakedClaudeVersion("dridock:latest-minimal");
+    // Read the built image back from the SAME daemon `make` just built it
+    // into, and under the SAME name/tag it used — both mirror Makefile's own
+    // selection logic exactly (Arfy's F1 on #100: a bare, context-less
+    // `docker run` happened to work in-container, where the ambient daemon
+    // IS the build daemon, but on the Mac it silently queries whatever
+    // context the operator's shell happens to be on, which need not be
+    // cb-infra; the read-back then returns undefined and gets misreported
+    // below as a stale-cache build failure that never happened).
+    const env = ctx.env.raw();
+    const explicitBackend = env["DRIDOCK_BACKEND"]; // Makefile's own `?=`: an exported value wins over auto-detection, without even running it.
+    const backend = explicitBackend === "docker" || explicitBackend === "colima"
+      ? explicitBackend
+      : (await deps.insideContainer()) ? "docker" : "colima";
+    const dockerArgs = backend === "docker" ? [] : ["--context", infraContext()];
+    const imageName = env["IMAGE_NAME"] ?? "dridock";
+    const tag = env["TAG"] ?? "latest";
+    const image = `${imageName}:${tag}-minimal`;
+
+    const bakedVersion = await deps.readBakedClaudeVersion(image, dockerArgs);
     if (bakedVersion !== resolvedVersion) {
-      ctx.stderr.write(`\n❌ harness update-cli: build succeeded, but the image bakes claude ${bakedVersion ?? "(unreadable)"}, not ${resolvedVersion}.\n`);
-      ctx.stderr.write(`   A cached layer may have reused the old npm install. Try: make build-minimal (plain, no cache flag) again, or 'docker builder prune'.\n`);
+      ctx.stderr.write(`\n❌ harness update-cli: build succeeded, but ${image}${dockerArgs.length > 0 ? ` (docker ${dockerArgs.join(" ")})` : ""} bakes claude ${bakedVersion ?? "(unreadable)"}, not ${resolvedVersion}.\n`);
+      ctx.stderr.write(`   Either a cached layer reused the old npm install (try: make build-minimal again, or 'docker builder prune'), or this read-back is reaching the wrong daemon/image — check DRIDOCK_BACKEND/IMAGE_NAME/TAG.\n`);
       ctx.stderr.write(`   Files are edited; nothing reverted.\n`);
       return 1;
     }
 
-    ctx.stdout.write(`✅ validated — dridock:latest-minimal bakes claude ${bakedVersion}.\n`);
+    ctx.stdout.write(`✅ validated — ${image} bakes claude ${bakedVersion}.\n`);
     ctx.stdout.write(`\nThis only built + edited LOCAL files — nothing is committed or propagated. Remaining steps:\n`);
     ctx.stdout.write(`  1. review + commit (this command never does)\n`);
     ctx.stdout.write(`  2. on the Mac: make build (or ./install.sh) to push the real image into cb-infra\n`);
@@ -436,13 +492,15 @@ async function defaultRunMakeBuildMinimal(root: string): Promise<{ rc: number; o
 }
 
 /** Read the Claude CLI version baked into `image` by running `claude
- *  --version` inside a throwaway container. Returns undefined on any
- *  failure (image missing, daemon unreachable, unparseable output) — never
- *  throws, since this always runs after a build whose own failure is
- *  reported separately. */
-async function defaultReadBakedClaudeVersion(image: string): Promise<string | undefined> {
+ *  --version` inside a throwaway container, on the daemon named by
+ *  `dockerArgs` (e.g. `["--context", "colima-cb-infra"]`, or `[]` for the
+ *  ambient one — the caller computes this to match whatever `make` just
+ *  built into). Returns undefined on any failure (image missing, daemon
+ *  unreachable, unparseable output) — never throws, since this always runs
+ *  after a build whose own failure is reported separately. */
+async function defaultReadBakedClaudeVersion(image: string, dockerArgs: readonly string[]): Promise<string | undefined> {
   try {
-    const proc = Bun.spawn(["docker", "run", "--rm", "--entrypoint", "claude", image, "--version"], {
+    const proc = Bun.spawn(["docker", ...dockerArgs, "run", "--rm", "--entrypoint", "claude", image, "--version"], {
       stdout: "pipe", stderr: "pipe",
     });
     const stdoutText = await new Response(proc.stdout).text();

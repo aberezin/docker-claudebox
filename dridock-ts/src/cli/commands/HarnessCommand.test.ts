@@ -8,12 +8,12 @@ import type { Context } from "../Context.ts";
 import { EnvResolver } from "../../domain/EnvResolver.ts";
 import { DridockError } from "../../domain/errors.ts";
 
-function makeCtx(fs: InMemoryFileSystem, cwd = "/repo"): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
+function makeCtx(fs: InMemoryFileSystem, cwd = "/repo", env: Record<string, string | undefined> = {}): { ctx: Context; stdout: StringWriter; stderr: StringWriter } {
   const stdout = new StringWriter();
   const stderr = new StringWriter();
   return {
     stdout, stderr,
-    ctx: { fs, env: new EnvResolver({}), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
+    ctx: { fs, env: new EnvResolver(env), cwd, home: "/home/alan", binName: "dridock", stdout, stderr },
   };
 }
 
@@ -441,5 +441,117 @@ describe("HarnessCommand.update-cli", () => {
     expect(stderr.text()).toContain("skipped the CHANGELOG entry");
     expect(await fs.readText("/repo/Dockerfile")).toContain("ARG CLAUDE_VERSION=2.1.319");
     expect(stdout.text()).toContain("validated");
+  });
+
+  // --- F1 (Arfy, #100): the validation read-back must query the SAME
+  // daemon + image `make build-minimal` just built, not whatever the
+  // operator's ambient docker context happens to be. ---
+
+  test("F1: inside a container (docker backend) → read-back uses bare docker args, no --context", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    let gotArgs: readonly string[] | undefined;
+    const { ctx } = makeCtx(fs);
+    const rc = await new HarnessCommand(baseDeps({
+      insideContainer: async () => true,
+      readBakedClaudeVersion: async (_image, dockerArgs) => { gotArgs = dockerArgs; return "2.1.319"; },
+    })).run(["update-cli", "2.1.319"], ctx);
+    expect(rc).toBe(0);
+    expect(gotArgs).toEqual([]);
+  });
+
+  test("F1: not inside a container (colima backend) → read-back uses --context colima-cb-infra", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    let gotArgs: readonly string[] | undefined;
+    const { ctx } = makeCtx(fs);
+    const rc = await new HarnessCommand(baseDeps({
+      insideContainer: async () => false,
+      readBakedClaudeVersion: async (_image, dockerArgs) => { gotArgs = dockerArgs; return "2.1.319"; },
+    })).run(["update-cli", "2.1.319"], ctx);
+    expect(rc).toBe(0);
+    expect(gotArgs).toEqual(["--context", "colima-cb-infra"]);
+  });
+
+  test("F1: explicit DRIDOCK_BACKEND=docker wins over insideContainer()=false (mirrors Makefile's ?=)", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    let gotArgs: readonly string[] | undefined;
+    const { ctx } = makeCtx(fs, "/repo", { DRIDOCK_BACKEND: "docker" });
+    const rc = await new HarnessCommand(baseDeps({
+      insideContainer: async () => false, // would normally mean colima — the env override wins
+      readBakedClaudeVersion: async (_image, dockerArgs) => { gotArgs = dockerArgs; return "2.1.319"; },
+    })).run(["update-cli", "2.1.319"], ctx);
+    expect(rc).toBe(0);
+    expect(gotArgs).toEqual([]);
+  });
+
+  test("F1: IMAGE_NAME/TAG env vars change the queried image, mirroring the Makefile's own overrides", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    let gotImage: string | undefined;
+    const { ctx, stdout } = makeCtx(fs, "/repo", { IMAGE_NAME: "myfork", TAG: "dev" });
+    const rc = await new HarnessCommand(baseDeps({
+      readBakedClaudeVersion: async (image) => { gotImage = image; return "2.1.319"; },
+    })).run(["update-cli", "2.1.319"], ctx);
+    expect(rc).toBe(0);
+    expect(gotImage).toBe("myfork:dev-minimal");
+    expect(stdout.text()).toContain("validated — myfork:dev-minimal bakes claude 2.1.319");
+  });
+
+  // --- F2 (Arfy, #100): the floor guard alone let 'stable' silently
+  // regress behind an already-newer 'latest' pin, reported as "raised". ---
+
+  test("F2: target older than current pin, no --allow-downgrade → rc 1, refuses, no files touched", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs); // current pin 2.1.258
+    fs.seed("/repo/Dockerfile", DOCKERFILE_BODY.replace("2.1.258", "2.1.300")); // current pin now 2.1.300
+    const before = await fs.readText("/repo/Dockerfile");
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.280"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("OLDER than the current pin 2.1.300");
+    expect(stderr.text()).toContain("--allow-downgrade");
+    expect(await fs.readText("/repo/Dockerfile")).toBe(before);
+    expect(await fs.readText("/repo/VERSION")).toBe(VERSION_BODY);
+  });
+
+  test("F2: 'stable' resolving behind the current pin → refused (the exact scenario Arfy reproduced)", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    fs.seed("/repo/Dockerfile", DOCKERFILE_BODY.replace("2.1.258", "2.1.319")); // current pin: latest already applied
+    const before = await fs.readText("/repo/Dockerfile");
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new HarnessCommand(baseDeps({
+      resolveChannel: async () => "2.1.311", // stable trails latest
+    })).run(["update-cli", "stable"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("OLDER than the current pin 2.1.319");
+    expect(await fs.readText("/repo/Dockerfile")).toBe(before);
+  });
+
+  test("F2: target older than current pin WITH --allow-downgrade → succeeds, CHANGELOG says 'lowered'", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    fs.seed("/repo/Dockerfile", DOCKERFILE_BODY.replace("2.1.258", "2.1.300"));
+    const { ctx, stdout } = makeCtx(fs);
+    const rc = await new HarnessCommand(baseDeps({
+      readBakedClaudeVersion: async () => "2.1.280",
+    })).run(["update-cli", "2.1.280", "--allow-downgrade"], ctx);
+    expect(rc).toBe(0);
+    expect(stdout.text()).toContain("pin 2.1.300 → 2.1.280");
+    expect(await fs.readText("/repo/Dockerfile")).toContain("ARG CLAUDE_VERSION=2.1.280");
+    const changelog = await fs.readText("/repo/CHANGELOG.md");
+    expect(changelog).toContain("Claude Code CLI pin lowered **2.1.300 → 2.1.280**");
+  });
+
+  test("F2: downgrade below the --remote-control floor → floor guard fires first regardless of --allow-downgrade", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    fs.seed("/repo/Dockerfile", DOCKERFILE_BODY.replace("2.1.258", "2.1.300"));
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.100", "--allow-downgrade"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("below the --remote-control floor");
   });
 });

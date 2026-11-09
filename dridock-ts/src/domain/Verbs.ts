@@ -60,7 +60,7 @@ export const VERBS = {
   net:              { summary: "print the browse dashboard; with <name>, set network.hostname", class: "state-mgmt", needsProject: true } as const,
   "browser-bridge": { summary: "opt-in CDP bridge to your real Chrome",             class: "vm-mgmt",      needsProject: true,  subcommands: ["up", "down"] as const } as const,
   "host-agent":     { summary: "framework-dev host-command proxy (TRUSTED)",        class: "vm-mgmt",      needsProject: false, subcommands: ["up", "down", "status"] as const } as const,
-  harness:          { summary: "framework-dev-only: sync cb-infra image",           class: "vm-mgmt",      needsProject: false, subcommands: ["sync"] as const } as const,
+  harness:          { summary: "framework-dev-only: sync cb-infra image, bump CLI pin", class: "vm-mgmt",   needsProject: false, subcommands: ["sync", "update-cli"] as const } as const,
   "framework-bugs": { summary: "review cross-project framework bug reports",        class: "framework",    needsProject: false, subcommands: ["list", "clear"] as const } as const,
   consult:          { summary: "supervised claudebot ↔ framework-Claude threads",   class: "framework",    needsProject: false, subcommands: ["list", "show", "approve", "revise", "reject", "post", "watch"] as const } as const,
   "claude-dir":     { summary: "print this project's host .claude data dir",        class: "readonly",     needsProject: true } as const,
