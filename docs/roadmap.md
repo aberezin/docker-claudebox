@@ -16,6 +16,19 @@ not happened. A deadline nobody can miss beats a deadline everybody means to kee
 |---|---|---|
 | **5.0.0** ✅ done | Legacy `CLAUDEBOX_*` / `CLAUDE_*` env tiers, the container env aliaser, and silent `.claudebox/` directory fallbacks. | `tests/test_deprecation_deadlines.sh` |
 | **6.0.0** | The `.claudebox/` → `.dridock/` migration path: the `dridock migrate` verb, `autoMigrateIfNeeded`, and the five migrators under `dridock-ts/src/services/migrators/`. | `tests/test_deprecation_deadlines.sh` |
+| **7.0.0** | Reading `features:` / `plugins:` from `.dridock/config.yml`. They moved to the tracked `.dridock/project.yml` in 5.10.0 (#97); until 7.0 the old location is unioned in and nudged about. | `tests/test_deprecation_deadlines.sh` |
+
+### Why 7.0 and not 6.0 for the config.yml project keys
+
+`features:` lived in `config.yml` since 3.x and `plugins:` since 5.9.0, in
+projects that had no reason to expect either to move. Dropping the old location
+would silently stop installing a project's tooling — the entries would parse as
+unknown keys and vanish — which is precisely the failure the split exists to
+prevent.
+
+6.0 is already carrying the `.claudebox/` removal. Stacking a second silent-drop
+risk into the same release is how a migration gets blamed for a defect it did not
+cause, so the two are kept one major apart.
 
 ### Why 6.0 and not 5.0 for the migrators
 

@@ -28,6 +28,76 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [5.10.0] - 2026-11-09
+
+### Added
+- **`.dridock/project.yml` — project-level config that actually travels** (#97).
+  `features:` and `plugins:` now live in a **tracked** file, so a clone of a
+  project gets the project's tool bundle and plugin set:
+  ```yaml
+  # .dridock/project.yml — COMMIT THIS FILE
+  features: [typescript, python]
+  plugins:  [superpowers@aberezin/superpowers]
+  ```
+  The gitignored `.dridock/config.yml` keeps what is genuinely machine-local —
+  `id` (the colima profile identity, which must differ per clone), `vm.*` (sized
+  for this host), `network.hostname` — and keeps its second job as the
+  *is-this-a-dridock-project* sentinel.
+
+  Why this was broken: `config.yml` is gitignored **because** of those keys, so
+  a project could not state its own tooling in a way that survived a clone.
+  `profiles:` had the defect since 3.x; #96's `plugins:` inherited it, which is
+  what surfaced it — the entire point of per-project plugins is that the project
+  declares them. Full rationale, including the rejected alternative:
+  [docs/design/project-config-split.md](docs/design/project-config-split.md).
+- **`dridock plugins [list|add|remove]`** (#97). #96 shipped the `plugins:` key
+  with no CLI verb at all, so the only way to enable a plugin was hand-editing a
+  gitignored file. `add` validates against the same regex the parser uses — a
+  validator that accepted what the parser then dropped would be a silent discard
+  with extra steps — and rejects both the #96 injection payload and a
+  version-pinned spec (`@v7.0.2` cannot parse: a marketplace tracks its HEAD).
+
+### Changed
+- Reads of `features:`/`plugins:` are a **union** of `project.yml` and
+  `config.yml`, project first. Union rather than override deliberately: the
+  installs are already additive and marker-guarded, and an override would
+  silently stop installing a pre-5.10.0 project's features the moment a
+  `project.yml` appeared. Legacy entries are applied, then named once on stderr
+  and tagged `(config.yml — local only)` in `list` output.
+- `features enable` / `plugins add` write to `project.yml`, **created lazily** —
+  bootstrap does not scaffold it, so nothing lands in a git tree unasked. As a
+  result `dridock features enable typescript` now dirties the working tree; that
+  is correct, since it changed a project fact that belongs in a commit.
+- `features disable` / `plugins remove` clear the name from **both** files.
+  Reads being a union, clearing one and reporting success is the silent-no-op
+  class this repo keeps re-learning.
+- `.dridock/config.sample.yml` had a stale `.claudebox/` header and never
+  documented `plugins:` at all, so #96's mechanism shipped invisible to anyone
+  reading the schema reference. It now states which file each kind of setting
+  belongs in.
+- `PLUGIN_SPEC_REGEX` extracted from `parsePlugins` so the CLI validator and the
+  parser are one source of truth.
+- `WorkspaceMigrator` carries `project.yml` across a `.claudebox/` → `.dridock/`
+  migration; leaving it behind would have dropped a project's declared tooling.
+
+### Fixed
+- **Three verbs were missing from `dridock --help`**: the new `plugins`, plus
+  the pre-existing `team` and `claude-dir`. `HelpCommand`'s section arrays are a
+  second source of truth beside `VERBS` and the registry, and nothing about
+  adding a verb forced them to agree — `plugins` was declared, registered,
+  dispatching and covered by 20 of its own tests while being undiscoverable,
+  with the suite green, because every existing test asked "does this verb work"
+  and none asked "can a user find it". New `HelpSectionCoverage.test.ts` drives
+  the real registry and fails on any runnable verb absent from the help; it
+  found `team` and `claude-dir` on its first run.
+
+### Deprecated
+- Reading `features:`/`plugins:` from `config.yml`. Removed in **7.0.0** — one
+  major after the `.claudebox/` removal rather than alongside it, so two
+  silent-drop risks do not land in the same release. Row in
+  [docs/roadmap.md](docs/roadmap.md), enforced by
+  `tests/test_deprecation_deadlines.sh` (verified to fail at major 7).
+
 ## [5.9.0] - 2026-11-08
 
 ### Added

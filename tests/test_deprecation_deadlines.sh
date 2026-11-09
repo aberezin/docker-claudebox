@@ -135,6 +135,31 @@ else
     fi
 fi
 
+# --- 7.0.0: `features:`/`plugins:` no longer read from config.yml (#97) ------
+# They moved to the tracked .dridock/project.yml in 5.10.0. The union with the
+# legacy location is what keeps pre-5.10 projects working; at 7.0 it goes, and
+# ProjectConfig must stop consulting configPath for these two keys.
+#
+# Probe: the resolvers take BOTH paths today. When the deadline lands they
+# should take only the project path -- so the two-argument signature is the
+# thing that must disappear.
+_pc="$REPO/dridock-ts/src/services/ProjectConfig.ts"
+if [ "$MAJOR" -ge 7 ]; then
+    if grep -q "featuresResolved(configPath: string, projectPath: string)" "$_pc" 2>/dev/null; then
+        bad "7.0 reached ($MAJOR.x) but ProjectConfig still unions features:/plugins: out of config.yml — drop the legacy read (#97)"
+    else
+        ok "7.0: features:/plugins: are read only from project.yml"
+    fi
+else
+    if grep -q "featuresResolved(configPath: string, projectPath: string)" "$_pc" 2>/dev/null; then
+        ok "pre-7.0 ($MAJOR.x): config.yml still unioned in for features:/plugins:, as documented"
+    else
+        bad "the config.yml union for features:/plugins: vanished before its 7.0 deadline (#97) — pre-5.10 projects would silently lose their tooling"
+    fi
+fi
+
+echo ""
+
 echo "  deprecation deadlines: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
 }

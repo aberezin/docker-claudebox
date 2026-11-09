@@ -2,14 +2,31 @@ import type { FileSystem } from "../infra/FileSystem.ts";
 import { cbNum } from "../domain/units.ts";
 
 /**
- * Reads a project's `.dridock/config.yml` (or legacy `.claudebox/config.yml`)
- * and answers questions about its declared features. Ports the read-side
- * of wrapper.sh's `cb_project_features` — the awk that tolerates both YAML
- * flow style and block style, keeps identifier chars only, and dedupes.
+ * Reads a project's dridock config and answers questions about it.
  *
- * Write-side (features:enable/disable → cb_features_write) lives in Phase 3
- * — that path mutates config.yml and needs the safe-rewrite scaffolding
- * (tempfile + rename) common to every migrator.
+ * TWO FILES since #97, split by whether a value can travel with the repo:
+ *
+ *   `config.yml`   machine-local, **gitignored** — `id`, `vm.*`,
+ *                  `network.hostname`. Also the project sentinel.
+ *   `project.yml`  project-level, **tracked** — `features:`, `plugins:`.
+ *
+ * Before #97 both lived in `config.yml`, so a project could not declare its
+ * own feature/plugin set in a way that survived a clone — `profiles:` had
+ * that defect since 3.x and #96's `plugins:` inherited it.
+ *
+ * READ resolution is a **union**, `project.yml` first (`featuresResolved` /
+ * `pluginsResolved`). Union rather than override because the installs are
+ * already additive and marker-guarded (`.profile-<name>`, `.plugin-<slug>`):
+ * "the project needs these, and I also want these locally" composes. The
+ * legacy location keeps working — never silently discarded — and the resolver
+ * hands back a `legacy` list so the caller can print the one-line nudge.
+ * Removed in 7.0.0 (roadmap row + tests/test_deprecation_deadlines.sh).
+ *
+ * WRITE goes to `project.yml`, lazily created (`setProjectList`) — nothing
+ * appears in someone's git tree until they actually set a project-level key.
+ * `setFeatures` still writes `config.yml` and is retained for exactly one
+ * caller: `features disable`, which must be able to remove a name from the
+ * legacy location or the disable would silently no-op.
  */
 export class ProjectConfig {
   constructor(private readonly fs: FileSystem) {}
@@ -28,14 +45,73 @@ export class ProjectConfig {
     if (text === undefined) {
       throw new Error(`setFeatures: no config.yml at ${configPath} — run 'dridock start' first to initialize`);
     }
-    const stripped = stripFeaturesBlock(text);
-    // Trim trailing blank lines so the appended features: block sits
-    // cleanly at the end (matches the bash `awk 'NF{p=1}...'` trim step).
-    const trimmed = stripped.replace(/\n+$/, "");
-    const rebuilt = names.length === 0
-      ? trimmed + "\n"
-      : `${trimmed}\n\nfeatures: [${names.join(", ")}]\n`;
-    await this.fs.writeTextAtomic(configPath, rebuilt);
+    await this.fs.writeTextAtomic(configPath, rewriteListBlock(text, "features", names));
+  }
+
+  /**
+   * Write `key` into `project.yml`, **creating the file** if absent (#97).
+   *
+   * Lazy creation is the point: bootstrap deliberately does not scaffold
+   * `project.yml`, so nothing lands in a git tree unasked. The file is born
+   * here, the first time someone sets a project-level key, carrying a header
+   * that explains what belongs in it vs `config.yml` — the file IS the
+   * documentation, which is why there is no `project.sample.yml` to drift.
+   *
+   * Any OTHER key already in the file survives: `rewriteListBlock` strips
+   * only the target key's block (flow or block form) and re-appends it, so
+   * `plugins:` is untouched when `features:` is rewritten, comments and all.
+   * Empty `names` removes the block but keeps the file — an emptied
+   * `features:` is not a reason to delete someone's committed config.
+   */
+  async setProjectList(
+    projectPath: string,
+    key: ListKey,
+    names: readonly string[],
+  ): Promise<void> {
+    const existing = await this.fs.readTextOrUndefined(projectPath);
+    const base = existing ?? PROJECT_YML_HEADER;
+    await this.fs.writeTextAtomic(projectPath, rewriteListBlock(base, key, names));
+  }
+
+  /**
+   * Rewrite `key` in an EXISTING file, never creating it.
+   *
+   * The counterpart to `setProjectList`, for editing the deprecated
+   * `config.yml` location — used only by the `disable`/`remove` paths, which
+   * must be able to drop a name from wherever it actually lives. Reads are a
+   * union (#97), so removing from just one file while reporting success is
+   * the silent-no-op class.
+   *
+   * Throws rather than creating: a missing file here means the caller's
+   * precondition was wrong (it had just read entries out of it), and inventing
+   * a `config.yml` would scaffold a project sentinel as a side effect of a
+   * removal.
+   */
+  async setExistingList(path: string, key: ListKey, names: readonly string[]): Promise<void> {
+    const text = await this.fs.readTextOrUndefined(path);
+    if (text === undefined) {
+      throw new Error(`setExistingList: no file at ${path}`);
+    }
+    await this.fs.writeTextAtomic(path, rewriteListBlock(text, key, names));
+  }
+
+  /**
+   * The effective `features:` for this project — `project.yml` ∪ `config.yml`.
+   * See the class doc for why this is a union and not an override.
+   */
+  async featuresResolved(configPath: string, projectPath: string): Promise<ResolvedProjectList> {
+    return unionLists(
+      parseFeatures((await this.fs.readTextOrUndefined(projectPath)) ?? ""),
+      parseFeatures((await this.fs.readTextOrUndefined(configPath)) ?? ""),
+    );
+  }
+
+  /** The effective `plugins:` for this project — `project.yml` ∪ `config.yml`. */
+  async pluginsResolved(configPath: string, projectPath: string): Promise<ResolvedProjectList> {
+    return unionLists(
+      parsePlugins((await this.fs.readTextOrUndefined(projectPath)) ?? ""),
+      parsePlugins((await this.fs.readTextOrUndefined(configPath)) ?? ""),
+    );
   }
 
   /**
@@ -219,11 +295,41 @@ function bakedVmDefault(field: "cpu" | "memory" | "disk"): string {
  *     non-indented, non-comment line ends the block
  */
 export function stripFeaturesBlock(text: string): string {
+  return stripListBlock(text, "features");
+}
+
+/**
+ * The set of YAML key spellings that address one logical list. `features`
+ * carries its legacy 2.x alias `profiles`; `plugins` (#96) has none — the
+ * mechanism did not exist before 3.x, so there is nothing to be compatible
+ * with.
+ */
+const LIST_KEY_ALIASES: Readonly<Record<ListKey, readonly string[]>> = {
+  features: ["features", "profiles"],
+  plugins: ["plugins"],
+};
+
+export type ListKey = "features" | "plugins";
+
+/**
+ * Drop `key`'s block from `text`, in either YAML form — flow (`key: [a, b]`)
+ * or block (`key:` + `  - a` lines). Everything else, comments included,
+ * survives verbatim: this is what lets `project.yml` hold BOTH `features:`
+ * and `plugins:` and have one rewritten without disturbing the other.
+ *
+ * Generalized from the old features-only version for #97. The skipping state
+ * machine is unchanged — a non-item, non-comment line ends the block and
+ * falls through, so a following key is never eaten.
+ */
+export function stripListBlock(text: string, key: ListKey): string {
+  const alt = LIST_KEY_ALIASES[key].join("|");
+  const flowRe = new RegExp(`^\\s*(?:${alt}):\\s*\\[`);
+  const blockRe = new RegExp(`^\\s*(?:${alt}):\\s*(?:#.*)?$`);
   const out: string[] = [];
   let skipping = false;
   for (const line of text.split(/\r?\n/)) {
-    if (/^\s*(?:features|profiles):\s*\[/.test(line)) { skipping = false; continue; }
-    if (/^\s*(?:features|profiles):\s*(?:#.*)?$/.test(line)) { skipping = true; continue; }
+    if (flowRe.test(line)) { skipping = false; continue; }
+    if (blockRe.test(line)) { skipping = true; continue; }
     if (skipping) {
       if (/^\s*-\s*/.test(line)) continue;   // block item
       if (/^\s*(?:#.*)?$/.test(line)) continue;   // comment/blank inside block
@@ -234,6 +340,93 @@ export function stripFeaturesBlock(text: string): string {
   }
   return out.join("\n");
 }
+
+/**
+ * `text` with `key` rewritten to `names` in flow style, appended at the end.
+ * Empty `names` removes the block entirely (and appends nothing).
+ *
+ * writeTextAtomic at the call sites means a power-cut mid-write can never
+ * leave a truncated config (the class fixed for `cb_features_write` in
+ * 3.3.6 Tier-1 #5).
+ */
+export function rewriteListBlock(text: string, key: ListKey, names: readonly string[]): string {
+  // Trim trailing blank lines so the appended block sits cleanly at the end
+  // (matches the bash `awk 'NF{p=1}...'` trim step).
+  const trimmed = stripListBlock(text, key).replace(/\n+$/, "");
+  return names.length === 0
+    ? trimmed + "\n"
+    : `${trimmed}\n\n${key}: [${names.join(", ")}]\n`;
+}
+
+/**
+ * One logical list resolved across the two config files (#97).
+ */
+export interface ResolvedProjectList {
+  /**
+   * The effective list — `project.yml` entries in order, then any
+   * `config.yml` entry not already present.
+   */
+  readonly values: string[];
+  /**
+   * Entries found in the DEPRECATED location (`config.yml`). Non-empty means
+   * the caller owes the user a one-line stderr nudge: the entries still work
+   * (never silently discarded) but they cannot travel with a clone, which is
+   * the whole point of the split. Removed in 7.0.0.
+   */
+  readonly legacy: string[];
+}
+
+/** project.yml ∪ config.yml, project first, deduped, order preserved. */
+export function unionLists(fromProject: readonly string[], fromConfig: readonly string[]): ResolvedProjectList {
+  const seen = new Set<string>(fromProject);
+  const values = [...fromProject];
+  for (const v of fromConfig) {
+    if (seen.has(v)) continue;
+    seen.add(v);
+    values.push(v);
+  }
+  return { values, legacy: [...fromConfig] };
+}
+
+/**
+ * The one-line nudge a caller prints when project-level keys are still in the
+ * gitignored `config.yml` (#97). Shared by `start`, `features` and `plugins`
+ * so the wording cannot drift between them.
+ *
+ * Deliberately NOT a warning-and-ignore: the entries are honored. The only
+ * thing wrong with them is their location, and the cost of that location is
+ * exactly what the sentence states.
+ */
+export function legacyLocationNotice(
+  key: ListKey,
+  legacy: readonly string[],
+  dotName: string,
+): string {
+  return `ℹ ${key}: in ${dotName}/config.yml (${legacy.join(", ")}) — still applied, but `
+    + `config.yml is gitignored so it can't travel with a clone. Move it to `
+    + `${dotName}/project.yml (tracked). The config.yml location is removed in 7.0.0.\n`;
+}
+
+/**
+ * The header a lazily-created `project.yml` is born with. The file is tracked,
+ * so this comment block is the primary documentation of the split that a
+ * reader will actually encounter — there is deliberately no
+ * `project.sample.yml` to fall out of date next to it.
+ */
+export const PROJECT_YML_HEADER = `# .dridock/project.yml — PROJECT-level dridock config. COMMIT THIS FILE.
+#
+# Everything here is a property of the project itself, identical in every
+# clone, so it belongs in git:
+#
+#   features: [typescript, python]                # tool bundles  -> 'dridock features'
+#   plugins:  [superpowers@aberezin/superpowers]  # Claude Code plugins -> 'dridock plugins'
+#
+# Machine-local settings live in the gitignored .dridock/config.yml instead
+# (project id, VM cpu/memory/disk, network hostname) — those must differ per
+# clone and per host.
+#
+# Docs: docs/design/project-config-split.md
+`;
 
 /**
  * Extracts feature names from the config-file text. Kept as a top-level
@@ -296,6 +489,29 @@ export function parseFeatures(text: string): string[] {
  *      the bash `cb-report-bug` lesson about never-silently-discarding
  *      user input.
  */
+/**
+ * The legal shape of a `plugins:` entry: `name@owner/repo`, each segment
+ * restricted to `[A-Za-z0-9._-]` — the real char class for GitHub owner/repo
+ * and plugin names.
+ *
+ * Exported so the `dridock plugins add` validator and this parser are the
+ * SAME check. A CLI validator that accepted something the parser then
+ * silently dropped would be the never-silently-discard class with extra
+ * steps: the user gets a success message and no plugin.
+ *
+ * The tight class also rejects by construction the quote/semicolon/glob
+ * characters that let the original permissive regex (`^[^@]+@[^/]+/[^@]+$`)
+ * carry `x@a/b\';touch /tmp/INJECTED;\'` through to the entrypoint's
+ * `bash -c` — Arfy's #96 finding. `entrypoint.sh`'s `[[ =~ ]]` re-validates
+ * the same class downstream; keep the two in sync.
+ *
+ * Note there is no version/tag component: `marketplace add owner/repo` tracks
+ * the marketplace's HEAD, so a plugin set cannot be pinned. A second `@`
+ * would not even parse. If pinning is wanted that is a syntax change, not a
+ * config change.
+ */
+export const PLUGIN_SPEC_REGEX = /^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
+
 export function parsePlugins(text: string): string[] {
   const lines = text.split(/\r?\n/);
   const seen = new Set<string>();
@@ -315,7 +531,7 @@ export function parsePlugins(text: string): string[] {
     // allowing `x@a/b';touch /tmp/INJECTED;'` during #96 review — the fix
     // is the char class in BOTH layers (TS here, bash `[[ =~ ]]` in
     // entrypoint), not escaping.
-    if (!/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(trimmed)) return;
+    if (!PLUGIN_SPEC_REGEX.test(trimmed)) return;
     seen.add(trimmed);
     result.push(trimmed);
   };

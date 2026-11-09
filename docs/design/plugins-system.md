@@ -12,8 +12,22 @@ create).
 
 ## Config
 
-Declare plugins in `.dridock/config.yml` under `plugins:`, same flow/block YAML
-shape features uses:
+Declare plugins in `.dridock/project.yml` under `plugins:`, same flow/block YAML
+shape features uses. That file is **tracked** — commit it and every clone of the
+project gets the same plugin set.
+
+> **Moved in 5.10.0 (#97).** These used to live in `.dridock/config.yml`, which
+> dridock gitignores (it holds the per-clone VM identity), so a project could
+> not actually declare its plugins to anyone else. The old location is still
+> read — unioned with the new one, with a one-line stderr nudge — and removed in
+> **7.0.0**. See [project-config-split.md](project-config-split.md).
+
+Manage them with `dridock plugins list|add|remove` rather than by hand:
+
+```console
+$ dridock plugins add superpowers@aberezin/superpowers
+  ✓ added plugin 'superpowers@aberezin/superpowers' to .dridock/project.yml
+```
 
 ```yaml
 # flow style:

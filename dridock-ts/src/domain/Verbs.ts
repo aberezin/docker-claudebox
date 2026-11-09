@@ -54,6 +54,7 @@ export const VERBS = {
   checkversion:     { summary: "compare host wrapper against the image label",      class: "readonly",     needsProject: true,  subcommands: ["--all"] as const } as const,
   features:         { summary: "list / enable / disable / info the project's features", class: "state-mgmt", needsProject: true } as const,
   profiles:         { summary: "legacy 2.x alias of `features`",                    class: "state-mgmt",   needsProject: true } as const,
+  plugins:          { summary: "list / add / remove this project's Claude Code plugins", class: "state-mgmt", needsProject: true,  subcommands: ["list", "add", "remove"] as const } as const,
   vm:               { summary: "colima VM diagnostics",                             class: "vm-mgmt",      needsProject: false, subcommands: ["ls", "list", "usage", "df", "gc"] as const } as const,
   ip:               { summary: "print this project VM's reachable IP",              class: "readonly",     needsProject: true } as const,
   net:              { summary: "print the browse dashboard; with <name>, set network.hostname", class: "state-mgmt", needsProject: true } as const,

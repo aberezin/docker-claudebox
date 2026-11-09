@@ -272,8 +272,9 @@ Use `~/.claude/init.d/*.sh` hooks (see [Init Hooks](docs/customization.md#init-h
 - Claude Code CLI with auto-updates disabled by default (opt in with `--update`)
 - Workspace trust dialog pre-accepted — no interactive prompts
 - Baked **`cb-*` helper commands** — `cb-browser` (self-contained browser testing), `cb-report-bug` (file a framework bug to the host), `cb-help` (list them). See [convenience scripts](docs/design/convenience-scripts.md).
-- **Profiles** — opt-in tool bundles (`profiles: [typescript, python, …]` in `.dridock/config.yml`) that enable code-intelligence plugins on first run. See [profiles](docs/design/profiles.md).
-- **Per-project Claude Code plugins** — list them in `.dridock/config.yml` under `plugins: [name@owner/repo, …]` and the entrypoint runs `claude plugin marketplace add` + `claude plugin install` for each on first container create, marker-guarded. Additive to the hardcoded default (`commit-commands`), opt out of everything with `DRIDOCK_DEFAULT_PLUGINS=0`. See [plugins-system.md](docs/design/plugins-system.md).
+- **Profiles** — opt-in tool bundles (`features: [typescript, python, …]` in the tracked `.dridock/project.yml`) that enable code-intelligence plugins on first run. Manage with `dridock features`. See [profiles](docs/design/profiles.md).
+- **Per-project Claude Code plugins** — `dridock plugins add name@owner/repo` records them in the tracked `.dridock/project.yml`, and the entrypoint runs `claude plugin marketplace add` + `claude plugin install` for each on first container create, marker-guarded. Additive to the hardcoded default (`commit-commands`), opt out of everything with `DRIDOCK_DEFAULT_PLUGINS=0`. See [plugins-system.md](docs/design/plugins-system.md).
+- **Two config files, split by whether a setting can travel** — the gitignored `.dridock/config.yml` holds this machine's VM identity and sizing; the tracked `.dridock/project.yml` holds `features:`/`plugins:`, so a clone gets the project's tooling. See [project-config-split.md](docs/design/project-config-split.md).
 - A container-side **`/dridock` skill** so the claudebot can self-report its harness version, tools, and environment.
 - Custom scripts via `~/.claude/bin` (added to PATH automatically)
 - Init hooks via `~/.claude/init.d/*.sh` (run once on first container create)

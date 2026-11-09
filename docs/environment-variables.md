@@ -34,7 +34,7 @@ All dridock config uses the `DRIDOCK_*` prefix. Anything you want available **in
 | `DRIDOCK_INFRA_CPU`        | CPUs for the shared `cb-infra` image-store VM (install-time only)                           | `2`                       |
 | `DRIDOCK_INFRA_MEMORY`     | Memory (GiB) for `cb-infra` (install-time; bump if a `full` build runs short)              | `4`                       |
 | `DRIDOCK_INFRA_DISK`       | Disk (GiB) for `cb-infra` (install-time only)                                               | `40`                      |
-| `DRIDOCK_DEFAULT_PLUGINS`  | Set to `0` to opt out of ALL plugin installs on first interactive run — the hardcoded default (`commit-commands@claude-plugins-official`) AND any per-project `plugins:` list from `.dridock/config.yml` (#96). | `1` (install)              |
+| `DRIDOCK_DEFAULT_PLUGINS`  | Set to `0` to opt out of ALL plugin installs on first interactive run — the hardcoded default (`commit-commands@claude-plugins-official`) AND any per-project `plugins:` list from `.dridock/project.yml` (#96, moved there in #97). | `1` (install)              |
 | `DRIDOCK_CONTAINER_NAME`   | Override the per-workspace container name                                                  | derived from `$PWD`       |
 | `DRIDOCK_ENV_*`            | Forward env vars into the container (prefix stripped: `DRIDOCK_ENV_FOO=bar` → `FOO=bar`)   | _(none)_                  |
 | `DRIDOCK_MOUNT_*`          | Mount extra host directories into the container                                            | _(none)_                  |

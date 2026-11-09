@@ -27,12 +27,13 @@ function makeCtx(fs: InMemoryFileSystem, cwd = "/p"): {
 describe("FeaturesCommand — list", () => {
   test("bare 'features' verb defaults to list", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/p/.dridock/config.yml", "features: [typescript, python]\n");
+    fs.seed("/p/.dridock/config.yml", "id: abc\n");
+    fs.seed("/p/.dridock/project.yml", "features: [typescript, python]\n");
     const { ctx, stdout } = makeCtx(fs);
     const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run([], ctx);
     expect(rc).toBe(0);
     const out = stdout.text();
-    expect(out).toContain("enabled for this project (.dridock/config.yml → features:)");
+    expect(out).toContain("enabled for this project (.dridock/project.yml → features:)");
     expect(out).toContain("  typescript\n");
     expect(out).toContain("  python\n");
     // 'available' listing is now ported (P4c) — but the InMemoryDocker
@@ -46,7 +47,7 @@ describe("FeaturesCommand — list", () => {
     fs.seed("/p/.dridock/config.yml", "vm:\n  disk: 60G\n");
     const { ctx, stdout } = makeCtx(fs);
     await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["list"], ctx);
-    expect(stdout.text()).toContain("(none — add e.g.");
+    expect(stdout.text()).toContain("(none — run 'dridock features enable typescript'");
   });
 
   test("no config.yml at all (fresh dir) -> still lists 0 enabled + shows .dridock name", async () => {
@@ -54,16 +55,16 @@ describe("FeaturesCommand — list", () => {
     const { ctx, stdout } = makeCtx(fs, "/new-project");
     const rc = await new FeaturesCommand("features", new StubGitToplevel("/new-project")).run(["list"], ctx);
     expect(rc).toBe(0);
-    expect(stdout.text()).toContain(".dridock/config.yml"); // canonical when neither dot dir exists
+    expect(stdout.text()).toContain(".dridock/project.yml"); // canonical when neither dot dir exists
   });
 
   test("legacy .claudebox project — dotName reflects on-disk reality", async () => {
     const fs = new InMemoryFileSystem();
     fs.seedDir("/p/.claudebox");
-    fs.seed("/p/.claudebox/config.yml", "features: [typescript]\n");
+    fs.seed("/p/.claudebox/project.yml", "features: [typescript]\n");
     const { ctx, stdout } = makeCtx(fs);
     await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["list"], ctx);
-    expect(stdout.text()).toContain(".claudebox/config.yml");
+    expect(stdout.text()).toContain(".claudebox/project.yml");
   });
 });
 
@@ -75,8 +76,13 @@ describe("FeaturesCommand — enable (Phase 3)", () => {
     const rc = await new FeaturesCommand("features", new StubGitToplevel("/p")).run(["enable", "typescript"], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain("✓ enabled feature 'typescript'");
+    // #97: writes land in the TRACKED project.yml, not the gitignored
+    // config.yml — a feature the project needs must survive a clone.
+    const proj = await fs.readText("/p/.dridock/project.yml");
+    expect(proj).toContain("features: [typescript]");
     const cfg = await fs.readText("/p/.dridock/config.yml");
-    expect(cfg).toContain("features: [typescript]");
+    expect(cfg).not.toContain("features:");
+    expect(cfg).toContain("id: abc");
   });
 
   test("enable is idempotent — 'already enabled' + no rewrite when duplicate", async () => {
@@ -211,7 +217,7 @@ describe("FeaturesCommand — sub-verb dispatch", () => {
 describe("FeaturesCommand — profiles alias", () => {
   test("prints one-line deprecation notice to stderr then dispatches to features", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/p/.dridock/config.yml", "features: [typescript]\n");
+    fs.seed("/p/.dridock/project.yml", "features: [typescript]\n");
     const { ctx, stdout, stderr } = makeCtx(fs);
     const rc = await new FeaturesCommand("profiles", new StubGitToplevel("/p")).run(["list"], ctx);
     expect(rc).toBe(0);

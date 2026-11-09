@@ -191,6 +191,13 @@ documents the schema (with `id: auto`). On first run the wrapper:
 3. appends `/.dridock/config.yml` to the project's `.gitignore` (leaving the
    sample tracked).
 
+Every key in this file is machine-local, which is what justifies the gitignore:
+`id` must differ per clone or two clones fight over one VM, `vm.*` is sized
+against this host, and `network.hostname` is an `/etc/hosts` alias to a local
+IP. Settings that are properties of the **project** — `features:` and
+`plugins:` — live in the tracked `.dridock/project.yml` instead, since 5.10.0
+(#97). See [project-config-split.md](project-config-split.md).
+
 ### Config schema
 
 ```yaml
@@ -203,8 +210,11 @@ vm:
   autostop: false         # stop the VM when the harness container exits (restart is slow)
 network:
   hostname: cb-projectA   # optional /etc/hosts alias → the VM's current IP; blank = use raw IP
-profiles: [typescript]    # optional opt-in tool bundles; see docs/design/profiles.md
 ```
+
+`features:`/`plugins:` are **not** in this file — they belong in the tracked
+`.dridock/project.yml` ([project-config-split.md](project-config-split.md)).
+They are still read here for back-compat, with a stderr nudge, until 7.0.0.
 
 Defaults written into the sample: 4 CPU / 8 GiB / 60 GiB, `autostop: false`.
 

@@ -57,7 +57,10 @@ This is particularly useful with the minimal image — pre-install your tools on
 For **common** tooling — especially language servers — prefer **profiles** over a hand-written init.d hook. Add them to `.dridock/config.yml`:
 
 ```yaml
-profiles: [typescript, python]   # run `dridock profiles` to list available ones
+profiles: [typescript, python]   # run `dridock features` to list available ones
+                                 # NOTE: as of 5.10.0 these belong in the tracked
+                                 # .dridock/project.yml — see
+                                 # docs/design/project-config-split.md
 ```
 
 The harness ships curated installers (e.g. `typescript` / `python` / `go` enable the matching `*-lsp` plugin; their servers are baked into the image), installs each once on first enable, and re-checks on later runs so adding a profile doesn't need a fresh container. `init.d` remains the escape hatch for anything a profile doesn't cover. Full details, and how to add your own profile, in [design/profiles.md](design/profiles.md).

@@ -1,5 +1,13 @@
-# .claudebox/config.sample.yml — schema reference (committed).
-# claudebox generates the real, gitignored .claudebox/config.yml on first run.
+# .dridock/config.sample.yml — schema reference (committed).
+# dridock generates the real, gitignored .dridock/config.yml on first run.
+#
+# Everything in THIS file is machine-local: it must differ per clone or per
+# host, which is why the real config.yml is gitignored.
+#
+# Project-level settings — `features:` and `plugins:`, which are the same in
+# every clone — go in the TRACKED .dridock/project.yml instead. Manage them
+# with 'dridock features' / 'dridock plugins'; that file is created on first
+# use. See docs/design/project-config-split.md.
 id: auto                  # stable project identity; generated once, never change
 vm:
   cpu: 4
@@ -8,4 +16,5 @@ vm:
   autostop: false         # stop the VM when the harness container exits
 network:
   hostname:               # optional: set e.g. "myproj" for a friendly http://myproj:<port> (/etc/hosts alias -> VM IP; run 'dridock net'); blank = raw IP
-# profiles: []            # tool bundles to enable, e.g. [typescript, python] — list them: 'dridock profiles'
+# features: / plugins:    # NOT here — see .dridock/project.yml (tracked).
+#                         # Still read from this file until 7.0.0, with a nudge.

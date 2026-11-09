@@ -12,6 +12,7 @@ import { CommandRegistry } from "./CommandRegistry.ts";
 import { VersionCommand } from "./commands/VersionCommand.ts";
 import { ConsultCommand } from "./commands/ConsultCommand.ts";
 import { FeaturesCommand } from "./commands/FeaturesCommand.ts";
+import { PluginsCommand } from "./commands/PluginsCommand.ts";
 import { CheckversionCommand } from "./commands/CheckversionCommand.ts";
 import { InfoCommand } from "./commands/InfoCommand.ts";
 import { MigrateCommand } from "./commands/MigrateCommand.ts";
@@ -55,6 +56,7 @@ export function buildRegistry(): CommandRegistry {
   registry.register(new VersionCommand());
   registry.register(new ConsultCommand());
   registry.register(new FeaturesCommand("features"));
+  registry.register(new PluginsCommand());
   registry.register(new FeaturesCommand("profiles"));
   registry.register(new CheckversionCommand());
   registry.register(new InfoCommand("info"));

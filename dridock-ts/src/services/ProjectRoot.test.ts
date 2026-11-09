@@ -13,6 +13,9 @@ describe("ProjectRootResolver.resolve", () => {
     expect(r.dotDir).toBe("/repo/root/.dridock");
     expect(r.dotName).toBe(".dridock");
     expect(r.configPath).toBe("/repo/root/.dridock/config.yml");
+    // #97: the tracked sibling, resolved alongside — always a path, usually
+    // pointing at a file that does not exist yet (it is created lazily).
+    expect(r.projectPath).toBe("/repo/root/.dridock/project.yml");
   });
 
   test("falls back to cwd when git returns undefined (bare directory case)", async () => {
@@ -37,6 +40,8 @@ describe("ProjectRootResolver.resolve", () => {
     expect(r.dotName).toBe(".claudebox");
     expect(r.dotDir).toBe("/legacy/.claudebox");
     expect(r.configPath).toBe("/legacy/.claudebox/config.yml");
+    // project.yml follows the dot dir actually in use, not the canonical one.
+    expect(r.projectPath).toBe("/legacy/.claudebox/project.yml");
   });
 
   test("returns canonical .dridock path when neither exists (fresh bootstrap)", async () => {

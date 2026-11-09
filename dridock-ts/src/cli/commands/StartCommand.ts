@@ -13,7 +13,7 @@ import { RealHostGit } from "../../infra/HostGit.ts";
 import type { ProcessProbe } from "../../infra/ProcessProbe.ts";
 import { RealProcessProbe } from "../../infra/ProcessProbe.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
-import { ProjectConfig } from "../../services/ProjectConfig.ts";
+import { ProjectConfig, legacyLocationNotice } from "../../services/ProjectConfig.ts";
 import { containerName } from "../../services/ContainerName.ts";
 import { guardWorkspace } from "../../services/WorkspaceGuard.ts";
 import { validateProgArgs } from "../../services/ProgArgValidator.ts";
@@ -193,10 +193,19 @@ mode (-p) they are validated against an allowlist first.
     const auth = new AuthSecretsProvisioner(ctx.fs, sidecars, ctx.env.raw(), dataDir);
     await auth.writeAuthSidecars();
     await auth.writeSecretsSidecars(`${project.dotDir}/secrets.env`);
-    const features = await projectCfg.features(project.configPath);
-    await auth.writeFeaturesSidecar(features);
-    const plugins = await projectCfg.plugins(project.configPath);
-    await auth.writePluginsSidecar(plugins);
+    // features:/plugins: resolve across BOTH config files (#97) — the tracked
+    // project.yml plus the gitignored config.yml, unioned. Legacy entries are
+    // applied, then named on stderr: they work, they just can't travel.
+    const featuresR = await projectCfg.featuresResolved(project.configPath, project.projectPath);
+    if (featuresR.legacy.length > 0) {
+      ctx.stderr.write(legacyLocationNotice("features", featuresR.legacy, project.dotName));
+    }
+    await auth.writeFeaturesSidecar(featuresR.values);
+    const pluginsR = await projectCfg.pluginsResolved(project.configPath, project.projectPath);
+    if (pluginsR.legacy.length > 0) {
+      ctx.stderr.write(legacyLocationNotice("plugins", pluginsR.legacy, project.dotName));
+    }
+    await auth.writePluginsSidecar(pluginsR.values);
 
     // Env passthrough (DRIDOCK_ENV_*) → both -e + sidecar
     const envPassthrough = collectEnvPassthrough(ctx.env.raw());

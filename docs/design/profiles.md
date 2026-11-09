@@ -1,5 +1,10 @@
 # Profiles — opt-in tool bundles per project
 
+> **Config location moved (5.10.0, #97):** `features:`/`profiles:` now live in
+> the tracked `.dridock/project.yml`, not the gitignored `.dridock/config.yml`.
+> See [project-config-split.md](project-config-split.md). The snippets below
+> still show the old file.
+>
 > **Superseded (2026-07-20):** the `profiles:` system was broadened into the general
 > **features** system in 3.0 (issue #5). Config key: `profiles:` → `features:` (both
 > accepted for one deprecation cycle, removed in 4.0). File layout: `profiles/<name>.sh`

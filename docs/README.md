@@ -43,6 +43,7 @@ and [`CLAUDE.md`](../CLAUDE.md) for the repo conventions.
 | [multi-repo-projects.md](design/multi-repo-projects.md) | One project/VM spanning several repos. |
 | [features-system.md](design/features-system.md) | 3.0 (#5): opt-in bundles via `features: [...]` — manifest, on/off scripts, CLI. Supersedes profiles. |
 | [plugins-system.md](design/plugins-system.md) | 5.9.0 (#96): per-project Claude Code plugins via `plugins: [name@owner/repo, ...]` — additive to the hardcoded default, marker-guarded per plugin, mirrors the features sidecar pattern. |
+| [project-config-split.md](design/project-config-split.md) | 5.10.0 (#97): why `features:`/`plugins:` moved to the tracked `project.yml` while `id`/`vm.*` stay in the gitignored `config.yml` — union resolution, lazy creation, the 7.0.0 removal. |
 | [profiles.md](design/profiles.md) | Legacy 2.x profile system (superseded by features; kept for backward-compat read). |
 | [convenience-scripts.md](design/convenience-scripts.md) | The container-side `cb-*` command convention + `cb-help`. |
 | [browser-testing.md](design/browser-testing.md) | `cb-browser` (headless/noVNC) and the opt-in CDP bridge to your real Chrome. |

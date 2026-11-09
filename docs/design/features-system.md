@@ -33,6 +33,10 @@
 
 ## Context
 
+The `features:` key lives in the tracked `.dridock/project.yml` as of 5.10.0
+(#97) — see [project-config-split.md](project-config-split.md); it is still read
+from `config.yml` until 7.0.0.
+
 The current `profiles:` system in `.dridock/config.yml` (2.x: `.claudebox/config.yml`)
 opts a project into language-specific tool bundles. Three profiles exist as of 2.x:
 `go`, `python`, `typescript`. Each activates a Claude Code LSP plugin whose

@@ -23,12 +23,18 @@ List every verb with a one-line synopsis. \`dridock <verb> --help\` for one verb
     ctx.stdout.write(`  ${bin}                        print version + start hint\n\n`);
 
     // Section headings mirror wrapper.sh's help layout.
-    this.renderSection(ctx, "PROJECT", ["bootstrap", "info", "status", "features", "profiles", "ip", "net", "stop", "clear-session"]);
+    //
+    // These arrays are a SECOND source of truth alongside VERBS, and nothing
+    // about adding a verb forces them to agree: `plugins` was registered,
+    // dispatchable and tested, yet absent from `dridock --help` (#97).
+    // HelpSectionCoverage.test.ts now fails if a verb is missing here.
+    this.renderSection(ctx, "PROJECT", ["bootstrap", "info", "status", "features", "profiles", "plugins", "claude-dir", "ip", "net", "stop", "clear-session"]);
     this.renderSection(ctx, "VM / DISK", ["vm", "df", "down", "destroy"]);
     this.renderSection(ctx, "VERSION", ["version", "checkversion"]);
     this.renderSection(ctx, "OTHER", [
       "migrate", "completion", "browser-bridge", "host-agent", "harness",
       "framework-bugs", "consult", "setup-token", "doctor", "auth", "mcp", "report-bug",
+      "team",
     ]);
 
     ctx.stdout.write(`\nUSEFUL ENV\n`);

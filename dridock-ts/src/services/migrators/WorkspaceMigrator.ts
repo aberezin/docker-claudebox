@@ -14,7 +14,10 @@ import type { MigrationReport, Migrator } from "../MigrationReport.ts";
  * Split-brain (same file in both dirs) → "leaving both" skipped-conflict
  * report per file; the migrate verb accumulates the rc.
  */
-const KNOWN_FILES = ["config.yml", "config.sample.yml", "secrets.env", "BRIEF.md"] as const;
+// `project.yml` joined the list in #97 — a project that still uses the legacy
+// `.claudebox/` dir can have one, and leaving it behind on migration would
+// silently drop the project's declared features/plugins.
+const KNOWN_FILES = ["config.yml", "config.sample.yml", "project.yml", "secrets.env", "BRIEF.md"] as const;
 
 export class WorkspaceMigrator implements Migrator {
   constructor(private readonly fs: FileSystem, private readonly root: string) {}

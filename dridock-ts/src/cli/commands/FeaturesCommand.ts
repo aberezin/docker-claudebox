@@ -2,7 +2,7 @@ import type { Command } from "../Command.ts";
 import type { Context } from "../Context.ts";
 import { DridockError } from "../../domain/errors.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
-import { ProjectConfig } from "../../services/ProjectConfig.ts";
+import { ProjectConfig, legacyLocationNotice } from "../../services/ProjectConfig.ts";
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
 import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 import type { Docker } from "../../infra/Docker.ts";
@@ -52,13 +52,22 @@ Toggle optional feature payloads for this project. \`profiles\` is the legacy al
   private async list(ctx: Context): Promise<number> {
     const project = await this.resolveProject(ctx);
     const cfg = new ProjectConfig(ctx.fs);
-    const enabled = await cfg.features(project.configPath);
+    const resolved = await cfg.featuresResolved(project.configPath, project.projectPath);
+    const enabled = resolved.values;
 
-    ctx.stdout.write(`enabled for this project (${project.dotName}/config.yml → features:):\n`);
+    ctx.stdout.write(`enabled for this project (${project.dotName}/project.yml → features:):\n`);
     if (enabled.length > 0) {
-      for (const f of enabled) ctx.stdout.write(`  ${f}\n`);
+      // Mark which file each name came from — a user looking at this list
+      // needs to know which entries are committed and which are local-only.
+      for (const f of enabled) {
+        const where = resolved.legacy.includes(f) ? "  (config.yml — local only)" : "";
+        ctx.stdout.write(`  ${f}${where}\n`);
+      }
     } else {
-      ctx.stdout.write(`  (none — add e.g.  features: [typescript, python]  to ${project.dotName}/config.yml, or run '${ctx.binName} features enable typescript')\n`);
+      ctx.stdout.write(`  (none — run '${ctx.binName} features enable typescript', or add  features: [typescript, python]  to ${project.dotName}/project.yml)\n`);
+    }
+    if (resolved.legacy.length > 0) {
+      ctx.stderr.write(legacyLocationNotice("features", resolved.legacy, project.dotName));
     }
     ctx.stdout.write(`\n`);
 
@@ -161,14 +170,19 @@ Toggle optional feature payloads for this project. \`profiles\` is the legacy al
     }
     const project = await this.resolveProject(ctx);
     const cfg = new ProjectConfig(ctx.fs);
-    const existing = await cfg.features(project.configPath);
-    if (existing.includes(name)) {
+    const resolved = await cfg.featuresResolved(project.configPath, project.projectPath);
+    if (resolved.values.includes(name)) {
       ctx.stdout.write(`  ✓ ${name} already enabled\n`);
       return 0;
     }
-    const next = [...existing, name];
-    await cfg.setFeatures(project.configPath, next);
-    ctx.stdout.write(`  ✓ enabled feature '${name}' (${next.join(", ")}). On next '${ctx.binName}' run, on.sh installs it.\n`);
+    // Writes go to the TRACKED project.yml (#97), created on first use — a
+    // feature a project needs should arrive with a clone, not be re-entered
+    // on every machine.
+    const inProject = await cfg.features(project.projectPath);
+    const next = [...inProject, name];
+    await cfg.setProjectList(project.projectPath, "features", next);
+    ctx.stdout.write(`  ✓ enabled feature '${name}' in ${project.dotName}/project.yml (${next.join(", ")}). On next '${ctx.binName}' run, on.sh installs it.\n`);
+    ctx.stdout.write(`    ${project.dotName}/project.yml is tracked — commit it so every clone gets this.\n`);
     return 0;
   }
 
@@ -183,13 +197,23 @@ Toggle optional feature payloads for this project. \`profiles\` is the legacy al
     }
     const project = await this.resolveProject(ctx);
     const cfg = new ProjectConfig(ctx.fs);
-    const existing = await cfg.features(project.configPath);
-    if (!existing.includes(name)) {
+    const resolved = await cfg.featuresResolved(project.configPath, project.projectPath);
+    if (!resolved.values.includes(name)) {
       ctx.stdout.write(`  ℹ ${name} isn't in features: — nothing to disable\n`);
       return 0;
     }
-    const remaining = existing.filter((f) => f !== name);
-    await cfg.setFeatures(project.configPath, remaining);
+    // Remove from BOTH files. Since reads are a union (#97), dropping it from
+    // only project.yml would leave a config.yml copy still enabling it and
+    // report success — the silent-no-op class this repo keeps re-learning.
+    const inProject = await cfg.features(project.projectPath);
+    if (inProject.includes(name)) {
+      await cfg.setProjectList(project.projectPath, "features", inProject.filter((f) => f !== name));
+    }
+    if (resolved.legacy.includes(name)) {
+      const inConfig = await cfg.features(project.configPath);
+      await cfg.setFeatures(project.configPath, inConfig.filter((f) => f !== name));
+    }
+    const remaining = resolved.values.filter((f) => f !== name);
     const remainingHint = remaining.length > 0 ? ` (remaining: ${remaining.join(", ")})` : "";
     ctx.stdout.write(`  ✓ disabled feature '${name}'${remainingHint}. off.sh will run on next '${ctx.binName}' start.\n`);
     return 0;
@@ -203,10 +227,10 @@ Toggle optional feature payloads for this project. \`profiles\` is the legacy al
   private printHelp(ctx: Context): void {
     ctx.stdout.write(`usage: ${ctx.binName} features [list | enable <name> | disable <name> | info <name>]\n`);
     ctx.stdout.write(`  list                    show enabled + available features (default)\n`);
-    ctx.stdout.write(`  enable <name>           add <name> to features: in .dridock/config.yml\n`);
+    ctx.stdout.write(`  enable <name>           add <name> to features: in .dridock/project.yml (tracked — commit it)\n`);
     ctx.stdout.write(`  disable <name>          remove <name> from features: (runs the feature's off.sh)\n`);
     ctx.stdout.write(`  info <name>             print the feature's manifest.yml\n\n`);
     ctx.stdout.write(`  '${ctx.binName} profiles' is an alias for one deprecation cycle (2.x → 3.0).\n`);
-    ctx.stdout.write(`  Full design: docs/design/features-system.md\n`);
+    ctx.stdout.write(`  Full design: docs/design/features-system.md · docs/design/project-config-split.md\n`);
   }
 }
