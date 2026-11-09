@@ -50,10 +50,15 @@ one but not the other — you get subtle, confusing breakage. The version makes 
 ## Release steps
 
 1. Bump **`VERSION`** and the `DRIDOCK_TS_VERSION` constant in **`dridock-ts/src/domain/dridockVersion.ts`** to the
-   same value (the sync test enforces this).
+   same value. `tests/test_version_sync.sh` enforces it — until #103 that line
+   claimed a "sync test" which did not exist, so the two could silently diverge
+   and the first symptom was `dridock checkversion` reporting host↔image drift
+   at runtime, long after the commit that caused it.
 2. Add a **`CHANGELOG.md`** entry under a new `## [X.Y.Z] — <date>` heading — one
    entry per bump (see the changelog policy below).
-3. Commit, then **tag**: `git tag -a vX.Y.Z -m "vX.Y.Z"` and push it
+3. Commit **on a branch** — `master` refuses direct commits (see
+   [Release branches](#release-branches-release-xyz) for which name to use) —
+   then ff-merge and **tag** the merged commit: `git tag -a vX.Y.Z -m "vX.Y.Z"` and push it
    (`git push <remote> vX.Y.Z`). **Fork gotcha:** the clone inherited upstream's
    `v0.x`–`v1.x` tags locally, so `git tag vX.Y.Z` may collide with an ancient
    upstream tag pointing at the wrong commit. Verify with `git rev-list -n1 vX.Y.Z`,
@@ -91,6 +96,37 @@ Rules:
 
 Two pre-3.0 branches (`wrapper-typescript-rewrite`, `dridock-skill-statusline`) predate
 this convention. Don't take them as precedent.
+
+### Release branches — `release-X.Y.Z`
+
+A standalone release commit — `VERSION` + `dridockVersion.ts` + `CHANGELOG.md` and
+nothing else — goes on **`release-X.Y.Z`**, named for the version it cuts:
+
+```
+release-5.12.0
+```
+
+This is the one branch form that does **not** take an issue number, because a release
+closes no issue. The "file the issue first" rule exists so a branch has somewhere to
+record the problem statement and the verification; for a version bump the **CHANGELOG
+entry is that record**, and it is in the commit itself.
+
+- **Only for a cut that spans already-merged work.** A bump that belongs to one issue's
+  work still rides in that issue's branch, which is how every release before 5.12.0
+  happened (5.10.0 in `97-project-level-config`, 5.11.0 in `89-claude-cli-2-1-258`).
+  Reach for `release-X.Y.Z` when the release covers issues that each shipped without a
+  bump of their own — as #100/#101/#102 did, all being host-TS or hook-only.
+- **Whoever cuts it owns it**: ff-merge to `master`, tag the merged commit, delete the
+  branch. Same ownership rule as any other branch.
+- **Don't use `DRIDOCK_ALLOW_MASTER_COMMIT=1` instead.** The override exists, but the
+  guard it defeats is there precisely because discipline failed once already; spending
+  it on a routine release is how it stops meaning anything. A release branch costs one
+  extra command.
+
+Why this needed writing down (#103): the pre-commit hook refused the 5.12.0 bump and
+pointed at `<issue#>-<slug>`, a form that cannot apply to a release. The guard was
+right and its advice was impossible — so the next person's options were an override
+they shouldn't reach for or a name they'd invent.
 
 Merging is **fast-forward** where possible (`git merge --ff-only`); check with
 `git merge-base --is-ancestor origin/master <branch>` before assuming it isn't.

@@ -14,6 +14,11 @@
 # Merges are allowed — merging a finished branch INTO master is the workflow.
 # Override for a genuine one-off with:  DRIDOCK_ALLOW_MASTER_COMMIT=1 git commit ...
 #
+# #103: this used to send you to <issue#>-<slug> unconditionally, which a RELEASE
+# commit cannot satisfy — it closes no issue. The guard was right and its advice
+# was impossible, leaving the next person a choice between an override they
+# shouldn't spend and a branch name they'd invent. Hence release-X.Y.Z below.
+#
 # INSTALL VIA `make hooks`, which copies this into .git/hooks/.
 # Do NOT rely on `core.hooksPath=.githooks` alone: that path is inside the
 # worktree, so the hook vanishes on any branch that predates it — including
@@ -42,11 +47,14 @@ cat >&2 <<EOF
 ❌ refusing to commit directly to '$_branch'.
 
    Work goes on a branch named <issue#>-<slug>, and the branch owner merges it.
+   A standalone RELEASE commit (VERSION + dridockVersion.ts + CHANGELOG, nothing
+   else) closes no issue, so it goes on release-X.Y.Z instead.
    See CLAUDE.md ("Work branches are named ...") and docs/versioning.md.
 
    Your staged changes are untouched. Move them to a branch:
 
-       git switch -c <issue#>-<slug>
+       git switch -c <issue#>-<slug>      # ordinary work
+       git switch -c release-X.Y.Z        # a version bump + changelog
        git commit ...
 
    If this genuinely belongs on '$_branch' (rare — a merge does not need this):

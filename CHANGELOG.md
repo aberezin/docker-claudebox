@@ -28,6 +28,44 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- **`release-X.Y.Z` branch convention, and a real VERSION sync test** (#103).
+  Cutting 5.12.0 exposed two gaps in `docs/versioning.md`:
+
+  A standalone release commit — `VERSION` + `dridockVersion.ts` + `CHANGELOG.md`
+  and nothing else — had nowhere to live. `.githooks/pre-commit` refuses commits
+  on `master` (deliberately: a fix went straight to master on 2026-09-01 "out of
+  momentum, not intent"), and the documented branch form is `<issue#>-<slug>`,
+  "named for the GitHub issue they close" — which a release doesn't. The hook's
+  refusal text pointed at that impossible form and otherwise offered
+  `DRIDOCK_ALLOW_MASTER_COMMIT=1`, so the next person's only options were an
+  override that shouldn't be spent on routine work or a name they'd invent. It
+  had never come up because every prior release bump rode inside the issue branch
+  that earned it (5.10.0 in `97-project-level-config`, 5.11.0 in
+  `89-claude-cli-2-1-258`); 5.12.0 was the first cut spanning three already-merged
+  issues that each shipped without a bump. Now documented in `docs/versioning.md`
+  (Branch naming + Release steps), `CLAUDE.md`, and the hook's own message, which
+  offers both forms.
+
+  And the release steps claimed `VERSION`/`DRIDOCK_TS_VERSION` were kept in
+  lockstep "(the sync test enforces this)" — nothing did. The only test touching
+  both seeds a *fake* `/repo/VERSION` from the constant into an
+  `InMemoryFileSystem`, exercising `checkversion`'s logic rather than the real
+  pair, so the two could silently diverge; the first symptom would be
+  `dridock checkversion` reporting host↔image drift that isn't real, long after
+  the commit that caused it. A doc asserting enforcement it doesn't have is worse
+  than silence, because it tells the next person not to check — the same reasoning
+  CLAUDE.md already applies to deprecation deadlines. New
+  `tests/test_version_sync.sh` (4 assertions) compares the real pair and pins the
+  shape, since both become the git tag and the `org.dridock.version` image label.
+  Mutation-checked: diverging the pair, a `v` prefix, and renaming the constant
+  each fail it — the last because a refactor must not silently turn the check
+  into a no-op.
+
+  **`make hooks` must be re-run** to pick up the hook's new message; editing
+  `.githooks/pre-commit` does not update the active copy in `.git/hooks/`.
+
+
 ## [5.12.0] - 2026-11-09
 
 ### Fixed
