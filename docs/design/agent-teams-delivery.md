@@ -20,7 +20,9 @@ observed in the wild:
 2. A live watcher armed in a terminal dies the moment that terminal is
    used for anything else.
 3. A terminal watcher consumes events using the shared cursor — the
-   agent never sees them (starvation).
+   agent never sees them (starvation). The dual of this, found in #102,
+   is a consumer that delivers but does NOT advance the cursor, so the
+   same events are handed over twice.
 4. An armed session-scoped Monitor dies with the session — the next
    session starts undelivered.
 
@@ -119,7 +121,7 @@ value of `$DRIDOCK_AGENT_NAME`).
 | `<agent>.jsonl`                   | fetcher               | The spool — one JSONL event per line, append-only. |
 | `<agent>.jsonl.pid`               | fetcher (boot)        | One-line PID file. Removed on clean shutdown. |
 | `<agent>.jsonl.log`               | fetcher (via nohup)   | Combined stdout+stderr. Startup config, poll-failure warnings, sink-write errors. |
-| `<agent>.jsonl.session-cursors.json` | SessionStart + UPS  | `{session_id: last_drained_byte_offset}` — per-session drain cursor. |
+| `<agent>.jsonl.session-cursors.json` | SessionStart + UPS  | `{session_id: last_delivered_byte_offset}` — per-session cursor. **Covers BOTH consumers** (#102): hook drains, and ranges a live Monitor `tail -F -c +N` was armed to deliver. Before #102 it tracked drains only, so a tail's deliveries never advanced it and expiry replayed them. |
 | `<agent>.jsonl.respawn-stamp`     | UPS                   | Unix epoch of last respawn attempt (for 60s backoff). |
 | `<agent>.jsonl.version`           | SessionStart          | dridock version that spawned the RUNNING fetcher (#71). Compared against the installed binary; a mismatch triggers stop+respawn so watcher fixes take effect. **Host-only** — gated on `[ ! -f /.dockerenv ]`, since the container's fetcher dies with the session and its shim rejects `--version`. |
 
@@ -241,6 +243,7 @@ failure.
 | Wraparound pid held by unrelated process    | Cmdline check rejects; treated as dead → respawn           |
 | Session-cursors state file corrupt/absent   | SessionStart falls back to CURRENT EOF (never replay-all) + stderr note |
 | Monitor not armed but events landing        | UserPromptSubmit prints delta events in-line + re-prints arm command |
+| Monitor armed, then expires mid-session     | UPS reads the tail's arm offset from its own cmdline and advances the cursor over `[arm, EOF)` while it is alive, so expiry does NOT replay what it delivered (#102). Events that landed BEFORE the arm offset were delivered by nobody and are surfaced as an explicit gap block rather than skipped — advancing blindly would trade duplicates for silent loss. Arm offset unparseable → cursor untouched, duplicates as the safe failure. |
 | Monitor not armed and inbox EMPTY           | UPS still reports it (#56). The liveness check runs BEFORE the nothing-new early exit — otherwise a dead channel with no traffic is indistinguishable from a healthy idle one, and the reminder is missing at the moment it matters most: a fresh session, before anything has arrived. |
 | Container fetcher SIGKILL'd at teardown     | SessionEnd hook (`team-watch-session-end.sh`, #70) fires `dridock team fetcher stop` so the fetcher's own SIGTERM handler persists state. **Container-only** — gated on `[ -f /.dockerenv ]`; on the host the fetcher SHOULD outlive the session, which is what lets events accumulate for the next drain. |
 | Poll to GitHub failed (rate limit, etc.)    | Fetcher's `onPollFailed` → stderr → log; cursor doesn't advance, next tick retries |

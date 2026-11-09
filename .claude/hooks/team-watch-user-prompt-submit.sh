@@ -74,6 +74,23 @@ _inbox="$_xdg/dridock/inbox/$_self.jsonl"
 _pid="$_inbox.pid"
 _log="$_inbox.log"
 _cursors="$_inbox.session-cursors.json"
+
+# Write this session's drain cursor. Factored out because #102 needs it from
+# TWO places (after a drain, and after confirming a live Monitor covered a
+# range) and a second hand-rolled copy of a jq read-modify-write is how the
+# two drift apart.
+_twh_set_cursor() {
+    local _off="$1"
+    [ -n "$_session_id" ] || return 0
+    command -v jq >/dev/null 2>&1 || return 0
+    if [ ! -f "$_cursors" ]; then echo '{}' > "$_cursors"; fi
+    local _tmp; _tmp="$(mktemp)"
+    if jq --arg id "$_session_id" --argjson off "$_off" '. + {($id): $off}' "$_cursors" > "$_tmp" 2>/dev/null; then
+        mv "$_tmp" "$_cursors"
+    else
+        rm -f "$_tmp"
+    fi
+}
 _respawn_stamp="$_inbox.respawn-stamp"
 
 # Ensure the inbox dir exists BEFORE any operation that would write into
@@ -243,12 +260,22 @@ fi
 # `surfaced: 0` before the `skipped` counter: silence meaning two different
 # things.
 _tail_pid=""
+_tail_arm=""
 if command -v pgrep >/dev/null 2>&1; then
     for _p in $(pgrep -f 'tail -F' 2>/dev/null || true); do
-        if ps -p "$_p" -o command= 2>/dev/null | grep -qF "$_inbox"; then
-            _tail_pid="$_p"
-            break
-        fi
+        _cmd="$(ps -p "$_p" -o command= 2>/dev/null || true)"
+        case "$_cmd" in
+            *"$_inbox"*)
+                _tail_pid="$_p"
+                # The byte offset the Monitor was ARMED at, straight out of
+                # its own cmdline (`tail -F -c +46037 <inbox>`). #102 needs
+                # it to know which range this tail is responsible for. Also
+                # matches the `bash -c` wrapper around the tail, whose
+                # cmdline embeds the same string -- either is fine.
+                _tail_arm="$(printf '%s' "$_cmd" | sed -n 's/.*-c +\([0-9][0-9]*\).*/\1/p' | head -1)"
+                break
+                ;;
+        esac
     done
 fi
 
@@ -266,9 +293,48 @@ if [ "$_inbox_size" -le "$_last_offset" ]; then
 fi
 
 if [ -n "$_tail_pid" ]; then
-    # Tail is running — Monitor is consuming. The stale drain offset
-    # just hasn't been updated yet (SessionStart is where updates
-    # happen). Nothing to surface.
+    # Tail is running — Monitor is consuming, so these events ARE reaching
+    # Claude. #102: this branch used to `exit 0` without touching the cursor,
+    # on the premise that "SessionStart is where updates happen". But
+    # SessionStart runs ONCE per session, so across a long session with
+    # several Monitor arm/expire cycles the cursor stayed frozen at whatever
+    # it was when the first tail came up -- while the file and Claude's actual
+    # knowledge both moved on. The moment that Monitor expired, the next turn
+    # computed its delta from that frozen cursor and REPLAYED every event the
+    # Monitor had already delivered. Observed three times in one session
+    # (#102), each time with the cursor sitting at exactly `arm_offset - 1`.
+    #
+    # The hook cannot know what the Monitor consumed, but it knows what the
+    # Monitor was TOLD to consume -- its arm offset -- and that is enough:
+    # a `tail -F -c +N` delivers [N, EOF) and keeps following.
+    if [ -n "$_tail_arm" ]; then
+        if [ "$_tail_arm" -gt $((_last_offset + 1)) ]; then
+            # A genuine gap: [_last_offset, _tail_arm) was delivered by
+            # NOBODY -- the tail starts after it and the drain never ran.
+            # Surface exactly that window before advancing past it. Blanket-
+            # advancing whenever a tail exists would trade duplicate delivery
+            # for SILENT LOSS, which is the worse half of the
+            # never-silently-discard rule.
+            _gap=$((_tail_arm - 1 - _last_offset))
+            if [ "$_gap" -gt 0 ]; then
+                echo ""
+                echo "─── team-inbox: $_gap bytes arrived before your Monitor's window (offset $_last_offset → $((_tail_arm - 1))) ───"
+                tail -c "+$((_last_offset + 1))" "$_inbox" | head -c "$_gap"
+                echo "─── end gap ───"
+                echo ""
+                echo "📬 Your Monitor is armed at +$_tail_arm and covers everything after this."
+            fi
+        fi
+        # Everything from the arm offset onward is the live tail's to deliver.
+        # Advance to the SNAPSHOT, not a fresh EOF: if the tail died between
+        # the pgrep above and here, advancing past bytes it never delivered
+        # would lose them silently. The snapshot bounds the residual to bytes
+        # appended during this one hook run, which the tail did deliver --
+        # duplicates over loss, deliberately.
+        _twh_set_cursor "$_inbox_size"
+    fi
+    # No readable arm offset → leave the cursor alone and keep the old
+    # behavior. Duplicates are the safe failure mode.
     exit 0
 fi
 
@@ -290,12 +356,4 @@ echo "    tail -F -c +$((_inbox_size + 1)) $_inbox"
 # it's loud (surfaces every turn) rather than silent (misses events),
 # and it stops as soon as SessionStart runs with a session_id (which
 # writes cursor and unwedges).
-if [ -n "$_session_id" ] && command -v jq >/dev/null 2>&1; then
-    if [ ! -f "$_cursors" ]; then echo '{}' > "$_cursors"; fi
-    _tmp="$(mktemp)"
-    if jq --arg id "$_session_id" --argjson off "$_inbox_size" '. + {($id): $off}' "$_cursors" > "$_tmp" 2>/dev/null; then
-        mv "$_tmp" "$_cursors"
-    else
-        rm -f "$_tmp"
-    fi
-fi
+_twh_set_cursor "$_inbox_size"

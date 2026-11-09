@@ -29,6 +29,56 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **The team-inbox cursor ignored one of its two consumers, so an expiring
+  Monitor replayed events it had already delivered** (#102, reported by Bear).
+  The inbox has two readers: the hook's in-line drain and the session's live
+  Monitor `tail -F`. Only the drain advanced the per-session cursor. While a
+  tail was alive, `team-watch-user-prompt-submit.sh` returned early without
+  touching it, on the premise that "SessionStart is where updates happen" — but
+  SessionStart runs **once per session**. So across a long session with several
+  Monitor arm/expire cycles the cursor stayed frozen at whatever it was when the
+  first tail came up, while the file and the agent's actual knowledge both moved
+  on. The moment that Monitor expired, the next turn computed its delta from the
+  frozen cursor and re-surfaced everything the Monitor had delivered — observed
+  three times in one session, each time with the cursor sitting at exactly
+  `arm_offset - 1`.
+
+  The hook can't know what a Monitor consumed, but it knows what the Monitor was
+  *told* to consume: `tail -F -c +N` delivers `[N, EOF)` and keeps following, and
+  `N` is in the tail's own cmdline, which the hook already reads to detect
+  liveness. So while a tail is alive the cursor now advances over the range that
+  tail is responsible for. Events that landed **before** the arm offset were
+  delivered by nobody, so those are surfaced as an explicit gap block first —
+  blanket-advancing whenever a tail exists would trade duplicate delivery for
+  **silent loss**, the worse half of the never-silently-discard rule. An
+  unparseable arm offset leaves the cursor untouched, keeping duplicates as the
+  safe failure mode.
+
+  Bear's original diagnosis — that the hook's offset bookkeeping lagged the
+  file — was right about the symptom and wrong about the cause, which matters
+  because the suspected race isn't one: `_inbox_size` is snapshotted once and
+  used consistently for the drain window, the printed re-arm offset and the
+  cursor write, so a suggested offset *behind* EOF is deliberate and is what
+  stops later arrivals being missed. Hardening that would have fixed nothing.
+
+  Also factored the jq read-modify-write of the cursor file into one
+  `_twh_set_cursor` helper, since the fix needs it from two places and a second
+  hand-rolled copy is how the two drift apart.
+
+  New host-only `tests/test_team_inbox_cursor.sh` (11 assertions) drives the
+  real hook against a real backgrounded `tail -F` and a stand-in fetcher rather
+  than stubbing the liveness probes — the mechanism under test *is* "what can
+  the hook learn from a live tail's cmdline", so stubbing the reader would test
+  nothing. Mutation-checked: restoring the early return fails the two
+  replay assertions (reproducing the reported symptom verbatim), and
+  blanket-advancing past the gap fails the gap assertions while still advancing
+  the cursor — so the suite distinguishes "fixed" from "fixed by losing data".
+  Its own fixtures carry sentinels, because the first run passed three
+  assertions vacuously when the hook was exiting at its respawn stage long
+  before reaching the code under test.
+
+  No `VERSION` bump: hook + test only, no host↔image contract change.
+
 - **Subcommand lists had five independent hand-maintained copies, and sixteen
   entries across nine verbs had drifted** (#101). `Verbs.ts`'s header has
   claimed since the TS port that "all three surfaces (dispatch / completion /
