@@ -52,13 +52,13 @@ export const VERBS = {
   status:           { summary: "alias of `info`",                                   class: "readonly",     needsProject: true } as const,
   version:          { summary: "print the wrapper's DRIDOCK_VERSION",               class: "meta",         needsProject: false } as const,
   checkversion:     { summary: "compare host wrapper against the image label",      class: "readonly",     needsProject: true,  subcommands: ["--all"] as const } as const,
-  features:         { summary: "list / enable / disable / info the project's features", class: "state-mgmt", needsProject: true } as const,
-  profiles:         { summary: "legacy 2.x alias of `features`",                    class: "state-mgmt",   needsProject: true } as const,
+  features:         { summary: "list / enable / disable / info the project's features", class: "state-mgmt", needsProject: true, subcommands: ["list", "enable", "disable", "info"] as const } as const,
+  profiles:         { summary: "legacy 2.x alias of `features`",                    class: "state-mgmt",   needsProject: true,  subcommands: ["list", "enable", "disable", "info"] as const } as const,
   plugins:          { summary: "list / add / remove this project's Claude Code plugins", class: "state-mgmt", needsProject: true,  subcommands: ["list", "add", "remove"] as const } as const,
   vm:               { summary: "colima VM diagnostics",                             class: "vm-mgmt",      needsProject: false, subcommands: ["ls", "list", "usage", "df", "gc"] as const } as const,
   ip:               { summary: "print this project VM's reachable IP",              class: "readonly",     needsProject: true } as const,
   net:              { summary: "print the browse dashboard; with <name>, set network.hostname", class: "state-mgmt", needsProject: true } as const,
-  "browser-bridge": { summary: "opt-in CDP bridge to your real Chrome",             class: "vm-mgmt",      needsProject: true,  subcommands: ["up", "down"] as const } as const,
+  "browser-bridge": { summary: "opt-in CDP bridge to your real Chrome",             class: "vm-mgmt",      needsProject: true,  subcommands: ["up", "down", "status"] as const } as const,
   "host-agent":     { summary: "framework-dev host-command proxy (TRUSTED)",        class: "vm-mgmt",      needsProject: false, subcommands: ["up", "down", "status"] as const } as const,
   harness:          { summary: "framework-dev-only: sync cb-infra image, bump CLI pin", class: "vm-mgmt",   needsProject: false, subcommands: ["sync", "update-cli"] as const } as const,
   "framework-bugs": { summary: "review cross-project framework bug reports",        class: "framework",    needsProject: false, subcommands: ["list", "clear"] as const } as const,
@@ -73,7 +73,7 @@ export const VERBS = {
   mcp:              { summary: "run `claude mcp …` in a throwaway container",       class: "throwaway",    needsProject: false } as const,
   "report-bug":     { summary: "file a framework bug report",                       class: "framework",    needsProject: false } as const,
   df:               { summary: "at-a-glance VM disk usage",                         class: "readonly",     needsProject: false } as const,
-  team:             { summary: "named-agent team: whoami/roster/post/watch (agent-teams.md)", class: "state-mgmt", needsProject: true, subcommands: ["whoami", "roster", "post", "watch"] as const } as const,
+  team:             { summary: "named-agent message bus over GitHub comments (agent-teams.md)", class: "state-mgmt", needsProject: true, subcommands: ["whoami", "roster", "post", "watch", "fetcher", "dir"] as const } as const,
 } as const satisfies Record<string, VerbSpec>;
 
 export type Verb = keyof typeof VERBS;
@@ -86,4 +86,34 @@ export function isKnownVerb(v: string): v is Verb {
 /** All verb names, sorted — for `--help` and completion output. */
 export function allVerbNames(): readonly Verb[] {
   return Object.keys(VERBS).sort() as Verb[];
+}
+
+/**
+ * Every verb that declares `subcommands`, sorted, as `[verb, subcommands]`.
+ *
+ * This exists so the bash-completion script is GENERATED from this map
+ * instead of hand-written beside it. The header above has claimed since the
+ * TS port that "all three surfaces (dispatch / completion / --help)" come
+ * from here, but completion was a hardcoded `case` block in
+ * CompletionCommand.ts, and it drifted exactly as you would expect: by
+ * #101 it was missing `status` for browser-bridge, `update-cli` for
+ * harness, and had no arm at all for `team` or `plugins` — so two verbs
+ * simply didn't tab-complete. Generating it deletes that copy rather than
+ * adding a test to watch it (#101).
+ */
+export function verbsWithSubcommands(): readonly (readonly [Verb, readonly string[]])[] {
+  return allVerbNames()
+    .map((v) => [v, (VERBS[v] as VerbSpec).subcommands] as const)
+    .filter((pair): pair is readonly [Verb, readonly string[]] => pair[1] !== undefined);
+}
+
+/**
+ * Subcommands that are really FLAGS, not subverbs — `destroy --purge`,
+ * `migrate --all`. They belong in `subcommands` because completion should
+ * offer them, but a `Command` must not declare them as `subverbs`: there is
+ * no `dridock destroy --purge --help`. The #101 cross-check uses this to
+ * compare only the subverb-shaped entries.
+ */
+export function isFlagShaped(subcommand: string): boolean {
+  return subcommand.startsWith("-");
 }

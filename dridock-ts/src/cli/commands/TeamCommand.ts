@@ -69,9 +69,66 @@ Agent-team message bus over GitHub issue comments.
   roster    show the configured agent roster
   post      post a message to the bus
   watch     run the inbox fetcher in the foreground
-  fetcher   manage the detached fetcher (status|stop)
+  fetcher   manage the detached fetcher (status|stop|log)
+  dir       print (or reap) the shared team rendezvous dir
 
 \`dridock team <subverb> --help\` for one subverb.`;
+
+  /**
+   * The ONE place team's accepted subverbs are written down (#101).
+   *
+   * Before this, the same list existed in six places and `dir` — shipped and
+   * working — was missing from five of them: this `usage` block, the
+   * unknown-subcommand error in `run()`, `printSubverbUsage`'s switch (so
+   * `team dir --help` fell to a `default:` branch commented "should be
+   * unreachable"), `printUsage`'s listing, and `Verbs.ts`'s `subcommands` +
+   * `summary`. The gate in `run()` and the error beside it now both derive
+   * from this array, so they cannot disagree with each other again.
+   */
+  readonly subverbs = [
+    {
+      name: "whoami",
+      synopsis: `dridock team whoami
+
+Print THIS runtime's agent name on stdout, pipe-clean for scripts
+(SELF=$(dridock team whoami)), with a short "(from X)" note on stderr.`,
+    },
+    {
+      name: "roster",
+      synopsis: `dridock team roster
+
+Print the whole team from .dridock/agents.yml — agents and the human.
+Read-only; roster edits go through bootstrap or a hand-edit.`,
+    },
+    {
+      name: "post",
+      synopsis: `dridock team post [--to A,B] [--issue N [--close] | --new --title T] [--repo owner/name] [--dry-run]
+
+Prepend the sender header to stdin and post it to the bus.`,
+    },
+    {
+      name: "watch",
+      synopsis: `dridock team watch [--inbox <path>]
+
+Run the inbox fetcher in the FOREGROUND, appending bus events to the inbox
+jsonl. The SessionStart hook normally runs this detached — see 'fetcher'.`,
+    },
+    {
+      name: "fetcher",
+      synopsis: `dridock team fetcher <status|stop|log> [--inbox <path>] [--lines N]
+
+Inspect and control the detached fetcher spawned by the SessionStart hook.`,
+    },
+    {
+      name: "dir",
+      synopsis: `dridock team dir [--reap [--older-than <days>]]
+
+Print the shared team rendezvous directory — a HOST-account path named after
+'team:' in .dridock/agents.yml, for handing files between agents. --reap
+removes entries older than --older-than days (default 7); --older-than
+without --reap is refused, since alone it would age nothing out.`,
+    },
+  ] as const;
 
   constructor(
     private readonly deps: Partial<TeamCommandDeps> = {},
@@ -85,8 +142,12 @@ Agent-team message bus over GitHub issue comments.
       this.printUsage(ctx);
       return sub === "-h" || sub === "--help" ? 0 : 1;
     }
-    if (sub !== "whoami" && sub !== "roster" && sub !== "post" && sub !== "watch" && sub !== "fetcher" && sub !== "dir") {
-      ctx.stderr.write(`❌ team: unknown subcommand '${sub}' (allowed: whoami, roster, post, watch, fetcher)\n`);
+    // Gate AND message both derive from `subverbs` (#101): the old hardcoded
+    // chain accepted `dir` while the error one line below it omitted `dir`,
+    // so a typo told you a working subverb didn't exist.
+    if (!this.subverbs.some((s) => s.name === sub)) {
+      const allowed = this.subverbs.map((s) => s.name).join(", ");
+      ctx.stderr.write(`❌ team: unknown subcommand '${sub}' (allowed: ${allowed})\n`);
       return 1;
     }
 
@@ -1093,35 +1154,64 @@ Agent-team message bus over GitHub issue comments.
         ctx.stdout.write(`  --inbox <p>  override the convention-default inbox path\n`);
         ctx.stdout.write(`               (<xdg>/dridock/inbox/<agent>.jsonl).\n`);
         return;
-      default:
-        // Should be unreachable — subverb allowlist gates run() before this.
+      default: {
+        // Reachable, despite what this comment used to claim: `dir` was
+        // added to the allowlist in run() without a case here, so
+        // `team dir --help` printed the GENERAL usage — to stderr, with no
+        // stdout at all, which breaks #60's "help is output, not a
+        // diagnostic" contract. Falling back to the declared synopsis means
+        // a newly added subverb gets correct help on stdout automatically
+        // instead of silently landing here (#101).
+        const declared = this.subverbs.find((s) => s.name === sub);
+        if (declared !== undefined) {
+          ctx.stdout.write(`usage: ${declared.synopsis}\n`);
+          return;
+        }
         this.printUsage(ctx);
+      }
     }
   }
 
   private printUsage(ctx: Context): void {
-    ctx.stderr.write(`usage: ${ctx.binName} team <subcommand>\n`);
-    ctx.stderr.write(`  Named-agent team collaboration (docs/design/agent-teams.md).\n`);
-    ctx.stderr.write(`\n`);
-    ctx.stderr.write(`Subcommands:\n`);
-    ctx.stderr.write(`  whoami                THIS runtime's agent name (from DRIDOCK_AGENT_NAME env\n`);
-    ctx.stderr.write(`                        or single-agent roster fallback)\n`);
-    ctx.stderr.write(`  roster                the whole team (agents + human) from .dridock/agents.yml\n`);
-    ctx.stderr.write(`  post [--to A,B]       prepend the sender header to stdin. --issue N ALSO sends\n`);
-    ctx.stderr.write(`       [--issue N]      via gh(1) as a comment on that issue (#59); without --issue,\n`);
-    ctx.stderr.write(`                        compose-only (stdout, pipe to gh). --repo overrides\n`);
-    ctx.stderr.write(`                        roster.github_repo; --dry-run shows without sending.\n`);
-    ctx.stderr.write(`  watch [--once]        poll GitHub for messages addressed to self; surface\n`);
-    ctx.stderr.write(`                        via stdout. --once = one catchup tick then exit\n`);
-    ctx.stderr.write(`                        (SessionStart hook). --repo owner/name overrides\n`);
-    ctx.stderr.write(`                        the roster's github_repo. Ctrl-C persists state\n`);
-    ctx.stderr.write(`                        and exits cleanly.\n`);
-    ctx.stderr.write(`                        --inbox <path> = fetcher mode: append JSONL to\n`);
-    ctx.stderr.write(`                        per-agent inbox file instead of stdout (spec #56).\n`);
-    ctx.stderr.write(`                        Spawned detached by SessionStart hook; pidfile at\n`);
-    ctx.stderr.write(`                        <path>.pid, stderr log at <path>.log.\n`);
-    ctx.stderr.write(`  fetcher <sub>         inspect/control the --inbox fetcher lifecycle:\n`);
-    ctx.stderr.write(`                        status | stop | log [--lines N] [--inbox <path>]\n`);
+    // Buffered rather than written straight through so the coverage check at
+    // the bottom can read what this actually emitted. The listing is
+    // hand-written prose — exactly the kind of copy that drifted from the
+    // run() gate before #101 (`dir` shipped working and undocumented here) —
+    // so instead of trusting it, or keeping a second list of names to check
+    // it against, it is checked against `subverbs` itself.
+    const lines: string[] = [];
+    const w = (s: string): void => { lines.push(s); };
+    w(`usage: ${ctx.binName} team <subcommand>\n`);
+    w(`  Named-agent team collaboration (docs/design/agent-teams.md).\n`);
+    w(`\n`);
+    w(`Subcommands:\n`);
+    w(`  whoami                THIS runtime's agent name (from DRIDOCK_AGENT_NAME env\n`);
+    w(`                        or single-agent roster fallback)\n`);
+    w(`  roster                the whole team (agents + human) from .dridock/agents.yml\n`);
+    w(`  post [--to A,B]       prepend the sender header to stdin. --issue N ALSO sends\n`);
+    w(`       [--issue N]      via gh(1) as a comment on that issue (#59); without --issue,\n`);
+    w(`                        compose-only (stdout, pipe to gh). --repo overrides\n`);
+    w(`                        roster.github_repo; --dry-run shows without sending.\n`);
+    w(`  watch [--once]        poll GitHub for messages addressed to self; surface\n`);
+    w(`                        via stdout. --once = one catchup tick then exit\n`);
+    w(`                        (SessionStart hook). --repo owner/name overrides\n`);
+    w(`                        the roster's github_repo. Ctrl-C persists state\n`);
+    w(`                        and exits cleanly.\n`);
+    w(`                        --inbox <path> = fetcher mode: append JSONL to\n`);
+    w(`                        per-agent inbox file instead of stdout (spec #56).\n`);
+    w(`                        Spawned detached by SessionStart hook; pidfile at\n`);
+    w(`                        <path>.pid, stderr log at <path>.log.\n`);
+    w(`  fetcher <sub>         inspect/control the --inbox fetcher lifecycle:\n`);
+    w(`                        status | stop | log [--lines N] [--inbox <path>]\n`);
+    w(`  dir [--reap]          print the shared team rendezvous dir (named after\n`);
+    w(`      [--older-than N]  'team:' in agents.yml). --reap removes entries older\n`);
+    w(`                        than N days (default 7).\n`);
+    const listed = lines.join("");
+    const undocumented = this.subverbs.map((s) => s.name).filter((n) => !listed.includes(n));
+    if (undocumented.length > 0) {
+      w(`  (undocumented here: ${undocumented.join(", ")} — run 'dridock team <subverb> --help')\n`);
+    }
+    for (const line of lines) ctx.stderr.write(line);
   }
 }
 

@@ -28,6 +28,70 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Subcommand lists had five independent hand-maintained copies, and sixteen
+  entries across nine verbs had drifted** (#101). `Verbs.ts`'s header has
+  claimed since the TS port that "all three surfaces (dispatch / completion /
+  `--help`) [are] generated from this map" — but the bash completion script was
+  a hand-written `case` block beside it, and `subcommands` itself was
+  hand-maintained with nothing comparing it to the dispatcher that actually
+  accepts subverbs. Found while reviewing #100.
+
+  Three were user-facing lies: `dridock host-agent --help` advertised
+  `[status|stop]` — a `stop` that has never been accepted, while omitting the
+  `up`/`down` that are — which is character-for-character the defect
+  `UsageSubverbs.test.ts`'s own header cites as its reason for existing, live
+  the whole time in a second file. `dridock framework-bugs --help` advertised
+  `show` and `resolve`, neither accepted, nine lines above its own `--help`
+  branch printing the correct `[list|clear]`. `dridock features --help`
+  advertised `on`/`off`, which the dispatcher rejects, while omitting the real
+  `enable`/`disable`/`info` — and the rejection told you to run `--help`, which
+  was what told you to type `on`.
+
+  `team dir` was the worst case: shipped, working, documented in
+  `docs/design/agent-teams.md`, and missing from **five** places in the code's
+  own help — `Verbs.ts`'s `subcommands` and `summary`, the verb's `usage` block,
+  the unknown-subcommand error one line below the gate that accepted it, and
+  `printSubverbUsage`'s switch, so `dridock team dir --help` fell to a
+  `default:` branch commented "should be unreachable" and printed the general
+  usage to **stderr with zero bytes on stdout**, breaking #60's "help is output,
+  not a diagnostic" contract. `features`/`profiles` had no `subcommands` entry
+  at all despite accepting four, so `dridock --help` listed none of them.
+  Completion was missing `status` (browser-bridge, #93) and `update-cli`
+  (harness, #100) and had **no arm at all for `team` or `plugins`** — two verbs
+  that simply did not tab-complete; `plugins` never got one when the verb
+  shipped in #97.
+
+  Every one of these was invisible to the existing enforcement for the same
+  reason: `UsageSubverbs.test.ts` and `HelpConformance.test.ts` iterate commands
+  that *declare* a `subverbs` array, and each drifted verb declared none — a
+  check that skips exactly the broken cases. So the fix is structural rather
+  than sixteen one-line patches:
+  - The completion `case` arms are now **generated** from `Verbs.ts`
+    (`verbsWithSubcommands()`), deleting that copy instead of testing it.
+    `start`'s arm stays hand-written and is now named as such — those are
+    programmatic flags, not subcommands.
+  - `team`, `host-agent`, `framework-bugs`, `features`/`profiles` and
+    `completion` now declare `subverbs`, which is what lets the existing #60
+    help-conformance suites see them at all (+73 tests).
+  - `TeamCommand`'s accepted-subverb gate and its unknown-subcommand error both
+    derive from that declaration, so they cannot disagree again; its
+    `printUsage` listing checks itself against the declaration and says so
+    rather than silently omitting one.
+  - New `VerbsSubcommandsCrosscheck.test.ts` cross-checks `Verbs.ts`'s
+    `subcommands` against each command's declared `subverbs` in both directions,
+    requires the declaration wherever `Verbs.ts` names subverb-shaped
+    subcommands (the anti-vacuity test), carves out flag-shaped entries
+    (`destroy --purge`), and pins each generated completion arm's full list.
+    Mutation-checked: reverting browser-bridge's `status`, deleting `team`'s
+    declaration, re-hardcoding the `harness` completion arm, and declaring a
+    flag-shaped subverb each fail it.
+  - `dridock completion`'s usage no longer advertises `zsh`, which the
+    dispatcher has always thrown on.
+
+  No `VERSION` bump: host-TS only, no host↔image contract change (same
+  precedent as #93/#94 and #100's own CLI-only commits).
+
 ### Added
 - **`dridock harness update-cli <version|latest|stable> [--skip-build]`** (#100).
   Bumping the baked Claude CLI version was a five-step manual dance (done by hand

@@ -11,9 +11,35 @@ import { stateHome } from "../../domain/paths.ts";
  */
 export class FrameworkBugsCommand implements Command {
   readonly verb = "framework-bugs" as const;
-  readonly usage = `dridock framework-bugs [list|show|resolve] [id]
+  readonly usage = `dridock framework-bugs <subverb>
 
-Harness-dev mode: cross-project framework bug reports.`;
+Harness-dev mode: cross-project framework bug reports.
+
+  list    show the pending reports (the default with no subverb)
+  clear   discard them all
+
+\`dridock framework-bugs <subverb> --help\` for one subverb.`;
+
+  // #101: advertised `show` and `resolve`, neither of which has ever been
+  // accepted, and omitted `clear`, which has. The verb's own `--help` branch
+  // printed the correct `[list|clear]` nine lines below the wrong usage
+  // string — two copies in one file, disagreeing.
+  readonly subverbs = [
+    {
+      name: "list",
+      synopsis: `dridock framework-bugs list
+
+Show pending cross-project framework bug reports. This is the default when
+no subverb is given.`,
+    },
+    {
+      name: "clear",
+      synopsis: `dridock framework-bugs clear
+
+Discard every pending framework bug report. Not undoable — the reports are
+the only record.`,
+    },
+  ] as const;
 
   async run(args: readonly string[], ctx: Context): Promise<number> {
     const sub = args[0] ?? "list";

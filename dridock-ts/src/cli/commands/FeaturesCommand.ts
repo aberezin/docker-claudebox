@@ -21,9 +21,55 @@ const FEATURE_NAME_REGEX = /^[A-Za-z0-9_-]+$/;
 
 export class FeaturesCommand implements Command {
   readonly verb: "features" | "profiles";
-  readonly usage = `dridock features [on|off|list] [name]
+  readonly usage = `dridock features <subverb> [name]
 
-Toggle optional feature payloads for this project. \`profiles\` is the legacy alias.`;
+Toggle optional feature payloads for this project. \`profiles\` is the legacy
+2.x alias of this verb and behaves identically.
+
+  list              show this project's features and what is installed
+  enable <name>     add a feature to .dridock/project.yml
+  disable <name>    remove it (from project.yml AND the legacy config.yml)
+  info <name>       describe one feature and what it installs
+
+\`dridock features <subverb> --help\` for one subverb.`;
+
+  // #101: `features`/`profiles` had NO `subcommands` entry in Verbs.ts at all
+  // despite accepting four, so `dridock --help` listed none of them, and the
+  // usage line above advertised `on`/`off` — which the dispatcher rejects —
+  // while omitting the real `enable`/`disable`/`info`. Declaring them here is
+  // what lets the #101 cross-check compare the two.
+  readonly subverbs = [
+    {
+      name: "list",
+      synopsis: `dridock features list
+
+Show the features enabled for this project and whether each is installed in
+the container. Default when no subverb is given.`,
+    },
+    {
+      name: "enable",
+      synopsis: `dridock features enable <name>
+
+Add a feature to .dridock/project.yml (tracked, so it travels with a clone).
+Takes effect on the next container start; installs are marker-guarded.`,
+    },
+    {
+      name: "disable",
+      synopsis: `dridock features disable <name>
+
+Remove a feature from .dridock/project.yml AND from the deprecated
+.dridock/config.yml location. Both, because reads are a union of the two —
+clearing one and reporting success is the silent-no-op class (#97).
+Already-installed payloads stay installed in the container.`,
+    },
+    {
+      name: "info",
+      synopsis: `dridock features info <name>
+
+Describe one feature: what its installer does and what it puts in the
+container.`,
+    },
+  ] as const;
 
   constructor(
     verb: "features" | "profiles" = "features",

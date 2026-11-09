@@ -14,9 +14,45 @@ import { HostAgentService } from "../../services/HostAgentService.ts";
  */
 export class HostAgentCommand implements Command {
   readonly verb = "host-agent" as const;
-  readonly usage = `dridock host-agent [status|stop]
+  readonly usage = `dridock host-agent <subverb>
 
-Host-side agent process for this project.`;
+Host-side agent process for this project: a TRUSTED, opt-in proxy that lets a
+harness-DEV claudebot run allowlisted colima/limactl commands back on the Mac.
+Off by default.
+
+  up       start the proxy for this project
+  down     stop it
+  status   report whether it is running
+
+\`dridock host-agent <subverb> --help\` for one subverb.`;
+
+  // #101: this verb declared no `subverbs`, so UsageSubverbs.test.ts skipped
+  // it — and the usage line above read `[status|stop]`, advertising a `stop`
+  // that the gate in run() has never accepted while omitting the `up`/`down`
+  // that it does. That is character-for-character the browser-bridge defect
+  // quoted in that test file's own header, still live in a second file.
+  readonly subverbs = [
+    {
+      name: "up",
+      synopsis: `dridock host-agent up
+
+Start the host-command proxy for this project. TRUSTED: it executes an
+allowlisted set of colima/limactl commands on the Mac on behalf of a
+harness-dev claudebot. Opt-in, off by default — see docs/design/backends.md.`,
+    },
+    {
+      name: "down",
+      synopsis: `dridock host-agent down
+
+Stop this project's host-command proxy.`,
+    },
+    {
+      name: "status",
+      synopsis: `dridock host-agent status
+
+Report whether this project's host-command proxy is running.`,
+    },
+  ] as const;
 
   constructor(private readonly deps: Partial<HostAgentCommandDeps> = {}) {}
 
