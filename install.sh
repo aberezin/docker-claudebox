@@ -169,10 +169,11 @@ fi
 
 # ── git hooks (#104) ─────────────────────────────────────────────────────────
 # CLAUDE.md has required `make hooks` once per clone since 2026-09-01, and it is
-# a step people skip: Bear's clone still had only `.git/hooks/*.sample` two
-# months later, so the master-commit guard this repo documents as ENFORCED was
-# live in exactly one of the two clones that commit to it. install.sh is the
-# command everyone actually runs, so the guard rides along with it.
+# a step people skip: on 2026-11-09 the checkout at
+# `~aberezin/.../docker-out-of-docker/docker-claudebox` on this host still held
+# only `.git/hooks/*.sample`, so the master-commit guard this repo documents as
+# ENFORCED was absent from a live checkout of it. install.sh is the command
+# everyone actually runs, so the guard rides along with it.
 #
 # Deliberately BEFORE the image build: the build takes minutes and can fail, and
 # a hook that only lands on a successful build is a hook that doesn't land.

@@ -9,10 +9,15 @@
 #      someone to remember to add a line here too. Adding a hook and
 #      distributing it were separate steps with nothing forcing the second —
 #      the same shape as the unindexed-docs problem (tests/test_docs_index.sh).
-#   2. It is a once-per-clone step, so it is a step people skip. Bear's clone had
-#      only `.git/hooks/*.sample` on 2026-11-09, two months after CLAUDE.md
-#      started requiring it: the master-commit guard was enforced in exactly one
-#      of the two clones that commit to this repo.
+#   2. It is a once-per-clone step, so it is a step people skip. On 2026-11-09,
+#      two months after CLAUDE.md started requiring it, the checkout at
+#      `~aberezin/.../docker-out-of-docker/docker-claudebox` on this host still
+#      held only `.git/hooks/*.sample` — re-checked at 23:30Z, still true. The
+#      guard documented here as ENFORCED was absent from a live checkout of
+#      this repo. (Naming the path, not an owner: the first draft of this
+#      comment said "Bear's clone", which Bear disproved on #104 — that path
+#      is not mounted into its container at all. Same lesson as #103: cite what
+#      resolves.)
 #   3. Re-running it is also required whenever `.githooks/*` CHANGES
 #      (CHANGELOG.md:65 says so for 5.4.0, and .githooks/pre-commit changed again
 #      in 99633cf) and nothing detects that it hasn't been. A stale copy is the

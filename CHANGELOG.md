@@ -34,9 +34,10 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   one named hook, a once-per-clone step, and no detection of any kind.
 
   All three were holes. `CLAUDE.md` has required the step since 2026-09-01; on
-  2026-11-09 one of the two clones that commit to this repo still held only
+  2026-11-09 a second checkout of this repo on the same host
+  (`~aberezin/.../docker-out-of-docker/docker-claudebox`) still held only
   `.git/hooks/*.sample`, so the master-commit guard documented here as *enforced*
-  was live in half the places it needed to be. Re-running it is also required
+  was absent from a live checkout of it. Re-running it is also required
   whenever the hook itself changes — this file said so for 5.4.0 and the hook
   changed again in #103 — and nothing detected a clone holding an installed,
   executable, passing guard that prints advice the repo has since retracted.

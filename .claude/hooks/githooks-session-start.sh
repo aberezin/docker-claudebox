@@ -4,9 +4,10 @@
 #
 # WHY (#104). The pre-commit guard that refuses direct commits on master is
 # installed by a once-per-clone `make hooks`, and nothing noticed when that never
-# happened: on 2026-11-09 Bear's clone held only `.git/hooks/*.sample`, two
-# months after CLAUDE.md started requiring the step — so the guard this repo
-# documents as ENFORCED was live in one of the two clones that commit to it.
+# happened: on 2026-11-09, two months after CLAUDE.md started requiring the step,
+# the checkout at `~aberezin/.../docker-out-of-docker/docker-claudebox` on this
+# host held only `.git/hooks/*.sample` — so the guard this repo documents as
+# ENFORCED was absent from a live checkout of it.
 # Staleness is the quieter half: `.githooks/pre-commit` has changed twice
 # (CHANGELOG.md:65, then 99633cf) and a clone can hold an installed, passing
 # guard that prints advice the repo has since retracted.

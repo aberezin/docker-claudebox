@@ -3,10 +3,11 @@
 # ── #104: .githooks/install.sh distributes every hook, and says so when it can't ──
 #
 # `make hooks` was `install -m 755 .githooks/pre-commit .git/hooks/pre-commit`:
-# one named hook, a once-per-clone step people skip (Bear's clone held only
-# `*.sample` two months after CLAUDE.md required it), and no detection at all
-# for a copy that had gone stale or for a `core.hooksPath` that makes
-# `.git/hooks/` dead weight.
+# one named hook, a once-per-clone step people skip (a checkout on this host,
+# `~aberezin/.../docker-out-of-docker/docker-claudebox`, still held only
+# `*.sample` on 2026-11-09, two months after CLAUDE.md required it), and no
+# detection at all for a copy that had gone stale or for a `core.hooksPath`
+# that makes `.git/hooks/` dead weight.
 #
 # These run on the HOST with no container and no Docker: the installer is pure
 # shell over a git worktree, so each case gets its own `git init` fixture. That

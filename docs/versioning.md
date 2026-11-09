@@ -155,9 +155,13 @@ make hooks-check    # report missing, stale, or shadowed hooks; silent when clea
 Since #104 you get it for free: `./install.sh` runs the installer before the image
 build, and a SessionStart hook nags when this clone's copies are missing or stale.
 Three layers because one wasn't enough — on 2026-11-09, two months after this file
-started requiring the step, one of the two clones that commit to this repo held only
-`.git/hooks/*.sample`. The guard was documented as enforced and was enforced in half
-the places it needed to be.
+started requiring the step, a second checkout of this repo on the same host
+(`~aberezin/.../docker-out-of-docker/docker-claudebox`) still held only
+`.git/hooks/*.sample`. The guard was documented as enforced and was absent from a
+live checkout. Name the path, not the owner: the first draft of these comments
+attributed that checkout to Bear, and Bear disproved it — its workspace is a
+*different* directory (`docker-claudebox-in-claudebox`) and `docker-claudebox` is
+not mounted into its container at all.
 
 **Staleness is the quieter half.** `.githooks/pre-commit` has changed twice (5.4.0
 reworded its refusal, #103 added the release-branch advice). A clone that installed
