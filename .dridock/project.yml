@@ -1,0 +1,15 @@
+# .dridock/project.yml — PROJECT-level dridock config. COMMIT THIS FILE.
+#
+# Everything here is a property of the project itself, identical in every
+# clone, so it belongs in git:
+#
+#   features: [typescript, python]                # tool bundles  -> 'dridock features'
+#   plugins:  [superpowers@aberezin/superpowers]  # Claude Code plugins -> 'dridock plugins'
+#
+# Machine-local settings live in the gitignored .dridock/config.yml instead
+# (project id, VM cpu/memory/disk, network hostname) — those must differ per
+# clone and per host.
+#
+# Docs: docs/design/project-config-split.md
+
+plugins: [superpowers@aberezin/superpowers]
