@@ -270,12 +270,15 @@ hook's "Monitor is NOT armed" nag cannot disagree. Keep it that way — a second
 copy of the check is the drift class #101 closed, and `tests/test_statusline_inbox.sh`
 fails if the hook regrows an inline scan.
 
-Known looseness, inherited from #102 rather than introduced here: the check
-matches any process whose command line contains both `tail -F` and the inbox
-path, including a `bash -c` wrapper around the tail (deliberately). A one-off
-command that merely *mentions* both — a diagnostic `pgrep`, say — reads as a
-live watch for as long as it runs. Short-lived and rare; both callers see the
-same answer.
+The process must actually be a `tail` (`ps -o comm=`), not merely mention one.
+Until #105's review the check accepted any command line containing both
+`tail -F` and the inbox path — a `bash -c` wrapper deliberately, but also a
+diagnostic `pgrep` or anything quoting a printed arm command. Arfy reproduced a
+non-tail decoy reading as live. For the status line that's a false "live"; for
+the hook it's silent loss, because a decoy quoting a **stale, lower** offset
+takes #102's no-gap path and advances the cursor past events nobody was handed.
+The real tail always runs alongside its wrapper (as its child), so requiring
+`comm == tail` loses nothing.
 
 ## Posting: every write needs a header
 

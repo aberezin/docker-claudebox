@@ -36,9 +36,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The count appears only when the watch is off, because with a live watch the
   cursor catches up at prompt time (#102) and a count would include events the
   agent has already seen. Placed before the project walk, like the #66 work
-  indicator, since the team bus is used most in the harness repo. Costs ~10ms a
-  render here: the agent name comes from `$DRIDOCK_AGENT_NAME` when set, and an
-  agent with no inbox exits before any process scan.
+  indicator, since the team bus is used most in the harness repo. Cost, measured:
+  +~30ms per render on macOS (0.06s → 0.09s for the whole script), about 20ms of
+  it the `pgrep` scan; the whole script is ~10ms in-container. The agent name
+  comes from `$DRIDOCK_AGENT_NAME` (set on both runtimes), and an agent with no
+  inbox exits before any process scan.
 
 ### Changed
 - **"Is the inbox watch live" now has one definition**, in
@@ -46,8 +48,19 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   hook's inline `pgrep`/`ps` loop moved there unchanged, and the status line
   sources the same function, so the two cannot disagree about whether a watch is
   armed. `tests/test_statusline_inbox.sh` (10 assertions, real `tail -F`
-  processes) fails if the hook grows its own copy again. No behaviour change in
-  the hook: #102's suite is 11/11 before and after.
+  processes) fails if the hook grows its own copy again.
+
+### Fixed
+- **A process that merely mentioned the arm command counted as a live watch**
+  (#105 review). The check accepted any command line containing `tail -F` and
+  the inbox path, so a diagnostic `pgrep`, or anything quoting a printed arm
+  line, read as armed. Arfy reproduced it with a non-tail decoy. For the status
+  line that's a false `📬 live`; for the hook it's silent loss, because a decoy
+  quoting a stale, lower offset takes #102's no-gap path and advances the cursor
+  past events nobody was handed. The process must now actually be a `tail`
+  (`ps -o comm=`). The real tail always runs as a child of its `bash -c`
+  wrapper, checked on macOS and in-container, so the genuine watch is still
+  found, with the same arm offset.
 
 ## [5.13.0] - 2026-11-09
 

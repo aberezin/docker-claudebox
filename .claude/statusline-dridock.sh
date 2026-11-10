@@ -97,9 +97,12 @@ fi
 # UserPromptSubmit hook uses — so the status line and the hook's "NOT armed"
 # nag cannot disagree.
 #
-# Cost: the name comes from $DRIDOCK_AGENT_NAME when set (free); only when it
-# isn't do we pay ~20ms for `dridock team whoami`. No inbox file → silent,
-# before any process scan. The unread count (two jq reads) runs only when off.
+# Cost, measured: +~30ms/render on macOS (0.06s → 0.09s whole script), ~20ms
+# of it the `pgrep -f 'tail -F'` scan; the whole script is ~10ms in-container.
+# The name comes from $DRIDOCK_AGENT_NAME, which is set on both runtimes, so
+# that's the normal path; `dridock team whoami` (20-30ms) is only a fallback.
+# No inbox file → silent, before any process scan. The unread count (two jq
+# reads) runs only when off.
 _tw_self="${DRIDOCK_AGENT_NAME:-}"
 if [ -z "$_tw_self" ] && command -v dridock >/dev/null 2>&1; then
     if _tw_self="$(dridock team whoami 2>/dev/null)"; then

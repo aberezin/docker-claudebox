@@ -82,6 +82,41 @@ test_statusline_inbox() {
         *)          bad "another agent's tail made this one look live: $out" ;;
     esac
 
+    # ── a NON-tail process that merely quotes the arm command → off ───
+    # Arfy's reproduction from #105's review. Two commands keep bash resident
+    # (a single `bash -c cmd` execs and loses the text), so this process's own
+    # argv contains `tail -F -c +1 <inbox>` while nothing is tailing anything.
+    # Before the comm filter it read as live — and quoting a STALE offset made
+    # the hook advance its cursor past undelivered events.
+    local dpid
+    bash -c "sleep 30; : 'tail -F -c +1 $inbox'" >/dev/null 2>&1 &
+    dpid=$!
+    sleep 0.3
+    # Sentinel: the decoy must actually be visible to the scan, or this case
+    # passes because the decoy died, not because the filter works.
+    if pgrep -f 'tail -F' 2>/dev/null | grep -qx "$dpid"; then
+        ok "decoy is alive and matched by the 'tail -F' pre-scan"
+    else
+        bad "decoy not visible to pgrep — the decoy assertions below would be vacuous"
+    fi
+    out="$(_tsi_render Tester "$xdg" s2)"
+    case "$out" in
+        *"📬 off"*) ok  "a non-tail quoting the arm command → still '📬 off'" ;;
+        *)          bad "decoy read as a live watch: $out" ;;
+    esac
+    # The hook reads the same function; assert it directly so the hook's
+    # consequence (no cursor advance on a decoy's offset) is covered too.
+    TWH_TAIL_PID="unset"
+    # shellcheck source=../.claude/hooks/lib/team-inbox-watch.sh
+    . "$_TSI_REPO/.claude/hooks/lib/team-inbox-watch.sh"
+    twh_find_tail "$inbox"
+    if [ -z "$TWH_TAIL_PID" ] && [ -z "$TWH_TAIL_ARM" ]; then
+        ok "twh_find_tail ignores the decoy (no pid, no arm offset for the hook)"
+    else
+        bad "twh_find_tail matched the decoy: pid=$TWH_TAIL_PID arm=$TWH_TAIL_ARM"
+    fi
+    kill "$dpid" 2>/dev/null; wait "$dpid" 2>/dev/null
+
     # ── live tail on this inbox → live, and no count ─────────────────
     tail -F -c +9 "$inbox" >/dev/null 2>&1 &
     tpid=$!
