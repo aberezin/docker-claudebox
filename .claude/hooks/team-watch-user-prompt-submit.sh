@@ -259,25 +259,15 @@ fi
 # is supposed to cover an unarmed Monitor could never trigger. Same shape as
 # `surfaced: 0` before the `skipped` counter: silence meaning two different
 # things.
-_tail_pid=""
-_tail_arm=""
-if command -v pgrep >/dev/null 2>&1; then
-    for _p in $(pgrep -f 'tail -F' 2>/dev/null || true); do
-        _cmd="$(ps -p "$_p" -o command= 2>/dev/null || true)"
-        case "$_cmd" in
-            *"$_inbox"*)
-                _tail_pid="$_p"
-                # The byte offset the Monitor was ARMED at, straight out of
-                # its own cmdline (`tail -F -c +46037 <inbox>`). #102 needs
-                # it to know which range this tail is responsible for. Also
-                # matches the `bash -c` wrapper around the tail, whose
-                # cmdline embeds the same string -- either is fine.
-                _tail_arm="$(printf '%s' "$_cmd" | sed -n 's/.*-c +\([0-9][0-9]*\).*/\1/p' | head -1)"
-                break
-                ;;
-        esac
-    done
-fi
+#
+# The detection itself lives in lib/team-inbox-watch.sh, shared with the
+# status line (#105) so the two can never disagree about whether the watch
+# is live. _tail_arm is the byte offset the Monitor was ARMED at (#102).
+# shellcheck source=lib/team-inbox-watch.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/team-inbox-watch.sh"
+twh_find_tail "$_inbox"
+_tail_pid="$TWH_TAIL_PID"
+_tail_arm="$TWH_TAIL_ARM"
 
 # Nothing new to deliver. Still report an unarmed Monitor — the live layer is
 # down whether or not mail happens to be waiting, and saying so only when there

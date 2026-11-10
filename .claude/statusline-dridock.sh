@@ -80,6 +80,65 @@ if [ -n "$_busy_pid" ]; then
     printf '\033[33m⏳ %s %s\033[0m ' "$_busy_label" "$_human"
 fi
 
+# ── team-inbox watch state (#105) ────────────────────────────────────
+# Whether this agent's team-bus inbox has a live watch on it, so that state
+# lives here instead of in the main transcript. Same placement reasoning as
+# #66 above: the team bus is used most in the harness repo, which the walk
+# below may treat as silent, so this must not be gated on it.
+#
+#   📬 live          a `tail -F` is consuming the inbox (Monitor armed)
+#   📬 off           nothing is; events wait for the next prompt
+#   📬 off · N new   …and N events are already waiting past this session's
+#                    cursor. Only shown when OFF: with a live watch the cursor
+#                    is advanced at prompt time (#102), so between prompts a
+#                    count would include events the agent has already seen.
+#
+# "Live" comes from lib/team-inbox-watch.sh — the SAME function the
+# UserPromptSubmit hook uses — so the status line and the hook's "NOT armed"
+# nag cannot disagree.
+#
+# Cost: the name comes from $DRIDOCK_AGENT_NAME when set (free); only when it
+# isn't do we pay ~20ms for `dridock team whoami`. No inbox file → silent,
+# before any process scan. The unread count (two jq reads) runs only when off.
+_tw_self="${DRIDOCK_AGENT_NAME:-}"
+if [ -z "$_tw_self" ] && command -v dridock >/dev/null 2>&1; then
+    if _tw_self="$(dridock team whoami 2>/dev/null)"; then
+        _tw_self="$(printf '%s' "$_tw_self" | head -1)"
+    else
+        _tw_self=""
+    fi
+fi
+_tw_inbox="${XDG_CONFIG_HOME:-$HOME/.config}/dridock/inbox/$_tw_self.jsonl"
+_tw_lib="$(dirname "${BASH_SOURCE[0]}")/hooks/lib/team-inbox-watch.sh"
+if [ -n "$_tw_self" ] && [ -f "$_tw_inbox" ] && [ -f "$_tw_lib" ]; then
+    # shellcheck source=hooks/lib/team-inbox-watch.sh
+    . "$_tw_lib"
+    twh_find_tail "$_tw_inbox"
+    if [ -n "$TWH_TAIL_PID" ]; then
+        printf '\033[32m📬 live\033[0m '
+    else
+        printf '\033[90m📬 off\033[0m'
+        _tw_new=0
+        if command -v jq >/dev/null 2>&1 && [ -n "$input" ]; then
+            _tw_sid="$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)"
+            _tw_cur=""
+            if [ -n "$_tw_sid" ] && [ -f "$_tw_inbox.session-cursors.json" ]; then
+                _tw_cur="$(jq -r --arg id "$_tw_sid" '.[$id] // empty' "$_tw_inbox.session-cursors.json" 2>/dev/null)"
+            fi
+            # No cursor for this session → treat EOF as seen, the hook's own
+            # default (#56), so a fresh session never shows a stale backlog.
+            case "$_tw_cur" in
+                ''|*[!0-9]*) ;;
+                *) _tw_new="$(tail -c +"$((_tw_cur + 1))" "$_tw_inbox" 2>/dev/null | wc -l | tr -d ' ')" ;;
+            esac
+        fi
+        if [ "${_tw_new:-0}" -gt 0 ] 2>/dev/null; then
+            printf ' \033[1;33m· %s new\033[0m' "$_tw_new"
+        fi
+        printf ' '
+    fi
+fi
+
 # ── walk up looking for .dridock/config.yml ──────────────────────────
 dir="$cwd"
 while [ "$dir" != "/" ] && [ -n "$dir" ]; do

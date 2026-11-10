@@ -248,6 +248,35 @@ failure.
 | Container fetcher SIGKILL'd at teardown     | SessionEnd hook (`team-watch-session-end.sh`, #70) fires `dridock team fetcher stop` so the fetcher's own SIGTERM handler persists state. **Container-only** — gated on `[ -f /.dockerenv ]`; on the host the fetcher SHOULD outlive the session, which is what lets events accumulate for the next drain. |
 | Poll to GitHub failed (rate limit, etc.)    | Fetcher's `onPollFailed` → stderr → log; cursor doesn't advance, next tick retries |
 
+### At a glance: the status line (#105)
+
+The watch state is also shown in the status line (`.claude/statusline-dridock.sh`),
+so a human can see whether delivery is live without the transcript filling up
+with arm/expire bookkeeping:
+
+| Segment          | Meaning |
+|------------------|---------|
+| `📬 live`        | a `tail -F` is consuming this agent's inbox (Monitor armed) |
+| `📬 off`         | nothing is; events wait for the next prompt's in-line drain |
+| `📬 off · N new` | …and N events are already waiting past this session's cursor |
+
+The count is shown only when **off**: with a live watch the cursor is advanced at
+prompt time (#102), so between prompts a count would include events the agent
+has already been handed. Nothing is shown when the agent has no inbox.
+
+"Live" is decided by `.claude/hooks/lib/team-inbox-watch.sh` (`twh_find_tail`),
+the **same** function the UserPromptSubmit hook uses, so the status line and the
+hook's "Monitor is NOT armed" nag cannot disagree. Keep it that way — a second
+copy of the check is the drift class #101 closed, and `tests/test_statusline_inbox.sh`
+fails if the hook regrows an inline scan.
+
+Known looseness, inherited from #102 rather than introduced here: the check
+matches any process whose command line contains both `tail -F` and the inbox
+path, including a `bash -c` wrapper around the tail (deliberately). A one-off
+command that merely *mentions* both — a diagnostic `pgrep`, say — reads as a
+live watch for as long as it runs. Short-lived and rare; both callers see the
+same answer.
+
 ## Posting: every write needs a header
 
 `Sender->Recipient:` is the **only** sender signal the bus has — both agents post

@@ -26,6 +26,29 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 > changelog is authoritative from `2.0.0` onward. Release process:
 > [docs/versioning.md](docs/versioning.md).
 
+## [Unreleased]
+
+### Added
+- **The status line shows whether the team-inbox watch is live** (#105):
+  `📬 live`, `📬 off`, or `📬 off · N new`. The watch's state used to be visible
+  only in the transcript — arm calls, a "Monitor expired" notice every five
+  minutes, and the hook's `📬 … NOT armed` nag — which buried the conversation.
+  The count appears only when the watch is off, because with a live watch the
+  cursor catches up at prompt time (#102) and a count would include events the
+  agent has already seen. Placed before the project walk, like the #66 work
+  indicator, since the team bus is used most in the harness repo. Costs ~10ms a
+  render here: the agent name comes from `$DRIDOCK_AGENT_NAME` when set, and an
+  agent with no inbox exits before any process scan.
+
+### Changed
+- **"Is the inbox watch live" now has one definition**, in
+  `.claude/hooks/lib/team-inbox-watch.sh` (`twh_find_tail`). The UserPromptSubmit
+  hook's inline `pgrep`/`ps` loop moved there unchanged, and the status line
+  sources the same function, so the two cannot disagree about whether a watch is
+  armed. `tests/test_statusline_inbox.sh` (10 assertions, real `tail -F`
+  processes) fails if the hook grows its own copy again. No behaviour change in
+  the hook: #102's suite is 11/11 before and after.
+
 ## [5.13.0] - 2026-11-09
 
 ### Added
