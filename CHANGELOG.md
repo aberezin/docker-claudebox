@@ -61,7 +61,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   user settings; on macOS, user settings only** — `ps` flattens argv, so a flag
   merely quoted in the system-prompt text read as a real one (a false `accept`
   Arfy reproduced in review), and off `/proc` the flag isn't counted. Otherwise
-  SessionStart says socket delivery is OFF and why. Opt out with
+  SessionStart says socket delivery is OFF and why. The wake file is also
+  withheld while the **running** fetcher predates 5.14.0 (read from
+  `/proc/<pid>/exe`, else the `<inbox>.version` stamp; fail open when neither
+  is readable). Otherwise the status line would show `live·sock` and the
+  Monitor nag would go quiet while nothing posts. Opt out with
   `DRIDOCK_SOCKET_DELIVERY=0`. Known gaps (idle withdrawal, non-file managed
   settings) are listed in the design doc. See
   [docs/design/agent-teams-delivery.md](docs/design/agent-teams-delivery.md#socket-delivery-107).

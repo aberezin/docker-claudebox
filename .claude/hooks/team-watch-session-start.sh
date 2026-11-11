@@ -589,7 +589,12 @@ elif [ -z "$_session_id" ]; then
     _socket_note="no session_id in the SessionStart payload, so the fetcher can't advance this session's cursor"
 else
     twh_inbound_in_force
-    if [ "$TWH_INBOUND" = "accept" ]; then
+    if [ "$TWH_INBOUND" = "accept" ] && ! twh_fetcher_can_post "$_inbox"; then
+        # accept is fine but the RUNNING fetcher predates socket delivery: a
+        # wake file would show live·sock while nothing posts (#107 review).
+        rm -f "$_inbox.wake.json"
+        _socket_note="$TWH_FETCHER_TOO_OLD_MSG"
+    elif [ "$TWH_INBOUND" = "accept" ]; then
         if twh_write_wake "$_inbox" "$_session_id"; then
             _socket_live=1
         else

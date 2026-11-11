@@ -290,6 +290,14 @@ if [ -n "$_socket_live" ]; then
         echo ""
         echo "⚠ team-inbox: crossSessionInbound is now '$TWH_INBOUND', not 'accept' — socket delivery"
         echo "   turned OFF (wake file removed) so held posts can't be counted as delivered."
+    elif ! twh_fetcher_can_post "$_inbox"; then
+        # The running fetcher can't post (respawned onto an older binary, or a
+        # wake file written before this gate existed). Pull it so the Monitor
+        # nag below comes back instead of a false live·sock (#107 review).
+        rm -f "$_inbox.wake.json"
+        _socket_live=""
+        echo ""
+        echo "⚠ team-inbox: socket delivery OFF — $TWH_FETCHER_TOO_OLD_MSG."
     fi
 elif [ ! -e "$_inbox.wake.json" ] && [ -n "$_session_id" ] && [ -n "${CLAUDE_CODE_MESSAGING_SOCKET:-}" ]; then
     # The other direction (Arfy, #107 review): accept added mid-session —
@@ -297,7 +305,7 @@ elif [ ! -e "$_inbox.wake.json" ] && [ -n "$_session_id" ] && [ -n "${CLAUDE_COD
     # exists: one naming another session belongs to that session (on the host
     # the fetcher outlives sessions) and taking it would strand its events.
     twh_inbound_in_force
-    if [ "$TWH_INBOUND" = "accept" ] && twh_write_wake "$_inbox" "$_session_id"; then
+    if [ "$TWH_INBOUND" = "accept" ] && twh_fetcher_can_post "$_inbox" && twh_write_wake "$_inbox" "$_session_id"; then
         _socket_live=1
         echo ""
         echo "📬 team-inbox: crossSessionInbound is now 'accept' — socket delivery turned ON. Events now"

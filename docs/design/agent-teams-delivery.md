@@ -363,6 +363,29 @@ So:
   post is logged (`socket wake failed … stays in the inbox`) and leaves the
   cursor alone.
 
+### The fetcher must be new enough to post
+
+`accept` is necessary but not sufficient: the fetcher has to be a release that
+posts (5.14.0+). The hooks come from the repo, but the fetcher is whatever binary
+was running when it was spawned, and on the host it is long-lived. A wake file in
+front of an older fetcher would show `📬 live·sock` and silence the "Monitor NOT
+armed" nag while delivery is really prompt-only, which is worse than no socket
+delivery at all. So both hooks write (and UPS keeps) the wake file only when
+`twh_fetcher_can_post` passes. It reads the **running** fetcher's version, never
+the binary on PATH (after `./install.sh`, PATH is new while the old fetcher is
+still the one that would post):
+
+1. `/proc/<pid>/exe --version`, the running process's own binary (Linux; this
+   also covers the harness repo's own container, where the hooks come from the
+   workspace checkout and the fetcher from the image).
+2. `<inbox>.version`, stamped once a spawn is confirmed (host).
+
+If neither can be read, it **fails open**: an unknown version is not "too old".
+When the version is too low, SessionStart and UPS name it, e.g. `the fetcher is
+running 5.13.0 …; socket delivery needs 5.14.0`. On the host the drift check
+restarts the fetcher on the next prompt after `./install.sh`, and delivery then
+turns on by itself. In a container it comes with the rebuilt image.
+
 ### What this does NOT close
 
 The gate is a computed prediction of what Claude Code will do; the socket never

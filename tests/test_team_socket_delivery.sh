@@ -238,6 +238,35 @@ test_team_socket_delivery() {
     if [ ! -e "$inbox.wake.json" ]; then ok "real --settings hold is not overridden by quoted accept text"
     else bad "quoted accept text overrode a real --settings hold"; fi
 
+    # ── running fetcher too old to post (Arfy, #107 review) ───────────
+    # The stand-in fetcher is a script, so /proc/<pid>/exe is bash and its
+    # --version isn't semver: the gate falls through to the <inbox>.version
+    # stamp, which these cases drive. (The /proc source itself was checked
+    # against the real fetcher binary in-container; see the commit.)
+    printf '{"crossSessionInbound":"accept"}' > "$cfg/settings.json"
+    rm -f "$inbox.wake.json"; printf '5.13.0\n' > "$inbox.version"
+    out="$(_tsd_hook "$_TSD_SS" sess-A)"
+    if [ ! -e "$inbox.wake.json" ]; then ok "fetcher stamped 5.13.0 + accept → NO wake file (it can't post)"
+    else bad "fetcher stamped 5.13.0 + accept → wake file written: false live·sock"; fi
+    case "$out" in *"running 5.13.0"*"needs 5.14.0"*) ok "…and names both versions" ;; *) bad "…versions not named; got: $(printf '%s' "$out" | grep -i socket | head -2)" ;; esac
+    case "$out" in *"tail -F -c +"*) ok "…and keeps the Monitor path" ;; *) bad "…and drops the Monitor arm command" ;; esac
+    out="$(_tsd_hook "$_TSD_UPS" sess-A)"
+    if [ ! -e "$inbox.wake.json" ]; then ok "UPS does not turn delivery on for a too-old fetcher"; else bad "UPS turned delivery on for a too-old fetcher"; fi
+    # A wake file already there (written before the gate, or the fetcher was
+    # respawned onto an older binary) is pulled by UPS, and the nag returns.
+    printf '5.14.0\n' > "$inbox.version"
+    _tsd_hook "$_TSD_SS" sess-A >/dev/null
+    if [ -e "$inbox.wake.json" ]; then ok "fetcher stamped 5.14.0 + accept → wake file written"; else bad "fetcher stamped 5.14.0 + accept → no wake file"; fi
+    printf '5.13.0\n' > "$inbox.version"
+    out="$(_tsd_hook "$_TSD_UPS" sess-A)"
+    if [ ! -e "$inbox.wake.json" ]; then ok "UPS pulls a wake file when the running fetcher is too old"; else bad "UPS kept a wake file in front of a too-old fetcher"; fi
+    case "$out" in *"socket delivery OFF"*"running 5.13.0"*) ok "…and says so, with the version" ;; *) bad "…silently" ;; esac
+    # Unstamped / unreadable → fail OPEN (absent is not "too old").
+    rm -f "$inbox.version"
+    _tsd_hook "$_TSD_SS" sess-A >/dev/null
+    if [ -e "$inbox.wake.json" ]; then ok "no version readable → fail open (wake file written)"; else bad "no version readable → socket delivery turned off (must fail open)"; fi
+    rm -f "$inbox.wake.json"
+
     # ── UPS: socket live, nothing new → no Monitor nag ────────────────
     printf '{"crossSessionInbound":"accept"}' > "$cfg/settings.json"
     _tsd_hook "$_TSD_SS" sess-A >/dev/null

@@ -221,3 +221,62 @@ twh_write_wake() {
         rm -f "$_tmp"; return 1
     fi
 }
+
+# ─── can the RUNNING fetcher post? (#107 review) ─────────────────────────
+# The hooks come from the repo; the fetcher is whatever binary was running
+# when it was spawned. A pre-5.14 fetcher never posts, so a wake file in front
+# of it means `📬 live·sock` and a silenced "Monitor NOT armed" nag while
+# delivery is really prompt-only — a worse diagnostic than having no socket
+# delivery at all.
+#
+# The version must be the RUNNING fetcher's, not the binary on PATH: on the
+# host the fetcher is long-lived, so after ./install.sh PATH says 5.14 while
+# the old fetcher is still the one that would have to post (Arfy, #107 — the
+# diagnostics-from-current-run rule). Sources, most exact first:
+#   1. /proc/<pid>/exe --version — the running process's own binary (the
+#      inode it was started from, even if the file was since replaced). Linux.
+#      Also covers the harness repo's own container, where the hooks come from
+#      the workspace checkout and the fetcher from the image, so skew is real.
+#   2. <inbox>.version — the stamp UPS/SessionStart write right after a spawn
+#      is CONFIRMED (host).
+# Neither available → fail OPEN (unknown is not "too old"): refusing would
+# turn socket delivery off wherever the version just can't be read.
+#
+# LOAD-BEARING: TWH_SOCKET_MIN_FETCHER is the first release whose fetcher
+# posts (SessionWaker.ts). Lowering it re-opens the false live·sock.
+TWH_SOCKET_MIN_FETCHER="5.14.0"
+
+# Sets TWH_FETCHER_VER (may be empty) and TWH_FETCHER_VER_SRC.
+# shellcheck disable=SC2034
+twh_fetcher_version() {
+    local _inbox="$1" _pid
+    TWH_FETCHER_VER=""; TWH_FETCHER_VER_SRC=""
+    _pid="$(cat "$_inbox.pid" 2>/dev/null | tr -d '[:space:]')"
+    if [ -n "$_pid" ] && [ -x "/proc/$_pid/exe" ] 2>/dev/null; then
+        TWH_FETCHER_VER="$("/proc/$_pid/exe" --version 2>/dev/null | awk 'NR==1{print $NF}')"
+        case "$TWH_FETCHER_VER" in [0-9]*.[0-9]*.[0-9]*) TWH_FETCHER_VER_SRC="running fetcher pid $_pid"; return 0 ;; esac
+        TWH_FETCHER_VER=""
+    fi
+    TWH_FETCHER_VER="$(tr -d '[:space:]' < "$_inbox.version" 2>/dev/null)"
+    case "$TWH_FETCHER_VER" in
+        [0-9]*.[0-9]*.[0-9]*) TWH_FETCHER_VER_SRC="$_inbox.version" ;;
+        *) TWH_FETCHER_VER="" ;;
+    esac
+    return 0
+}
+
+# Returns 1 ONLY when the running fetcher's version is known and below the
+# minimum; sets TWH_FETCHER_TOO_OLD_MSG for the caller to print.
+# shellcheck disable=SC2034
+twh_fetcher_can_post() {
+    TWH_FETCHER_TOO_OLD_MSG=""
+    twh_fetcher_version "$1"
+    [ -n "$TWH_FETCHER_VER" ] || return 0
+    [ "$(printf '%s\n%s\n' "$TWH_SOCKET_MIN_FETCHER" "$TWH_FETCHER_VER" | sort -V | head -1)" = "$TWH_SOCKET_MIN_FETCHER" ] && return 0
+    if [ -f /.dockerenv ]; then
+        TWH_FETCHER_TOO_OLD_MSG="the fetcher is running $TWH_FETCHER_VER (from $TWH_FETCHER_VER_SRC); socket delivery needs $TWH_SOCKET_MIN_FETCHER — it comes with the image, so on the Mac: make build, then dridock down + dridock start"
+    else
+        TWH_FETCHER_TOO_OLD_MSG="the fetcher is running $TWH_FETCHER_VER (from $TWH_FETCHER_VER_SRC); socket delivery needs $TWH_SOCKET_MIN_FETCHER — after ./install.sh it restarts on the next prompt and this turns on by itself"
+    fi
+    return 1
+}
