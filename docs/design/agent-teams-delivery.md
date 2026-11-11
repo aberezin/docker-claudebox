@@ -28,18 +28,33 @@ observed in the wild:
 
 None of these produce error signals. The redesign turns delivery into
 a durable-by-default pipeline: **fetcher outlives sessions, inbox is
-the spool, hook self-arms, Monitor tails the inbox.**
+the spool, and the fetcher posts each event straight into the session's
+socket** — with the hook-armed Monitor as the fallback when it can't.
+
+Mode 4 was only half closed by the inbox: a new session still had to arm
+a Monitor, the Monitor still expired, and the agent still had to notice.
+Since #107 (5.14.0) the live layer needs no agent action at all when
+socket delivery is on — see [Socket delivery](#socket-delivery-107).
 
 ## Architecture
 
 ```
 GitHub  →  [detached fetcher (nohup)]  →  <xdg>/dridock/inbox/<agent>.jsonl
-                                                    ↓
-                              ┌─────────────────────┴─────────────────────┐
-                              ↓                                           ↓
-              SessionStart hook drain (catch-up)             Monitor `tail -F -c +N`
-              → session context on cold start                → live chat notifications
+              │                                     ↓
+              │                     ┌───────────────┴───────────────┐
+              │                     ↓                               ↓
+              │     SessionStart / UPS drain (catch-up)   Monitor `tail -F -c +N`
+              │     → context at start and each prompt    → live (FALLBACK, only
+              │                                              when socket is off)
+              └─→ post to $CLAUDE_CODE_MESSAGING_SOCKET (named in <agent>.jsonl.wake.json)
+                  → starts a turn in the session; raises its cursor (#107, PRIMARY)
 ```
+
+Which live path runs is decided per session by the SessionStart hook: it
+writes the wake file only when `crossSessionInbound: "accept"` is in force
+and the running fetcher is new enough to post. With a wake file, the hook
+tells the agent **not** to arm a Monitor (that would deliver twice); without
+one, it prints the Monitor arm command and says why socket delivery is off.
 
 - **Fetcher** (`dridock team watch --inbox <path>`): polls GitHub every
   30s (configurable), writes each surfaced event to the inbox as one
@@ -57,8 +72,10 @@ GitHub  →  [detached fetcher (nohup)]  →  <xdg>/dridock/inbox/<agent>.jsonl
      if not).
   2. Drain unread inbox slice `[last_offset, EOF)` into stdout — Claude
      Code injects that as session context.
-  3. Print the exact Monitor arm command `tail -F -c +$((EOF+1))
-     <inbox>` for Claude to run.
+  3. Pick the live path (#107): if socket delivery is in force, write
+     `<inbox>.wake.json` and tell Claude not to arm a Monitor; otherwise
+     remove any wake file and print the exact Monitor arm command
+     `tail -F -c +$((EOF+1)) <inbox>` for Claude to run.
 - **SessionEnd hook** (`team-watch-session-end.sh`, #70): container-only
   (`[ -f /.dockerenv ]`). Fires `dridock team fetcher stop` so the fetcher
   exits cleanly inside Claude's teardown window rather than being SIGKILL'd
@@ -67,7 +84,10 @@ GitHub  →  [detached fetcher (nohup)]  →  <xdg>/dridock/inbox/<agent>.jsonl
 - **UserPromptSubmit hook** (`team-watch-user-prompt-submit.sh`): fires
   per turn to make silent-degrade impossible mid-session:
   - Fetcher liveness (with 60s respawn backoff).
-  - Consumer liveness (self-heal if inbox grew but no tail is reading).
+  - Socket-delivery re-check (#107), both directions: removes the wake
+    file if `accept` went away, writes one if it appeared.
+  - Consumer liveness (self-heal if inbox grew but neither the socket nor
+    a tail is delivering).
 
 ## Canonical inbox line format
 

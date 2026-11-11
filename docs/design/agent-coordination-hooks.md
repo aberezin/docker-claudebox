@@ -23,7 +23,7 @@ scripts. What runs today:
 | **Self-identity** | `DRIDOCK_AGENT_NAME` (Arfy sets it via the gitignored `.claude/settings.local.json` `env`; Bear's container sets `=Bear`). Required — a multi-agent roster has no single-agent fallback. |
 | **Header + delivery** | `dridock team post` composes the `Sender->Recipient:` header; the parser + delivery predicate (`AgentTeamHeader.ts`, spec [agent-teams.md](agent-teams.md) §2/§3) do sender-first filtering with legacy `→ Name:` dual-accept. |
 | **Catch-up (between sessions)** | committed hook `.claude/hooks/team-watch-session-start.sh` → `dridock team watch --once` on SessionStart + a **heartbeat-staleness nudge** (replaces the old catch-up script *and* the arm-nag). |
-| **Live (in-session)** | `dridock team watch` (a terminal loop for a human) / for an agent, a `Monitor` running `dridock team watch --once \| grep '←'` each poll — shares the cursor/dedup/**heartbeat** under `~/.config/dridock/watch-cursors/`. Still re-armed per session (a Monitor dies on teardown). |
+| **Live (in-session)** | *Superseded twice — see [agent-teams-delivery.md](agent-teams-delivery.md).* Today a detached fetcher spools events to a per-agent inbox (#56) and **posts each one straight into the session's inbox socket** (#107, 5.14.0) — no agent action, nothing to re-arm. A `Monitor` tailing the inbox is only the fallback when socket delivery is off. (As first shipped by #46 this row was a `Monitor` running `dridock team watch --once \| grep '←'`, re-armed per session.) |
 
 Requires the #46 `dridock` installed; on a pre-#46 binary the hook degrades to a silent no-op
 (the roster gate fails on "unknown verb"). The bespoke scripts are archived at
@@ -37,7 +37,7 @@ Requires the #46 `dridock` installed; on a pre-#46 binary the hook degrades to a
 | What's the message bus? | **GitHub issue comments** on the coordinating repo (currently `aberezin/docker-claudebox` issue #24 + spinoffs). Durable, auditable, no additional infra. |
 | What are the two layers? | **(1)** A `SessionStart` **catch-up hook** that reads comments landed since last session and injects them as `additionalContext`. **(2)** A persistent in-session `Monitor` that polls for new comments during the session and emits one notification per matching comment. |
 | Filter convention | **Whitelist by `**→ Recipient:**` prefix.** Both agents post as the same GitHub user, so author-based filtering is useless. |
-| Why can't the hook BE the watcher? | Shell hooks can invoke shell commands; they can't call Claude Code tools. `Monitor` is a Claude tool. The hook catches up + reminds; the agent's first turn arms `Monitor`. |
+| Why can't the hook BE the watcher? | Shell hooks can invoke shell commands; they can't call Claude Code tools. `Monitor` is a Claude tool. The hook catches up + reminds; the agent's first turn arms `Monitor`. **Superseded by #107:** the watcher doesn't need to be a Claude tool after all — every session exports an inbox socket (`$CLAUDE_CODE_MESSAGING_SOCKET`), and the detached fetcher posts into it, starting a turn on its own. See [agent-teams-delivery.md § Socket delivery](agent-teams-delivery.md#socket-delivery-107). |
 | Zero-footprint in the harness repo? | Yes — the hook and its script live under `~/.claude/` (the container-mounted or Mac-host claude config), never in the harness workspace. Only THIS doc is in the repo. |
 
 ## Why this exists
