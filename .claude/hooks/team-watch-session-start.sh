@@ -580,6 +580,7 @@ fi
 . "$(dirname "${BASH_SOURCE[0]}")/lib/team-inbox-watch.sh"
 _socket_live=0
 _socket_note=""
+_cfg_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 if [ -z "${CLAUDE_CODE_MESSAGING_SOCKET:-}" ]; then
     rm -f "$_inbox.wake.json"
     _socket_note="this Claude Code build exposes no inbox socket (\$CLAUDE_CODE_MESSAGING_SOCKET unset)"
@@ -597,7 +598,16 @@ else
         fi
     else
         rm -f "$_inbox.wake.json"
-        _socket_note="crossSessionInbound is '$TWH_INBOUND', not 'accept' — a post from the detached fetcher would be held, not delivered. dridock sessions get accept from the entrypoint; a session started by hand needs: claude --settings '{\"crossSessionInbound\":\"accept\"}'"
+        # The fix depends on whether this host has exact argv (/proc): the
+        # --settings flag is only READ there (see twh_claude_settings_flag), so
+        # on macOS pointing at the flag would send people to a fix the hook
+        # can't see.
+        if [ -d /proc/self ]; then
+            _socket_fix="start claude with --settings '{\"crossSessionInbound\":\"accept\"}', or set it in user settings ($_cfg_dir/settings.json)"
+        else
+            _socket_fix="set \"crossSessionInbound\": \"accept\" in user settings ($_cfg_dir/settings.json) — on this host a --settings launch flag can't be verified, so it isn't counted"
+        fi
+        _socket_note="crossSessionInbound is '$TWH_INBOUND', not 'accept' — a post from the detached fetcher would be held, not delivered. dridock containers get accept from the entrypoint; this session needs: $_socket_fix"
     fi
 fi
 

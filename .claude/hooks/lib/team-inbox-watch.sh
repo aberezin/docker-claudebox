@@ -89,7 +89,23 @@ twh_effective_inbound() {
     local _q='if type == "object" and has("crossSessionInbound") then .crossSessionInbound else empty end'
     local _m="" _f="" _u="" _p="" _l="" _invalid=0 _v _r
     command -v jq >/dev/null 2>&1 || { TWH_INBOUND="unset"; return 0; }
-    [ -f "$_managed" ] && _m="$(jq -r "$_q" "$_managed" 2>/dev/null)"
+    # Managed = managed-settings.json PLUS any managed-settings.d/*.json
+    # drop-ins beside it (Arfy, #107 review). Take the STRICTEST value across
+    # all of them — fail-safe: a policy hold/refuse in a drop-in must never be
+    # outvoted by how we guess the merge order. Unrecognized → refuse (below).
+    local _mf _mv _md
+    _md="$(dirname "$_managed")/managed-settings.d"
+    for _mf in "$_managed" "$_md"/*.json; do
+        [ -f "$_mf" ] || continue
+        _mv="$(jq -r "$_q" "$_mf" 2>/dev/null)"
+        case "$_mv" in
+            "")     ;;                                    # not set in this file
+            refuse) [ "$_m" = invalid ] || _m="refuse" ;;
+            hold)   case "$_m" in refuse|invalid) ;; *) _m="hold" ;; esac ;;
+            accept) [ -n "$_m" ] || _m="accept" ;;
+            *)      _m="invalid" ;;                       # → refuse below
+        esac
+    done
     if [ -n "$_flag" ]; then
         case "$_flag" in
             '{'*) _f="$(printf '%s' "$_flag" | jq -r "$_q" 2>/dev/null)" ;;
@@ -123,9 +139,19 @@ twh_effective_inbound() {
 
 # The `--settings` value Claude Code was launched with, read off the nearest
 # ancestor process whose name is `claude`. Empty when there isn't one or it
-# has no --settings. /proc on Linux (exact argv); `ps` on macOS, where argv
-# is space-joined — fine for the inline JSON dridock passes, which has no
-# spaces.
+# has no --settings.
+#
+# LOAD-BEARING: only from /proc/<pid>/cmdline, where argv is NUL-separated
+# and exact. NOT from `ps -o command=` (macOS): that joins argv with spaces
+# and drops the quoting, so a `--settings '{…accept…}'` that merely appears
+# INSIDE another argument — the --append-system-prompt text, which carries
+# CLAUDE.md, always-skills and this feature's own docs — is indistinguishable
+# from a real flag. Arfy measured that as a false `accept` (#107 review): wake
+# file written, every post held, cursor advanced — silent loss. So off /proc
+# the flag source is skipped and the decision rests on managed + user
+# settings. dridock passes the flag in Linux containers, where /proc exists.
+# tests/test_team_socket_delivery.sh pins both halves.
+#
 # TWH_ANCESTOR_PID overrides where the walk starts. Tests set it to 1 (= no
 # claude ancestor); without it, a test run from inside a Claude session would
 # find THAT session's --settings and its result would depend on the runner.
@@ -136,20 +162,14 @@ twh_claude_settings_flag() {
         [ -n "$_pid" ] && [ "$_pid" -gt 1 ] 2>/dev/null || return 0
         _comm="$(ps -p "$_pid" -o comm= 2>/dev/null | tr -d ' ')"
         if [ "${_comm##*/}" = "claude" ]; then
-            if [ -r "/proc/$_pid/cmdline" ]; then
-                while IFS= read -r -d '' _a; do
-                    if [ "$_next" = 1 ]; then TWH_SETTINGS_FLAG="$_a"; return 0; fi
-                    case "$_a" in
-                        --settings)   _next=1 ;;
-                        --settings=*) TWH_SETTINGS_FLAG="${_a#--settings=}"; return 0 ;;
-                    esac
-                done < "/proc/$_pid/cmdline"
-            else
-                TWH_SETTINGS_FLAG="$(ps -p "$_pid" -o command= 2>/dev/null \
-                    | sed -n "s/.*--settings[= ]\([^ ]*\).*/\1/p" | head -1)"
-                TWH_SETTINGS_FLAG="${TWH_SETTINGS_FLAG#\'}"
-                TWH_SETTINGS_FLAG="${TWH_SETTINGS_FLAG%\'}"
-            fi
+            [ -r "/proc/$_pid/cmdline" ] || return 0   # no exact argv → no flag source (see above)
+            while IFS= read -r -d '' _a; do
+                if [ "$_next" = 1 ]; then TWH_SETTINGS_FLAG="$_a"; return 0; fi
+                case "$_a" in
+                    --settings)   _next=1 ;;
+                    --settings=*) TWH_SETTINGS_FLAG="${_a#--settings=}"; return 0 ;;
+                esac
+            done < "/proc/$_pid/cmdline"
             return 0
         fi
         _pid="$(ps -p "$_pid" -o ppid= 2>/dev/null | tr -d ' ')"

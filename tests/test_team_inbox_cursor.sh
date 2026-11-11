@@ -42,10 +42,14 @@ STUB
 }
 
 # Run the hook with a controlled XDG root + session id. Sets _TIC_OUT/_TIC_RC.
+# No inbox socket: run from inside a Claude session, the runner's own socket
+# (plus an `accept` in its user settings) would switch on #107's socket
+# delivery and this suite would be testing the runner, not the Monitor path.
 _tic_run() {
     local stub="$1" xdg="$2" sid="$3"
     _TIC_OUT="$(printf '{"session_id":"%s"}' "$sid" \
-        | PATH="$stub:$PATH" XDG_CONFIG_HOME="$xdg" bash "$_TIC_HOOK" 2>/dev/null)"
+        | env -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN \
+            PATH="$stub:$PATH" XDG_CONFIG_HOME="$xdg" bash "$_TIC_HOOK" 2>/dev/null)"
     _TIC_RC=$?
 }
 

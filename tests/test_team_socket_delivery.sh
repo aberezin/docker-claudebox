@@ -55,6 +55,22 @@ _tsd_eff() {
     rm -rf "$d"
 }
 
+# Managed tier with drop-ins. Args: managed-file-value dropin1 dropin2 flag.
+# "" = absent. Drop-ins land in managed-settings.d/ beside the file.
+_tsd_eff_dropin() {
+    local d; d="$(mktemp -d)"
+    local m="$d/managed-settings.json" f="" n=0 v
+    mkdir -p "$d/managed-settings.d"
+    [ -n "$1" ] && printf '{"crossSessionInbound":"%s"}' "$1" > "$m"
+    for v in "$2" "$3"; do
+        n=$((n + 1))
+        [ -n "$v" ] && printf '{"crossSessionInbound":"%s"}' "$v" > "$d/managed-settings.d/$n-policy.json"
+    done
+    [ -n "$4" ] && f="{\"crossSessionInbound\":\"$4\"}"
+    ( . "$_TSD_LIB"; twh_effective_inbound "$m" "$f" "$d/u" "$d/p" "$d/l"; printf '%s' "$TWH_INBOUND" )
+    rm -rf "$d"
+}
+
 test_team_socket_delivery() {
     local PASS=0 FAIL=0
     ok()  { echo "  ok   $1"; PASS=$((PASS + 1)); }
@@ -90,6 +106,17 @@ test_team_socket_delivery() {
     local got; got="$( . "$_TSD_LIB"; twh_effective_inbound "$d/none" "$d/flag.json" "$d/none" "$d/none" "$d/none"; printf '%s' "$TWH_INBOUND")"
     if [ "$got" = accept ]; then ok "--settings as a file path is read"; else bad "--settings file path: want accept, got $got"; fi
     rm -rf "$d"
+
+    # managed-settings.d/ drop-ins (Arfy, #107 review): strictest managed value wins.
+    expect_dropin() { # want file d1 d2 flag — label
+        got="$(_tsd_eff_dropin "$2" "$3" "$4" "$5")"
+        if [ "$got" = "$1" ]; then ok "managed drop-ins: $6 → $1"; else bad "managed drop-ins: $6 → want $1, got $got"; fi
+    }
+    expect_dropin hold   accept hold   ""     ""     "file accept + drop-in hold"
+    expect_dropin refuse ""     refuse ""     accept "drop-in refuse beats --settings accept"
+    expect_dropin refuse ""     hold   refuse ""     "two drop-ins: strictest (refuse) wins"
+    expect_dropin refuse ""     bogus  ""     accept "unrecognized drop-in value refuses"
+    expect_dropin accept ""     accept ""     ""     "drop-in accept alone is managed accept"
 
     # ── fixtures for the hook-level checks ────────────────────────────
     local stub xdg cfg proj inbox cursors sock spid="" fpid=""
@@ -135,8 +162,14 @@ test_team_socket_delivery() {
     if [ ! -e "$inbox.wake.json" ]; then ok "SessionStart without accept: no wake file"; else bad "SessionStart without accept wrote a wake file"; fi
     case "$out" in *"socket delivery is OFF"*"not 'accept'"*) ok "…and says socket delivery is off and why" ;;
         *) bad "…expected an OFF + reason line, got: $(printf '%s' "$out" | tail -8)" ;; esac
-    case "$out" in *"--settings '{\"crossSessionInbound\":\"accept\"}'"*) ok "…and names the --settings fix for a hand-started session" ;;
-        *) bad "…the --settings fix is missing from the OFF note" ;; esac
+    # The fix it names depends on whether the hook can read exact argv here.
+    if [ -d /proc/self ]; then
+        case "$out" in *"--settings '{\"crossSessionInbound\":\"accept\"}'"*) ok "…and names the --settings fix (host has /proc)" ;;
+            *) bad "…the --settings fix is missing from the OFF note" ;; esac
+    else
+        case "$out" in *"user settings"*"can't be verified"*) ok "…and names user settings, not the unverifiable flag (no /proc)" ;;
+            *) bad "…on a no-/proc host the OFF note must point at user settings" ;; esac
+    fi
     case "$out" in *"tail -F -c +"*) ok "…and still prints the Monitor arm command" ;; *) bad "…Monitor arm command missing" ;; esac
 
     # ── accept only in PROJECT settings → still off (by design) ───────
@@ -178,6 +211,22 @@ test_team_socket_delivery() {
         CLAUDE_CODE_MESSAGING_SOCKET="$sock" "$fake" -c 'bash "$1" < "$2" >/dev/null 2>&1' x "$_TSD_SS" "$stub/payload"
     if [ ! -e "$inbox.wake.json" ]; then ok "…and the same launch WITHOUT --settings does not (control)"
     else bad "control: no --settings, yet a wake file was written — the pass above proves nothing"; fi
+    # Arfy's case A (#107 review): no real --settings, but another argument's
+    # TEXT quotes one — exactly what --append-system-prompt carries once these
+    # docs are in CLAUDE.md or a skill. Must NOT count as accept. On macOS the
+    # flattened `ps` line made this a false accept; /proc argv is exact.
+    rm -f "$inbox.wake.json"
+    env -u CLAUDE_CODE_MESSAGING_TOKEN -u TWH_ANCESTOR_PID PATH="$stub:$PATH" XDG_CONFIG_HOME="$xdg" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PROJECT_DIR="$proj" \
+        CLAUDE_CODE_MESSAGING_SOCKET="$sock" "$fake" -c 'bash "$1" < "$2" >/dev/null 2>&1; :' x "$_TSD_SS" "$stub/payload" \
+        --append-system-prompt "start it with claude --settings '{\"crossSessionInbound\":\"accept\"}' to enable"
+    if [ ! -e "$inbox.wake.json" ]; then ok "flag text quoted inside --append-system-prompt does NOT count as accept"
+    else bad "FALSE ACCEPT: prompt text quoting --settings enabled socket delivery (posts would be held, cursor advanced)"; fi
+    # Case B: real --settings hold, prompt text quotes accept → still off.
+    env -u CLAUDE_CODE_MESSAGING_TOKEN -u TWH_ANCESTOR_PID PATH="$stub:$PATH" XDG_CONFIG_HOME="$xdg" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PROJECT_DIR="$proj" \
+        CLAUDE_CODE_MESSAGING_SOCKET="$sock" "$fake" -c 'bash "$1" < "$2" >/dev/null 2>&1; :' x "$_TSD_SS" "$stub/payload" \
+        --settings '{"crossSessionInbound":"hold"}' --append-system-prompt "use --settings '{\"crossSessionInbound\":\"accept\"}'"
+    if [ ! -e "$inbox.wake.json" ]; then ok "real --settings hold is not overridden by quoted accept text"
+    else bad "quoted accept text overrode a real --settings hold"; fi
 
     # ── UPS: socket live, nothing new → no Monitor nag ────────────────
     printf '{"crossSessionInbound":"accept"}' > "$cfg/settings.json"
@@ -207,6 +256,19 @@ test_team_socket_delivery() {
     out="$(_tsd_hook "$_TSD_UPS" sess-A)"
     if [ ! -e "$inbox.wake.json" ]; then ok "accept withdrawn → UPS removes the wake file"; else bad "accept withdrawn → wake file still there (fetcher would count held posts as delivered)"; fi
     case "$out" in *"socket delivery"*"turned OFF"*) ok "…and says so" ;; *) bad "…silently" ;; esac
+
+    # …and the other direction: accept added mid-session, no wake file → UPS turns it on.
+    printf '{"crossSessionInbound":"accept"}' > "$cfg/settings.json"
+    out="$(_tsd_hook "$_TSD_UPS" sess-A)"
+    if [ "$(jq -r .sessionId "$inbox.wake.json" 2>/dev/null)" = sess-A ]; then ok "accept added mid-session → UPS writes the wake file"
+    else bad "accept added mid-session → no wake file (only SessionStart could turn it on)"; fi
+    case "$out" in *"socket delivery turned ON"*) ok "…and says so" ;; *) bad "…silently" ;; esac
+    # …but never takes a wake file that names another session.
+    jq '.sessionId = "sess-OTHER"' "$inbox.wake.json" > "$inbox.wake.tmp" && mv "$inbox.wake.tmp" "$inbox.wake.json"
+    _tsd_hook "$_TSD_UPS" sess-A >/dev/null
+    if [ "$(jq -r .sessionId "$inbox.wake.json" 2>/dev/null)" = sess-OTHER ]; then ok "UPS leaves another session's wake file alone"
+    else bad "UPS took over another session's wake file"; fi
+    rm -f "$inbox.wake.json"
 
     # ── socket gone → not live (the status line and UPS agree) ────────
     printf '{"crossSessionInbound":"accept"}' > "$cfg/settings.json"

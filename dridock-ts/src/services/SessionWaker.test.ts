@@ -143,6 +143,19 @@ describe("InboxSink + wake (#107)", () => {
     expect(err.lines.join("")).toContain("stays in the inbox");
   });
 
+  test("a line that won't parse back is logged, not silently skipped (Arfy #107 nit 4)", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed(WAKE, JSON.stringify({ socket: "/s.sock", sessionId: "s1" }));
+    const { poster, calls } = recordingPoster(true);
+    const err = stderrCapture();
+    // No eventHash → no fingerprint → parseInboxLine rejects the line.
+    const ev = { ...commentEvent(), eventHash: undefined } as unknown as WatcherEvent;
+    expect(await sink(fs, poster, err).onEvent(ev)).toBe(true);
+    expect(calls).toHaveLength(0);
+    expect(err.lines.join("")).toContain("doesn't parse back");
+    expect(await fs.readText(INBOX)).toContain("github:#107#comment-42");
+  });
+
   test("a poster that throws never fails the event", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed(WAKE, JSON.stringify({ socket: "/s.sock", sessionId: "s1" }));

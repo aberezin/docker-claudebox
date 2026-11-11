@@ -53,11 +53,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   managed settings, `--settings` or user settings; project and local settings
   can only make it stricter, by design. The wake file therefore exists only
   while `accept` is in force. SessionStart writes or removes it, and
-  UserPromptSubmit removes it the moment `accept` goes away. **A session dridock
-  didn't start (e.g. on the Mac host) must be launched with
-  `claude --settings '{"crossSessionInbound":"accept"}'`** or carry it in user
-  settings; otherwise SessionStart says socket delivery is OFF and why. Opt out
-  with `DRIDOCK_SOCKET_DELIVERY=0`. See
+  UserPromptSubmit re-checks every prompt in both directions: it removes the
+  file the moment `accept` goes away and writes one when `accept` is added
+  mid-session. Managed settings include `managed-settings.d/*.json` drop-ins
+  (strictest wins). **A session dridock didn't start needs a verifiable
+  `accept`: on Linux, `claude --settings '{"crossSessionInbound":"accept"}'` or
+  user settings; on macOS, user settings only** — `ps` flattens argv, so a flag
+  merely quoted in the system-prompt text read as a real one (a false `accept`
+  Arfy reproduced in review), and off `/proc` the flag isn't counted. Otherwise
+  SessionStart says socket delivery is OFF and why. Opt out with
+  `DRIDOCK_SOCKET_DELIVERY=0`. Known gaps (idle withdrawal, non-file managed
+  settings) are listed in the design doc. See
   [docs/design/agent-teams-delivery.md](docs/design/agent-teams-delivery.md#socket-delivery-107).
 - **The status line shows whether the team-inbox watch is live** (#105):
   `📬 live`, `📬 off`, or `📬 off · N new`. The watch's state used to be visible

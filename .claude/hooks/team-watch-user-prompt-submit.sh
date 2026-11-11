@@ -291,6 +291,18 @@ if [ -n "$_socket_live" ]; then
         echo "⚠ team-inbox: crossSessionInbound is now '$TWH_INBOUND', not 'accept' — socket delivery"
         echo "   turned OFF (wake file removed) so held posts can't be counted as delivered."
     fi
+elif [ ! -e "$_inbox.wake.json" ] && [ -n "$_session_id" ] && [ -n "${CLAUDE_CODE_MESSAGING_SOCKET:-}" ]; then
+    # The other direction (Arfy, #107 review): accept added mid-session —
+    # Claude Code picks it up live, so should we. Only when NO wake file
+    # exists: one naming another session belongs to that session (on the host
+    # the fetcher outlives sessions) and taking it would strand its events.
+    twh_inbound_in_force
+    if [ "$TWH_INBOUND" = "accept" ] && twh_write_wake "$_inbox" "$_session_id"; then
+        _socket_live=1
+        echo ""
+        echo "📬 team-inbox: crossSessionInbound is now 'accept' — socket delivery turned ON. Events now"
+        echo "   arrive as messages; if you armed an inbox Monitor, stop it (it would deliver twice)."
+    fi
 fi
 
 # Nothing new to deliver. Still report an unarmed Monitor — the live layer is

@@ -68,7 +68,8 @@ STUB
 # Captures stdout + rc into globals `_TWH_STDOUT` and `_TWH_RC`.
 _twh_run_session_start_hook() {
     local stub_dir="$1"
-    _TWH_STDOUT="$(PATH="$stub_dir:$PATH" bash "$_TWH_HOOKS_DIR/team-watch-session-start.sh" </dev/null 2>/dev/null)"
+    # No inbox socket: keep #107's socket path (runner's session) out of this gate test.
+    _TWH_STDOUT="$(env -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN PATH="$stub_dir:$PATH" bash "$_TWH_HOOKS_DIR/team-watch-session-start.sh" </dev/null 2>/dev/null)"
     _TWH_RC=$?
 }
 

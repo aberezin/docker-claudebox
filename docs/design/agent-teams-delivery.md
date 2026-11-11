@@ -317,37 +317,68 @@ So:
 - **dridock containers** — the entrypoint launches claude with
   `--settings '{"crossSessionInbound":"accept"}'`. Nothing to do. Opt out with
   `DRIDOCK_SOCKET_DELIVERY=0` ([environment-variables.md](../environment-variables.md)).
-- **Any session dridock didn't start** (e.g. Arfy on the Mac host) **must be
-  started with:**
+- **Any session dridock didn't start** needs `accept` from a source the hook
+  can verify:
+  - **On Linux** (hooks can read exact argv from `/proc`): start it with
 
-  ```bash
-  claude --settings '{"crossSessionInbound":"accept"}'
-  ```
+    ```bash
+    claude --settings '{"crossSessionInbound":"accept"}'
+    ```
 
-  …or carry `"crossSessionInbound": "accept"` in **user** settings
-  (`~/.claude/settings.json`). Putting it in the repo's `.claude/settings.json`
-  or `settings.local.json` does **not** work. Without it, SessionStart says
-  `socket delivery is OFF — crossSessionInbound is '…'` and prints the Monitor
-  arm command as before.
+    or set `"crossSessionInbound": "accept"` in **user** settings
+    (`~/.claude/settings.json`).
+  - **On macOS** (e.g. Arfy on the Mac host): **user settings only.** Claude
+    Code would honour the launch flag, but the hook can't verify it there: `ps`
+    flattens argv, so a `--settings '{…accept…}'` merely *quoted* in another
+    argument — the `--append-system-prompt` text, which carries CLAUDE.md,
+    always-skills, and this very page — is indistinguishable from a real flag.
+    Arfy measured that as a false `accept` (#107 review), so off `/proc` the
+    flag isn't counted at all.
+
+  Putting it in the repo's `.claude/settings.json` or `settings.local.json`
+  does **not** work anywhere. Without a verifiable `accept`, SessionStart says
+  `socket delivery is OFF — crossSessionInbound is '…'`, names the fix for that
+  host, and prints the Monitor arm command as before.
 
 ### Who decides, and when
 
 - **SessionStart** computes the effective value (`twh_inbound_in_force` in
-  `lib/team-inbox-watch.sh`: managed settings file, the `--settings` value read
-  off the parent `claude` process's argv, then user settings, then the
-  stricter-only project/local files). `accept` → it writes the wake file and
+  `lib/team-inbox-watch.sh`: managed settings — `managed-settings.json` plus any
+  `managed-settings.d/*.json` drop-ins, strictest wins — then the `--settings`
+  value read off the parent `claude` process's `/proc` argv, then user
+  settings, then the stricter-only project/local files). `accept` → it writes the wake file and
   tells the agent **not** to arm a Monitor (that would deliver everything twice).
   Anything else → it removes the wake file and prints why plus the Monitor
   command.
-- **UserPromptSubmit** re-checks every prompt while the wake file names this
-  session. If `accept` has gone away it removes the file and says so, so the
-  fetcher stops counting held posts as delivered. Anything past the cursor is a
+- **UserPromptSubmit** re-checks every prompt, in both directions. While the
+  wake file names this session and `accept` has gone away, it removes the file
+  and says so, so the fetcher stops counting held posts as delivered. When there
+  is **no** wake file and `accept` is now in force (added mid-session — Claude
+  Code applies it live), it writes one. It never takes over a wake file naming
+  another session. Anything past the cursor is a
   post that failed (session busy restarting, socket gone) and is drained in-line,
   labelled as such.
 - **The fetcher** re-reads the wake file before every post, so on the host —
   where it outlives sessions — it always targets the current session. A failed
   post is logged (`socket wake failed … stays in the inbox`) and leaves the
   cursor alone.
+
+### What this does NOT close
+
+The gate is a computed prediction of what Claude Code will do; the socket never
+confirms it. Two known gaps remain (both from Arfy's #107 review):
+
+1. **`accept` withdrawn while the session is idle.** The prompt hook is the only
+   re-check, and a held post never wakes the session to produce a prompt. Until
+   someone types, the fetcher keeps posting into a session that holds, and keeps
+   advancing the cursor. The held events are still in the inbox file —
+   `cat <inbox> | jq -s .` — but nothing will re-surface them on its own.
+2. **Managed settings that aren't files.** Managed settings can also arrive by
+   MDM policy or as server-managed settings from the claude.ai console. Neither
+   is readable from a shell hook, so in a managed environment the hook can
+   compute `accept` while Claude Code is holding. Where that is possible, opt
+   out (`DRIDOCK_SOCKET_DELIVERY=0` in containers; don't set `accept` on hosts)
+   and use the Monitor.
 
 Both writers of the cursors file **raise, never lower** (`max`), so a race
 between the fetcher's post and a prompt-time drain costs a duplicate, never a

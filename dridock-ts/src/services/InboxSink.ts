@@ -140,7 +140,13 @@ async function wakeSession(deps: InboxSinkDeps, poster: SocketPoster, line: stri
     const target = await readWakeTarget(deps.fs, wakeFileFor(deps.inboxPath));
     if (target === undefined) return; // socket delivery off: Monitor/drain path as before
     const record = parseInboxLine(line);
-    if (record === undefined) return;
+    if (record === undefined) {
+      // A line this sink just wrote that won't parse back is a harness bug,
+      // not a quiet skip (Arfy, #107 review: an event without eventHash lost
+      // its fingerprint and was never posted, with nothing in the log).
+      deps.stderr.write(`${new Date().toISOString()} ⚠️  team watch: socket wake skipped — the line just appended doesn't parse back as an inbox record (harness bug); event stays in the inbox for the next prompt's drain: ${line.slice(0, 200)}\n`);
+      return;
+    }
     const ok = await poster(target, wakeText(deps.selfName, record, line));
     if (!ok) {
       deps.stderr.write(`${new Date().toISOString()} ⚠️  team watch: socket wake failed for ${record.ref} (session ${target.sessionId} gone or socket stale) — event stays in the inbox for the next prompt's drain\n`);
