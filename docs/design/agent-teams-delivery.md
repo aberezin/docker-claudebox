@@ -46,13 +46,19 @@ GitHub  →  [detached fetcher (nohup)]  →  <xdg>/dridock/inbox/<agent>.jsonl
               │     SessionStart / UPS drain (catch-up)   Monitor `tail -F -c +N`
               │     → context at start and each prompt    → live (FALLBACK, only
               │                                              when socket is off)
-              └─→ post to $CLAUDE_CODE_MESSAGING_SOCKET (named in <agent>.jsonl.wake.json)
+              └─→ THEN post to $CLAUDE_CODE_MESSAGING_SOCKET (named in <agent>.jsonl.wake.json)
                   → starts a turn in the session; raises its cursor (#107, PRIMARY)
 ```
 
+The post always comes *after* the append. The inbox write is the delivery
+contract and the socket post is a wake-up on top of it, so no event is ever
+posted without being spooled. That's what makes the drain a safe fallback.
+
 Which live path runs is decided per session by the SessionStart hook: it
-writes the wake file only when `crossSessionInbound: "accept"` is in force
-and the running fetcher is new enough to post. With a wake file, the hook
+writes the wake file only when the session exposes an inbox socket
+(`$CLAUDE_CODE_MESSAGING_SOCKET`), the hook payload carries a `session_id`,
+`crossSessionInbound: "accept"` is in force, and the running fetcher is new
+enough to post. With a wake file, the hook
 tells the agent **not** to arm a Monitor (that would deliver twice); without
 one, it prints the Monitor arm command and says why socket delivery is off.
 
@@ -142,7 +148,7 @@ value of `$DRIDOCK_AGENT_NAME`).
 | `<agent>.jsonl.pid`               | fetcher (boot)        | One-line PID file. Removed on clean shutdown. |
 | `<agent>.jsonl.log`               | fetcher (via nohup)   | Combined stdout+stderr. Startup config, poll-failure warnings, sink-write errors. |
 | `<agent>.jsonl.session-cursors.json` | SessionStart + UPS  | `{session_id: last_delivered_byte_offset}` — per-session cursor. **Covers BOTH consumers** (#102): hook drains, and ranges a live Monitor `tail -F -c +N` was armed to deliver. Before #102 it tracked drains only, so a tail's deliveries never advanced it and expiry replayed them. |
-| `<agent>.jsonl.wake.json`         | SessionStart (UPS removes) | `{socket, sessionId, token?, writtenAt}`, chmod 600 — tells the fetcher which session socket to post into (#107). Exists **only** while `crossSessionInbound: "accept"` is in force; see [Socket delivery](#socket-delivery-107). |
+| `<agent>.jsonl.wake.json`         | SessionStart + UPS (both write and remove) | `{socket, sessionId, token?, writtenAt}`, chmod 600 — tells the fetcher which session socket to post into (#107). Exists **only** while socket delivery is in force: an inbox socket and a `session_id` are present, `crossSessionInbound: "accept"` is in force, and the fetcher is ≥ 5.14.0. UPS writes it if `accept` appears mid-session. See [Socket delivery](#socket-delivery-107). |
 | `<agent>.jsonl.respawn-stamp`     | UPS                   | Unix epoch of last respawn attempt (for 60s backoff). |
 | `<agent>.jsonl.version`           | SessionStart          | dridock version that spawned the RUNNING fetcher (#71). Compared against the installed binary; a mismatch triggers stop+respawn so watcher fixes take effect. **Host-only** — gated on `[ ! -f /.dockerenv ]`, since the container's fetcher dies with the session and its shim rejects `--version`. |
 
@@ -366,7 +372,11 @@ So:
   `lib/team-inbox-watch.sh`: managed settings — `managed-settings.json` plus any
   `managed-settings.d/*.json` drop-ins, strictest wins — then the `--settings`
   value read off the parent `claude` process's `/proc` argv, then user
-  settings, then the stricter-only project/local files). `accept` → it writes the wake file and
+  settings, then the stricter-only project/local files). It first refuses, with the reason
+  printed, if there is no `$CLAUDE_CODE_MESSAGING_SOCKET` (the Claude Code build
+  exposes none) or no `session_id` in the hook payload (the fetcher couldn't
+  advance that session's cursor). After those come the `accept` check and the fetcher-version gate
+  ([below](#the-fetcher-must-be-new-enough-to-post)). `accept` → it writes the wake file and
   tells the agent **not** to arm a Monitor (that would deliver everything twice).
   Anything else → it removes the wake file and prints why plus the Monitor
   command.

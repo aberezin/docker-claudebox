@@ -42,6 +42,12 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Hook hints that said `make build` before `dridock down` + `dridock start` now
   say `./install.sh`, which builds the image too.
 
+### Docs
+- The overview of `docs/design/agent-teams-delivery.md` and the summary in
+  `agent-coordination-hooks.md` still described the Monitor as the only live layer.
+  They now show socket delivery (#107) as the primary path, list all four of its
+  gates, and mark the pre-#46 rows (including the `→ Recipient:` filter) as superseded.
+
 ## [5.14.0] - 2026-11-11
 
 ### Added

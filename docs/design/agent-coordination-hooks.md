@@ -31,12 +31,18 @@ Requires the #46 `dridock` installed; on a pre-#46 binary the hook degrades to a
 
 ## Summary
 
+> **This table summarises the interim design as first written (July 2026), before
+> #46, #56 and #107.** It's kept as rationale. Each row that no longer describes
+> what runs says what replaced it. For the current mechanism read
+> [Current setup](#current-setup--native-dridock-team-watcher) above and
+> [agent-teams-delivery.md](agent-teams-delivery.md).
+
 | Question | Answer |
 |---|---|
 | Is this the destination? | **No.** Interim scaffolding. Target state is A2A over `api_server.py`; see [agent-to-agent.md](agent-to-agent.md) and the waker discussion there. |
-| What's the message bus? | **GitHub issue comments** on the coordinating repo (currently `aberezin/docker-claudebox` issue #24 + spinoffs). Durable, auditable, no additional infra. |
-| What are the two layers? | **(1)** A `SessionStart` **catch-up hook** that reads comments landed since last session and injects them as `additionalContext`. **(2)** A persistent in-session `Monitor` that polls for new comments during the session and emits one notification per matching comment. |
-| Filter convention | **Whitelist by `**→ Recipient:**` prefix.** Both agents post as the same GitHub user, so author-based filtering is useless. |
+| What's the message bus? | **GitHub issue comments** on the coordinating repo (`aberezin/docker-claudebox`; originally issue #24, now whichever issue the work is on). Durable, auditable, no additional infra. Still true. |
+| What are the two layers? | **(1)** A `SessionStart` **catch-up hook** that reads comments landed since last session and injects them as `additionalContext`. **(2)** A persistent in-session `Monitor` that polls for new comments during the session and emits one notification per matching comment. **Superseded:** both layers now read a per-agent inbox spooled by a detached fetcher (#56). (1) is the SessionStart/UserPromptSubmit drain. (2) is the fetcher posting into the session socket (#107), and a Monitor that tails `<inbox>` (not GitHub) is only the fallback when socket delivery is off. See [agent-teams-delivery.md](agent-teams-delivery.md). |
+| Filter convention | ~~Whitelist by `**→ Recipient:**` prefix.~~ **Superseded:** the header is `Sender->Recipient:` (`Sender:` = broadcast), written by `dridock team post` and parsed sender-first by `AgentTeamHeader.ts` ([agent-teams.md](agent-teams.md) §2/§3). The legacy `→ Name:` form is accepted only for compatibility. Do not write it. The reasoning still holds: both agents post as the same GitHub user, so filtering by author is useless. |
 | Why can't the hook BE the watcher? | Shell hooks can invoke shell commands; they can't call Claude Code tools. `Monitor` is a Claude tool. The hook catches up + reminds; the agent's first turn arms `Monitor`. **Superseded by #107:** the watcher doesn't need to be a Claude tool after all — every session exports an inbox socket (`$CLAUDE_CODE_MESSAGING_SOCKET`), and the detached fetcher posts into it, starting a turn on its own. See [agent-teams-delivery.md § Socket delivery](agent-teams-delivery.md#socket-delivery-107). |
 | Zero-footprint in the harness repo? | Yes — the hook and its script live under `~/.claude/` (the container-mounted or Mac-host claude config), never in the harness workspace. Only THIS doc is in the repo. |
 
