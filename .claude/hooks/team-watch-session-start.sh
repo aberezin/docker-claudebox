@@ -568,11 +568,53 @@ if [ -n "$_drain_note" ]; then
     fi
 fi
 
-# ─── Step 3: print the exact Monitor arm command ─────────────────────
+# ─── Step 3: live layer — socket delivery if safe, else Monitor (#107) ─
+# The fetcher posts each event straight into this session's inbox socket
+# when `<inbox>.wake.json` names it. That file is written ONLY when
+# `crossSessionInbound: "accept"` is in force from a trusted source:
+# without it the session HOLDS a post from the detached fetcher, the
+# socket can't tell us so, and the fetcher would advance the cursor past
+# an event the agent never saw. Removed otherwise, so a stale file from an
+# earlier session can't keep the fetcher posting into the void.
+# shellcheck source=lib/team-inbox-watch.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/team-inbox-watch.sh"
+_socket_live=0
+_socket_note=""
+if [ -z "${CLAUDE_CODE_MESSAGING_SOCKET:-}" ]; then
+    rm -f "$_inbox.wake.json"
+    _socket_note="this Claude Code build exposes no inbox socket (\$CLAUDE_CODE_MESSAGING_SOCKET unset)"
+elif [ -z "$_session_id" ]; then
+    rm -f "$_inbox.wake.json"
+    _socket_note="no session_id in the SessionStart payload, so the fetcher can't advance this session's cursor"
+else
+    twh_inbound_in_force
+    if [ "$TWH_INBOUND" = "accept" ]; then
+        if twh_write_wake "$_inbox" "$_session_id"; then
+            _socket_live=1
+        else
+            rm -f "$_inbox.wake.json"
+            _socket_note="accept is in force but writing $_inbox.wake.json failed"
+        fi
+    else
+        rm -f "$_inbox.wake.json"
+        _socket_note="crossSessionInbound is '$TWH_INBOUND', not 'accept' — a post from the detached fetcher would be held, not delivered. dridock sessions get accept from the entrypoint; a session started by hand needs: claude --settings '{\"crossSessionInbound\":\"accept\"}'"
+    fi
+fi
+
+if [ "$_socket_live" = 1 ]; then
+    echo ""
+    echo "📬 team-inbox live layer: SOCKET delivery is on — the fetcher posts each event"
+    echo "  for $_self straight into this session. Do NOT arm a Monitor on the inbox (it"
+    echo "  would deliver every event twice). Anything a post misses is drained at the"
+    echo "  next prompt."
+    exit 0
+fi
+
 # Handoff-race safe: tail starts at `current_EOF + 1`; the fetcher
 # continues appending past `current_EOF`; no gap between drain and arm.
 echo ""
-echo "📬 team-inbox live layer — arm your Monitor tool with this EXACT command (persistent):"
+echo "⚠ team-inbox: socket delivery is OFF — $_socket_note."
+echo "📬 team-inbox live layer — arm your Monitor tool with this EXACT command (timeout_ms: 1800000, re-arm when it ends):"
 echo "    tail -F -c +$((_inbox_size + 1)) $_inbox"
 echo "  Each new line = one team-bus event addressed to $_self. Monitor turns each"
 echo "  line into a chat notification. Do NOT run this in a terminal — its stdout"

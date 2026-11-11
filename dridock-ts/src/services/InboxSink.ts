@@ -2,6 +2,7 @@ import type { FileSystem } from "../infra/FileSystem.ts";
 import type { WatcherEvent } from "./WatcherEvent.ts";
 import type { WatcherSink, WatcherTickSummary } from "./WatcherLoop.ts";
 import type { TextWriter } from "../cli/Context.ts";
+import { readWakeTarget, wakeFileFor, wakeText, raiseCursor, type SocketPoster } from "./SessionWaker.ts";
 
 /**
  * Sink for `dridock team watch --inbox <path>` — the fetcher mode.
@@ -52,6 +53,10 @@ export interface InboxSinkDeps {
   /** Where to write poll-failure warnings + the (rare) sink error line.
    *  Under `nohup` redirection this is the log file at `<inbox>.log`. */
   readonly stderr: TextWriter;
+  /** Socket wake-up (#107). When present, each appended event is also
+   *  posted into the agent's Claude session if the SessionStart hook left a
+   *  wake file — see SessionWaker.ts. Absent = file-only, as before. */
+  readonly poster?: SocketPoster;
 }
 
 /** Build a `WatcherSink` that appends JSONL events to the inbox file
@@ -67,6 +72,11 @@ export function makeInboxSink(deps: InboxSinkDeps): WatcherSink {
       try {
         const line = formatInboxLine(event, deps.repo);
         await deps.fs.appendText(deps.inboxPath, `${line}\n`);
+        // The append is the delivery contract; the wake-up is on top of it.
+        // A failed wake never fails the event — it stays in the file for the
+        // prompt-time drain — so this can't turn a delivered event into a
+        // retried (and then duplicated) one.
+        if (deps.poster !== undefined) await wakeSession(deps, deps.poster, line);
         return true;
       } catch (e) {
         // Report the failure to the loop instead of absorbing it. The old
@@ -120,6 +130,31 @@ export function makeInboxSink(deps: InboxSinkDeps): WatcherSink {
       }
     },
   };
+}
+
+/** Post one just-appended inbox line into the agent's session (#107) and,
+ *  if that worked, raise the session's cursor past it. Never throws: every
+ *  failure is logged and leaves the event for the prompt-time drain. */
+async function wakeSession(deps: InboxSinkDeps, poster: SocketPoster, line: string): Promise<void> {
+  try {
+    const target = await readWakeTarget(deps.fs, wakeFileFor(deps.inboxPath));
+    if (target === undefined) return; // socket delivery off: Monitor/drain path as before
+    const record = parseInboxLine(line);
+    if (record === undefined) return;
+    const ok = await poster(target, wakeText(deps.selfName, record, line));
+    if (!ok) {
+      deps.stderr.write(`${new Date().toISOString()} ⚠️  team watch: socket wake failed for ${record.ref} (session ${target.sessionId} gone or socket stale) — event stays in the inbox for the next prompt's drain\n`);
+      return;
+    }
+    const size = await deps.fs.sizeBytes(deps.inboxPath);
+    if (size === undefined) return;
+    const raised = await raiseCursor(deps.fs, sessionCursorsFor(deps.inboxPath), target.sessionId, size);
+    if (!raised) {
+      deps.stderr.write(`${new Date().toISOString()} ⚠️  team watch: woke session for ${record.ref} but could not parse ${sessionCursorsFor(deps.inboxPath)} to advance its cursor — the next prompt may show this event again\n`);
+    }
+  } catch (e) {
+    deps.stderr.write(`${new Date().toISOString()} ⚠️  team watch: socket wake error (event stays in the inbox): ${e instanceof Error ? e.message : String(e)}\n`);
+  }
 }
 
 /** Serialize one event into a single JSONL line (no trailing newline —

@@ -122,6 +122,7 @@ value of `$DRIDOCK_AGENT_NAME`).
 | `<agent>.jsonl.pid`               | fetcher (boot)        | One-line PID file. Removed on clean shutdown. |
 | `<agent>.jsonl.log`               | fetcher (via nohup)   | Combined stdout+stderr. Startup config, poll-failure warnings, sink-write errors. |
 | `<agent>.jsonl.session-cursors.json` | SessionStart + UPS  | `{session_id: last_delivered_byte_offset}` — per-session cursor. **Covers BOTH consumers** (#102): hook drains, and ranges a live Monitor `tail -F -c +N` was armed to deliver. Before #102 it tracked drains only, so a tail's deliveries never advanced it and expiry replayed them. |
+| `<agent>.jsonl.wake.json`         | SessionStart (UPS removes) | `{socket, sessionId, token?, writtenAt}`, chmod 600 — tells the fetcher which session socket to post into (#107). Exists **only** while `crossSessionInbound: "accept"` is in force; see [Socket delivery](#socket-delivery-107). |
 | `<agent>.jsonl.respawn-stamp`     | UPS                   | Unix epoch of last respawn attempt (for 60s backoff). |
 | `<agent>.jsonl.version`           | SessionStart          | dridock version that spawned the RUNNING fetcher (#71). Compared against the installed binary; a mismatch triggers stop+respawn so watcher fixes take effect. **Host-only** — gated on `[ ! -f /.dockerenv ]`, since the container's fetcher dies with the session and its shim rejects `--version`. |
 
@@ -256,6 +257,7 @@ with arm/expire bookkeeping:
 
 | Segment          | Meaning |
 |------------------|---------|
+| `📬 live·sock`   | the fetcher posts events into this session's socket (#107) |
 | `📬 live`        | a `tail -F` is consuming this agent's inbox (Monitor armed) |
 | `📬 off`         | nothing is; events wait for the next prompt's in-line drain |
 | `📬 off · N new` | …and N events are already waiting past this session's cursor |
@@ -279,6 +281,77 @@ the hook it's silent loss, because a decoy quoting a **stale, lower** offset
 takes #102's no-gap path and advances the cursor past events nobody was handed.
 The real tail always runs alongside its wrapper (as its child), so requiring
 `comm == tail` loses nothing.
+
+## Socket delivery (#107)
+
+The Monitor (`tail -F` on the inbox) works, but it is the agent's job to keep it
+armed, and agents forget: it expires (the Monitor tool's `timeout_ms` tops out at
+30 minutes), re-arming leaks a task each time, and a session that never armed it
+stays dark until someone prompts it. Since #107 the **fetcher** delivers instead.
+
+Every Claude Code session binds an inbox Unix socket and exports it as
+`$CLAUDE_CODE_MESSAGING_SOCKET` (with `$CLAUDE_CODE_MESSAGING_TOKEN`). A message
+posted there starts a turn in an idle session, or is read between tool calls in
+a busy one. After appending an event to the inbox, the fetcher posts it to the
+socket named in `<agent>.jsonl.wake.json` — one auth line, then
+`{"type":"user","message":{"role":"user","content":"…"}}` — and on success raises
+that session's cursor past it, so the prompt-time drain doesn't hand it over
+again.
+
+### The one setting it depends on
+
+A session that skips permission prompts — **every dridock session** — *holds* a
+post from a process it can't prove is its own child, and the fetcher is detached
+(reparented to init), so it can't. The socket returns nothing either way, so a
+held post looks delivered: the fetcher would advance the cursor past an event the
+agent never saw. Only `crossSessionInbound: "accept"` gets the post through, and
+only from a trusted source — the precedence is **managed settings → the
+`--settings` flag → user settings**, first value wins. Project and local settings
+can only make it *stricter*: `accept` there is ignored by design, so a cloned
+repo can't open your session to other processes. (Measured on CLI 2.1.319: a
+detached sender with `accept` in `settings.local.json` was held; with it in user
+settings it was delivered mid-turn with no dialog.)
+
+So:
+
+- **dridock containers** — the entrypoint launches claude with
+  `--settings '{"crossSessionInbound":"accept"}'`. Nothing to do. Opt out with
+  `DRIDOCK_SOCKET_DELIVERY=0` ([environment-variables.md](../environment-variables.md)).
+- **Any session dridock didn't start** (e.g. Arfy on the Mac host) **must be
+  started with:**
+
+  ```bash
+  claude --settings '{"crossSessionInbound":"accept"}'
+  ```
+
+  …or carry `"crossSessionInbound": "accept"` in **user** settings
+  (`~/.claude/settings.json`). Putting it in the repo's `.claude/settings.json`
+  or `settings.local.json` does **not** work. Without it, SessionStart says
+  `socket delivery is OFF — crossSessionInbound is '…'` and prints the Monitor
+  arm command as before.
+
+### Who decides, and when
+
+- **SessionStart** computes the effective value (`twh_inbound_in_force` in
+  `lib/team-inbox-watch.sh`: managed settings file, the `--settings` value read
+  off the parent `claude` process's argv, then user settings, then the
+  stricter-only project/local files). `accept` → it writes the wake file and
+  tells the agent **not** to arm a Monitor (that would deliver everything twice).
+  Anything else → it removes the wake file and prints why plus the Monitor
+  command.
+- **UserPromptSubmit** re-checks every prompt while the wake file names this
+  session. If `accept` has gone away it removes the file and says so, so the
+  fetcher stops counting held posts as delivered. Anything past the cursor is a
+  post that failed (session busy restarting, socket gone) and is drained in-line,
+  labelled as such.
+- **The fetcher** re-reads the wake file before every post, so on the host —
+  where it outlives sessions — it always targets the current session. A failed
+  post is logged (`socket wake failed … stays in the inbox`) and leaves the
+  cursor alone.
+
+Both writers of the cursors file **raise, never lower** (`max`), so a race
+between the fetcher's post and a prompt-time drain costs a duplicate, never a
+skipped event. The Monitor path is unchanged and remains the fallback.
 
 ## Posting: every write needs a header
 

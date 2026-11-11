@@ -28,7 +28,37 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [5.14.0] - 2026-11-11
+
 ### Added
+- **Team-bus events wake the session through its inbox socket** (#107). The
+  fetcher used to only append to the inbox file, and live delivery depended on
+  the agent keeping a Monitor (`tail -F`) armed. The Monitor expires (its
+  `timeout_ms` tops out at 30 min), and agents forget to re-arm it. Each re-arm
+  also left a task behind: one restart reported 288 orphans. Now, after the
+  append, the fetcher posts the event into the session's
+  `$CLAUDE_CODE_MESSAGING_SOCKET`, which starts a turn when idle or is read
+  between tool calls when busy. On success it raises that session's cursor so
+  the prompt-time drain doesn't repeat it. A failed post is logged and leaves
+  the event for the drain. The SessionStart hook writes
+  `<agent>.jsonl.wake.json` (chmod 600: socket, session id, token), and the
+  fetcher re-reads it before every post, so on the host it follows the current
+  session. The status line shows `📬 live·sock`. The Monitor stays as the
+  fallback.
+- **The entrypoint launches claude with
+  `--settings '{"crossSessionInbound":"accept"}'`** (#107). A session that skips
+  permission prompts holds a post from a process it can't verify as its own
+  child, and the detached fetcher can't be verified. The socket gives no
+  acknowledgement, so a held post looks delivered. `accept` counts only from
+  managed settings, `--settings` or user settings; project and local settings
+  can only make it stricter, by design. The wake file therefore exists only
+  while `accept` is in force. SessionStart writes or removes it, and
+  UserPromptSubmit removes it the moment `accept` goes away. **A session dridock
+  didn't start (e.g. on the Mac host) must be launched with
+  `claude --settings '{"crossSessionInbound":"accept"}'`** or carry it in user
+  settings; otherwise SessionStart says socket delivery is OFF and why. Opt out
+  with `DRIDOCK_SOCKET_DELIVERY=0`. See
+  [docs/design/agent-teams-delivery.md](docs/design/agent-teams-delivery.md#socket-delivery-107).
 - **The status line shows whether the team-inbox watch is live** (#105):
   `📬 live`, `📬 off`, or `📬 off · N new`. The watch's state used to be visible
   only in the transcript — arm calls, a "Monitor expired" notice every five
@@ -43,6 +73,12 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   inbox exits before any process scan.
 
 ### Changed
+- **Inbox cursors are raised, never lowered.** The fetcher and the
+  UserPromptSubmit hook both write `session-cursors.json` now, and both take the
+  `max`. If they race, the worst outcome is a duplicate, never a skip. The
+  hook's temp file now sits beside the target, so the `mv` is an atomic rename.
+- The Monitor arm text says `timeout_ms: 1800000` instead of "persistent", a
+  parameter the Monitor tool doesn't have.
 - **"Is the inbox watch live" now has one definition**, in
   `.claude/hooks/lib/team-inbox-watch.sh` (`twh_find_tail`). The UserPromptSubmit
   hook's inline `pgrep`/`ps` loop moved there unchanged, and the status line

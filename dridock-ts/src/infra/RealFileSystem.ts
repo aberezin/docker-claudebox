@@ -116,6 +116,13 @@ export class RealFileSystem implements FileSystem {
       return undefined;
     }
   }
+  async sizeBytes(path: string): Promise<number | undefined> {
+    try {
+      return (await stat(path)).size;
+    } catch {
+      return undefined;
+    }
+  }
 
   async removeDirRecursive(path: string): Promise<void> {
     // `rm -rf` — force + recursive. `force: true` makes ENOENT idempotent.

@@ -192,6 +192,10 @@ export class InMemoryFileSystem implements FileSystem {
   private readonly mtimes = new Map<string, number>();
   setMtimeMs(path: string, ms: number): void { this.mtimes.set(path, ms); }
   async mtimeMs(path: string): Promise<number | undefined> { return this.mtimes.get(path); }
+  async sizeBytes(path: string): Promise<number | undefined> {
+    const f = this.files.get(path);
+    return f === undefined ? undefined : Buffer.byteLength(f.content, "utf8");
+  }
   async statMode(path: string): Promise<number | undefined> {
     return this.files.get(path)?.mode ?? this.dirModes.get(path);
   }

@@ -84,8 +84,13 @@ _twh_set_cursor() {
     [ -n "$_session_id" ] || return 0
     command -v jq >/dev/null 2>&1 || return 0
     if [ ! -f "$_cursors" ]; then echo '{}' > "$_cursors"; fi
-    local _tmp; _tmp="$(mktemp)"
-    if jq --arg id "$_session_id" --argjson off "$_off" '. + {($id): $off}' "$_cursors" > "$_tmp" 2>/dev/null; then
+    # Raise, never lower (#107): the fetcher writes this file too, after a
+    # successful socket post. If the two race, max() keeps the higher offset,
+    # so the worst outcome is a duplicate, never a re-surfaced gap or a skip.
+    # Temp file beside the target so the mv is an atomic rename.
+    local _tmp; _tmp="$(mktemp "$_cursors.XXXXXX")" || return 0
+    if jq --arg id "$_session_id" --argjson off "$_off" \
+        '. + {($id): ([(.[$id] // 0), $off] | max)}' "$_cursors" > "$_tmp" 2>/dev/null; then
         mv "$_tmp" "$_cursors"
     else
         rm -f "$_tmp"
@@ -269,14 +274,33 @@ twh_find_tail "$_inbox"
 _tail_pid="$TWH_TAIL_PID"
 _tail_arm="$TWH_TAIL_ARM"
 
+# Socket delivery (#107). The fetcher posts each event into this session and
+# raises its cursor on success, so anything still past the cursor here is
+# exactly what a post MISSED — the in-line drain below covers it either way.
+# Re-check accept every prompt: settings can change mid-session, and a wake
+# file that outlives accept would have the fetcher advancing the cursor over
+# posts the session is holding. Pull the file the moment that's true.
+twh_socket_live "$_inbox" "$_session_id"
+_socket_live="$TWH_SOCKET_LIVE"
+if [ -n "$_socket_live" ]; then
+    twh_inbound_in_force
+    if [ "$TWH_INBOUND" != "accept" ]; then
+        rm -f "$_inbox.wake.json"
+        _socket_live=""
+        echo ""
+        echo "⚠ team-inbox: crossSessionInbound is now '$TWH_INBOUND', not 'accept' — socket delivery"
+        echo "   turned OFF (wake file removed) so held posts can't be counted as delivered."
+    fi
+fi
+
 # Nothing new to deliver. Still report an unarmed Monitor — the live layer is
 # down whether or not mail happens to be waiting, and saying so only when there
 # is a backlog means you learn about it after it has already cost you.
 if [ "$_inbox_size" -le "$_last_offset" ]; then
-    if [ -z "$_tail_pid" ]; then
+    if [ -z "$_tail_pid" ] && [ -z "$_socket_live" ]; then
         echo ""
         echo "📬 team-inbox: your Monitor is NOT armed — live delivery is off. Events will"
-        echo "   only reach you at the next SessionStart or prompt. Arm it (persistent):"
+        echo "   only reach you at the next SessionStart or prompt. Arm it (timeout_ms: 1800000):"
         echo "       tail -F -c +$((_inbox_size + 1)) $_inbox"
     fi
     exit 0
@@ -333,12 +357,18 @@ fi
 # arm command with the fresh offset for Claude to re-arm.
 _delta=$((_inbox_size - _last_offset))
 echo ""
-echo "─── team-inbox: $_delta unread bytes since offset $_last_offset (Monitor not armed) ───"
+if [ -n "$_socket_live" ]; then
+    echo "─── team-inbox: $_delta bytes the socket post did not deliver (since offset $_last_offset) ───"
+else
+    echo "─── team-inbox: $_delta unread bytes since offset $_last_offset (Monitor not armed) ───"
+fi
 tail -c "+$((_last_offset + 1))" "$_inbox" | head -c "$_delta"
 echo "─── end delta ───"
-echo ""
-echo "📬 team-inbox: re-arm your Monitor with (persistent):"
-echo "    tail -F -c +$((_inbox_size + 1)) $_inbox"
+if [ -z "$_socket_live" ]; then
+    echo ""
+    echo "📬 team-inbox: re-arm your Monitor with (timeout_ms: 1800000):"
+    echo "    tail -F -c +$((_inbox_size + 1)) $_inbox"
+fi
 
 # Update cursor to current EOF so we don't re-surface these on the next
 # turn. Requires session_id — with no session_id, cursor can't advance

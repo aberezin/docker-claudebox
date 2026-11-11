@@ -1152,6 +1152,24 @@ if [ -n "$COMBINED_APPEND" ]; then
 	SYSTEM_HINT_FLAG="--append-system-prompt $(printf '%q' "$COMBINED_APPEND")"
 fi
 
+# Team-bus socket delivery (#107). The team fetcher posts each event into
+# this session's inbox socket ($CLAUDE_CODE_MESSAGING_SOCKET). It runs
+# detached, so Claude Code can't verify it as the session's own child, and a
+# session that skips permission prompts — every dridock session — HOLDS such
+# a post unless crossSessionInbound is "accept". Project/local settings can't
+# grant accept (by design: a cloned repo must not be able to open your
+# session), so it has to come from --settings, user, or managed settings.
+# The container is already the isolation boundary, so dridock grants it on
+# the launch line. Opt out with DRIDOCK_SOCKET_DELIVERY=0: the team hooks
+# then fall back to the Monitor and say so at SessionStart.
+INBOUND_FLAG=""
+if [ "${DRIDOCK_SOCKET_DELIVERY:-1}" != "0" ]; then
+	INBOUND_FLAG="--settings $(printf '%q' '{"crossSessionInbound":"accept"}')"
+	SYSTEM_HINT_FLAG="$INBOUND_FLAG $SYSTEM_HINT_FLAG"
+else
+	echo "dridock: team-bus socket delivery OFF (DRIDOCK_SOCKET_DELIVERY=0) — events fall back to the Monitor (#107)" >&2
+fi
+
 # detect --no-continue and --resume in args (affects whether we auto-add --continue)
 _skip_auto_continue() {
 	for a in "$@"; do

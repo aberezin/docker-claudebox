@@ -55,6 +55,11 @@ export interface FileSystem {
    *  and must not abort the sweep. */
   mtimeMs(path: string): Promise<number | undefined>;
 
+  /** Size in BYTES, or `undefined` when the path is missing or unreadable.
+   *  Byte offsets into the team inbox are what cursors store, so this must
+   *  be a byte count, not a string length. */
+  sizeBytes(path: string): Promise<number | undefined>;
+
   /** Permission bits (including setuid/setgid/sticky), or `undefined`
    *  when the path is missing. Exists so callers can VERIFY a chmod took
    *  effect: Bun's `chmod` silently drops the sticky bit, so writing the

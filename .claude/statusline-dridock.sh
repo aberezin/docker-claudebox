@@ -86,6 +86,8 @@ fi
 # #66 above: the team bus is used most in the harness repo, which the walk
 # below may treat as silent, so this must not be gated on it.
 #
+#   📬 live·sock     the fetcher posts events into this session's socket
+#                    (#107; checked first — a file read, no process scan)
 #   📬 live          a `tail -F` is consuming the inbox (Monitor armed)
 #   📬 off           nothing is; events wait for the next prompt
 #   📬 off · N new   …and N events are already waiting past this session's
@@ -116,8 +118,14 @@ _tw_lib="$(dirname "${BASH_SOURCE[0]}")/hooks/lib/team-inbox-watch.sh"
 if [ -n "$_tw_self" ] && [ -f "$_tw_inbox" ] && [ -f "$_tw_lib" ]; then
     # shellcheck source=hooks/lib/team-inbox-watch.sh
     . "$_tw_lib"
-    twh_find_tail "$_tw_inbox"
-    if [ -n "$TWH_TAIL_PID" ]; then
+    TWH_SOCKET_LIVE=""
+    if command -v jq >/dev/null 2>&1 && [ -n "$input" ]; then
+        twh_socket_live "$_tw_inbox" "$(printf '%s' "$input" | jq -r '.session_id // empty' 2>/dev/null)"
+    fi
+    [ -n "$TWH_SOCKET_LIVE" ] || twh_find_tail "$_tw_inbox"
+    if [ -n "$TWH_SOCKET_LIVE" ]; then
+        printf '\033[32m📬 live·sock\033[0m '
+    elif [ -n "$TWH_TAIL_PID" ]; then
         printf '\033[32m📬 live\033[0m '
     else
         printf '\033[90m📬 off\033[0m'

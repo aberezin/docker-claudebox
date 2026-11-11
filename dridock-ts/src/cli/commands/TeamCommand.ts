@@ -11,6 +11,7 @@ import { GithubWatchSource } from "../../services/GithubWatchSource.ts";
 import { WatcherStore } from "../../services/WatcherStore.ts";
 import { runOneTick, type WatcherSink, type WatcherTickSummary } from "../../services/WatcherLoop.ts";
 import { makeInboxSink, inboxPathFor, pidfileFor, logfileFor } from "../../services/InboxSink.ts";
+import { realSocketPoster, type SocketPoster } from "../../services/SessionWaker.ts";
 import { isPidAlive, RealProcessProbe, type ProcessProbe } from "../../services/PidLiveness.ts";
 import { teamSharedDir, partitionForReap, TEAM_DIR_MODE, type ReapCandidate } from "../../services/TeamSharedDir.ts";
 import { xdgRoot } from "../../domain/paths.ts";
@@ -567,6 +568,9 @@ without --reap is refused, since alone it would age nothing out.`,
           repo,
           heartbeatPath,
           stderr: ctx.stderr,
+          // Only the long-running fetcher wakes a session; `--once` is the
+          // SessionStart catch-up and runs before the session could be woken.
+          ...(opts.once ? {} : { poster: this.deps.socketPoster ?? realSocketPoster }),
         })
       : this.makeStdoutSink(ctx, heartbeatPath, selfName, repo);
 
@@ -1230,6 +1234,9 @@ export interface TeamCommandDeps {
    *  with no consumer prints an actionable hint on stderr so the user
    *  knows the message wasn't actually sent. */
   readonly stdoutIsTTY: () => boolean;
+  /** Posts a team-bus event into the agent's Claude session socket (#107).
+   *  Prod default is `realSocketPoster`; tests inject a fake. */
+  readonly socketPoster: SocketPoster;
 }
 
 interface WatchOpts {
