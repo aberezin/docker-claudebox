@@ -257,7 +257,9 @@ twh_fetcher_version() {
         case "$TWH_FETCHER_VER" in [0-9]*.[0-9]*.[0-9]*) TWH_FETCHER_VER_SRC="running fetcher pid $_pid"; return 0 ;; esac
         TWH_FETCHER_VER=""
     fi
-    TWH_FETCHER_VER="$(tr -d '[:space:]' < "$_inbox.version" 2>/dev/null)"
+    # `[ -f ]` first: a failed `<` redirect is reported by the shell before tr
+    # runs, so `2>/dev/null` on tr can't hide it (Arfy's nit, #107).
+    [ -f "$_inbox.version" ] && TWH_FETCHER_VER="$(tr -d '[:space:]' < "$_inbox.version" 2>/dev/null)"
     case "$TWH_FETCHER_VER" in
         [0-9]*.[0-9]*.[0-9]*) TWH_FETCHER_VER_SRC="$_inbox.version" ;;
         *) TWH_FETCHER_VER="" ;;
