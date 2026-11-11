@@ -68,8 +68,14 @@ STUB
 # Captures stdout + rc into globals `_TWH_STDOUT` and `_TWH_RC`.
 _twh_run_session_start_hook() {
     local stub_dir="$1"
-    # No inbox socket: keep #107's socket path (runner's session) out of this gate test.
-    _TWH_STDOUT="$(env -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN PATH="$stub_dir:$PATH" bash "$_TWH_HOOKS_DIR/team-watch-session-start.sh" </dev/null 2>/dev/null)"
+    # Hermetic: no inbox socket AND a temp XDG root. Without the XDG redirect a
+    # roster-fine case reaches the hook's inbox logic against the RUNNER's real
+    # inbox -- and with no socket in env SessionStart removes that inbox's
+    # wake file, silently switching the runner's own socket delivery off (#107,
+    # found running this suite from a live session; fixed on #108's branch).
+    mkdir -p "$stub_dir/xdg"
+    _TWH_STDOUT="$(env -u CLAUDE_CODE_MESSAGING_SOCKET -u CLAUDE_CODE_MESSAGING_TOKEN \
+        PATH="$stub_dir:$PATH" XDG_CONFIG_HOME="$stub_dir/xdg" bash "$_TWH_HOOKS_DIR/team-watch-session-start.sh" </dev/null 2>/dev/null)"
     _TWH_RC=$?
 }
 

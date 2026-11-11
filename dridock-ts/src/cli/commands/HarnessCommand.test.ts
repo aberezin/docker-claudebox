@@ -477,6 +477,20 @@ describe("HarnessCommand.update-cli", () => {
     expect(out.endsWith("### Fixed\n- something earlier\n")).toBe(true);
   });
 
+  test("#106: heading with trailing whitespace counts as present — entry written under it, no second heading stacked (Arfy's nit)", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    fs.seed("/repo/CHANGELOG.md", "# Changelog\n\n## [Unreleased]  \n\n## [5.10.1] - 2026-11-09\n\n### Fixed\n- something earlier\n");
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.319"], ctx)).toBe(0);
+    const out = await fs.readText("/repo/CHANGELOG.md");
+    expect(out.match(/^## \[Unreleased\]/gm)).toHaveLength(1);
+    expect(out).toContain("Claude Code CLI pin raised **");
+    expect(out.indexOf("## [5.11.0]")).toBeGreaterThan(out.indexOf("## [Unreleased]"));
+    expect(stderr.text()).not.toContain("skipped the CHANGELOG entry");
+    expect(stderr.text()).not.toContain("added it above");
+  });
+
   test("#106: heading present → no 'added' note (the restore path stays out of the normal case)", async () => {
     const fs = new InMemoryFileSystem();
     seedRepo(fs);
