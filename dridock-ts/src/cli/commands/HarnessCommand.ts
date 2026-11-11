@@ -415,8 +415,22 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
     const entryDirection = targetVer.compareTo(Version.parseLoose(pinAtHeadForEntry)) === "lt" ? "lowered" : "raised";
 
     const changelogPath = `${project.root}/CHANGELOG.md`;
-    const changelogText = await ctx.fs.readTextOrUndefined(changelogPath);
-    if (changelogText !== undefined && changelogText.includes("## [Unreleased]")) {
+    let changelogText = await ctx.fs.readTextOrUndefined(changelogPath);
+    // #106: the `## [Unreleased]` heading is the anchor this entry goes under,
+    // and nothing else in the repo depended on it -- the 5.13.0 cut removed it
+    // and #105 had to restore it by hand. So when it's missing but the file has
+    // release headings, put it back above the first one (Keep-a-Changelog's own
+    // shape) instead of skipping the entry, and say so: this changes the file
+    // beyond the entry itself. No release heading at all → we don't know the
+    // file's shape, so the warn-and-skip below still applies.
+    if (changelogText !== undefined && !/^## \[Unreleased\]$/m.test(changelogText)) {
+      const firstRelease = /^## \[/m.exec(changelogText);
+      if (firstRelease !== null) {
+        changelogText = `${changelogText.slice(0, firstRelease.index)}## [Unreleased]\n\n${changelogText.slice(firstRelease.index)}`;
+        ctx.stderr.write(`ℹ️  harness update-cli: ${changelogPath} had no '## [Unreleased]' heading — added it above the first release heading (#106). Keep it when cutting a release.\n`);
+      }
+    }
+    if (changelogText !== undefined && /^## \[Unreleased\]$/m.test(changelogText)) {
       const today = new Date().toISOString().slice(0, 10);
       const pinLine = `- Claude Code CLI pin ${entryDirection} **${pinAtHeadForEntry} → ${resolvedVersion}** (\`ARG CLAUDE_VERSION\`)${target === "latest" || target === "stable" ? `, resolved from the \`${target}\` release channel` : ""}. Above the \`--remote-control\` floor (${CLAUDE_CLI_REMOTE_CONTROL_FLOOR}).`;
       // Matches exactly the shape this command itself always writes (date

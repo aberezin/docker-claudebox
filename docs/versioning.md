@@ -54,8 +54,14 @@ one but not the other — you get subtle, confusing breakage. The version makes 
    claimed a "sync test" which did not exist, so the two could silently diverge
    and the first symptom was `dridock checkversion` reporting host↔image drift
    at runtime, long after the commit that caused it.
-2. Add a **`CHANGELOG.md`** entry under a new `## [X.Y.Z] — <date>` heading — one
-   entry per bump (see the changelog policy below).
+2. Add a **`CHANGELOG.md`** entry under a new `## [X.Y.Z] - <date>` heading — one
+   entry per bump (see the changelog policy below). **Keep `## [Unreleased]`**:
+   the new heading goes directly **below** it, with any entries that were waiting
+   under `Unreleased` moved into the release. Don't rename `Unreleased` to the
+   version. `dridock harness update-cli` writes under that heading; the 5.13.0
+   cut renamed it and #105 had to restore it (#106). `update-cli` now puts a
+   missing one back, but `tests/test_version_sync.sh` fails unless there is
+   exactly one, above every release heading.
 3. Commit **on a branch** — `master` refuses direct commits (see
    [Release branches](#release-branches-release-xyz) for which name to use) —
    then ff-merge and **tag** the merged commit: `git tag -a vX.Y.Z -m "vX.Y.Z"` and push it

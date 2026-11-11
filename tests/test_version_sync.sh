@@ -79,6 +79,28 @@ test_version_sync() {
         bad "VERSION='$vraw' is not bare MAJOR.MINOR.PATCH — it becomes the image label and the git tag"
     fi
 
+    # #106: CHANGELOG.md keeps exactly one `## [Unreleased]`, above every
+    # release heading. `dridock harness update-cli` writes its entry under it,
+    # and a cut that renames it to `## [X.Y.Z]` instead of adding the release
+    # heading BELOW it (what 5.13.0 did) leaves nothing to anchor on. update-cli
+    # now restores a missing one, but the file should never need that. A second
+    # copy is a latent trap: anything anchoring on "the" heading picks one of
+    # two (a stray sat at line ~850 from 5.2.0 until #106).
+    local cl="$REPO/CHANGELOG.md" n_unrel first_unrel first_rel
+    n_unrel="$(grep -c '^## \[Unreleased\]$' "$cl" 2>/dev/null || true)"
+    if [ "$n_unrel" = 1 ]; then
+        ok "CHANGELOG.md has exactly one '## [Unreleased]' heading"
+    else
+        bad "CHANGELOG.md has ${n_unrel:-0} '## [Unreleased]' headings, want 1 — a release cut keeps it and adds '## [X.Y.Z] - <date>' BELOW it (docs/versioning.md 'Release steps')"
+    fi
+    first_unrel="$(grep -n '^## \[Unreleased\]$' "$cl" 2>/dev/null | head -1 | cut -d: -f1)"
+    first_rel="$(grep -nE '^## \[[0-9]' "$cl" 2>/dev/null | head -1 | cut -d: -f1)"
+    if [ -n "$first_unrel" ] && [ -n "$first_rel" ] && [ "$first_unrel" -lt "$first_rel" ]; then
+        ok "'## [Unreleased]' sits above the first release heading (line $first_unrel < $first_rel)"
+    else
+        bad "'## [Unreleased]' (line ${first_unrel:-none}) is not above the first release heading (line ${first_rel:-none})"
+    fi
+
     echo "  #103 version sync: $PASS passed, $FAIL failed"
     [ "$FAIL" -eq 0 ]
 }

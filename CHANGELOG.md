@@ -727,6 +727,20 @@ not. Verify with `dridock checkversion` or the image's
 - The `UserPromptSubmit` hook now warns when the installed `dridock` is older
   than the harness repo, and restarts a version-stale team fetcher without
   requiring a session exit (#86).
+- *(Detail of the #85 fix; until #106 it sat under a stray `## [Unreleased]` heading further down.)* **`SessionStart` hook silently disabled the whole team bus when `DRIDOCK_AGENT_NAME`
+  was wrong** (#85) — the hook swallowed `dridock team whoami` stderr and `exit 0`'d
+  on any failure, so a typo in the env var, an unsourced rc file, or a renamed roster
+  entry all produced identical silence: no fetcher spawn, no inbox drain, no Monitor
+  arm, no diagnostic. The `dridock team roster` guard above it swallowed a corrupt or
+  empty `agents.yml` the same way — the more likely failure, since nobody hand-edits
+  the env var as often as YAML. Both hooks now branch on the CLI's own rc: `team
+  roster` returns rc=2 for a missing roster file (silent — user never opted in) and
+  rc=1 for present-but-broken (loud — surface the CLI's stderr, still `exit 0` so the
+  session starts). `team whoami` failure is loud too. The CLI's own error messages
+  are already actionable ("Roster has: Bear, Arfy — pick one, or add …"); the fix is
+  simply not to throw them away. Load-bearing: the `rc=2` for absent vs `rc=1` for
+  malformed is now a pinned contract of `dridock team roster` (`TeamCommand.test.ts`
+  asserts both). Also pins a four-case bash test for the branching.
 
 ### Note for anyone upgrading
 This release changes a **host↔hook contract**, so the version bump is load-bearing
@@ -850,24 +864,6 @@ when a project is still legacy afterwards (opt-out set, or migration failed).
   CLI would shadow it and the container would not start.
 - `DRIDOCK_DATA_DIR` means "put `.claude` exactly here", which is incompatible with
   folding, so that override keeps the pre-phase-2 mount shape.
-
-## [Unreleased]
-
-### Fixed
-- **`SessionStart` hook silently disabled the whole team bus when `DRIDOCK_AGENT_NAME`
-  was wrong** (#85) — the hook swallowed `dridock team whoami` stderr and `exit 0`'d
-  on any failure, so a typo in the env var, an unsourced rc file, or a renamed roster
-  entry all produced identical silence: no fetcher spawn, no inbox drain, no Monitor
-  arm, no diagnostic. The `dridock team roster` guard above it swallowed a corrupt or
-  empty `agents.yml` the same way — the more likely failure, since nobody hand-edits
-  the env var as often as YAML. Both hooks now branch on the CLI's own rc: `team
-  roster` returns rc=2 for a missing roster file (silent — user never opted in) and
-  rc=1 for present-but-broken (loud — surface the CLI's stderr, still `exit 0` so the
-  session starts). `team whoami` failure is loud too. The CLI's own error messages
-  are already actionable ("Roster has: Bear, Arfy — pick one, or add …"); the fix is
-  simply not to throw them away. Load-bearing: the `rc=2` for absent vs `rc=1` for
-  malformed is now a pinned contract of `dridock team roster` (`TeamCommand.test.ts`
-  asserts both). Also pins a four-case bash test for the branching.
 
 ## [5.1.1] — 2026-09-02 _(fork)_
 

@@ -452,6 +452,40 @@ describe("HarnessCommand.update-cli", () => {
     expect(stdout.text()).toContain("validated");
   });
 
+  test("#106: '## [Unreleased]' missing but release headings present → heading restored above the first one, entry written, said on stderr", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    // The shape a release cut leaves when it renames the heading instead of
+    // adding one above it -- what 5.13.0 did.
+    fs.seed("/repo/CHANGELOG.md", "# Changelog\n\nPreamble.\n\n## [5.10.1] - 2026-11-09\n\n### Fixed\n- something earlier\n");
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.319"], ctx);
+    expect(rc).toBe(0);
+    const out = await fs.readText("/repo/CHANGELOG.md");
+    expect(stderr.text()).toContain("added it above the first release heading");
+    expect(stderr.text()).not.toContain("skipped the CHANGELOG entry");
+    // Exactly one heading, above the new entry, above the old release; the
+    // preamble and the old release are untouched.
+    expect(out.match(/^## \[Unreleased\]$/gm)).toHaveLength(1);
+    const iUnrel = out.indexOf("## [Unreleased]");
+    const iNew = out.indexOf("## [5.11.0]");
+    const iOld = out.indexOf("## [5.10.1] - 2026-11-09");
+    expect(iUnrel).toBeGreaterThan(out.indexOf("Preamble."));
+    expect(iUnrel).toBeLessThan(iNew);
+    expect(iNew).toBeLessThan(iOld);
+    expect(out).toContain("Claude Code CLI pin raised **");
+    expect(out.endsWith("### Fixed\n- something earlier\n")).toBe(true);
+  });
+
+  test("#106: heading present → no 'added' note (the restore path stays out of the normal case)", async () => {
+    const fs = new InMemoryFileSystem();
+    seedRepo(fs);
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await new HarnessCommand(baseDeps()).run(["update-cli", "2.1.319"], ctx)).toBe(0);
+    expect(stderr.text()).not.toContain("had no '## [Unreleased]' heading");
+    expect((await fs.readText("/repo/CHANGELOG.md")).match(/^## \[Unreleased\]$/gm)).toHaveLength(1);
+  });
+
   // --- F1 (Arfy, #100): the validation read-back must query the SAME
   // daemon + image `make build-minimal` just built, not whatever the
   // operator's ambient docker context happens to be. ---
