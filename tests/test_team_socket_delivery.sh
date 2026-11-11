@@ -200,9 +200,19 @@ test_team_socket_delivery() {
     if env -u CLAUDE_CODE_MESSAGING_TOKEN -u TWH_ANCESTOR_PID PATH="$stub:$PATH" XDG_CONFIG_HOME="$xdg" CLAUDE_CONFIG_DIR="$cfg" CLAUDE_PROJECT_DIR="$proj" \
         CLAUDE_CODE_MESSAGING_SOCKET="$sock" "$fake" -c 'bash "$1" < "$2" >/dev/null 2>&1; test -f "$3"' \
         x "$_TSD_SS" "$stub/payload" "$inbox.wake.json" --settings '{"crossSessionInbound":"accept"}'; then
-        ok "--settings accept on the claude launch line enables socket delivery (no settings files)"
+        _tsd_flag_on=1
     else
-        bad "--settings accept on the claude launch line did NOT enable socket delivery"
+        _tsd_flag_on=0
+    fi
+    # Platform-split BY DESIGN (Arfy, #107 re-review): the flag is a source
+    # only where argv is exact (/proc). Pin both halves — the inverse is what
+    # catches a regression back to reading the flag off `ps`.
+    if [ -d /proc/self ]; then
+        if [ "$_tsd_flag_on" = 1 ]; then ok "--settings accept on the claude launch line enables socket delivery (/proc host)"
+        else bad "--settings accept on the claude launch line did NOT enable socket delivery (/proc host)"; fi
+    else
+        if [ "$_tsd_flag_on" = 0 ]; then ok "--settings accept on the launch line is IGNORED without exact argv (no /proc)"
+        else bad "--settings accept was counted without /proc — the ps-flattened read is back (false-accept class)"; fi
     fi
     # Negative control: same launch, no --settings. Without it the pass above
     # could be the walk finding something else entirely.
