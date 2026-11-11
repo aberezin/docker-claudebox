@@ -57,7 +57,7 @@ fi
 # return "unknown subcommand 'fetcher'". One-line probe.
 if dridock team fetcher status --inbox /dev/null 2>&1 | grep -q "unknown subcommand"; then
     echo "⚠ team-watch: installed dridock binary predates 4.2.0 (missing 'fetcher' verb) — skipping this hook."
-    echo "  Fix: on the host, git pull + ./install.sh; in-container, make build + dridock down + dridock start."
+    echo "  Fix: on the host, git pull + ./install.sh; in-container, ./install.sh on the Mac (it builds the image too) + dridock down + dridock start."
     exit 0
 fi
 

@@ -28,6 +28,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **`dridock harness update-cli` restores a missing `## [Unreleased]` heading**
+  instead of skipping its CHANGELOG entry (#106). When the heading is absent but
+  release headings exist, it inserts one above the first and says so on stderr.
+  `tests/test_version_sync.sh` now fails unless there is exactly one, above every
+  release heading, and the release steps in `docs/versioning.md` say to keep it.
+  The stray second copy (from 5.2.0) is gone; its #85 detail moved into 5.2.0.
+- **`tests/test_hook_version_drift.sh` no longer edits the real `VERSION`** (#108).
+  It now uses a fixture repo and a stub `dridock`, so it no longer leaves the tree
+  dirty (the restore dropped the trailing newline) or depends on the installed
+  binary. Two of its checks could never pass in a container.
+- Hook hints that said `make build` before `dridock down` + `dridock start` now
+  say `./install.sh`, which builds the image too.
+
 ## [5.14.0] - 2026-11-11
 
 ### Added

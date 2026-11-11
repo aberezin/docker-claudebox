@@ -276,7 +276,7 @@ twh_fetcher_can_post() {
     [ -n "$TWH_FETCHER_VER" ] || return 0
     [ "$(printf '%s\n%s\n' "$TWH_SOCKET_MIN_FETCHER" "$TWH_FETCHER_VER" | sort -V | head -1)" = "$TWH_SOCKET_MIN_FETCHER" ] && return 0
     if [ -f /.dockerenv ]; then
-        TWH_FETCHER_TOO_OLD_MSG="the fetcher is running $TWH_FETCHER_VER (from $TWH_FETCHER_VER_SRC); socket delivery needs $TWH_SOCKET_MIN_FETCHER — it comes with the image, so on the Mac: make build, then dridock down + dridock start"
+        TWH_FETCHER_TOO_OLD_MSG="the fetcher is running $TWH_FETCHER_VER (from $TWH_FETCHER_VER_SRC); socket delivery needs $TWH_SOCKET_MIN_FETCHER — it comes with the image, so on the Mac: ./install.sh (it builds the image too), then dridock down + dridock start"
     else
         TWH_FETCHER_TOO_OLD_MSG="the fetcher is running $TWH_FETCHER_VER (from $TWH_FETCHER_VER_SRC); socket delivery needs $TWH_SOCKET_MIN_FETCHER — after ./install.sh it restarts on the next prompt and this turns on by itself"
     fi
