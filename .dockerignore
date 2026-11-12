@@ -12,4 +12,8 @@ docker-compose.dev.yaml
 # bun build --compile leaves 0-byte, mode-000 temp files in dridock-ts/ (one per
 # build). They are unreadable even by their owner, so including them in the build
 # context fails the sender with "failed to xattr ...: permission denied".
-*.bun-build
+# `**/` is required: a .dockerignore pattern without it matches only at the
+# context root, and the strays live in dridock-ts/. The bare `*.bun-build` that
+# was here let one through and broke Alan's ./install.sh on 2026-11-12.
+# tests/test_dockerignore.sh checks this with a real build.
+**/*.bun-build

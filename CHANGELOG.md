@@ -115,6 +115,13 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   formatter (Arfy's #110 nit). It now looks for the prefix as a complete string
   literal in code, which still rejects the description string and the comments.
 
+- **`.dockerignore` excludes `.bun-build` strays in subdirectories** (`**/*.bun-build`).
+  The bare `*.bun-build` only matched at the context root, so a mode-000 stray that
+  `bun build --compile` left in `dridock-ts/` reached the build context and failed
+  `./install.sh` with `failed to xattr … permission denied` (Alan's Mac, 2026-11-12).
+  This is framework-bug report `69adc719-2026-08-17T19-51-08`, open since August.
+  `tests/test_dockerignore.sh` checks it with a real build and skips without docker.
+
 ### Docs
 - The overview of `docs/design/agent-teams-delivery.md` and the summary in
   `agent-coordination-hooks.md` still described the Monitor as the only live layer.
