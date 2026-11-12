@@ -245,3 +245,19 @@ describe("CronModeCommand — guards", () => {
     expect(stderr.text()).toContain("cron mode needs a project context");
   });
 });
+
+describe("CronModeCommand — #110 launch-time drift warning", () => {
+  test("a cron launch warns about the image it runs (fixture cb-infra is 3.3.7)", async () => {
+    const { fs, cmd } = seedProject();
+    const { ctx, stderr } = makeCtx(fs);
+    await cmd.run([], ctx);
+    expect(stderr.text()).toContain("cb-infra image dridock:latest (3.3.7)");
+  });
+
+  test("`stop` does not warn", async () => {
+    const { fs, cmd } = seedProject();
+    const { ctx, stderr } = makeCtx(fs);
+    await cmd.run(["stop"], ctx);
+    expect(stderr.text()).not.toContain("cb-infra image");
+  });
+});

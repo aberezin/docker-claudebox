@@ -564,3 +564,50 @@ describe("StartCommand — migration invalidates existing containers", () => {
     expect(docker.removals.map((r) => r.name)).toEqual([]);
   });
 });
+
+describe("StartCommand — #110 launch-time wiring", () => {
+  function fixture(image: string, variant: "full" | "minimal", keepAwake?: { available(): boolean; hold(pid: number): void }) {
+    const b = seedProjectVmRunning();
+    // Fixture's cb-infra is 3.3.7, far behind any current wrapper.
+    b.docker.seedImage(infraContext(), image, "3.3.7");
+    b.docker.seedImage("colima-cb-abc", image, "3.3.7");
+    const cmd = new StartCommand(image, {
+      colima: b.colima, docker: b.docker, runtime: b.runtime,
+      git: new StubGitToplevel("/p"), hostGit: new StubHostGit(), probe: new StubProcessProbe(),
+      ...(keepAwake ? { keepAwake } : {}),
+    }, variant);
+    return { ...b, cmd };
+  }
+
+  test("drift warning names the image start runs and its make target", async () => {
+    const { fs, cmd } = fixture("dridock:latest-minimal", "minimal");
+    const { ctx, stderr } = makeCtx(fs, { env: { XDG_CONFIG_HOME: "/home/alan/.config" } });
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(stderr.text()).toContain("cb-infra image dridock:latest-minimal (3.3.7)");
+    expect(stderr.text()).toContain("make build-minimal");
+  });
+
+  test("DRIDOCK_NO_DRIFT_WARN=1 → no drift line", async () => {
+    const { fs, cmd } = fixture("dridock:latest", "full");
+    const { ctx, stderr } = makeCtx(fs, { env: { XDG_CONFIG_HOME: "/home/alan/.config", DRIDOCK_NO_DRIFT_WARN: "1" } });
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(stderr.text()).not.toContain("cb-infra image");
+  });
+
+  test("DRIDOCK_CAFFEINATE=1 → holds the dridock process's own pid before attaching", async () => {
+    const holds: number[] = [];
+    const { fs, cmd, runtime } = fixture("dridock:latest", "full", { available: () => true, hold: (p) => { holds.push(p); } });
+    const { ctx } = makeCtx(fs, { env: { XDG_CONFIG_HOME: "/home/alan/.config", DRIDOCK_CAFFEINATE: "1" } });
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(holds).toEqual([process.pid]);
+    expect(runtime.runs.length).toBe(1);
+  });
+
+  test("-p mode is covered too (3.x held for both foreground paths)", async () => {
+    const holds: number[] = [];
+    const { fs, cmd } = fixture("dridock:latest", "full", { available: () => true, hold: (p) => { holds.push(p); } });
+    const { ctx } = makeCtx(fs, { env: { XDG_CONFIG_HOME: "/home/alan/.config", DRIDOCK_CAFFEINATE: "1" } });
+    await cmd.run(["-p", "hi"], ctx);
+    expect(holds).toEqual([process.pid]);
+  });
+});

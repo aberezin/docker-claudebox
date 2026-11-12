@@ -60,12 +60,35 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and points at `make build-all`. It still builds one variant per run.
 - `harness update-cli`'s follow-up step now says `make build-all`. Its own
   validation builds minimal, so `make build` alone left the full image behind.
+- **`DRIDOCK_CAFFEINATE` works again** (#110). The 4.0 port dropped it, so a Mac
+  that was meant to stay awake through a long `dridock start` could sleep and let
+  Colima suspend. It holds `caffeinate -dimsu -w <dridock's pid>` for interactive
+  and `-p` runs, as 3.x did. Where there's no `caffeinate` (the Linux backend), it
+  now says so on stderr instead of in a debug-only line.
+- **`dridock start` warns again when cb-infra's image is out of step with the
+  wrapper** (#110), and `DRIDOCK_NO_DRIFT_WARN=1` silences it again. Since 4.0, drift
+  showed up only if you ran `checkversion`, which is how `latest-minimal` sat ten
+  releases behind (#109). The warning names the image this run actually uses
+  (`latest-minimal` under `DRIDOCK_MINIMAL`) and its `make` target. It also runs
+  for cron-mode launches, never blocks, and is skipped in the harness checkout.
+- The `--remote-control` stale-CLI warning names `make build-minimal` when the
+  minimal image is the one in use, instead of always `make build`.
+- **New test: `tests/test_env_var_readers.sh`** (#110). It fails when a `DRIDOCK_*`
+  setting documented in `docs/environment-variables.md` has nothing that reads it
+  in shipped code. A message string or a test file doesn't count as a reader.
+  Against `c1dac13` it names the three settings above.
 
 ### Docs
 - The overview of `docs/design/agent-teams-delivery.md` and the summary in
   `agent-coordination-hooks.md` still described the Monitor as the only live layer.
   They now show socket delivery (#107) as the primary path, list all four of its
   gates, and mark the pre-#46 rows (including the `→ Recipient:` filter) as superseded.
+- `DRIDOCK_ALLOW_NEW` is no longer documented (#110). Since 4.0, `dridock start`
+  outside a dridock project refuses with exit 1 and no bypass, which is stricter than
+  the documented prompt-or-override. The behaviour was right; the row was wrong.
+- `docs/design/framework-dev-mode.md` described the 3.x `wrapper.sh` fingerprint and
+  the removed `CLAUDEBOX_*` aliases; it now names `dridockVersion.ts` and
+  `DRIDOCK_FRAMEWORK_DEV`.
 
 ## [5.14.0] - 2026-11-11
 

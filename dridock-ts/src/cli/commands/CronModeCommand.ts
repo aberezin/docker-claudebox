@@ -18,6 +18,9 @@ import { containerName } from "../../services/ContainerName.ts";
 import { collectEnvPassthrough, collectMountPassthrough } from "../../services/EnvMountPassthrough.ts";
 import { xdgRoot } from "../../domain/paths.ts";
 import { scanOrphans, formatLaunchWarning } from "../../services/OrphanSessionScanner.ts";
+import { checkInfraDrift } from "../../services/InfraDriftWarning.ts";
+import { DRIDOCK_TS_VERSION } from "../../domain/dridockVersion.ts";
+import type { ImageChoice } from "../../domain/ImageRef.ts";
 
 /**
  * `DRIDOCK_MODE_CRON=1 dridock [stop]` — long-running cron daemon
@@ -44,6 +47,8 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
   constructor(
     private readonly imageName = "dridock:latest",
     private readonly deps: Partial<CronModeDeps> = {},
+    /** How imageName was chosen (ImageRef); picks the drift warning's remedy. */
+    private readonly imageVariant: ImageChoice["variant"] = "full",
   ) {}
 
   async run(args: readonly string[], ctx: Context): Promise<number> {
@@ -112,6 +117,12 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
         return 1;
       case "started": case "already-running": break;
     }
+
+    // #110: same launch-time drift warning as `start` (3.x ran it on both).
+    for (const line of await checkInfraDrift(
+      { docker, fs: ctx.fs, env: ctx.env }, project.root,
+      { wrapperVersion: DRIDOCK_TS_VERSION, image: this.imageName, variant: this.imageVariant, binName: ctx.binName },
+    )) ctx.stderr.write(line);
 
     // "cron already running" idempotent branch — matches wrapper.sh:3086.
     const existing = await runtime.psFilter(ctxDocker, cronName);

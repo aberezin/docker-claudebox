@@ -72,7 +72,7 @@ export function buildRegistry(
   registry.register(new DownCommand());
   registry.register(new DestroyCommand());
   registry.register(new StopCommand());
-  registry.register(new StartCommand(image));
+  registry.register(new StartCommand(image, {}, choice.variant));
   registry.register(new VmCommand());
   registry.register(new IpCommand());
   registry.register(new NetCommand());
@@ -104,5 +104,5 @@ export function buildRegistry(
 /** Cron mode is dispatched by env, not by verb, so it isn't registered; it is
  *  built here so the #109 wiring test covers it like every other image user. */
 export function buildCronModeCommand(choice: ImageChoice = resolveImage(new EnvResolver({}))): CronModeCommand {
-  return new CronModeCommand(choice.image);
+  return new CronModeCommand(choice.image, {}, choice.variant);
 }

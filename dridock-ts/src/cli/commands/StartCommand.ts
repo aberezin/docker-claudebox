@@ -35,6 +35,10 @@ import { Version } from "../../domain/Version.ts";
 import { IMAGE_UNAVAILABLE, IMAGE_UNSTAMPED } from "../../infra/Docker.ts";
 import { scanOrphans, formatLaunchWarning } from "../../services/OrphanSessionScanner.ts";
 import { loadRoster, soleAgentByEnvironment } from "../../services/AgentRoster.ts";
+import { checkInfraDrift } from "../../services/InfraDriftWarning.ts";
+import { maybeCaffeinate, RealKeepAwake, type KeepAwake } from "../../services/Caffeinate.ts";
+import { DRIDOCK_TS_VERSION } from "../../domain/dridockVersion.ts";
+import { makeTargetFor, type ImageChoice } from "../../domain/ImageRef.ts";
 
 /**
  * `dridock start` — the main launch verb. Full port; no bash fallback.
@@ -68,6 +72,8 @@ mode (-p) they are validated against an allowlist first.
   constructor(
     private readonly imageName = "dridock:latest",
     private readonly deps: Partial<StartDeps> = {},
+    /** How imageName was chosen (ImageRef); picks the drift warning's remedy. */
+    private readonly imageVariant: ImageChoice["variant"] = "full",
   ) {}
 
   async run(args: string[], ctx: Context): Promise<number> {
@@ -159,6 +165,14 @@ mode (-p) they are validated against an allowlist first.
         break;
     }
     const vmIp = vmOutcome.kind === "started" || vmOutcome.kind === "already-running" ? vmOutcome.ip : "";
+
+    // #110: warn (never block) when cb-infra's copy of the image this run
+    // uses is out of step with this wrapper. After VM ensure, so a cb-infra
+    // that the ensure just booted is readable rather than silently skipped.
+    for (const line of await checkInfraDrift(
+      { docker, fs: ctx.fs, env: ctx.env }, project.root,
+      { wrapperVersion: DRIDOCK_TS_VERSION, image: this.imageName, variant: this.imageVariant, binName: ctx.binName },
+    )) ctx.stderr.write(line);
 
     // ── Resolve per-project data dir + sidecar writer ─────────────────
     const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
@@ -349,6 +363,10 @@ mode (-p) they are validated against an allowlist first.
     // tmpfs opt-in
     const tmpfsSpec = resolveTmpfs(ctx.env.raw());
 
+    // #110: DRIDOCK_CAFFEINATE holds the Mac awake for as long as this
+    // foreground process lives, which is as long as the session is attached.
+    maybeCaffeinate(ctx.env, this.deps.keepAwake ?? new RealKeepAwake(), process.pid, ctx.stderr);
+
     // ── mode dispatch ─────────────────────────────────────────────────
     if (isProg) return await this.runProgrammatic(validated!, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec, dotMount);
     // (#17) --remote-control against an image whose claude CLI predates
@@ -517,7 +535,7 @@ export async function warnIfRemoteControlBelowFloor(
   stderr.write(`    --remote-control flag (needs >= ${CLAUDE_CLI_REMOTE_CONTROL_FLOOR}). claude IGNORES unknown flags\n`);
   stderr.write(`    silently, so the session will start and Remote Control just won't activate.\n`);
   stderr.write(`    The CLI is baked into the image and can't self-update. Fix:\n`);
-  stderr.write(`      make build     # bump Dockerfile ARG CLAUDE_VERSION first if it's still old\n`);
+  stderr.write(`      ${makeTargetFor(imageName)}     # bump Dockerfile ARG CLAUDE_VERSION first if it's still old\n`);
   stderr.write(`    Continuing anyway — everything except Remote Control works normally.\n`);
 }
 
@@ -529,4 +547,5 @@ export interface StartDeps {
   readonly git: GitToplevel;
   readonly hostGit: HostGit;
   readonly probe: ProcessProbe;
+  readonly keepAwake: KeepAwake;
 }

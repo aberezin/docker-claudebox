@@ -11,14 +11,12 @@ this project's own harness being iterated on from inside a container).
 
 Framework-dev mode is the **runtime mode** the harness enters when the claudebot's
 workspace is a dridock harness fork itself. It is **auto-detected by a workspace
-fingerprint** — the `cb_is_framework_dev` helper in `wrapper.sh` returns true when
-`$CB_PROJECT_ROOT/wrapper.sh` exists and contains a `DRIDOCK_VERSION=` line (the
-legacy `CLAUDEBOX_VERSION=` marker is still recognized on forks that haven't yet
-renamed).
-`DRIDOCK_HARNESS_DEV=1` forces the mode for a renamed/relocated fork
-(see [environment-variables.md](../environment-variables.md); the legacy
-`CLAUDEBOX_HARNESS_DEV` / `CLAUDEBOX_FRAMEWORK_DEV` aliases are still accepted for
-backward compat).
+fingerprint**: a `dridock-ts/src/domain/dridockVersion.ts` file at the project root.
+(Through 3.x the fingerprint was a `wrapper.sh` containing `DRIDOCK_VERSION=`; that
+file was deleted in 4.0.) `DRIDOCK_HARNESS_DEV=1` forces the mode for a
+renamed/relocated fork, with `DRIDOCK_FRAMEWORK_DEV=1` as a legacy alias (see
+[environment-variables.md](../environment-variables.md)). The `CLAUDEBOX_*` names
+stopped working in 5.0.0.
 
 **It is a mode, not a feature.** You don't opt in per project — you're either developing
 the harness or you aren't. Because it's a mode, it deliberately does **not** fit into the
@@ -44,7 +42,7 @@ Inventory of every framework-dev behavior baked in as of 2.21.1, with pointers:
 | Startup surfacing of cross-project `awaiting-framework` consults + unreviewed framework-bug reports | `entrypoint.sh` (framework-dev block after the CLAUDE.md HEREDOC) | 2.16.0 |
 | `cb-consult list --all` (cross-project consult view) | `cb-consult` (opt-in flag on the general helper) | 2.16.0 |
 | `cb-report-bug list / show / done` (management surface for the drop dir) | `cb-report-bug` (subcommands on the general helper) | 2.16.0 |
-| **Skip** the "cb-infra image is behind wrapper" drift warning | `wrapper.sh:cb_check_infra_drift` | 2.19.0 |
+| **Skip** the "cb-infra image is behind wrapper" drift warning | `dridock-ts/src/services/InfraDriftWarning.ts` (was `wrapper.sh:cb_check_infra_drift`; missing from 4.0 to 5.14.0, #110) | 2.19.0 |
 | `dridock harness sync` — rebuild cb-infra from the current wrapper checkout | `wrapper.sh:cb_harness_sync` + dispatch under `harness)` | 2.20.0 |
 | `dridock harness sync --repair` — auto-recover from BuildKit snapshotter corruption | `wrapper.sh:cb_harness_sync` (flag) | 2.21.0 |
 | `dridock harness update-cli <version\|latest\|stable>` — raise the baked Claude CLI pin + VERSION + dridockVersion.ts in lockstep, validated by building and reading the version back out of the image | `dridock-ts/src/cli/commands/HarnessCommand.ts` | 5.11.0 (#100) |
@@ -111,12 +109,12 @@ naming). Established 2.22.0. Current inventory:
 
 | Env var | Effect | Default |
 |---|---|---|
-| `DRIDOCK_HARNESS_DEV=1` | Force framework-dev mode (bypasses the fingerprint check). Used for a renamed/relocated fork whose `wrapper.sh` no longer contains `DRIDOCK_VERSION=`. | auto-detected via fingerprint |
+| `DRIDOCK_HARNESS_DEV=1` | Force framework-dev mode (bypasses the fingerprint check). Used for a renamed/relocated fork without `dridock-ts/src/domain/dridockVersion.ts` at its root. | auto-detected via fingerprint |
 | `DRIDOCK_HARNESS_WATCH_INTERVAL=<secs>` | Poll interval for `cb-harness-watch-consults`. | 20 |
 
-**Backward compat**: the legacy 2.x names `CLAUDEBOX_HARNESS_DEV=1` and (older still)
-`CLAUDEBOX_FRAMEWORK_DEV=1` are honored as aliases for `DRIDOCK_HARNESS_DEV=1`. Follows
-the same legacy-alias pattern already in the wrapper.
+**Backward compat**: `DRIDOCK_FRAMEWORK_DEV=1` is honored as an alias for
+`DRIDOCK_HARNESS_DEV=1`, which wins when both are set. The 2.x `CLAUDEBOX_HARNESS_DEV` /
+`CLAUDEBOX_FRAMEWORK_DEV` names were removed in 5.0.0 with the rest of that prefix.
 
 **Not framework-dev knobs** (documented elsewhere), even though they interact:
 `DRIDOCK_NO_DRIFT_WARN=1` silences a warning that's already auto-skipped in
