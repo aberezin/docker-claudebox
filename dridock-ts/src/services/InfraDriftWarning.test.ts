@@ -37,6 +37,12 @@ describe("driftWarningLines (#110)", () => {
     expect(l[0]).not.toContain("make build");
   });
 
+  test("a label that parses equal but isn't byte-equal is no drift", () => {
+    for (const iv of ["v5.14.0", "5.14", "5.14.0-rc1", "5.14.0.1"]) {
+      expect(driftWarningLines({ ...base, infraVersion: iv })).toEqual([]);
+    }
+  });
+
   test("image ahead of wrapper → points at install.sh", () => {
     const l = driftWarningLines({ ...base, infraVersion: "5.15.0" });
     expect(l[0]).toContain("AHEAD");

@@ -10,7 +10,8 @@
 #
 # What counts as a reader is a READ, not a mention:
 #   - TS (dridock-ts/src, *.test.* excluded): env.get("X") / .bool("X") /
-#     .require("X") (EnvResolver adds the DRIDOCK_ prefix), or
+#     .require("X") (EnvResolver adds the DRIDOCK_ prefix; if EnvResolver
+#     grows another accessor, add it here or its settings go red), or
 #     ["DRIDOCK_X"] / .DRIDOCK_X on an env record. A message string such as
 #     "set DRIDOCK_X=1 to silence this" is not a reader. That's how a dead
 #     setting would stay green.
@@ -20,6 +21,13 @@
 #   - Python daemons at the repo root: "DRIDOCK_X" as a string key.
 # Test files never count; #109's three settings had test references and no
 # runtime reader.
+#
+# The DRIDOCK_ENV_* / DRIDOCK_MOUNT_* families are read by prefix, so their
+# documented instances are skipped and the prefix READ is checked instead:
+# a `*_PREFIXES = [...]` initializer or a startsWith(), comments stripped.
+#
+# Not covered: the --help USEFUL ENV list staying in sync with the doc. That's
+# a separate pairing, and this test doesn't check it.
 #
 # Known limit: a reader anywhere counts. A setting documented as a run-time
 # setting but read only by install.sh passes, which is why DRIDOCK_IMAGE_NAME
@@ -78,15 +86,19 @@ else
     bad "$dead of $total documented settings have no reader in shipped code"
 fi
 
-# The two prefix families: the readers that cover their $family instances.
-local p
+# The two prefix families. A READ only: a description string or comment that
+# names the prefix doesn't count (Arfy's #110 mutation: ENV_PREFIXES changed
+# to ["NOPE_"] stayed green on a description string and two comments).
+local p ts_code
+ts_code="$(cat "${TS_FILES[@]}" | grep -vE '^[[:space:]]*(//|\*|/\*)')"
 for p in DRIDOCK_ENV_ DRIDOCK_MOUNT_; do
-    if grep -qE "[\"'\`]${p}[\"'\`]?" "${TS_FILES[@]}"; then
-        ok "prefix family ${p}* has a reader"
+    if grep -qE "(_PREFIXES[[:space:]]*=[[:space:]]*\[[^]]*|startsWith\()[\"'\`]${p}[\"'\`]" <<<"$ts_code"; then
+        ok "prefix family ${p}* has a reader (covers the documented instances)"
     else
         bad "prefix family ${p}* has no reader in dridock-ts/src"
     fi
 done
+echo "    ($family documented DRIDOCK_ENV_*/DRIDOCK_MOUNT_* names rely on those two prefix readers)"
 
 echo "  env-var readers: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

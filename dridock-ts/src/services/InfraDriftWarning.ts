@@ -53,7 +53,11 @@ export function driftWarningLines(input: DriftWarningInput): string[] {
   const w = Version.parseLoose(wv);
   const i = Version.parseLoose(iv);
   const tag = input.image;
-  if (w.compareTo(i) === "lt") {
+  const cmp = w.compareTo(i);
+  // Loose-equal (`v5.14.0`, `5.14`) is no drift: same rule as checkversion's
+  // classify(), so the two never disagree about one label (Arfy, #110 review).
+  if (cmp === "eq") return [];
+  if (cmp === "lt") {
     return [
       `⚠️  cb-infra image ${tag} (${iv}) is AHEAD of this wrapper (${wv}): update the wrapper with ./install.sh\n`,
       `   (${input.binName} checkversion for details; DRIDOCK_NO_DRIFT_WARN=1 silences this)\n`,

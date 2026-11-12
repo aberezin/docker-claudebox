@@ -131,3 +131,11 @@ describe("CheckVersionService — wires classify() to Docker", () => {
     expect(r.outcome).toEqual({ kind: "no-comparable", reason: "vms-down" });
   });
 });
+
+describe("classify — loose-equal labels (#110 review)", () => {
+  test("a label that parses equal to the wrapper is in sync, not image-newer", () => {
+    for (const label of ["v5.14.0", "5.14", "5.14.0-rc1"]) {
+      expect(classify({ wrapperVersion: "5.14.0", infraImageVersion: label }).kind).toBe("in-sync");
+    }
+  });
+});

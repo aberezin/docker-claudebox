@@ -71,6 +71,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   releases behind (#109). The warning names the image this run actually uses
   (`latest-minimal` under `DRIDOCK_MINIMAL`) and its `make` target. It also runs
   for cron-mode launches, never blocks, and is skipped in the harness checkout.
+- **`checkversion` reports a label that parses equal to the wrapper's version as
+  in sync** (#110). `v5.14.0`, `5.14` or `5.14.0-rc1` against wrapper `5.14.0` used
+  to come out as drift with "image newer". The launch warning uses the same rule,
+  so the two can't disagree about one image. Not reachable from an `install.sh` or
+  `make` build, only from images stamped by something else (`DRIDOCK_IMAGE`).
 - The `--remote-control` stale-CLI warning names `make build-minimal` when the
   minimal image is the one in use, instead of always `make build`.
 - **New test: `tests/test_env_var_readers.sh`** (#110). It fails when a `DRIDOCK_*`
@@ -85,7 +90,9 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   gates, and mark the pre-#46 rows (including the `→ Recipient:` filter) as superseded.
 - `DRIDOCK_ALLOW_NEW` is no longer documented (#110). Since 4.0, `dridock start`
   outside a dridock project refuses with exit 1 and no bypass, which is stricter than
-  the documented prompt-or-override. The behaviour was right; the row was wrong.
+  the documented prompt-or-override. The behaviour was right; the row was wrong. That
+  row was also the only description of the refusal, so `docs/design/bootstrap.md`
+  now has a "Running dridock outside a project" section.
 - `docs/design/framework-dev-mode.md` described the 3.x `wrapper.sh` fingerprint and
   the removed `CLAUDEBOX_*` aliases; it now names `dridockVersion.ts` and
   `DRIDOCK_FRAMEWORK_DEV`.

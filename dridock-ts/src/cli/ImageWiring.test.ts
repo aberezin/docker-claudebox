@@ -43,6 +43,20 @@ describe("the resolved image reaches every image-using command", () => {
     expect(imageOf(buildCronModeCommand(choice))).toBe(choice.image);
   });
 
+  // #110: start and cron also take the variant, which picks the drift
+  // warning's remedy. Nothing in the types ties it to imageName, so check
+  // the pair agrees wherever a command holds both.
+  test("a command holding imageVariant holds the variant of its image", () => {
+    const variantOf = (c: object): unknown => (c as { imageVariant?: unknown }).imageVariant;
+    const cmds: object[] = [...buildRegistry(choice).all(), buildCronModeCommand(choice)];
+    const holders = cmds.filter((c) => variantOf(c) !== undefined);
+    expect(holders.length).toBeGreaterThanOrEqual(2);   // start + cron at #110
+    for (const c of holders) {
+      expect(imageOf(c)).toBe(choice.image);
+      expect(variantOf(c)).toBe(choice.variant);
+    }
+  });
+
   test("with no settings the default is still dridock:latest", () => {
     const holders = buildRegistry().all().filter((c) => imageOf(c) !== undefined);
     expect(holders.every((c) => imageOf(c) === "dridock:latest")).toBe(true);

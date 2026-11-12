@@ -34,6 +34,20 @@ brief:
 These live in the baked `CLAUDE.md` template + the design docs. claudebot already
 knows them. The brief carries only what is **unique to this project**.
 
+## Running dridock outside a project
+
+`dridock start` (and every other project verb) only runs in a directory that has a
+`.dridock/config.yml`, found from the current directory or the git toplevel. Anywhere
+else it refuses with exit 1:
+
+```
+no dridock project here — run 'dridock bootstrap' to scaffold .dridock/config.yml first.
+```
+
+There's no override: creating a project, and the Colima VM that comes with it, is
+`bootstrap`'s job. (3.x prompted instead and had a `DRIDOCK_ALLOW_NEW=1` bypass; 4.0
+dropped both, and #110 removed the leftover doc row.)
+
 ## The mechanism
 
 ### 0. Preflight — assert the ground before building on it

@@ -87,6 +87,11 @@ export function classify(inputs: CheckVersionInputs): CheckVersionOutcome {
   // Drift.
   const w = Version.parseLoose(wv);
   const i = Version.parseLoose(cmp);
+  // A label that parses equal but isn't byte-equal (`v5.14.0`, `5.14`,
+  // `5.14.0-rc1`) is in sync. Before #110 it fell through and was reported
+  // as "image-newer" with severity "same", while the launch warning read
+  // the same label as behind. Both now use this rule (driftWarningLines).
+  if (w.compareTo(i) === "eq") return { kind: "in-sync", version: wv };
   const severity = w.skewSeverity(i);
   const direction = w.compareTo(i) === "gt" ? "wrapper-newer" : "image-newer";
   return { kind: "drift", wrapperVersion: wv, imageVersion: cmp, severity, direction };
