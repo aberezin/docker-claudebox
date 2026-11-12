@@ -103,6 +103,16 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   each build discarded the stage the next one needed. It now runs with
   `--filter until=168h` (`make CACHE_KEEP=…` to change it).
 
+- **`checkversion` no longer puts ✓ on an out-of-date image that's in use** (#112).
+  The variants list derived each row's mark from its problem list, and the in-use
+  tag's harness drift was left off that list because the drift section reports it.
+  So the image ten releases behind got ✓ while the one a minor behind got ⚠️. The
+  in-use tag is now flagged too, with a line pointing at the drift section, and
+  the version comparison is the loose one `classify()` uses (#110).
+- `tests/test_env_var_readers.sh` accepts a prefix reader split across lines by a
+  formatter (Arfy's #110 nit). It now looks for the prefix as a complete string
+  literal in code, which still rejects the description string and the comments.
+
 ### Docs
 - The overview of `docs/design/agent-teams-delivery.md` and the summary in
   `agent-coordination-hooks.md` still described the Monitor as the only live layer.

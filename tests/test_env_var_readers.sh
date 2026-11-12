@@ -24,7 +24,7 @@
 #
 # The DRIDOCK_ENV_* / DRIDOCK_MOUNT_* families are read by prefix, so their
 # documented instances are skipped and the prefix READ is checked instead:
-# a `*_PREFIXES = [...]` initializer or a startsWith(), comments stripped.
+# the prefix as a complete string literal in code, comments stripped.
 #
 # Not covered: the --help USEFUL ENV list staying in sync with the doc. That's
 # a separate pairing, and this test doesn't check it.
@@ -92,7 +92,12 @@ fi
 local p ts_code
 ts_code="$(cat "${TS_FILES[@]}" | grep -vE '^[[:space:]]*(//|\*|/\*)')"
 for p in DRIDOCK_ENV_ DRIDOCK_MOUNT_; do
-    if grep -qE "(_PREFIXES[[:space:]]*=[[:space:]]*\[[^]]*|startsWith\()[\"'\`]${p}[\"'\`]" <<<"$ts_code"; then
+    # The prefix as a whole string literal: a quote right after it. That's
+    # the shape of both real readers (`["DRIDOCK_ENV_"]`, startsWith), works
+    # across line breaks (a formatter splitting the array), and rejects the
+    # decoys: `"DRIDOCK_ENV_* forwards…"` has `*` after the prefix, and
+    # comments are already stripped (Arfy, #110 re-review).
+    if grep -qE "[\"'\`]${p}[\"'\`]" <<<"$ts_code"; then
         ok "prefix family ${p}* has a reader (covers the documented instances)"
     else
         bad "prefix family ${p}* has no reader in dridock-ts/src"

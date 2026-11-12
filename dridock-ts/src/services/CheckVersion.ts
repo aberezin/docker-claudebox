@@ -167,9 +167,19 @@ export function assessVariants(input: VariantAssessmentInput): VariantReport[] {
     if (!r.present) return { ...r, problems };
     if (r.version === undefined) {
       problems.push(`no ${LABEL_VERSION} label: the image predates versioning`);
-    } else if (!r.inUse && r.version !== input.wrapperVersion) {
-      // The tag in use is already compared by classify(); don't say it twice.
-      problems.push(`harness ${r.version}, but the wrapper is ${input.wrapperVersion}`);
+    } else if (Version.parseLoose(r.version).compareTo(Version.parseLoose(input.wrapperVersion)) !== "eq") {
+      // Loose equality, the same rule classify() and the launch warning use
+      // (#110), so `v5.14.0` isn't stale here and in sync there.
+      //
+      // The tag in use IS flagged (#112). Before, its harness drift was left
+      // out because classify() reports it in the drift section, and the row
+      // marker was derived from this list, so a drifting in-use image got a
+      // ✓ four lines above its own 🔴 MAJOR drift. The problems list answers
+      // "is this image current?", so it has to carry it; for the in-use tag
+      // the line points at the drift section instead of repeating it.
+      problems.push(r.inUse
+        ? `harness ${r.version}, but the wrapper is ${input.wrapperVersion} (see the version drift below)`
+        : `harness ${r.version}, but the wrapper is ${input.wrapperVersion}`);
     }
     if (r.claude === undefined) {
       // LOAD-BEARING: this must be a PROBLEM, not "unknown". The real stale

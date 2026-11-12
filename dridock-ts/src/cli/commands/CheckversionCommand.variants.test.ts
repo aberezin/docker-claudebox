@@ -68,6 +68,34 @@ describe("checkversion — every variant tag in cb-infra (#109)", () => {
     expect(out).not.toContain("is stale");
   });
 
+  // #112. Run under DRIDOCK_MINIMAL so the in-use row is latest-minimal: the
+  // rule must follow ImageRef's choice, not hardcode `latest`.
+  test("#112: the in-use tag drifting gets ⚠️, not ✓, and the stale-in-use wording", async () => {
+    const docker = arfyHost();
+    docker.seedImage(INFRA, MIN, "4.0.0");
+    docker.seedImageIdentity(INFRA, MIN, { id: "sha256:m0", labels: { "org.dridock.version": "4.0.0", "org.dridock.claude-version": PIN } });
+    const { out } = await run(docker, harnessCheckout(), { DRIDOCK_MINIMAL: "1" });
+    const row = out.split("\n").find((l) => l.includes(MIN) && l.includes("← in use")) ?? "";
+    expect(row).toContain("4.0.0");
+    expect(row).not.toContain("✓");
+    expect(row).toContain("⚠️");
+    expect(out).toContain(`${MIN} is stale (and it is the image dridock runs)`);
+    expect(out).toContain(`harness 4.0.0, but the wrapper is ${DRIDOCK_TS_VERSION} (see the version drift below)`);
+    expect(out).toContain("version drift: wrapper");
+    // the other tag is current: still ✓
+    const other = out.split("\n").find((l) => l.includes(`${FULL} `) && !l.includes("← in use")) ?? "";
+    expect(other).toContain("✓");
+  });
+
+  test("#112 mirror (the #109 case): in-use current, other stale → in-use ✓, other ⚠️", async () => {
+    const { out } = await run(arfyHost(), harnessCheckout());
+    const inUse = out.split("\n").find((l) => l.includes("← in use")) ?? "";
+    expect(inUse).toContain(FULL);
+    expect(inUse).toContain("✓");
+    const other = out.split("\n").find((l) => l.includes(MIN) && l.includes("4.3.4")) ?? "";
+    expect(other).toContain("⚠️");
+  });
+
   test("minimal never built → 'not built', no warning", async () => {
     const docker = new InMemoryDocker();
     docker.seedImage(INFRA, FULL, DRIDOCK_TS_VERSION);
@@ -157,12 +185,22 @@ describe("assessVariants — pure", () => {
     });
     expect(min!.problems).toEqual([`bakes claude 2.1.215, but ${FULL} bakes 2.1.319`]);
   });
-  test("the tag in use isn't re-flagged for harness drift (classify already says it)", () => {
+  test("#112: a drifting tag in use IS flagged, pointing at the drift section", () => {
     const [full] = assessVariants({
       wrapperVersion: "5.14.0", inUse: FULL, pin: "2.1.319",
       variants: [{ tag: FULL, labels: { "org.dridock.version": "5.13.0", "org.dridock.claude-version": "2.1.319" } }],
     });
-    expect(full!.problems).toEqual([]);
+    expect(full!.problems).toEqual(["harness 5.13.0, but the wrapper is 5.14.0 (see the version drift below)"]);
+  });
+  test("a label that parses equal to the wrapper is current, in use or not (#110 rule)", () => {
+    const reports = assessVariants({
+      wrapperVersion: "5.14.0", inUse: FULL, pin: "2.1.319",
+      variants: [
+        { tag: FULL, labels: { "org.dridock.version": "v5.14.0", "org.dridock.claude-version": "2.1.319" } },
+        { tag: MIN, labels: { "org.dridock.version": "5.14", "org.dridock.claude-version": "2.1.319" } },
+      ],
+    });
+    expect(reports.map((r) => r.problems)).toEqual([[], []]);
   });
   test("legacy org.claudebox.version is read; '<no value>' counts as absent", () => {
     const [v] = assessVariants({
