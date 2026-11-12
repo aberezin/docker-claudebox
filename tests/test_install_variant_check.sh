@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# #109 — install.sh builds ONE image variant per run. When the OTHER variant tag
-# is present and stale, it must say so (stderr); when it is absent or current
-# it must stay silent. Runs the real function, extracted from install.sh
+# #109 — when install.sh leaves a variant unbuilt and that tag is present and
+# stale, it must say so (stderr); when it is absent or current it must stay
+# silent. Since #111 install.sh builds both, so this runs only under
+# DRIDOCK_SKIP_MINIMAL=1 (tests/test_install_build_variants.sh covers the
+# both-builds path). Runs the real function, extracted from install.sh
 # between its markers, against a stub `docker` whose labels the test sets.
 # No docker required.
 
@@ -47,7 +49,7 @@ _ivm() {
 local out
 out="$(_ivm '4.3.4|<no value>')"
 case "$out" in
-    *"dridock:latest-minimal in the same store is stale"*"harness 4.3.4, not 5.14.0"*"no claude-version label (built before #78)"*"make build-all"*)
+    *"dridock:latest-minimal in the same store is stale"*"harness 4.3.4, not 5.14.0"*"no claude-version label (built before #78)"*"make build-minimal"*"without DRIDOCK_SKIP_MINIMAL"*)
         ok "the ticket's host: stale minimal with no claude label is named, with both reasons" ;;
     *) bad "stale minimal not reported as expected; got: $out" ;;
 esac
@@ -55,6 +57,7 @@ case "$out" in *"when DRIDOCK_MINIMAL is set"*) ok "says when dridock would run 
 
 out="$(_iv '5.14.0|2.1.300')"
 case "$out" in *"claude 2.1.300, not 2.1.319"*) ok "a claude-only lag is reported" ;; *) bad "claude lag missed; got: $out" ;; esac
+case "$out" in *"Rebuild it with: make build"|*"Rebuild it with: make build"$'\n') ok "a stale full tag names make build" ;; *) bad "wrong remedy for a stale full tag; got: $out" ;; esac
 
 out="$(_iv '5.14.0|2.1.319')"
 if [ -z "$out" ]; then ok "silent when the other variant is current"; else bad "spoke about a current variant: $out"; fi

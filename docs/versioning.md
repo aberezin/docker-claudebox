@@ -76,9 +76,8 @@ one but not the other — you get subtle, confusing breakage. The version makes 
    upstream tag pointing at the wrong commit. Verify with `git rev-list -n1 vX.Y.Z`,
    and use `git tag -f -a vX.Y.Z HEAD` (then `git push --force <remote> vX.Y.Z`) if it
    resolved to an upstream commit. The remote fork only carries the tags we push.
-4. `make build` to stamp the image; reinstall the wrapper (`./install.sh`, or
-   `install -m 755 wrapper.sh ~/.local/bin/dridock`). `dridock checkversion`
-   should then read **in sync**.
+4. `./install.sh` to stamp both images (full and minimal, #111) and reinstall the
+   binary. `dridock checkversion` should then read **in sync** for both variants.
 
 ## Branch naming — `<issue#>-<slug>`
 

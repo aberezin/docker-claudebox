@@ -147,13 +147,6 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-/dev/null}")" 2>/dev/null && pwd)"
 
 IMAGE_NAME="${DRIDOCK_IMAGE_NAME:-dridock}"
-CLAUDE_TAG="latest"
-BUILD_TARGET="full"
-_minimal="${DRIDOCK_MINIMAL:-}"
-if [ -n "$_minimal" ]; then
-	CLAUDE_TAG="latest-minimal"
-	BUILD_TARGET="minimal"
-fi
 
 if [ ! -f "$SCRIPT_DIR/Dockerfile" ]; then
 	echo "❌ Dockerfile not found in $SCRIPT_DIR."
@@ -206,7 +199,6 @@ fi
 
 # stamp the fork semver into the image (LABEL + ENV); `dridock checkversion` reads it
 DRIDOCK_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 0.0.0)"
-echo "🔨 Building local Claude Code image into $CB_INFRA_PROFILE ($IMAGE_NAME:$CLAUDE_TAG v$DRIDOCK_VERSION, target: $BUILD_TARGET)..."
 # Only pass --build-arg CLAUDE_VERSION when explicitly overridden, so the
 # Dockerfile's ARG default stays the single source of truth otherwise (#73).
 _build_args=(--build-arg "DRIDOCK_VERSION=$DRIDOCK_VERSION")
@@ -216,21 +208,16 @@ if [ -n "$CLAUDE_VERSION_OVERRIDE" ]; then
 	echo "   ⚠️  re-check the entrypoint's --remote-control capability probe — a too-old CLI"
 	echo "      silently ignores unknown flags (#17)."
 fi
-if ! docker --context "$CB_INFRA_CTX" build "${_build_args[@]}" --target "$BUILD_TARGET" -t "$IMAGE_NAME:$CLAUDE_TAG" "$SCRIPT_DIR"; then
-	echo "❌ Image build failed."
-	exit 1
-fi
 
 # >>> install_report_other_variant (#109) -- tests/test_install_variant_check.sh runs this block
-# This script builds ONE variant per run (full, or minimal with DRIDOCK_MINIMAL).
-# The other tag, if present, is left as it was, and nothing used to say so: a
-# host was found with dridock:latest-minimal ten releases behind a fresh full
-# image. Say so here, where the build already happened, rather than building
-# both (8.5GB + 2.2GB per macOS account, #88). Silent when the other tag is
-# absent or current. Never fails the install.
+# Since #111 this script builds BOTH variants, so this runs only when
+# DRIDOCK_SKIP_MINIMAL=1 left latest-minimal unbuilt: a tag from an earlier
+# run may still be there and stale, and nothing else would say so (#109: a
+# host had dridock:latest-minimal ten releases behind a fresh full image).
+# Silent when the other tag is absent or current. Never fails the install.
 #   install_report_other_variant <ctx> <built-tag> <other-tag> <want-version> <want-claude>
 install_report_other_variant() {
-	local ctx="$1" built="$2" other="$3" want_v="$4" want_c="$5" labels v c why="" runs
+	local ctx="$1" built="$2" other="$3" want_v="$4" want_c="$5" labels v c why="" runs fix
 	labels="$(docker --context "$ctx" image inspect "$other" \
 		--format '{{ index .Config.Labels "org.dridock.version" }}|{{ index .Config.Labels "org.dridock.claude-version" }}' 2>/dev/null)" || return 0
 	v="${labels%%|*}"; c="${labels#*|}"
@@ -244,19 +231,111 @@ install_report_other_variant() {
 	fi
 	[ -z "$why" ] && return 0
 	case "$other" in
-		*:latest-minimal) runs="dridock runs it when DRIDOCK_MINIMAL is set" ;;
-		*)                runs="dridock runs it when DRIDOCK_MINIMAL is unset" ;;
+		*:latest-minimal) runs="dridock runs it when DRIDOCK_MINIMAL is set"; fix="make build-minimal (or re-run ./install.sh without DRIDOCK_SKIP_MINIMAL)" ;;
+		*)                runs="dridock runs it when DRIDOCK_MINIMAL is unset"; fix="make build" ;;
 	esac
 	echo "⚠️  Built $built. $other in the same store is stale: $why." >&2
-	echo "    $runs. To rebuild both variants: make build-all" >&2
+	echo "    $runs. Rebuild it with: $fix" >&2
 }
 # <<< install_report_other_variant
-case "$CLAUDE_TAG" in
-	latest-minimal) _other_tag="latest" ;;
-	*)              _other_tag="latest-minimal" ;;
-esac
-_want_claude="${CLAUDE_VERSION_OVERRIDE:-$(sed -n 's/^ARG CLAUDE_VERSION=\([^ ]*\).*/\1/p' "$SCRIPT_DIR/Dockerfile" 2>/dev/null | head -1)}"
-install_report_other_variant "$CB_INFRA_CTX" "$IMAGE_NAME:$CLAUDE_TAG" "$IMAGE_NAME:$_other_tag" "$DRIDOCK_VERSION" "$_want_claude"
+
+# >>> install_build_variants (#111) -- tests/test_install_build_variants.sh runs this block
+# install.sh builds BOTH image variants (#111). Through 5.14.0 it built one,
+# chosen by DRIDOCK_MINIMAL, and the other rotted: minimal sat ten releases
+# behind (#109). DRIDOCK_MINIMAL now only says which image dridock RUNS, and
+# that one is built first, as the primary. DRIDOCK_SKIP_MINIMAL=1 opts out of
+# the minimal build.
+#
+# Both targets are `FROM base`, and nothing is pruned between the two builds
+# (one prune runs after both, as in `make build-all`), so the second build
+# reuses the base stage and costs only its own layers.
+#
+# A failed primary build fails the install. A failed secondary build doesn't
+# stop the binary install, because the image dridock runs is fine, but it is
+# reported now and again at the end, and the install exits non-zero.
+
+# install_variant_plan <DRIDOCK_MINIMAL> <DRIDOCK_SKIP_MINIMAL>
+#   Sets INSTALL_PRIMARY / INSTALL_SECONDARY to "target:tag-suffix"
+#   (INSTALL_SECONDARY empty when skipped). rc 1 on a contradiction.
+install_variant_plan() {
+	local minimal="$1" skip_raw="$2" skip=""
+	case "$(printf '%s' "$skip_raw" | tr '[:upper:]' '[:lower:]')" in
+		1|true|yes|on) skip=1 ;;
+		""|0|false|no|off) ;;
+		*) echo "⚠️  DRIDOCK_SKIP_MINIMAL=\"$skip_raw\" isn't a recognised value (1/true/yes/on to skip): building the minimal image anyway." >&2 ;;
+	esac
+	# Same rule as dridock's ImageRef: any non-empty value selects minimal.
+	if [ -n "$minimal" ]; then
+		if [ -n "$skip" ]; then
+			echo "❌ DRIDOCK_SKIP_MINIMAL is set, but DRIDOCK_MINIMAL=\"$minimal\" says dridock runs the minimal image." >&2
+			echo "   Unset one of them: skipping the image dridock runs would leave nothing to run." >&2
+			return 1
+		fi
+		INSTALL_PRIMARY="minimal:latest-minimal"; INSTALL_SECONDARY="full:latest"
+	else
+		INSTALL_PRIMARY="full:latest"
+		if [ -n "$skip" ]; then INSTALL_SECONDARY=""; else INSTALL_SECONDARY="minimal:latest-minimal"; fi
+	fi
+	return 0
+}
+
+# install_build_variants <ctx> <image-name> <context-dir> [build args...]
+#   Builds the plan from install_variant_plan. rc 1 when the primary build
+#   fails. Sets INSTALL_SECONDARY_FAILED to the tag that didn't build, or "".
+install_build_variants() {
+	local ctx="$1" name="$2" dir="$3"; shift 3
+	local target tag spec rc
+	INSTALL_SECONDARY_FAILED=""
+	for spec in "$INSTALL_PRIMARY" "$INSTALL_SECONDARY"; do
+		[ -z "$spec" ] && continue
+		target="${spec%%:*}"; tag="$name:${spec#*:}"
+		echo "🔨 Building $tag (target: $target) into ${ctx#colima-}..."
+		rc=0
+		docker --context "$ctx" build "$@" --target "$target" -t "$tag" "$dir" || rc=$?
+		[ "$rc" -eq 0 ] && continue
+		if [ "$spec" = "$INSTALL_PRIMARY" ]; then
+			echo "❌ Image build failed for $tag (rc=$rc). It's the image dridock runs, so the install stops here." >&2
+			return 1
+		fi
+		INSTALL_SECONDARY_FAILED="$tag"
+		echo "❌ The second image, $tag, failed to build (rc=$rc; the build output above has the error)." >&2
+		echo "   Continuing: $name:${INSTALL_PRIMARY#*:}, the image dridock runs, built fine. Retry with: $(install_make_target "$tag")" >&2
+	done
+	return 0
+}
+
+install_make_target() {
+	case "$1" in *:latest-minimal) echo "make build-minimal" ;; *) echo "make build" ;; esac
+}
+
+# install_finish <secondary-failed-tag>: the end-of-install verdict. rc 1 if a
+# build failed, so a scripted install can't mistake a partial one for done.
+install_finish() {
+	if [ -n "$1" ]; then
+		echo "⚠️  dridock is installed, but $1 did not build, so this install is INCOMPLETE." >&2
+		echo "   Retry it with: $(install_make_target "$1")" >&2
+		return 1
+	fi
+	return 0
+}
+# <<< install_build_variants
+
+install_variant_plan "${DRIDOCK_MINIMAL:-}" "${DRIDOCK_SKIP_MINIMAL:-}" || exit 1
+echo "🔨 Building the local Claude Code images into $CB_INFRA_PROFILE (v$DRIDOCK_VERSION): $IMAGE_NAME:${INSTALL_PRIMARY#*:}${INSTALL_SECONDARY:+ and $IMAGE_NAME:${INSTALL_SECONDARY#*:}}"
+install_build_variants "$CB_INFRA_CTX" "$IMAGE_NAME" "$SCRIPT_DIR" "${_build_args[@]}" || exit 1
+# Prune once, after both builds, as `make build-all` does: each rebuild leaves the
+# previous tag as a dangling image (8.5GB for full), and with two builds per run
+# cb-infra's 40GB disk fills twice as fast. Dangling images and unreferenced
+# BuildKit cache only. Never fails the install.
+echo "🧹 Pruning dangling images and unused build cache in $CB_INFRA_PROFILE..."
+if ! { docker --context "$CB_INFRA_CTX" image prune -f >/dev/null && docker --context "$CB_INFRA_CTX" builder prune -f >/dev/null; }; then
+	echo "⚠️  prune in $CB_INFRA_PROFILE failed (the images are built). Reclaim space later with: docker --context $CB_INFRA_CTX image prune -f" >&2
+fi
+if [ -z "$INSTALL_SECONDARY" ]; then
+	echo "   (DRIDOCK_SKIP_MINIMAL: not building $IMAGE_NAME:latest-minimal)"
+	_want_claude="${CLAUDE_VERSION_OVERRIDE:-$(sed -n 's/^ARG CLAUDE_VERSION=\([^ ]*\).*/\1/p' "$SCRIPT_DIR/Dockerfile" 2>/dev/null | head -1)}"
+	install_report_other_variant "$CB_INFRA_CTX" "$IMAGE_NAME:latest" "$IMAGE_NAME:latest-minimal" "$DRIDOCK_VERSION" "$_want_claude"
+fi
 
 # Compile the dridock TypeScript wrapper (a single ~95MB standalone binary via
 # `bun build --compile`) and install it as `$BIN_NAME`. Since 4.0.0 this IS the
@@ -397,6 +476,7 @@ if mkdir -p "$COMPLETION_DIR" 2>/dev/null; then
 	fi
 fi
 
+install_finish "$INSTALL_SECONDARY_FAILED" || exit 1
 echo "✅ dridock (Claude Code) setup complete! You can now use '$BIN_NAME' command from any directory."
 
 # Nudge if the install dir isn't on PATH (common for ~/.local/bin on macOS)

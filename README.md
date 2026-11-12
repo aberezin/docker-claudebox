@@ -81,11 +81,14 @@ Clone the repo and run the installer from the checkout. It builds the image loca
 ```bash
 git clone <your-fork-url> dridock && cd dridock
 
-# full image (recommended — all dev tools pre-installed)
+# builds BOTH images (full and minimal) and installs the binary; dridock runs the full one
 ./install.sh
 
-# minimal image (just the essentials — Claude installs what it needs on the fly)
-export DRIDOCK_MINIMAL=1 && ./install.sh
+# run the minimal image instead (set it wherever you run dridock, e.g. your shell rc)
+export DRIDOCK_MINIMAL=1
+
+# skip building the minimal image (saves its build time and ~0.5 GB in cb-infra)
+DRIDOCK_SKIP_MINIMAL=1 ./install.sh
 
 # custom binary name (e.g. if you want to call it 'claude' instead of 'dridock')
 ./install.sh claude
@@ -131,9 +134,8 @@ mkdir -p "$HOME/.ssh/claudebox"
 ssh-keygen -t ed25519 -C "claude@claude.ai" -f "$HOME/.ssh/claudebox/id_ed25519" -N ""
 # then add the public key to GitHub/GitLab/wherever you push code
 
-# 3. build the image locally
-make build
-# or minimal: make build-minimal
+# 3. build the images locally (both; or just one: make build / make build-minimal)
+make build-all
 
 # 4. build + install the wrapper binary as a command (no sudo — user-writable dir)
 (cd dridock-ts && bun install --frozen-lockfile && bun run build)
@@ -219,7 +221,7 @@ Everything pre-installed. Go, Python, Node.js, C/C++ toolchains, Terraform, kube
 Just enough to run Claude: Ubuntu, git, curl, Node.js, and Docker. Claude has passwordless sudo, so it will install whatever else it needs on the fly via `apt-get`, `pip`, `npm`, etc. Smaller image to build, but the first run takes longer as Claude sorts out its dependencies.
 
 ```bash
-export DRIDOCK_MINIMAL=1 && ./install.sh    # or: make build-minimal
+export DRIDOCK_MINIMAL=1    # dridock runs this image; ./install.sh builds it along with the full one
 ```
 
 Use `~/.claude/init.d/*.sh` hooks (see [Init Hooks](docs/customization.md#init-hooks-claudeinitd)) to pre-install your tools on first container create so Claude doesn't burn tokens figuring out package management.

@@ -40,24 +40,40 @@ infra-up:
 	@colima status -p $(CB_INFRA_PROFILE) >/dev/null 2>&1 || \
 		colima start -p $(CB_INFRA_PROFILE) --cpu $(CB_INFRA_CPU) --memory $(CB_INFRA_MEMORY) --disk $(CB_INFRA_DISK)
 
-# Build the full image into cb-infra
-build: $(INFRA_DEP)
+# The build and prune steps, as recipes so build-all can run both builds
+# before a single prune (#111).
+define BUILD_FULL
 	$(DOCKER_INFRA) build --build-arg DRIDOCK_VERSION=$(DRIDOCK_VERSION) --target full -t $(IMAGE_NAME):$(TAG) .
-	@# the previous $(IMAGE_NAME):latest is now a dangling <none> image — reclaim it
+endef
+define BUILD_MINIMAL
+	$(DOCKER_INFRA) build --build-arg DRIDOCK_VERSION=$(DRIDOCK_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
+endef
+define PRUNE
+	@# the previous tag is now a dangling <none> image — reclaim it
 	$(DOCKER_INFRA) image prune -f
 	@# also prune UNREFERENCED BuildKit cache (non-`-a`, so recently-used layers survive).
 	@# Without this, cb-infra's BuildKit cache grows unbounded over many rebuilds — Alan
 	@# hit a 41 GB accumulation over four days of iteration before a nuclear prune.
 	$(DOCKER_INFRA) builder prune -f
+endef
+
+# Build the full image into cb-infra
+build: $(INFRA_DEP)
+	$(BUILD_FULL)
+	$(PRUNE)
 
 # Build the minimal image into cb-infra
 build-minimal: $(INFRA_DEP)
-	$(DOCKER_INFRA) build --build-arg DRIDOCK_VERSION=$(DRIDOCK_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
-	$(DOCKER_INFRA) image prune -f
-	$(DOCKER_INFRA) builder prune -f
+	$(BUILD_MINIMAL)
+	$(PRUNE)
 
-# Build both
-build-all: build build-minimal
+# Build both, pruning once at the end. Through 5.14.0 this was
+# `build-all: build build-minimal`, so build's prune ran between the two and
+# the minimal build re-ran the shared base stage instead of reusing it (#111).
+build-all: $(INFRA_DEP)
+	$(BUILD_FULL)
+	$(BUILD_MINIMAL)
+	$(PRUNE)
 
 # Run all tests
 test:

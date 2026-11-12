@@ -182,7 +182,7 @@ Cleanup is spread across three layers because the disk problem shows up in three
 
 | Mechanism | Runs where | What it prunes | Trigger |
 |---|---|---|---|
-| Makefile `build` / `build-minimal` (2.20.1) | **cb-infra** daemon | dangling images + **BuildKit cache** (non-`-a`, unreferenced only) | every `make build` (or `dridock harness sync`) |
+| Makefile `build` / `build-minimal` / `build-all` (2.20.1), `install.sh` (#111) | **cb-infra** daemon | dangling images + **BuildKit cache** (non-`-a`, unreferenced only) | every `make build` (or `dridock harness sync`); once after both builds in `build-all` and `install.sh` |
 | `DRIDOCK_PRUNE_ON_START=1` (2.11.0, 2.15.3) | **project VMs** | BuildKit cache + dangling images | every container start (opt-in) |
 | `dridock vm gc` (2.9.0) | all running `cb-*` VMs (incl. cb-infra) | orphaned lima disks + dangling images + **BuildKit cache** + `fstrim` | manual, on the Mac |
 
@@ -211,7 +211,10 @@ pattern, and if matched auto-prunes the cache and retries once.
   used layers survive) after each build. Without this, cb-infra's BuildKit cache grew
   unbounded across rebuilds — a real 41 GB accumulation over four days of harness
   iteration triggered the addition in 2.20.1. Since `dridock harness sync` invokes
-  `make build` under the hood, both paths get the same treatment.
+  `make build` under the hood, both paths get the same treatment. `make build-all` and
+  `install.sh` build both variants and prune **once, after both** (#111): pruning
+  between them threw away the shared `base` stage, so the minimal build re-ran it and
+  the two images shared only the 139 MB ubuntu layer instead of the whole base.
 - **Startup disk MOTD** — when `/` is ≥85% full at container boot, the entrypoint injects a
   disk warning into the claudebot's context (via `--append-system-prompt`), so a claudebot
   inheriting a near-full VM is told up front.

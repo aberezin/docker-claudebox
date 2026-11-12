@@ -83,6 +83,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in shipped code. A message string or a test file doesn't count as a reader.
   Against `c1dac13` it names the three settings above.
 
+- **`./install.sh` builds both image variants** (#111). It used to build only the
+  one `DRIDOCK_MINIMAL` selected, so the other went stale: `latest-minimal` sat ten
+  releases behind (#109). `DRIDOCK_MINIMAL` now only picks the image dridock runs,
+  which is built first. `DRIDOCK_SKIP_MINIMAL=1` skips the minimal build, and it's
+  refused alongside `DRIDOCK_MINIMAL`. If the first build fails, the install stops.
+  If the second fails, the binary still installs, the failure is named right away
+  and again at the end, and `install.sh` exits non-zero instead of printing
+  "setup complete". It prunes dangling images and unused build cache once, after
+  both builds.
+- **`make build-all` no longer prunes between its two builds** (#111). It was
+  `build build-minimal`, so `build`'s prune ran in the middle and the minimal build
+  re-ran the shared `base` stage: on Alan's host the two images shared only the
+  139 MB ubuntu layer. It now builds both, then prunes once.
+
 ### Docs
 - The overview of `docs/design/agent-teams-delivery.md` and the summary in
   `agent-coordination-hooks.md` still described the Monitor as the only live layer.
