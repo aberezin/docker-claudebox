@@ -47,25 +47,32 @@ import { RealGitToplevel } from "../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../services/ProjectRoot.ts";
 import { autoMigrateIfNeeded } from "../services/AutoMigrate.ts";
 import type { Context, TextWriter } from "./Context.ts";
+import { resolveImage, type ImageChoice } from "../domain/ImageRef.ts";
 
 /** Exported for the #60 help-conformance test, which asserts every
  *  REGISTERED command answers `--help` — the real composition root, not a
  *  hand-maintained list that could drift from it. */
-export function buildRegistry(): CommandRegistry {
+export function buildRegistry(
+  /** Which claudebot image the image-using verbs run (#109). `main` resolves
+   *  it once from ctx.env and prints its notes. The default is the no-env
+   *  answer (`dridock:latest`) so tests never read the ambient process (#52). */
+  choice: ImageChoice = resolveImage(new EnvResolver({})),
+): CommandRegistry {
+  const image = choice.image;
   const registry = new CommandRegistry();
   registry.register(new VersionCommand());
   registry.register(new ConsultCommand());
-  registry.register(new FeaturesCommand("features"));
+  registry.register(new FeaturesCommand("features", undefined, undefined, image));
   registry.register(new PluginsCommand());
-  registry.register(new FeaturesCommand("profiles"));
-  registry.register(new CheckversionCommand());
-  registry.register(new InfoCommand("info"));
-  registry.register(new InfoCommand("status"));   // `status` is an alias of `info`
+  registry.register(new FeaturesCommand("profiles", undefined, undefined, image));
+  registry.register(new CheckversionCommand(image, undefined, undefined, undefined, undefined, choice));
+  registry.register(new InfoCommand("info", image));
+  registry.register(new InfoCommand("status", image));   // `status` is an alias of `info`
   registry.register(new MigrateCommand());
   registry.register(new DownCommand());
   registry.register(new DestroyCommand());
   registry.register(new StopCommand());
-  registry.register(new StartCommand());
+  registry.register(new StartCommand(image));
   registry.register(new VmCommand());
   registry.register(new IpCommand());
   registry.register(new NetCommand());
@@ -74,10 +81,10 @@ export function buildRegistry(): CommandRegistry {
   registry.register(new FrameworkBugsCommand());
   registry.register(new ReportBugCommand());
   registry.register(new ClearSessionCommand());
-  registry.register(new SetupTokenCommand());
-  registry.register(new DoctorCommand());
-  registry.register(new AuthCommand());
-  registry.register(new McpCommand());
+  registry.register(new SetupTokenCommand(undefined, image));
+  registry.register(new DoctorCommand(undefined, image));
+  registry.register(new AuthCommand(image));
+  registry.register(new McpCommand(image));
   registry.register(new HarnessCommand());
   registry.register(new BootstrapCommand());
   // Native TS implementations (2026-07-24) of the last three verbs that
@@ -92,4 +99,10 @@ export function buildRegistry(): CommandRegistry {
   registry.register(new TeamCommand());
   registry.register(new HelpCommand());
   return registry;
+}
+
+/** Cron mode is dispatched by env, not by verb, so it isn't registered; it is
+ *  built here so the #109 wiring test covers it like every other image user. */
+export function buildCronModeCommand(choice: ImageChoice = resolveImage(new EnvResolver({}))): CronModeCommand {
+  return new CronModeCommand(choice.image);
 }

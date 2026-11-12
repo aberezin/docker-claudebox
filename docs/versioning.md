@@ -35,6 +35,12 @@ one but not the other — you get subtle, confusing breakage. The version makes 
   warn on drift with direction-specific guidance (rebuild the image / reinstall the
   wrapper). Read-only; never boots a VM. Images built before versioning read as
   `unstamped` until the next `make build`.
+  It also lists **every variant tag** in cb-infra (`latest` and `latest-minimal`),
+  marks the one dridock runs, and flags any whose harness version lags the wrapper or
+  whose `org.dridock.claude-version` differs from the checkout's `ARG CLAUDE_VERSION`,
+  or is missing, which means the image predates #78. Before #109 it looked at
+  `dridock:latest` only, and said "in sync" on a host whose minimal image was ten
+  releases behind.
 
 ## When to bump (semver)
 

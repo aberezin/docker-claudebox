@@ -492,7 +492,7 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
       ctx.stdout.write(`     make build-minimal && docker ${dockerArgs.join(" ")}${dockerArgs.length > 0 ? " " : ""}run --rm --entrypoint claude ${image} --version\n`);
       ctx.stdout.write(`\nThis only edited local files — nothing is committed. Mac-side propagation still needed:\n`);
       ctx.stdout.write(`  1. review + commit (this command never does)\n`);
-      ctx.stdout.write(`  2. on the Mac: make build (or ./install.sh) to push the real image into cb-infra\n`);
+      ctx.stdout.write(`  2. on the Mac: make build-all to rebuild BOTH image variants in cb-infra (./install.sh rebuilds only the one you run) (#109)\n`);
       ctx.stdout.write(`  3. on the Mac: dridock down && dridock start to recreate projects on it\n`);
       return 0;
     }
@@ -519,7 +519,7 @@ pin is a real case this guards, not a hypothetical). Never commits.`,
     ctx.stdout.write(`✅ validated — ${image} bakes claude ${bakedVersion}.\n`);
     ctx.stdout.write(`\nThis only built + edited LOCAL files — nothing is committed or propagated. Remaining steps:\n`);
     ctx.stdout.write(`  1. review + commit (this command never does)\n`);
-    ctx.stdout.write(`  2. on the Mac: make build (or ./install.sh) to push the real image into cb-infra\n`);
+    ctx.stdout.write(`  2. on the Mac: make build-all to rebuild BOTH image variants in cb-infra (./install.sh rebuilds only the one you run) (#109)\n`);
     ctx.stdout.write(`  3. on the Mac: dridock down && dridock start to recreate projects on it\n`);
     return 0;
   }

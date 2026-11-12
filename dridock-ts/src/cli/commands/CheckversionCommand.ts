@@ -1,7 +1,8 @@
 import type { Command } from "../Command.ts";
 import type { Context } from "../Context.ts";
 import { DridockError } from "../../domain/errors.ts";
-import { CheckVersionService, infraContext, projectContext, projectProfile, type CheckVersionOutcome, type CheckVersionInputs } from "../../services/CheckVersion.ts";
+import { CheckVersionService, infraContext, projectContext, projectProfile, assessVariants, dockerfilePin, type CheckVersionOutcome, type CheckVersionInputs, type VariantReport } from "../../services/CheckVersion.ts";
+import { variantTags, makeTargetFor, DEFAULT_IMAGE_NAME, type ImageChoice } from "../../domain/ImageRef.ts";
 import { RealDocker, type Docker } from "../../infra/Docker.ts";
 import type { Colima } from "../../infra/Colima.ts";
 import { RealColima } from "../../infra/Colima.ts";
@@ -39,6 +40,9 @@ drift, and report the host vs in-image Claude CLI versions.
     private readonly colimaOverride?: Colima,
     /** Injected in tests. Default probes the host's own `claude --version` (#73). */
     private readonly hostClaudeVersion?: () => Promise<string | undefined>,
+    /** How `imageName` was chosen (#109). Decides which variant tags to inspect;
+     *  absent in older tests, where it's derived from `imageName`. */
+    private readonly imageChoice?: ImageChoice,
   ) {}
 
   async run(args: readonly string[], ctx: Context): Promise<number> {
@@ -122,8 +126,68 @@ drift, and report the host vs in-image Claude CLI versions.
       }
     }
 
-    this.renderOutcome(evaluation.outcome, ctx, stoppedProfiles);
+    const variants = await this.inspectVariants(docker, git, ctx);
+    const staleOthers = variants.filter((v) => !v.inUse && v.problems.length > 0).map((v) => v.tag);
+    this.renderOutcome(evaluation.outcome, ctx, stoppedProfiles, staleOthers);
     return 0;
+  }
+
+  /**
+   * Every variant tag in cb-infra, not just the one in use (#109). Label reads
+   * only. Prints the section and returns the reports so the outcome line can
+   * stop saying "in sync" about a host that holds a stale variant.
+   */
+  private async inspectVariants(docker: Docker, git: GitToplevel, ctx: Context): Promise<VariantReport[]> {
+    const choice: ImageChoice = this.imageChoice ?? {
+      image: this.imageName,
+      variant: "full",
+      name: this.imageName.includes(":") ? this.imageName.slice(0, this.imageName.lastIndexOf(":")) : DEFAULT_IMAGE_NAME,
+      notes: [],
+    };
+    // DRIDOCK_IMAGE names an arbitrary image; the variant tags may not exist
+    // under it, and inspecting guesses would report on images nobody chose.
+    const tags = choice.variant === "custom" ? [choice.image] : [...variantTags(choice.name)];
+    const inputs = [];
+    for (const tag of tags) {
+      const ident = await docker.imageIdentity(infraContext(), tag);
+      inputs.push({ tag, ...(ident !== undefined ? { labels: ident.labels } : {}) });
+    }
+    if (inputs.every((i) => i.labels === undefined)) return [];   // VM down / nothing built: the outcome says so
+
+    const pinInfo = await this.readPin(git, ctx);
+    const reports = assessVariants({ wrapperVersion: DRIDOCK_TS_VERSION, inUse: choice.image, pin: pinInfo?.pin, variants: inputs });
+
+    ctx.stdout.write(`  image variants in cb-infra${pinInfo !== undefined ? ` (claude pin ${pinInfo.pin} from ${pinInfo.path})` : ""}:\n`);
+    const width = Math.max(...reports.map((r) => r.tag.length));
+    for (const r of reports) {
+      const mark = r.inUse ? "  ← in use" : "";
+      if (!r.present) { ctx.stdout.write(`    ${r.tag.padEnd(width)}  not built${mark}\n`); continue; }
+      ctx.stdout.write(`    ${r.tag.padEnd(width)}  ${(r.version ?? "unstamped").padEnd(8)} claude ${(r.claude ?? "?").padEnd(9)}${r.problems.length > 0 ? " ⚠️" : " ✓"}${mark}\n`);
+    }
+    ctx.stdout.write(`\n`);
+    for (const r of reports.filter((x) => x.problems.length > 0)) {
+      ctx.stdout.write(`⚠️  ${r.tag} is stale${r.inUse ? " (and it is the image dridock runs)" : ""}:\n`);
+      for (const p of r.problems) ctx.stdout.write(`    - ${p}\n`);
+      ctx.stdout.write(`    Rebuild on the Mac: ${makeTargetFor(r.tag)}   (or make build-all for both variants)\n`);
+    }
+    if (reports.some((x) => x.problems.length > 0)) ctx.stdout.write(`\n`);
+    return reports;
+  }
+
+  /** `ARG CLAUDE_VERSION` from the Dockerfile at this checkout's toplevel —
+   *  only a harness checkout has one. Undefined elsewhere; the variants are
+   *  then compared with each other instead. */
+  private async readPin(git: GitToplevel, ctx: Context): Promise<{ pin: string; path: string } | undefined> {
+    const top = await git.topLevel(ctx.cwd);
+    if (top === undefined) return undefined;
+    // Only the HARNESS checkout's Dockerfile is the pin. A user project can
+    // have its own Dockerfile, even one with an ARG of the same name. Same
+    // fingerprint the version-drift hook uses (#86).
+    if (!(await ctx.fs.exists(`${top}/dridock-ts/src/domain/dridockVersion.ts`))) return undefined;
+    const path = `${top}/Dockerfile`;
+    const text = await ctx.fs.readTextOrUndefined(path);
+    const pin = text === undefined ? undefined : dockerfilePin(text);
+    return pin === undefined ? undefined : { pin, path };
   }
 
   /**
@@ -275,10 +339,17 @@ drift, and report the host vs in-image Claude CLI versions.
     }
   }
 
-  private renderOutcome(o: CheckVersionOutcome, ctx: Context, stoppedProfiles: string[] = []): void {
+  private renderOutcome(o: CheckVersionOutcome, ctx: Context, stoppedProfiles: string[] = [], staleOthers: readonly string[] = []): void {
     switch (o.kind) {
       case "in-sync":
-        ctx.stdout.write(`✅ in sync — wrapper and claudebot image are both ${o.version}.\n`);
+        if (staleOthers.length === 0) {
+          ctx.stdout.write(`✅ in sync — wrapper and claudebot image (${this.imageChoice?.image ?? this.imageName}) are both ${o.version}.\n`);
+        } else {
+          // #109: "in sync" with no qualifier was printed on a host holding a
+          // ten-release-stale variant. Scope the claim to the tag it's about.
+          ctx.stdout.write(`✅ the image dridock runs (${this.imageChoice?.image ?? this.imageName}) matches the wrapper (${o.version}),\n`);
+          ctx.stdout.write(`   but ${staleOthers.join(", ")} ${staleOthers.length === 1 ? "is" : "are"} stale (see above). That only matters if you switch to it.\n`);
+        }
         return;
       case "reseed-needed":
         ctx.stdout.write(`ℹ️  cb-infra is current (${o.infraVersion}); this project's VM still runs ${o.projectVersion}.\n`);

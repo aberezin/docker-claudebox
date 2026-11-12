@@ -221,6 +221,43 @@ if ! docker --context "$CB_INFRA_CTX" build "${_build_args[@]}" --target "$BUILD
 	exit 1
 fi
 
+# >>> install_report_other_variant (#109) -- tests/test_install_variant_check.sh runs this block
+# This script builds ONE variant per run (full, or minimal with DRIDOCK_MINIMAL).
+# The other tag, if present, is left as it was, and nothing used to say so: a
+# host was found with dridock:latest-minimal ten releases behind a fresh full
+# image. Say so here, where the build already happened, rather than building
+# both (8.5GB + 2.2GB per macOS account, #88). Silent when the other tag is
+# absent or current. Never fails the install.
+#   install_report_other_variant <ctx> <built-tag> <other-tag> <want-version> <want-claude>
+install_report_other_variant() {
+	local ctx="$1" built="$2" other="$3" want_v="$4" want_c="$5" labels v c why="" runs
+	labels="$(docker --context "$ctx" image inspect "$other" \
+		--format '{{ index .Config.Labels "org.dridock.version" }}|{{ index .Config.Labels "org.dridock.claude-version" }}' 2>/dev/null)" || return 0
+	v="${labels%%|*}"; c="${labels#*|}"
+	[ "$v" = "<no value>" ] && v=""
+	[ "$c" = "<no value>" ] && c=""
+	[ "$v" != "$want_v" ] && why="harness ${v:-unstamped}, not $want_v"
+	if [ -z "$c" ]; then
+		why="${why:+$why; }no claude-version label (built before #78)"
+	elif [ -n "$want_c" ] && [ "$c" != "$want_c" ]; then
+		why="${why:+$why; }claude $c, not $want_c"
+	fi
+	[ -z "$why" ] && return 0
+	case "$other" in
+		*:latest-minimal) runs="dridock runs it when DRIDOCK_MINIMAL is set" ;;
+		*)                runs="dridock runs it when DRIDOCK_MINIMAL is unset" ;;
+	esac
+	echo "⚠️  Built $built. $other in the same store is stale: $why." >&2
+	echo "    $runs. To rebuild both variants: make build-all" >&2
+}
+# <<< install_report_other_variant
+case "$CLAUDE_TAG" in
+	latest-minimal) _other_tag="latest" ;;
+	*)              _other_tag="latest-minimal" ;;
+esac
+_want_claude="${CLAUDE_VERSION_OVERRIDE:-$(sed -n 's/^ARG CLAUDE_VERSION=\([^ ]*\).*/\1/p' "$SCRIPT_DIR/Dockerfile" 2>/dev/null | head -1)}"
+install_report_other_variant "$CB_INFRA_CTX" "$IMAGE_NAME:$CLAUDE_TAG" "$IMAGE_NAME:$_other_tag" "$DRIDOCK_VERSION" "$_want_claude"
+
 # Compile the dridock TypeScript wrapper (a single ~95MB standalone binary via
 # `bun build --compile`) and install it as `$BIN_NAME`. Since 4.0.0 this IS the
 # dridock wrapper — the bash wrapper.sh has been removed (see #47 + CHANGELOG for

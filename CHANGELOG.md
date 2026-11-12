@@ -42,6 +42,25 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Hook hints that said `make build` before `dridock down` + `dridock start` now
   say `./install.sh`, which builds the image too.
 
+- **`DRIDOCK_IMAGE`, `DRIDOCK_IMAGE_NAME` and `DRIDOCK_MINIMAL` work again** (#109).
+  The 4.0 TypeScript port dropped them: every command hardcoded `dridock:latest`, so
+  `DRIDOCK_MINIMAL=1 dridock` silently ran the full image, and a host that built with
+  `DRIDOCK_MINIMAL=1 ./install.sh` got a tag dridock never used. The 3.4.1 rules are
+  restored in one resolver (`ImageRef.ts`) that `main` passes to every image-using
+  command, including cron mode. A test drives the real registry and fails if any
+  command that holds an image doesn't get the chosen one. A setting that's read but
+  has no effect, such as `DRIDOCK_MINIMAL` next to `DRIDOCK_IMAGE`, now gets a stderr note.
+- **`dridock checkversion` reports every image variant** (#109). It said
+  `✅ in sync` on a host whose `dridock:latest-minimal` was at harness 4.3.4 with
+  claude 2.1.215 and no claude-version label. It now lists both tags, marks the one
+  in use, and flags harness drift, a claude CLI that differs from the Dockerfile pin
+  (read only in a harness checkout), and a missing label. It only says "in sync"
+  about the image that's actually in use. Label reads only: no container spawn.
+- **`install.sh` names the variant it didn't build when that one is stale** (#109),
+  and points at `make build-all`. It still builds one variant per run.
+- `harness update-cli`'s follow-up step now says `make build-all`. Its own
+  validation builds minimal, so `make build` alone left the full image behind.
+
 ### Docs
 - The overview of `docs/design/agent-teams-delivery.md` and the summary in
   `agent-coordination-hooks.md` still described the Monitor as the only live layer.

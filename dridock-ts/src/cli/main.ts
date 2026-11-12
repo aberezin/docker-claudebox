@@ -33,7 +33,7 @@ import { McpCommand, AuthCommand } from "./commands/ProjectPassthroughCommand.ts
 import { HarnessCommand } from "./commands/HarnessCommand.ts";
 import { BootstrapCommand } from "./commands/BootstrapCommand.ts";
 import { ClaudeDirCommand } from "./commands/ClaudeDirCommand.ts";
-import { CronModeCommand, cronModeRequested } from "./commands/CronModeCommand.ts";
+import { cronModeRequested } from "./commands/CronModeCommand.ts";
 import { BrowserBridgeCommand } from "./commands/BrowserBridgeCommand.ts";
 import { HostAgentCommand } from "./commands/HostAgentCommand.ts";
 import { TeamCommand } from "./commands/TeamCommand.ts";
@@ -48,7 +48,8 @@ import { RealGitToplevel } from "../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../services/ProjectRoot.ts";
 import { autoMigrateIfNeeded } from "../services/AutoMigrate.ts";
 import type { Context, TextWriter } from "./Context.ts";
-import { buildRegistry } from "./buildRegistry.ts";
+import { buildRegistry, buildCronModeCommand } from "./buildRegistry.ts";
+import { resolveImage } from "../domain/ImageRef.ts";
 
 /** Adapts Node-compat `process.stdout` / `process.stderr` to the narrow
  *  TextWriter interface. Uses the Node-compat streams (not `Bun.stdout`
@@ -97,8 +98,12 @@ async function main(): Promise<number> {
   const binaryArg = process.argv[0] ?? "dridock";
   const userArgs = process.argv.slice(2);   // matches Node/Bun convention
 
-  const registry = buildRegistry();
   const ctx = buildContext(binaryArg);
+  // One decision about which image to run, made once from the real env (#109).
+  // Its notes name any image setting that was read but had no effect.
+  const imageChoice = resolveImage(ctx.env);
+  for (const note of imageChoice.notes) ctx.stderr.write(note);
+  const registry = buildRegistry(imageChoice);
 
   try {
     const fs = new RealFileSystem();
@@ -159,7 +164,7 @@ async function main(): Promise<number> {
     // before verb dispatch. `stop` becomes "stop the cron container",
     // anything else spawns / resumes the detached _cron container.
     if (cronModeRequested(ctx.env.raw())) {
-      return await new CronModeCommand().run(userArgs, ctx);
+      return await buildCronModeCommand(imageChoice).run(userArgs, ctx);
     }
 
     return await registry.dispatch(userArgs, ctx);
