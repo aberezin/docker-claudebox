@@ -108,7 +108,9 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   tag's harness drift was left off that list because the drift section reports it.
   So the image ten releases behind got ✓ while the one a minor behind got ⚠️. The
   in-use tag is now flagged too, with a line pointing at the drift section, and
-  the version comparison is the loose one `classify()` uses (#110).
+  the version comparison is the loose one `classify()` uses (#110). That also
+  stops a sibling tag labelled `v5.14.0` being called stale, which string
+  equality did.
 - `tests/test_env_var_readers.sh` accepts a prefix reader split across lines by a
   formatter (Arfy's #110 nit). It now looks for the prefix as a complete string
   literal in code, which still rejects the description string and the comments.
