@@ -157,7 +157,8 @@ drift, and report the host vs in-image Claude CLI versions.
     const pinInfo = await this.readPin(git, ctx);
     const reports = assessVariants({ wrapperVersion: DRIDOCK_TS_VERSION, inUse: choice.image, pin: pinInfo?.pin, variants: inputs });
 
-    ctx.stdout.write(`  image variants in cb-infra${pinInfo !== undefined ? ` (claude pin ${pinInfo.pin} from ${pinInfo.path})` : ""}:\n`);
+    const heading = choice.variant === "custom" ? "image in cb-infra (DRIDOCK_IMAGE)" : "image variants in cb-infra";
+    ctx.stdout.write(`  ${heading}${pinInfo !== undefined ? ` (claude pin ${pinInfo.pin} from ${pinInfo.path})` : ""}:\n`);
     const width = Math.max(...reports.map((r) => r.tag.length));
     for (const r of reports) {
       const mark = r.inUse ? "  ← in use" : "";
@@ -172,6 +173,22 @@ drift, and report the host vs in-image Claude CLI versions.
     }
     if (reports.some((x) => x.problems.length > 0)) ctx.stdout.write(`\n`);
     return reports;
+  }
+
+  /**
+   * The command that rebuilds the image dridock RUNS (#109 review). Before the
+   * image settings were restored this was always `make build`, which was right
+   * because dridock always ran `dridock:latest`. With DRIDOCK_MINIMAL it runs
+   * `latest-minimal`, and `make build` (full target) leaves that drift exactly
+   * where it was. A DRIDOCK_IMAGE reference isn't something `make` builds at
+   * all, so say that rather than name a target that won't help.
+   */
+  private rebuildRemedy(): string {
+    const choice = this.imageChoice;
+    if (choice?.variant === "custom") {
+      return `(${choice.image} comes from DRIDOCK_IMAGE, which no make target builds: rebuild or pull it yourself, or unset DRIDOCK_IMAGE)`;
+    }
+    return makeTargetFor(choice?.image ?? this.imageName);
   }
 
   /** `ARG CLAUDE_VERSION` from the Dockerfile at this checkout's toplevel —
@@ -358,7 +375,7 @@ drift, and report the host vs in-image Claude CLI versions.
         return;
       case "no-comparable":
         if (o.reason === "predates-versioning") {
-          ctx.stdout.write(`ℹ️  the claudebot image predates versioning (no stamp). Rebuild to stamp it: make build\n`);
+          ctx.stdout.write(`ℹ️  the claudebot image predates versioning (no stamp). Rebuild to stamp it: ${this.rebuildRemedy()}\n`);
         } else {
           // Name the actual cause when we know it. "make build" is the WRONG
           // remedy for a stopped VM, and sending someone into a 7-minute
@@ -367,7 +384,7 @@ drift, and report the host vs in-image Claude CLI versions.
             ctx.stdout.write(`ℹ️  no image to compare — ${stoppedProfiles.join(", ")} ${stoppedProfiles.length === 1 ? "is" : "are"} STOPPED (not a missing build).\n`);
             ctx.stdout.write(`   → ${ctx.binName} start   (or: colima start -p ${stoppedProfiles[0]})\n`);
           } else {
-            ctx.stdout.write(`ℹ️  no built image reachable to compare (VMs down / not built yet): make build\n`);
+            ctx.stdout.write(`ℹ️  no built image reachable to compare (VMs down / not built yet): ${this.rebuildRemedy()}\n`);
           }
         }
         return;
@@ -380,7 +397,7 @@ drift, and report the host vs in-image Claude CLI versions.
           case "same":  break; // Shouldn't occur — drift implies wv != cmp
         }
         switch (o.direction) {
-          case "wrapper-newer": ctx.stdout.write(`      host wrapper is newer → rebuild the image, then restart:  make build\n`); break;
+          case "wrapper-newer": ctx.stdout.write(`      host wrapper is newer → rebuild the image, then restart:  ${this.rebuildRemedy()}\n`); break;
           case "image-newer":   ctx.stdout.write(`      claudebot image is newer → update the host wrapper:  ./install.sh\n`); break;
         }
         return;

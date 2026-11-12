@@ -46,7 +46,11 @@ export function resolveImage(env: EnvResolver): ImageChoice {
   const explicit = nonEmpty(env.get("IMAGE"));
   const nameSetting = nonEmpty(env.get("IMAGE_NAME"));
   const minimalRaw = env.get("MINIMAL");
-  const minimal = nonEmpty(minimalRaw) !== undefined;
+  // NOT trimmed, unlike the two above: install.sh tests `[ -n "$_minimal" ]`,
+  // which is true for " ". Trimming here made DRIDOCK_MINIMAL=" " full in
+  // dridock and minimal in install.sh: the mismatch this module exists to
+  // prevent (Arfy, #109 review).
+  const minimal = minimalRaw !== undefined && minimalRaw !== "";
   const name = nameSetting ?? DEFAULT_IMAGE_NAME;
   const notes: string[] = [];
 
@@ -55,8 +59,8 @@ export function resolveImage(env: EnvResolver): ImageChoice {
     if (nameSetting !== undefined) notes.push(`ℹ️  DRIDOCK_IMAGE_NAME is ignored: DRIDOCK_IMAGE=${explicit} names the image outright.\n`);
     return { image: explicit, variant: "custom", name, notes };
   }
-  if (minimal && /^(0|false|no|off)$/i.test(minimalRaw!.trim())) {
-    notes.push(`ℹ️  DRIDOCK_MINIMAL=${minimalRaw} selects the MINIMAL image: any non-empty value does (same as install.sh). Unset it for the full image.\n`);
+  if (minimal && /^(0|false|no|off|)$/i.test(minimalRaw!.trim())) {   // "" after trim = whitespace-only
+    notes.push(`ℹ️  DRIDOCK_MINIMAL=${JSON.stringify(minimalRaw)} selects the MINIMAL image: any non-empty value does (same as install.sh). Unset it for the full image.\n`);
   }
   return {
     image: `${name}:${minimal ? MINIMAL_TAG : FULL_TAG}`,

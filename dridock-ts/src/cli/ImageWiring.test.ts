@@ -10,6 +10,10 @@ import { EnvResolver } from "../domain/EnvResolver.ts";
 // non-default choice and asserts every command that carries an image got it.
 // It discovers them by the field, so a command added later with the old
 // default-and-forget pattern fails here instead of shipping.
+//
+// CONTRACT: the field is named `imageName`. A command that stores its image
+// under any other name is invisible to the generic check below and is caught
+// only if it's in the hardcoded verb list. Name it `imageName`.
 
 function imageOf(cmd: object): string | undefined {
   const v = (cmd as { imageName?: unknown }).imageName;

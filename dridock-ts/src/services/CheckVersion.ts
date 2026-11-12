@@ -181,9 +181,11 @@ export function assessVariants(input: VariantAssessmentInput): VariantReport[] {
 }
 
 /** `ARG CLAUDE_VERSION=<v>` from a Dockerfile's text; the first one wins,
- *  matching install.sh's `sed -n … | head -1`. */
+ *  matching install.sh's `sed -n … | head -1` read of the same line. Same
+ *  character class as that sed's `[^ ]*`: everything up to the first SPACE
+ *  (a tab is kept, as sed keeps it). */
 export function dockerfilePin(dockerfile: string): string | undefined {
-  const m = /^ARG CLAUDE_VERSION=(\S+)/m.exec(dockerfile);
+  const m = /^ARG CLAUDE_VERSION=([^ \n]+)/m.exec(dockerfile);
   return m?.[1];
 }
 

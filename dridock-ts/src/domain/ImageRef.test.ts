@@ -29,6 +29,13 @@ describe("resolveImage — the v3.4.1 wrapper.sh:2146-2153 rules", () => {
   });
   test("empty values count as unset, like bash's [ -n ] / [ -z ]", () => {
     expect(r({ DRIDOCK_IMAGE: "", DRIDOCK_IMAGE_NAME: " ", DRIDOCK_MINIMAL: "" }).image).toBe("dridock:latest");
+    expect(r({ DRIDOCK_IMAGE: "  " }).variant).toBe("full");
+  });
+  test("whitespace-only DRIDOCK_MINIMAL selects minimal, as bash's [ -n \" \" ] does, and says so", () => {
+    // Arfy #109 review: trimming made " " full here and minimal in install.sh.
+    const c = r({ DRIDOCK_MINIMAL: " " });
+    expect(c.image).toBe("dridock:latest-minimal");
+    expect(c.notes.join("")).toContain('DRIDOCK_MINIMAL=" " selects the MINIMAL image');
   });
   test("DRIDOCK_MINIMAL=0 still selects minimal (install.sh parity), and says so", () => {
     // LOAD-BEARING: install.sh reads it as [ -n ]. If this resolver treated

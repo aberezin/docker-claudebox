@@ -92,6 +92,32 @@ describe("checkversion — every variant tag in cb-infra (#109)", () => {
     expect(out).toContain("claudebot image 4.3.4");
   });
 
+  test("drift under DRIDOCK_MINIMAL prescribes make build-minimal, never the full-image make build (Arfy #109 must-fix 1)", async () => {
+    const { out } = await run(arfyHost(), harnessCheckout(), { DRIDOCK_MINIMAL: "1" });
+    expect(out).toContain("rebuild the image, then restart:  make build-minimal");
+    expect(out).not.toMatch(/make build\n/);
+  });
+
+  test("an unstamped minimal in use → the stamp remedy names make build-minimal", async () => {
+    const docker = new InMemoryDocker();
+    docker.seedImage(INFRA, MIN, "unstamped");
+    const { out } = await run(docker, harnessCheckout(), { DRIDOCK_MINIMAL: "1" });
+    expect(out).toContain("Rebuild to stamp it: make build-minimal");
+  });
+
+  test("DRIDOCK_IMAGE not reachable → says no make target builds it, names none", async () => {
+    const { out } = await run(new InMemoryDocker(), harnessCheckout(), { DRIDOCK_IMAGE: "nosuch:tag" });
+    expect(out).toContain("nosuch:tag comes from DRIDOCK_IMAGE, which no make target builds");
+    expect(out).not.toMatch(/: make build/);
+  });
+
+  test("full image in use still gets plain make build", async () => {
+    const docker = new InMemoryDocker();
+    docker.seedImage(INFRA, FULL, "5.0.0");
+    const { out } = await run(docker, harnessCheckout());
+    expect(out).toContain("rebuild the image, then restart:  make build\n");
+  });
+
   test("a USER project's Dockerfile is not taken as the pin (no harness fingerprint)", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/app/Dockerfile", "ARG CLAUDE_VERSION=9.9.9\n");
@@ -108,6 +134,8 @@ describe("checkversion — every variant tag in cb-infra (#109)", () => {
     docker.seedImageIdentity(INFRA, "reg/cb:dev", { id: "sha256:c", labels: { "org.dridock.version": DRIDOCK_TS_VERSION, "org.dridock.claude-version": PIN } });
     const { out } = await run(docker, harnessCheckout(), { DRIDOCK_IMAGE: "reg/cb:dev" });
     expect(out).toMatch(/reg\/cb:dev.*← in use/);
+    expect(out).toContain("image in cb-infra (DRIDOCK_IMAGE)");
+    expect(out).not.toContain("image variants in cb-infra");
     expect(out).not.toContain(MIN);
   });
 
@@ -148,5 +176,8 @@ describe("assessVariants — pure", () => {
   test("dockerfilePin takes the first ARG, like install.sh's sed | head -1", () => {
     expect(dockerfilePin("FROM a\nARG CLAUDE_VERSION=2.1.319\nARG CLAUDE_VERSION=1.0.0\n")).toBe("2.1.319");
     expect(dockerfilePin("ARG CLAUDE_VERSION\n")).toBeUndefined();
+    // sed's [^ ]* stops at a SPACE only: a trailing tab is kept, so this keeps it too.
+    expect(dockerfilePin("ARG CLAUDE_VERSION=2.1.319 # pin\n")).toBe("2.1.319");
+    expect(dockerfilePin("ARG CLAUDE_VERSION=2.1.319\t\n")).toBe("2.1.319\t");
   });
 });
