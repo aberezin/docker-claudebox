@@ -49,9 +49,11 @@ define BUILD_MINIMAL
 	$(DOCKER_INFRA) build --build-arg DRIDOCK_VERSION=$(DRIDOCK_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
 endef
 # Build cache younger than this survives a prune, so the next build can reuse
-# the base stage. A plain `builder prune -f` (no -a) does NOT spare recently
-# used cache, despite what this file used to say: Arfy measured a non-`-a`
-# prune reclaiming 100% of six-second-old records (#111 review).
+# the base stage. A plain `builder prune -f` (no -a) spares only cache that an
+# existing image still references, at any age. The `image prune` just before
+# it deletes the previous tag, which is what makes the base stage unreferenced,
+# so the pair discarded the stage the next build needed (Arfy measured it,
+# #111 review). The age filter is what keeps it.
 CACHE_KEEP ?= 168h
 define PRUNE
 	@# the previous tag is now a dangling <none> image — reclaim it

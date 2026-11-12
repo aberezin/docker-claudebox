@@ -183,7 +183,7 @@ Cleanup is spread across three layers because the disk problem shows up in three
 | Mechanism | Runs where | What it prunes | Trigger |
 |---|---|---|---|
 | Makefile `build` / `build-minimal` / `build-all` (2.20.1), `install.sh` (#111) | **cb-infra** daemon | dangling images + **BuildKit cache older than a week** (`--filter until=168h`, #111) | every `make build` (or `dridock harness sync`); once after both builds in `build-all` and `install.sh` |
-| `DRIDOCK_PRUNE_ON_START=1` (2.11.0, 2.15.3) | **project VMs** | BuildKit cache + dangling images | every container start (opt-in) |
+| `DRIDOCK_PRUNE_ON_START=1` (2.11.0, 2.15.3) | **project VMs** | BuildKit cache + dangling images (unfiltered: the next in-container build re-runs any stage no image still references) | every container start (opt-in) |
 | `dridock vm gc` (2.9.0) | all running `cb-*` VMs (incl. cb-infra) | orphaned lima disks + dangling images + **BuildKit cache** + `fstrim` | manual, on the Mac |
 
 None of these is redundant — the Makefile keeps cb-infra tidy where builds happen,
@@ -209,9 +209,11 @@ pattern, and if matched auto-prunes the cache and retries once.
 - **Post-build cache prune on cb-infra** — the Makefile's `build` / `build-minimal`
   targets run `docker builder prune -f --filter until=168h` after each build. Until
   #111 they ran it without the filter, believing non-`-a` spared recently used
-  layers. It doesn't: Arfy measured a plain `builder prune -f` reclaiming 100% of
-  seconds-old cache, so every build threw away the base stage the next one needed.
-  The age filter is what keeps it. Without this, cb-infra's BuildKit cache grew
+  layers. It doesn't: a non-`-a` prune spares only cache that an existing image
+  still references, at any age. The `image prune -f` immediately before it deletes
+  the previous tag, which makes that tag's base stage unreferenced, so the pair
+  discarded the stage the next build needed (measured by Arfy, #111). The age filter
+  is what keeps it. Without this, cb-infra's BuildKit cache grew
   unbounded across rebuilds — a real 41 GB accumulation over four days of harness
   iteration triggered the addition in 2.20.1. Since `dridock harness sync` invokes
   `make build` under the hood, both paths get the same treatment. `make build-all` and

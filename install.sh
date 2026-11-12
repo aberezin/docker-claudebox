@@ -311,10 +311,11 @@ install_make_target() {
 # install_prune <ctx> <profile>: once, after both builds. Each rebuild leaves
 # the previous tag as a dangling image (8.5GB for full), and two builds per run
 # fill cb-infra's 40GB disk twice as fast, so dangling images go. Build cache
-# goes only once it's a week old: a plain `builder prune -f` (no -a) takes
-# fresh cache too, contrary to what this repo believed, so the NEXT install
-# would re-run the whole base stage (Arfy measured it, #111 review). The age
-# filter still bounds the accumulation that motivated the prune (2.20.1).
+# goes only once it's a week old. A plain `builder prune -f` (no -a) spares
+# only cache an image still references, and the `image prune` before it has
+# just orphaned the previous tag's base stage, so unfiltered the NEXT install
+# would re-run that stage (Arfy measured it, #111 review). The age filter still
+# bounds the accumulation that motivated the prune (2.20.1).
 # Never fails the install.
 INSTALL_CACHE_KEEP="168h"
 install_prune() {

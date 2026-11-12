@@ -98,8 +98,9 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   139 MB ubuntu layer. It now builds both, then prunes once.
 - **The cb-infra build-cache prune keeps the last week of cache** (#111). The
   Makefile's `builder prune -f` was believed to spare recently used layers because
-  it has no `-a`. Arfy measured it reclaiming 100% of seconds-old cache, so each
-  build discarded the base stage the next one needed. It now runs with
+  it has no `-a`. It spares only cache an image still references, and the
+  `image prune` run just before it had orphaned the previous tag's base stage, so
+  each build discarded the stage the next one needed. It now runs with
   `--filter until=168h` (`make CACHE_KEEP=…` to change it).
 
 ### Docs
