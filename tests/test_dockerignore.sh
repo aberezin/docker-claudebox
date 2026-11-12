@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# .dockerignore must keep bun's mode-000 `.bun-build` strays out of the build
-# context, wherever they are. A stray in dridock-ts/ slipped past a root-only
+# .dockerignore must keep `.bun-build` strays out of the build context,
+# wherever they are. NOTE: this covers READABLE strays only. It creates them
+# with `touch` (mode 644), and an unreadable (mode-000) stray fails the build on
+# macOS before any pattern applies (Arfy, #114). install.sh's
+# install_clear_unreadable handles those; tests/test_install_unreadable_guard.sh
+# tests it. A stray in dridock-ts/ slipped past a root-only
 # `*.bun-build` and failed ./install.sh with "failed to xattr … permission
 # denied" (2026-11-12; framework-bug report 69adc719-2026-08-17T19-51-08).
 #

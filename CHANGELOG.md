@@ -122,6 +122,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   This is framework-bug report `69adc719-2026-08-17T19-51-08`, open since August.
   `tests/test_dockerignore.sh` checks it with a real build and skips without docker.
 
+- **`install.sh` clears or names unreadable files before the image build** (#114).
+  On macOS a file the user can't read anywhere in the checkout fails the build with
+  `failed to xattr … permission denied`, and `.dockerignore` can't prevent it: listing
+  xattrs needs read permission there, before any ignore pattern applies. The
+  `**/*.bun-build` pattern from `ebc8d1d` covers only readable strays. Known temp files
+  (`*.bun-build`, which bun leaves at mode 000) are removed, each named on stderr. Any
+  other unreadable file stops the install with its path and is not deleted. `.git` is
+  skipped. Tested with mode-000 fixtures in `tests/test_install_unreadable_guard.sh`.
+
+### Process
+- **The install gate** (#114): a branch that touches the build path is merged only
+  after Alan has run `./install.sh` on it and it ended in `✅ setup complete`. See
+  `docs/versioning.md` § The install gate and the branch bullet in CLAUDE.md.
+
 ### Docs
 - The overview of `docs/design/agent-teams-delivery.md` and the summary in
   `agent-coordination-hooks.md` still described the Monitor as the only live layer.

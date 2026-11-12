@@ -16,4 +16,7 @@ docker-compose.dev.yaml
 # context root, and the strays live in dridock-ts/. The bare `*.bun-build` that
 # was here let one through and broke Alan's ./install.sh on 2026-11-12.
 # tests/test_dockerignore.sh checks this with a real build.
+# This only covers a READABLE stray. An unreadable one (mode 000, as bun leaves
+# them) fails the build on macOS before any pattern applies, so install.sh
+# removes those first (install_clear_unreadable, #114).
 **/*.bun-build

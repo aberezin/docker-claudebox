@@ -180,6 +180,46 @@ if [ -f "$SCRIPT_DIR/.githooks/install.sh" ] && git -C "$SCRIPT_DIR" rev-parse -
 	fi
 fi
 
+# >>> install_clear_unreadable (#114) -- tests/test_install_unreadable_guard.sh runs this block
+# A file the current user can't read anywhere in the checkout fails the docker
+# build on macOS with "failed to xattr …: permission denied", and .dockerignore
+# can't prevent it: the sender lists each file's xattrs, which on macOS needs
+# read permission, before the ignore patterns apply. (Linux doesn't need it,
+# which is why no container-side check saw this.) `bun build --compile` run in
+# the container leaves exactly such files, mode 000, in dridock-ts/. One broke
+# ./install.sh on 2026-11-12 (#114).
+#
+# Known temp shapes are removed, each one named. Any other unreadable file is
+# NOT deleted: it might be the user's (a locked file, something a container
+# left), so the install stops and names it instead. .git is skipped.
+#   install_clear_unreadable <dir>   rc 1 when something unreadable remains
+install_clear_unreadable() {
+	local dir="$1" f rc=0
+	while IFS= read -r f; do
+		case "$f" in
+			*.bun-build)
+				if rm -f "$f" 2>/dev/null && [ ! -e "$f" ]; then
+					echo "🧹 removed an unreadable bun build temp file (it would fail the docker build): $f" >&2
+				else
+					echo "❌ $f is unreadable and couldn't be removed; the docker build would fail on it." >&2
+					echo "   Remove it yourself: rm -f '$f'" >&2
+					rc=1
+				fi ;;
+			*)
+				echo "❌ $f is unreadable by $(id -un); the docker build would fail on it." >&2
+				echo "   install.sh doesn't delete files it doesn't recognise. Make it readable (chmod u+r) or remove it." >&2
+				rc=1 ;;
+		esac
+	done < <(find "$dir" -path "$dir/.git" -prune -o -type f ! -perm -u+r -print 2>/dev/null)
+	return "$rc"
+}
+# <<< install_clear_unreadable
+
+if ! install_clear_unreadable "$SCRIPT_DIR"; then
+	echo "❌ Unreadable files in the checkout (listed above); not starting the image build." >&2
+	exit 1
+fi
+
 # Build into a dedicated cb-infra colima profile (never the human's default VM).
 # Project VMs are seeded from it via save|load at run time. See
 # docs/design/per-project-vm.md.

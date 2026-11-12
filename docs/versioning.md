@@ -212,6 +212,45 @@ seen on #62/#64: each agent waits for the other, or both merge and one clobbers.
 Ownership decides *who*; it does not decide *whether it has been verified* — a branch
 still needs its sign-off before its owner merges it.
 
+### The install gate — Alan runs `./install.sh` on the branch before merge
+
+**A branch that touches the build path is not merged until Alan has run `./install.sh`
+on it, in his own checkout, and it has ended in `✅ setup complete`.** The build path is
+any of: `install.sh`, `Makefile`, `Dockerfile`, `.dockerignore`, and dridock-ts's build
+(`dridock-ts/package.json`, `bunfig.toml`, the lockfile). The reviewer's sign-off is
+still required, but for these branches it isn't enough on its own.
+
+How it runs:
+
+1. The owner pushes the branch, gets the sign-off, then asks Alan in a WHERE/TYPE block:
+   `git fetch && git checkout <branch> && ./install.sh`.
+2. Alan pastes the output. The owner checks that it ended in `✅ setup complete` and
+   quotes that line, with what it built, in the merge note.
+3. The owner fast-forwards master. Because the merge is a fast-forward, the binary
+   Alan just installed is exactly what master becomes. If the branch is abandoned
+   instead, `git checkout master && ./install.sh` puts master's binary back.
+
+Why only Alan's run counts: the build reads **Alan's** working tree, including files
+git doesn't track and no diff shows. In #114, a mode-000 `.bun-build` file that the
+container's `bun build --compile` left in `dridock-ts/` was gitignored, so `git status`
+stayed clean through four merges. It failed `./install.sh` only on macOS, where
+listing a file's xattrs needs read permission (Linux doesn't), and only from Alan's
+tree. Arfy's clone had no stray, and the container's builds don't hit the macOS
+failure. #110–#112 each merged with "real `./install.sh` not verified" written in the
+merge note. That line was a disclosure; this gate makes it a step.
+
+The incident's general lesson, which this gate exists to enforce: three real checks in
+a row each lacked the one property that caused the break. A `.dockerignore` pattern
+was read by eye instead of being run through docker. Its test used readable files when
+the real ones were mode 000. A container probe ran on the container's own filesystem
+instead of the mount. **When you reproduce a failure, reproduce the property that
+caused it, in the environment where it happened.**
+
+A branch outside the build path can still break the install by leaving state behind,
+as #110 did, without touching any of these files. `install.sh` now clears or names
+unreadable files before it builds (`install_clear_unreadable`), and agents don't run
+builds with their working directory inside the shared checkout.
+
 ### Claiming something is verified
 
 **Name the environment, or you haven't verified it.** "Verified on real runs" is a
