@@ -182,7 +182,7 @@ Cleanup is spread across three layers because the disk problem shows up in three
 
 | Mechanism | Runs where | What it prunes | Trigger |
 |---|---|---|---|
-| Makefile `build` / `build-minimal` / `build-all` (2.20.1), `install.sh` (#111) | **cb-infra** daemon | dangling images + **BuildKit cache** (non-`-a`, unreferenced only) | every `make build` (or `dridock harness sync`); once after both builds in `build-all` and `install.sh` |
+| Makefile `build` / `build-minimal` / `build-all` (2.20.1), `install.sh` (#111) | **cb-infra** daemon | dangling images + **BuildKit cache older than a week** (`--filter until=168h`, #111) | every `make build` (or `dridock harness sync`); once after both builds in `build-all` and `install.sh` |
 | `DRIDOCK_PRUNE_ON_START=1` (2.11.0, 2.15.3) | **project VMs** | BuildKit cache + dangling images | every container start (opt-in) |
 | `dridock vm gc` (2.9.0) | all running `cb-*` VMs (incl. cb-infra) | orphaned lima disks + dangling images + **BuildKit cache** + `fstrim` | manual, on the Mac |
 
@@ -207,14 +207,18 @@ pattern, and if matched auto-prunes the cache and retries once.
 - **Prune-aware `dridock vm gc`** — the host reclaim command also prunes build cache
   per VM (not only dangling images), because build cache is the real accumulator.
 - **Post-build cache prune on cb-infra** — the Makefile's `build` / `build-minimal`
-  targets run `docker builder prune -f` (dangling BuildKit cache, non-`-a` so recently-
-  used layers survive) after each build. Without this, cb-infra's BuildKit cache grew
+  targets run `docker builder prune -f --filter until=168h` after each build. Until
+  #111 they ran it without the filter, believing non-`-a` spared recently used
+  layers. It doesn't: Arfy measured a plain `builder prune -f` reclaiming 100% of
+  seconds-old cache, so every build threw away the base stage the next one needed.
+  The age filter is what keeps it. Without this, cb-infra's BuildKit cache grew
   unbounded across rebuilds — a real 41 GB accumulation over four days of harness
   iteration triggered the addition in 2.20.1. Since `dridock harness sync` invokes
   `make build` under the hood, both paths get the same treatment. `make build-all` and
   `install.sh` build both variants and prune **once, after both** (#111): pruning
   between them threw away the shared `base` stage, so the minimal build re-ran it and
-  the two images shared only the 139 MB ubuntu layer instead of the whole base.
+  the two images shared only the 139 MB ubuntu layer instead of the whole base. Built
+  without a prune in between, the second variant costs only its own ~0.45 GB.
 - **Startup disk MOTD** — when `/` is ≥85% full at container boot, the entrypoint injects a
   disk warning into the claudebot's context (via `--append-system-prompt`), so a claudebot
   inheriting a near-full VM is told up front.

@@ -90,12 +90,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refused alongside `DRIDOCK_MINIMAL`. If the first build fails, the install stops.
   If the second fails, the binary still installs, the failure is named right away
   and again at the end, and `install.sh` exits non-zero instead of printing
-  "setup complete". It prunes dangling images and unused build cache once, after
-  both builds.
+  "setup complete". It prunes once, after both builds: dangling images, and build
+  cache older than a week.
 - **`make build-all` no longer prunes between its two builds** (#111). It was
   `build build-minimal`, so `build`'s prune ran in the middle and the minimal build
   re-ran the shared `base` stage: on Alan's host the two images shared only the
   139 MB ubuntu layer. It now builds both, then prunes once.
+- **The cb-infra build-cache prune keeps the last week of cache** (#111). The
+  Makefile's `builder prune -f` was believed to spare recently used layers because
+  it has no `-a`. Arfy measured it reclaiming 100% of seconds-old cache, so each
+  build discarded the base stage the next one needed. It now runs with
+  `--filter until=168h` (`make CACHE_KEEP=…` to change it).
 
 ### Docs
 - The overview of `docs/design/agent-teams-delivery.md` and the summary in

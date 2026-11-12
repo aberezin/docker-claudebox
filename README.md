@@ -90,6 +90,9 @@ export DRIDOCK_MINIMAL=1
 # skip building the minimal image (saves its build time and ~0.5 GB in cb-infra)
 DRIDOCK_SKIP_MINIMAL=1 ./install.sh
 
+# build just one image, without installing the binary
+make build            # or: make build-minimal
+
 # custom binary name (e.g. if you want to call it 'claude' instead of 'dridock')
 ./install.sh claude
 # or: export DRIDOCK_BIN_NAME=claude && ./install.sh

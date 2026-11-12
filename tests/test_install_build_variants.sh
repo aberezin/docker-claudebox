@@ -141,6 +141,34 @@ case "$out" in
 esac
 [ "$(_rc 1 '' minimal)" = "rc=1 failed=" ] && ok "failed primary build: rc 1" || bad "primary failure rc: $(_rc 1 '' minimal)"
 
+# install_prune: dangling images, and build cache only past the age filter. An
+# unfiltered `builder prune -f` takes fresh cache too, so the next install would
+# re-run the base stage (Arfy, #111 review).
+cat > "$tmp/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >> "$IB_LOG"
+[ -n "${IB_FAIL:-}" ] && [[ " $* " == *" $IB_FAIL "* ]] && exit 1
+exit 0
+STUB
+chmod +x "$tmp/bin/docker"
+local plog="$tmp/prune.log"; : > "$plog"
+out="$( PATH="$tmp/bin:$PATH" IB_LOG="$plog" bash -c ". '$fn'; install_prune colima-cb-infra cb-infra; echo rc=\$?" 2>&1 )"
+case "$(cat "$plog")" in
+    *"--context colima-cb-infra image prune -f"*"--context colima-cb-infra builder prune -f --filter until="*) ok "install_prune: dangling images, then build cache with an age filter" ;;
+    *) bad "install_prune calls wrong; got: $(cat "$plog")" ;;
+esac
+grep -E 'builder prune' "$plog" | grep -vq -- '--filter until=' && bad "an unfiltered builder prune ran: $(cat "$plog")"
+out="$( PATH="$tmp/bin:$PATH" IB_LOG=/dev/null IB_FAIL=builder bash -c ". '$fn'; install_prune colima-cb-infra cb-infra; echo rc=\$?" 2>&1 )"
+case "$out" in
+    *"prune in cb-infra failed"*"rc=0") ok "install_prune: a failed prune is reported and doesn't fail the install" ;;
+    *) bad "failed prune handling; got: $out" ;;
+esac
+if grep -q '^install_prune "\$CB_INFRA_CTX" "\$CB_INFRA_PROFILE"$' "$INSTALL"; then
+    ok "install.sh calls install_prune after the builds"
+else
+    bad "install.sh doesn't call install_prune"
+fi
+
 rm -rf "$tmp"
 echo "  install build variants: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

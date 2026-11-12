@@ -48,13 +48,18 @@ endef
 define BUILD_MINIMAL
 	$(DOCKER_INFRA) build --build-arg DRIDOCK_VERSION=$(DRIDOCK_VERSION) --target minimal -t $(IMAGE_NAME):$(TAG)-minimal .
 endef
+# Build cache younger than this survives a prune, so the next build can reuse
+# the base stage. A plain `builder prune -f` (no -a) does NOT spare recently
+# used cache, despite what this file used to say: Arfy measured a non-`-a`
+# prune reclaiming 100% of six-second-old records (#111 review).
+CACHE_KEEP ?= 168h
 define PRUNE
 	@# the previous tag is now a dangling <none> image — reclaim it
 	$(DOCKER_INFRA) image prune -f
-	@# also prune UNREFERENCED BuildKit cache (non-`-a`, so recently-used layers survive).
-	@# Without this, cb-infra's BuildKit cache grows unbounded over many rebuilds — Alan
-	@# hit a 41 GB accumulation over four days of iteration before a nuclear prune.
-	$(DOCKER_INFRA) builder prune -f
+	@# also prune BuildKit cache older than $(CACHE_KEEP). Without a prune, cb-infra's
+	@# cache grows unbounded over many rebuilds — Alan hit a 41 GB accumulation over
+	@# four days of iteration before a nuclear prune (2.20.1).
+	$(DOCKER_INFRA) builder prune -f --filter until=$(CACHE_KEEP)
 endef
 
 # Build the full image into cb-infra

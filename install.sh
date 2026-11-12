@@ -308,6 +308,25 @@ install_make_target() {
 	case "$1" in *:latest-minimal) echo "make build-minimal" ;; *) echo "make build" ;; esac
 }
 
+# install_prune <ctx> <profile>: once, after both builds. Each rebuild leaves
+# the previous tag as a dangling image (8.5GB for full), and two builds per run
+# fill cb-infra's 40GB disk twice as fast, so dangling images go. Build cache
+# goes only once it's a week old: a plain `builder prune -f` (no -a) takes
+# fresh cache too, contrary to what this repo believed, so the NEXT install
+# would re-run the whole base stage (Arfy measured it, #111 review). The age
+# filter still bounds the accumulation that motivated the prune (2.20.1).
+# Never fails the install.
+INSTALL_CACHE_KEEP="168h"
+install_prune() {
+	local ctx="$1" profile="$2"
+	echo "🧹 Pruning dangling images, and build cache older than $INSTALL_CACHE_KEEP, in $profile..."
+	if ! { docker --context "$ctx" image prune -f >/dev/null \
+		&& docker --context "$ctx" builder prune -f --filter "until=$INSTALL_CACHE_KEEP" >/dev/null; }; then
+		echo "⚠️  prune in $profile failed (the images are built). Reclaim space later with: docker --context $ctx image prune -f" >&2
+	fi
+	return 0
+}
+
 # install_finish <secondary-failed-tag>: the end-of-install verdict. rc 1 if a
 # build failed, so a scripted install can't mistake a partial one for done.
 install_finish() {
@@ -323,14 +342,7 @@ install_finish() {
 install_variant_plan "${DRIDOCK_MINIMAL:-}" "${DRIDOCK_SKIP_MINIMAL:-}" || exit 1
 echo "🔨 Building the local Claude Code images into $CB_INFRA_PROFILE (v$DRIDOCK_VERSION): $IMAGE_NAME:${INSTALL_PRIMARY#*:}${INSTALL_SECONDARY:+ and $IMAGE_NAME:${INSTALL_SECONDARY#*:}}"
 install_build_variants "$CB_INFRA_CTX" "$IMAGE_NAME" "$SCRIPT_DIR" "${_build_args[@]}" || exit 1
-# Prune once, after both builds, as `make build-all` does: each rebuild leaves the
-# previous tag as a dangling image (8.5GB for full), and with two builds per run
-# cb-infra's 40GB disk fills twice as fast. Dangling images and unreferenced
-# BuildKit cache only. Never fails the install.
-echo "🧹 Pruning dangling images and unused build cache in $CB_INFRA_PROFILE..."
-if ! { docker --context "$CB_INFRA_CTX" image prune -f >/dev/null && docker --context "$CB_INFRA_CTX" builder prune -f >/dev/null; }; then
-	echo "⚠️  prune in $CB_INFRA_PROFILE failed (the images are built). Reclaim space later with: docker --context $CB_INFRA_CTX image prune -f" >&2
-fi
+install_prune "$CB_INFRA_CTX" "$CB_INFRA_PROFILE"
 if [ -z "$INSTALL_SECONDARY" ]; then
 	echo "   (DRIDOCK_SKIP_MINIMAL: not building $IMAGE_NAME:latest-minimal)"
 	_want_claude="${CLAUDE_VERSION_OVERRIDE:-$(sed -n 's/^ARG CLAUDE_VERSION=\([^ ]*\).*/\1/p' "$SCRIPT_DIR/Dockerfile" 2>/dev/null | head -1)}"
