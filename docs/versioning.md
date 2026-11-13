@@ -202,8 +202,11 @@ dispatcher that runs its own hooks and then the repo's
 `$(git rev-parse --git-common-dir)/hooks/<name>`. That's what #113 installed as Alan's
 global `hooksPath`, and there the guard does run. So the installer looks at the file git
 will actually run, `<hooksPath>/<name>` for each hook this repo ships (following
-symlinks). If it's executable and refers to the repo's hooks dir (`--git-common-dir`,
-`--git-dir` or `.git/hooks`), that hook counts as chained: `--check` stays silent, and
+symlinks). If it's executable and its code (comments stripped) calls `rev-parse` and
+refers to the repo's hooks dir, that hook counts as chained. `--git-common-dir` always
+qualifies. `--git-dir` and `.git/hooks` qualify only outside a linked worktree: inside
+one they lead to `.git/worktrees/<name>/` or a `.git` file, where no hooks live. A
+chained hook means `--check` stays silent, and
 an install prints one line saying chaining was detected plus the probe that proves it
 (commit on master and watch the guard refuse). It's a heuristic on the file's contents,
 not a run of the chain, which is why the message offers the probe rather than claiming

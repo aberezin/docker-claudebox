@@ -17,7 +17,10 @@
 # reasons unrelated to the code.
 #
 # GIT_CONFIG_GLOBAL/SYSTEM are redirected at temp files so the hooksPath cases
-# neither read nor write the real user's gitconfig.
+# neither read nor write the real user's gitconfig. That's load-bearing, not
+# hygiene: the #117 cases run `git config --global --unset core.hooksPath`,
+# which without the redirect would delete Alan's #113 chaining setup. Keep it
+# above any new --global case.
 
 test_githooks_install() {
     local PASS=0 FAIL=0
@@ -266,6 +269,76 @@ CHAIN
     else
         _bad "non-executable dispatcher accepted as chaining (rc $rc): $out"
     fi
+    # A file that only MENTIONS .git/hooks in a comment isn't a dispatcher
+    # (Arfy: this silenced --check while a master commit went through).
+    local mention="$tmp/mention-hooks"
+    mkdir -p "$mention"
+    printf '#!/bin/sh\n# installed via core.hooksPath, which replaces .git/hooks\n# (we deliberately do not use git rev-parse --git-common-dir here)\nexit 0\n' > "$mention/pre-commit"
+    chmod 755 "$mention/pre-commit"
+    git config --global core.hooksPath "$mention"
+    out="$(bash "$d/.githooks/install.sh" --check 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'REPLACES'; then
+        _ok "a hook that only mentions .git/hooks / --git-common-dir in comments still warns (rc $rc)"
+    else
+        _bad "comment-only mention was accepted as chaining (rc $rc): $out"
+    fi
+
+    # ...nor one that mentions it in CODE (a message string) without the
+    # rev-parse call a real dispatcher has to make.
+    printf '#!/bin/sh\necho "lint only; this hook does not chain to .git/hooks" >/dev/null\nexit 0\n' > "$mention/pre-commit"
+    out="$(bash "$d/.githooks/install.sh" --check 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'REPLACES'; then
+        _ok "a hook that names .git/hooks in a string but never calls rev-parse still warns (rc $rc)"
+    else
+        _bad "string-only mention (no rev-parse) was accepted as chaining (rc $rc): $out"
+    fi
+
+    # Linked worktree: --git-dir is .git/worktrees/<name>, which has no hooks,
+    # so a --git-dir dispatcher chains nowhere there (Arfy, #117). It must warn
+    # in the linked worktree and still pass in the main one.
+    local gdhp="$tmp/gitdir-hooks"
+    mkdir -p "$gdhp"
+    printf '#!/bin/sh\nh="$(git rev-parse --git-dir)/hooks/$(basename "$0")"\n[ -x "$h" ] && exec "$h" "$@"\nexit 0\n' > "$gdhp/pre-commit"
+    chmod 755 "$gdhp/pre-commit"
+    git -C "$d" -c user.name=t -c user.email=t@t commit -q --allow-empty --no-verify -m base 2>/dev/null
+    local wt="$tmp/linked-wt"
+    git -C "$d" worktree add -q --detach "$wt" 2>/dev/null
+    cp "$d/.githooks/install.sh" "$wt/.githooks/install.sh" 2>/dev/null || { mkdir -p "$wt/.githooks"; cp "$d/.githooks/"* "$wt/.githooks/"; }
+    cp "$d/.githooks/pre-commit" "$wt/.githooks/pre-commit"
+    git config --global core.hooksPath "$gdhp"
+    out="$(bash "$d/.githooks/install.sh" --check 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
+        _ok "--git-dir dispatcher in the main worktree: accepted (--git-dir is .git there)"
+    else
+        _bad "--git-dir dispatcher rejected in the main worktree (rc $rc): $out"
+    fi
+    out="$(bash "$wt/.githooks/install.sh" --check 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'REPLACES'; then
+        _ok "--git-dir dispatcher in a LINKED worktree: warned (rc $rc), it chains nowhere there"
+    else
+        _bad "--git-dir dispatcher accepted in a linked worktree (rc $rc): $out"
+    fi
+    # ...while a --git-common-dir dispatcher is right in the linked worktree too,
+    # and the guard really fires there.
+    chmod 755 "$hp/chain-hook"
+    git config --global core.hooksPath "$hp"
+    out="$(bash "$wt/.githooks/install.sh" --check 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
+        _ok "--git-common-dir dispatcher in a linked worktree: silent, rc 0"
+    else
+        _bad "--git-common-dir dispatcher warned in a linked worktree (rc $rc): $out"
+    fi
+    # `main`, not master: master is checked out in the main worktree, and git
+    # may refuse to check it out twice. The guard refuses both names.
+    git -C "$wt" checkout -q -b main
+    echo hi > "$wt/g.txt"; git -C "$wt" add g.txt
+    out="$(git -C "$wt" -c user.name=t -c user.email=t@t commit -m 'on main from wt' 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'refusing to commit directly'; then
+        _ok "from the linked worktree (on main), the guard fires through the --git-common-dir dispatcher (rc $rc)"
+    else
+        _bad "linked worktree main commit not refused (rc $rc): $out"
+    fi
+    git -C "$d" worktree remove --force "$wt" 2>/dev/null
     git config --global --unset core.hooksPath
     # hooksPath pointing AT the repo's own hooks dir shadows nothing.
     git -C "$d" config core.hooksPath "$d/.git/hooks"

@@ -100,8 +100,9 @@ done
 # both modes.
 #
 # #117: set is not the same as dead. When $hooksPath/<name> is an executable
-# file that refers to the repo's hooks dir (--git-common-dir, --git-dir or
-# .git/hooks), it's a chaining dispatcher and the repo hook still runs. That's a
+# file whose code (not comments) calls rev-parse and refers to the repo's hooks
+# dir (--git-common-dir; or --git-dir / .git/hooks, outside a linked worktree),
+# it's a chaining dispatcher and the repo hook still runs. That's a
 # heuristic on the file's contents (it doesn't run the chain), so in install
 # mode it's reported as information with the command that proves it.
 # --type=path expands a leading ~; a relative hooksPath is relative to the
@@ -115,6 +116,28 @@ if [ -n "$_hp" ]; then
     elif [ -n "$(git -C "$REPO" config --global --get core.hooksPath 2>/dev/null || true)" ]; then
         _scope="GLOBAL (~/.gitconfig — affects every repo you own)"
     fi
+    # In a linked worktree, --git-dir is .git/worktrees/<name> (no hooks there)
+    # and <toplevel>/.git is a file, so only --git-common-dir reaches the repo's
+    # hooks. Outside one, all three point at the same .git/hooks (Arfy, #117).
+    _linked=0
+    _gd="$(git -C "$REPO" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    if [ -n "$_gd" ] && [ "$(cd "$_gd" && pwd -P)" != "$(cd "${HOOKS_DIR%/hooks}" && pwd -P)" ]; then
+        _linked=1
+    fi
+    # Does this file chain to the repo's hooks? Comments are stripped first and a
+    # `rev-parse` call is required, so a file that merely MENTIONS .git/hooks
+    # ("we deliberately don't use .git/hooks") doesn't count (Arfy, #117). Still a
+    # heuristic on the text: stripping from `#` also cuts `${#x}`/`$#` lines short,
+    # which can only make a real dispatcher look unchained (a loud miss, not a
+    # silent one).
+    _chains_to_repo() {
+        local body
+        body="$(sed 's/#.*//' "$1" 2>/dev/null)" || return 1
+        printf '%s\n' "$body" | grep -q 'rev-parse' || return 1
+        printf '%s\n' "$body" | grep -q -- '--git-common-dir' && return 0
+        [ "$_linked" = 1 ] && return 1
+        printf '%s\n' "$body" | grep -qE -- '--git-dir|\.git/hooks'
+    }
     _unchained="" _chained=""
     if [ -d "$_hp_abs" ] && [ -d "$HOOKS_DIR" ] \
        && [ "$(cd "$_hp_abs" && pwd -P)" = "$(cd "$HOOKS_DIR" && pwd -P)" ]; then
@@ -122,7 +145,7 @@ if [ -n "$_hp" ]; then
     else
         for b in $_shipped; do
             if [ -f "$_hp_abs/$b" ] && [ -x "$_hp_abs/$b" ] \
-               && grep -qE -- '--git-common-dir|--git-dir|\.git/hooks' "$_hp_abs/$b" 2>/dev/null; then
+               && _chains_to_repo "$_hp_abs/$b"; then
                 _chained="${_chained:+$_chained }$b"
             else
                 _unchained="${_unchained:+$_unchained }$b"

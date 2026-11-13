@@ -35,8 +35,9 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a warning from `./install.sh`, and a SessionStart nag in every agent session). The
   printed remedy, `--global --unset core.hooksPath`, would have turned off every
   global hook #113 had just chained. The installer now reads `<hooksPath>/<hook>` for
-  each shipped hook. An executable file that refers to the repo's hooks dir counts as
-  chaining: `--check` is silent, and install says so and gives a probe to verify it.
+  each shipped hook. An executable file whose code (not comments) calls `rev-parse`
+  and refers to the repo's hooks dir counts as chaining (`--git-dir` / `.git/hooks`
+  only outside a linked worktree, where they don't reach the hooks): `--check` is silent, and install says so and gives a probe to verify it.
   Anything else gets the old warning, which now mentions chaining as an alternative to
   unsetting. Tests cover both sides, plus a commit through a fixture dispatcher that
   the real guard refuses. Also fixes `tests/test_githooks_install.sh` case 11, which
