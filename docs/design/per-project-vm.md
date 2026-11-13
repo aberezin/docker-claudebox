@@ -102,8 +102,11 @@ the image seeded into each project VM from the shared `cb-infra` profile:
 > so with equal semvers the **image IDs** are compared too, and a different ID in
 > `cb-infra` is copied across (`same version label, different build (<old> → <new>)`).
 > `docker save | docker load` preserves the ID, so a copied image matches its source
-> until `cb-infra` is rebuilt (#118). The label-only rules above apply when an ID
-> can't be read. To pick up an image built by a newer
+> until `cb-infra` is rebuilt (#118). The ID changes on **every** rebuild, even one
+> that changed nothing (measured: identical layers and `Created`, different ID), so
+> each `cb-infra` rebuild costs every project VM one copy on its next start. The
+> progress line names the reason. An ID that can't be read on either side gives
+> `image drift not checked (couldn't read …)` rather than a guess. To pick up an image built by a newer
 > `make build`, start `cb-infra` and re-run. The **first-time seed** (project VM
 > has no image at all) is different: it *requires* `cb-infra` and fails loudly
 > with `cb-infra not running — cannot seed image` rather than proceeding.

@@ -40,6 +40,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   was built locally rather than copied from `cb-infra` now gets `cb-infra`'s on the
   next start; `cb-infra` is the source of truth. The "only one side has the CLI
   label" case no longer needs `DRIDOCK_FORCE_RESEED=1` when both IDs are readable.
+  **Cost:** the ID changes on every `cb-infra` rebuild, even a no-op one, so after
+  each `./install.sh` every project VM does one 15-45s copy on its next start. The
+  progress line now says why a copy is happening (`seeding image cb-infra → cb-x
+  (<reason>)`). An unreadable image identity reports `image drift not checked`
+  instead of passing as current.
 - **`dridock --version` works inside the container** (#115). The in-container shim
   listed `version`, `-v` and `--version` as host-only (rc 2), though the baked binary
   answers them without Colima. The team-watch hooks check for a stale fetcher with
