@@ -196,6 +196,87 @@ test_githooks_install() {
     fi
     git config --global --unset core.hooksPath
 
+    # ── 9b. #117: a hooksPath that CHAINS to .git/hooks is not a dead guard ──
+    # Alan's #113 fix made his global hooksPath a dispatcher (one symlink per
+    # hook name → chain-hook) that runs `$(git rev-parse --git-common-dir)/hooks/
+    # <name>`. Set is not dead: --check must stay silent and rc 0 there, or every
+    # session opens with a nag whose remedy (`--global --unset`) undoes #113.
+    local hp="$tmp/chained-hooks"
+    mkdir -p "$hp"
+    cat > "$hp/chain-hook" <<'CHAIN'
+#!/bin/sh
+# fixture dispatcher: hand off to the repo's own hook
+h="$(git rev-parse --git-common-dir)/hooks/$(basename "$0")"
+[ -x "$h" ] && exec "$h" "$@"
+exit 0
+CHAIN
+    chmod 755 "$hp/chain-hook"
+    ln -s chain-hook "$hp/pre-commit"
+    d="$(_mkfixture chained pre-commit)"
+    cp "$REPO/.githooks/pre-commit" "$d/.githooks/pre-commit"
+    git config --global core.hooksPath "$hp"
+    out="$(bash "$d/.githooks/install.sh" 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && printf '%s' "$out" | grep -q 'chains to' && ! printf '%s' "$out" | grep -q 'REPLACES'; then
+        _ok "chained global hooksPath: install rc 0, says chaining was detected, no shadow warning"
+    else
+        _bad "chained hooksPath install gave rc $rc: $out"
+    fi
+    out="$(bash "$d/.githooks/install.sh" --check 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
+        _ok "chained hooksPath: --check is silent and rc 0 (the SessionStart nag stays quiet)"
+    else
+        _bad "chained hooksPath --check gave rc $rc: $out"
+    fi
+    # ...and the claim is true, not just quiet: the repo guard fires through the chain.
+    git -C "$d" symbolic-ref HEAD refs/heads/master
+    echo hi > "$d/f.txt"; git -C "$d" add f.txt
+    out="$(git -C "$d" -c user.name=t -c user.email=t@t commit -m 'on master' 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'refusing to commit directly'; then
+        _ok "through the chained hooksPath, the installed guard refuses a master commit (rc $rc)"
+    else
+        _bad "chained hooksPath: master commit was not refused by the guard (rc $rc): $out"
+    fi
+
+    # The discriminator's other side. A hooksPath dir whose pre-commit does NOT
+    # hand off must still warn exactly as before; dropping the content check
+    # (treating any file as a dispatcher) turns this red.
+    local plain="$tmp/plain-hooks"
+    mkdir -p "$plain"
+    printf '#!/bin/sh\n# a plain global hook: lint, then done\nexit 0\n' > "$plain/pre-commit"
+    chmod 755 "$plain/pre-commit"
+    git config --global core.hooksPath "$plain"
+    out="$(bash "$d/.githooks/install.sh" --check 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'REPLACES' && printf '%s' "$out" | grep -q 'GLOBAL'; then
+        _ok "non-chaining hooksPath dir: still warned (rc $rc), scope still GLOBAL"
+    else
+        _bad "a hooksPath that does not chain was accepted (rc $rc): $out"
+    fi
+    out="$(bash "$d/.githooks/install.sh" 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'the guard may not be active'; then
+        _ok "non-chaining hooksPath dir: install still exits non-zero (rc $rc)"
+    else
+        _bad "non-chaining hooksPath install gave rc $rc: $out"
+    fi
+    # A dispatcher git can't execute is skipped by git, so it chains nothing.
+    chmod 644 "$hp/chain-hook"
+    git config --global core.hooksPath "$hp"
+    out="$(bash "$d/.githooks/install.sh" --check 2>&1)"; rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'REPLACES'; then
+        _ok "a non-executable dispatcher is not counted as chaining (rc $rc)"
+    else
+        _bad "non-executable dispatcher accepted as chaining (rc $rc): $out"
+    fi
+    git config --global --unset core.hooksPath
+    # hooksPath pointing AT the repo's own hooks dir shadows nothing.
+    git -C "$d" config core.hooksPath "$d/.git/hooks"
+    out="$(bash "$d/.githooks/install.sh" --check 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [ -z "$out" ]; then
+        _ok "hooksPath set to the repo's own .git/hooks: silent, rc 0"
+    else
+        _bad "hooksPath == .git/hooks gave rc $rc: $out"
+    fi
+    git -C "$d" config --unset core.hooksPath
+
     # ── 10. sentinel: an empty .githooks/ must not read as success ──────────
     d="$(_mkfixture empty)"
     out="$(bash "$d/.githooks/install.sh" 2>&1)"; rc=$?
@@ -224,7 +305,10 @@ test_githooks_install() {
     # ...and BEFORE the image build, or a failed build means no hook.
     local _l_hook _l_build
     _l_hook="$(grep -nF 'bash "$SCRIPT_DIR/.githooks/install.sh"' "$REPO/install.sh" | head -1 | cut -d: -f1)"
-    _l_build="$(grep -n 'docker --context "\$CB_INFRA_CTX" build' "$REPO/install.sh" | head -1 | cut -d: -f1)"
+    # The build call, not a docker line: #111 moved `docker build` into
+    # install_build_variants, which left this grep matching nothing (red on
+    # master from 8a926cb until #117 noticed).
+    _l_build="$(grep -n '^install_build_variants "\$CB_INFRA_CTX"' "$REPO/install.sh" | head -1 | cut -d: -f1)"
     if [ -n "$_l_hook" ] && [ -n "$_l_build" ] && [ "$_l_hook" -lt "$_l_build" ]; then
         _ok "the hook install runs before the image build (line $_l_hook < $_l_build)"
     else

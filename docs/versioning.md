@@ -197,6 +197,19 @@ Two reasons it doesn't:
 Because a set `hooksPath` makes an install a no-op with no other symptom, the installer
 refuses rather than reporting success, and names the scope that set it.
 
+**Unless the hooksPath chains back (#117).** A `hooksPath` directory can hold a
+dispatcher that runs its own hooks and then the repo's
+`$(git rev-parse --git-common-dir)/hooks/<name>`. That's what #113 installed as Alan's
+global `hooksPath`, and there the guard does run. So the installer looks at the file git
+will actually run, `<hooksPath>/<name>` for each hook this repo ships (following
+symlinks). If it's executable and refers to the repo's hooks dir (`--git-common-dir`,
+`--git-dir` or `.git/hooks`), that hook counts as chained: `--check` stays silent, and
+an install prints one line saying chaining was detected plus the probe that proves it
+(commit on master and watch the guard refuse). It's a heuristic on the file's contents,
+not a run of the chain, which is why the message offers the probe rather than claiming
+it works. Any shipped hook without such a file still gets the full warning. A
+`hooksPath` pointing at the repo's own `.git/hooks` shadows nothing and is accepted.
+
 Adding a **new** hook is one step: drop it in `.githooks/` under its real git hook name
 (no `.sh` extension — git never calls `pre-push.sh`). The installer walks the directory,
 so nothing else needs editing; it refuses a name git wouldn't recognise instead of

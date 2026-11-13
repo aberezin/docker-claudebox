@@ -30,6 +30,14 @@
 # .git/hooks/ lives outside the worktree and is branch-independent. Tested that
 # way; the guard silently did nothing. See .githooks/pre-commit's header.
 #
+# Both halves are still true of a BARE hooksPath, and they're why this script
+# copies into .git/hooks/. What doesn't follow is "hooksPath is set, so the guard
+# is dead": a hooksPath dir can hold a dispatcher that runs its own hooks and
+# then the repo's .git/hooks/<name> (#113 installed one as Alan's global
+# hooksPath). So the check below looks at the file git will actually run,
+# $hooksPath/<name>, and only warns when it doesn't hand off to the repo's hooks
+# dir (#117).
+#
 #   bash .githooks/install.sh            # install / refresh (idempotent)
 #   bash .githooks/install.sh --check    # report only; silent + rc 0 when clean
 set -uo pipefail
@@ -38,7 +46,7 @@ MODE=install
 case "${1:-}" in
     ""|--install) MODE=install ;;
     --check)      MODE=check ;;
-    -h|--help)    sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help)    sed -n '2,39p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "install.sh: unknown argument '$1' (expected --install or --check)" >&2; exit 2 ;;
 esac
 
@@ -73,27 +81,70 @@ if ! git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1; then
     exit 1
 fi
 
-# --- shadowing: a set core.hooksPath makes .git/hooks/ dead weight ------------
+HOOKS_DIR="$(git -C "$REPO" rev-parse --git-common-dir)"
+case "$HOOKS_DIR" in /*) ;; *) HOOKS_DIR="$REPO/$HOOKS_DIR" ;; esac
+HOOKS_DIR="$HOOKS_DIR/hooks"
+
+# The hook names this repo ships (the same filter the install loop applies).
+_shipped=""
+for f in "$SRC"/*; do
+    [ -f "$f" ] || continue
+    b="$(basename "$f")"
+    case "$b" in *.sh) continue ;; esac
+    _is_valid_hook "$b" && _shipped="${_shipped:+$_shipped }$b"
+done
+
+# --- shadowing: a set core.hooksPath can make .git/hooks/ dead weight ---------
 # `make hooks` would report success while installing a file git never runs. This
 # is the one failure mode with no other symptom, so it is checked first and in
 # both modes.
-_hp="$(git -C "$REPO" config --get core.hooksPath 2>/dev/null || true)"
+#
+# #117: set is not the same as dead. When $hooksPath/<name> is an executable
+# file that refers to the repo's hooks dir (--git-common-dir, --git-dir or
+# .git/hooks), it's a chaining dispatcher and the repo hook still runs. That's a
+# heuristic on the file's contents (it doesn't run the chain), so in install
+# mode it's reported as information with the command that proves it.
+# --type=path expands a leading ~; a relative hooksPath is relative to the
+# worktree root (git-config(1)).
+_hp="$(git -C "$REPO" config --type=path --get core.hooksPath 2>/dev/null || true)"
 if [ -n "$_hp" ]; then
+    case "$_hp" in /*) _hp_abs="$_hp" ;; *) _hp_abs="$REPO/$_hp" ;; esac
     _scope=unknown
     if [ -n "$(git -C "$REPO" config --local --get core.hooksPath 2>/dev/null || true)" ]; then
         _scope="this repo (.git/config)"
     elif [ -n "$(git -C "$REPO" config --global --get core.hooksPath 2>/dev/null || true)" ]; then
         _scope="GLOBAL (~/.gitconfig — affects every repo you own)"
     fi
-    _say "core.hooksPath is set to '$_hp' in $_scope, which REPLACES .git/hooks/ —
-    anything installed there is never run. Unset it for this repo with:
+    _unchained="" _chained=""
+    if [ -d "$_hp_abs" ] && [ -d "$HOOKS_DIR" ] \
+       && [ "$(cd "$_hp_abs" && pwd -P)" = "$(cd "$HOOKS_DIR" && pwd -P)" ]; then
+        : # hooksPath IS the repo's hooks dir: nothing is shadowed.
+    else
+        for b in $_shipped; do
+            if [ -f "$_hp_abs/$b" ] && [ -x "$_hp_abs/$b" ] \
+               && grep -qE -- '--git-common-dir|--git-dir|\.git/hooks' "$_hp_abs/$b" 2>/dev/null; then
+                _chained="${_chained:+$_chained }$b"
+            else
+                _unchained="${_unchained:+$_unchained }$b"
+            fi
+        done
+    fi
+    if [ -n "$_unchained" ]; then
+        _say "core.hooksPath is set to '$_hp' in $_scope, which REPLACES .git/hooks/ —
+    anything installed there is never run. Not handed off to .git/hooks/: $_unchained
+    (no executable file of that name in '$_hp' that refers to the repo's hooks dir).
+    Either make '$_hp/<hook>' chain to \$(git rev-parse --git-common-dir)/hooks/<hook>
+    (#113/#117), or unset it for this repo with:
         git -C $REPO config --unset core.hooksPath
-    (and \`--global --unset\` if the scope above says global)."
+    (\`--global --unset\` if the scope above says global — that also turns off
+    every hook in '$_hp' for all your repos, so check what's there first)."
+    elif [ -n "$_chained" ] && [ "$MODE" = install ]; then
+        echo "   ~ core.hooksPath is set to '$_hp' in $_scope, but its $_chained
+     refers to the repo's hooks dir, so it looks like a dispatcher that chains to
+     $HOOKS_DIR (#117). Not verified by running it. To check, on master:
+         git commit --allow-empty -m probe     # the guard should refuse it"
+    fi
 fi
-
-HOOKS_DIR="$(git -C "$REPO" rev-parse --git-common-dir)"
-case "$HOOKS_DIR" in /*) ;; *) HOOKS_DIR="$REPO/$HOOKS_DIR" ;; esac
-HOOKS_DIR="$HOOKS_DIR/hooks"
 
 # --- the hooks themselves ----------------------------------------------------
 _found=0 _installed=0 _refreshed=0

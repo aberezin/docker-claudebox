@@ -29,6 +29,18 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **`make hooks`, `make hooks-check` and `./install.sh` no longer call a chaining
+  `core.hooksPath` a dead guard (#117).** Any set `hooksPath` was reported as
+  replacing `.git/hooks/`, which counted as a problem (rc 1 from both make targets,
+  a warning from `./install.sh`, and a SessionStart nag in every agent session). The
+  printed remedy, `--global --unset core.hooksPath`, would have turned off every
+  global hook #113 had just chained. The installer now reads `<hooksPath>/<hook>` for
+  each shipped hook. An executable file that refers to the repo's hooks dir counts as
+  chaining: `--check` is silent, and install says so and gives a probe to verify it.
+  Anything else gets the old warning, which now mentions chaining as an alternative to
+  unsetting. Tests cover both sides, plus a commit through a fixture dispatcher that
+  the real guard refuses. Also fixes `tests/test_githooks_install.sh` case 11, which
+  had been red since #111 moved `docker build` into `install_build_variants`.
 - **`dridock harness update-cli` restores a missing `## [Unreleased]` heading**
   instead of skipping its CHANGELOG entry (#106). When the heading is absent but
   release headings exist, it inserts one above the first and says so on stderr.
