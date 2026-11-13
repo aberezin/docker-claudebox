@@ -56,6 +56,9 @@ describe("ImageEnsureService.ensure — drift-reseed", () => {
     colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
     docker.seedImage(infraContext(), "dridock:latest", "3.3.7");
     docker.seedImage("colima-cb-abc", "dridock:latest", "3.3.7");
+    // Same build on both sides: an equal semver alone no longer settles it (#118).
+    docker.seedImageIdentity(infraContext(), "dridock:latest", { id: "sha256:same", labels: {} });
+    docker.seedImageIdentity("colima-cb-abc", "dridock:latest", { id: "sha256:same", labels: {} });
     const r = await svc.ensure("colima-cb-abc");
     expect(r.kind).toBe("already-current");
     expect(docker.saves).toEqual([]); // no reseed
@@ -127,6 +130,9 @@ describe("ImageEnsureService.ensure — drift-reseed", () => {
     colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
     docker.seedImage(infraContext(), "dridock:latest", "3.3.7");
     docker.seedImage("colima-cb-abc", "dridock:latest", "3.3.7");
+    // Same build on both sides: an equal semver alone no longer settles it (#118).
+    docker.seedImageIdentity(infraContext(), "dridock:latest", { id: "sha256:same", labels: {} });
+    docker.seedImageIdentity("colima-cb-abc", "dridock:latest", { id: "sha256:same", labels: {} });
     const r = await svc.ensure("colima-cb-abc");
     expect(r.kind).toBe("already-current");
     // The note must be specific to "couldn't check" — if it fired here too
@@ -274,7 +280,7 @@ describe("ImageEnsureService — claude CLI drift (#78)", () => {
     }
   });
 
-  test("exactly ONE side stamped, an ID unreadable → unverified, NOT a guessed reseed", async () => {
+  test("an identity unreadable on ONE side → unverified naming that side, not a guess", async () => {
     // Without an ID we're back to labels only. The target's identity is
     // missing (inspect failed) while its version label read fine.
     for (const unreadable of ["target", "infra"] as const) {
@@ -286,7 +292,12 @@ describe("ImageEnsureService — claude CLI drift (#78)", () => {
       else seedWithCli(docker, "colima-cb-abc", "2.1.243");
       const r = await svc.ensure("colima-cb-abc");
       expect(r.kind).toBe("unverified");
-      if (r.kind === "unverified") expect(r.reason).toContain("predates");
+      if (r.kind === "unverified") expect(r.reason).toBe(unreadable === "infra"
+        ? "couldn't read cb-infra's image identity"
+        : "couldn't read this project's image identity");
+      // NOT the old "predates the stamp" text: the image may carry the stamp
+      // fine; what failed was the inspect, so that's what to look at.
+      if (r.kind === "unverified") expect(r.reason).not.toContain("predates");
       expect(docker.saves).toEqual([]);
     }
   });
@@ -360,6 +371,33 @@ describe("ImageEnsureService — same labels, different build (#118)", () => {
     docker.seedImageIdentity("colima-cb-abc", "dridock:latest", { id: "sha256:t", labels: {} });
     expect((await svc.ensure("colima-cb-abc")).kind).toBe("already-current");
     expect(docker.saves).toEqual([]);
+  });
+
+  test("BOTH identities unreadable → unverified + the drift note, never a silent blessing (#76)", async () => {
+    const { svc, colima, docker, notes } = build();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    docker.seedImage(infraContext(), "dridock:latest", V);
+    docker.seedImage("colima-cb-abc", "dridock:latest", V);
+    const r = await svc.ensure("colima-cb-abc");
+    expect(r.kind).toBe("unverified");
+    if (r.kind === "unverified") expect(r.reason).toBe("couldn't read either image's identity");
+    expect(docker.saves).toEqual([]);
+    await svc.asCallback()("colima-cb-abc");
+    expect(notes.join("")).toContain("image drift not checked (couldn't read either image's identity)");
+  });
+
+  test("the reseed's reason is in the progress line the user sees, not only in the outcome", async () => {
+    const colima = new InMemoryColima();
+    const docker = new InMemoryDocker();
+    colima.seedVm({ name: "cb-infra", status: "Running", address: "" });
+    seedWithCli(docker, infraContext(), "2.1.243", "sha256:1daa83165f3cffff");
+    seedWithCli(docker, "colima-cb-abc", "2.1.243", "sha256:1e2d825b8b70ffff");
+    const { progress, phases } = recordingProgress();
+    const svc = new ImageEnsureService({ colima, docker, image: "dridock:latest", progress });
+    expect((await svc.ensure("colima-cb-abc")).kind).toBe("reseeded");
+    const why = "same version label, different build (1e2d825b8b70 → 1daa83165f3c)";
+    expect(phases.some((p) => p.includes("seeding image") && p.includes(why))).toBe(true);
+    expect(phases.some((p) => p.includes("image seeded") && p.includes(why))).toBe(true);
   });
 
   test("a failed save|load on an ID reseed is reported as failed", async () => {

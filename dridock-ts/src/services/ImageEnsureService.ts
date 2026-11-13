@@ -122,7 +122,7 @@ export class ImageEnsureService {
       // before the comparisons precisely because its purpose is the cases the
       // comparisons cannot settle.
       if (this.deps.force === true && infraVersion !== "unavailable") {
-        const rc = await this.reseed(targetContext);
+        const rc = await this.reseed(targetContext, "forced (DRIDOCK_FORCE_RESEED)");
         if (rc !== 0) return { kind: "failed", reason: `save|load rc ${rc}` };
         return {
           kind: "reseeded", from: targetVersion, to: infraVersion,
@@ -140,7 +140,7 @@ export class ImageEnsureService {
         };
       }
       if (targetVersion === "unstamped" || this.isNewer(infraVersion, targetVersion)) {
-        const rc = await this.reseed(targetContext);
+        const rc = await this.reseed(targetContext, `${targetVersion} → ${infraVersion}`);
         if (rc !== 0) return { kind: "failed", reason: `save|load rc ${rc}` };
         return { kind: "reseeded", from: targetVersion, to: infraVersion };
       }
@@ -171,46 +171,29 @@ export class ImageEnsureService {
           if (infraIdent.id === targetIdent.id) {
             return { kind: "already-current", version: targetVersion };
           }
-          const rc = await this.reseed(targetContext);
+          const reason = infraCli !== undefined && targetCli !== undefined && infraCli !== targetCli
+            ? `claude CLI ${targetCli} → ${infraCli}`
+            : `same version label, different build (${shortId(targetIdent.id)} → ${shortId(infraIdent.id)})`;
+          // The reason goes into the progress line: a 15-45s copy at launch
+          // with no "why" leaves "why is start slow again?" unanswerable.
+          const rc = await this.reseed(targetContext, reason);
           if (rc !== 0) return { kind: "failed", reason: `save|load rc ${rc}` };
-          return {
-            kind: "reseeded",
-            from: targetVersion,
-            to: infraVersion,
-            reason: infraCli !== undefined && targetCli !== undefined && infraCli !== targetCli
-              ? `claude CLI ${targetCli} → ${infraCli}`
-              : `same version label, different build (${shortId(targetIdent.id)} → ${shortId(infraIdent.id)})`,
-          };
+          return { kind: "reseeded", from: targetVersion, to: infraVersion, reason };
         }
 
-        // An ID we couldn't read: fall back to the labels, which is all the
-        // pre-#118 code had. Reached only when an inspect failed on a side
-        // whose version label we DID read, i.e. rarely.
-        if (infraCli === undefined && targetCli === undefined) {
-          // NEITHER side carries the stamp: both images predate it. Nothing is
-          // knowable from labels, so stay silent rather than nag every launch.
-          return { kind: "already-current", version: targetVersion };
-        }
-        if (infraCli === undefined || targetCli === undefined) {
-          // Exactly ONE side is stamped -- genuinely ambiguous without an ID,
-          // so report it rather than guess either way (#76 rule).
-          // DRIDOCK_FORCE_RESEED is the way across.
-          return {
-            kind: "unverified",
-            version: targetVersion,
-            reason: `${targetCli === undefined ? "this project's image" : "cb-infra's image"} predates the ${CLAUDE_CLI_LABEL} stamp`,
-          };
-        }
-        if (infraCli !== targetCli) {
-          const rc = await this.reseed(targetContext);
-          if (rc !== 0) return { kind: "failed", reason: `save|load rc ${rc}` };
-          return {
-            kind: "reseeded",
-            from: targetVersion,
-            to: infraVersion,
-            reason: `claude CLI ${targetCli} → ${infraCli}`,
-          };
-        }
+        // An identity we couldn't read means the question is unanswered, and
+        // an unanswered drift question is never reported as current (#76).
+        // Pre-#118 the labels decided here, but with the ID as the primary
+        // signal, "both unreadable" and "both predate the CLI stamp" are
+        // different situations, and only the second is nothing-to-see.
+        const unreadable = infraIdent === undefined && targetIdent === undefined
+          ? "either image's identity"
+          : infraIdent === undefined ? `${INFRA_PROFILE}'s image identity` : "this project's image identity";
+        return {
+          kind: "unverified",
+          version: targetVersion,
+          reason: `couldn't read ${unreadable}`,
+        };
       }
       return { kind: "already-current", version: targetVersion };
     }
@@ -259,17 +242,18 @@ export class ImageEnsureService {
    * dangling spinner row that the next status line writes into the middle
    * of, and that site would be whichever one nobody exercises.
    */
-  private async reseed(targetContext: string): Promise<number> {
+  private async reseed(targetContext: string, why?: string): Promise<number> {
     const from = INFRA_PROFILE;
     const to = targetContext.replace(/^colima-/, "");
-    const done = (this.deps.progress ?? NULL_PROGRESS).begin(`seeding image ${from} → ${to}`);
+    const because = why === undefined ? "" : ` (${why})`;
+    const done = (this.deps.progress ?? NULL_PROGRESS).begin(`seeding image ${from} → ${to}${because}`);
     let rc = 1;
     try {
       rc = await this.deps.docker.saveAndLoad(infraContext(), this.deps.image, targetContext);
       return rc;
     } finally {
       done(rc === 0
-        ? { summary: `image seeded ${from} → ${to}` }
+        ? { summary: `image seeded ${from} → ${to}${because}` }
         : { ok: false, summary: `image seed FAILED ${from} → ${to} (rc ${rc})` });
     }
   }
