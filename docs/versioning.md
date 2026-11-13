@@ -241,22 +241,25 @@ seen on #62/#64: each agent waits for the other, or both merge and one clobbers.
 Ownership decides *who*; it does not decide *whether it has been verified* — a branch
 still needs its sign-off before its owner merges it.
 
-### The install gate — Alan runs `./install.sh` on the branch before merge
+### The install gate — Alan runs `./install.sh` from his Mac shell
 
-**A branch that touches the build path is not merged until Alan has run `./install.sh`
-on it, on macOS, and it has ended in `✅ setup complete`.** The build path is
+**A branch that touches the build path is not DONE — issue closed, branch deleted —
+until Alan has run `./install.sh` on that code, from his shell on the Mac, and it has
+ended in `✅ setup complete`.** Running it before the merge is the preferred order and
+the one to ask for; merging first is allowed on the terms below, which is why the rule
+is written against "done" rather than "merged". The build path is
 any of: `install.sh`, `Makefile`, `Dockerfile`, `.dockerignore`, and dridock-ts's build
 (`dridock-ts/package.json`, `bunfig.toml`, the lockfile). The reviewer's sign-off is
 still required, but for these branches it isn't enough on its own.
 
-**The runtime is part of the gate.** It must be a **macOS run with the colima backend**,
-from a checkout on the Mac. `DRIDOCK_BACKEND` auto-selects `docker` inside a container
-(`Makefile:24`), so a run from a container-mounted clone builds on the container's own
-daemon under Linux — which cannot hit the macOS-only xattr failure this gate exists for
-(#114). The merge note quotes **the checkout path the run happened in**, not only the
-final line: #117's confirming run landed its hooks in a second checkout
-(`…/docker-claudebox-in-claudebox`), and a gate whose value is "it read one specific
-working tree" has to say which one.
+**The runtime is part of the gate, and it is decided by the SHELL, not the directory.**
+`DRIDOCK_BACKEND` auto-selects `docker` inside a container (`Makefile:24`), so the same
+checkout gives macOS + colima from Alan's Mac shell and Linux + the ambient daemon from a
+container shell — and only the first can hit the macOS-only xattr failure this gate exists
+for (#114). A claudebot's container mounts Alan's checkout at its own host path, so the
+path alone does not tell you which ran. The merge note therefore quotes **the shell and
+the checkout path**, not only the final line: "Alan's bash (aberezin), in
+`/Users/aberezin/…/<checkout>`" is the claim that can be checked; "Alan ran it" is not.
 
 How it runs — the preferred order:
 
@@ -269,11 +272,11 @@ How it runs — the preferred order:
    Alan just installed is exactly what master becomes. If the branch is abandoned
    instead, `git checkout master && ./install.sh` puts master's binary back.
 
-**If it merged first.** This is written down because it is what actually happens: the
-gate costs a two-variant image build plus a round trip through Alan, so under momentum
-the cheap move is to merge and ask after. #114 — the branch that *introduced* the gate —
-merged before its run (`cd57925`), and #117 did too (`e21d369`). So the merged-first path
-is allowed, on these terms:
+**If it merged first.** Not a precedent-driven rule — on the record the gate has held
+whenever it applied (see the precedents below) — but a fallback written before it is
+needed. The gate costs a two-variant image build plus a round trip through Alan, so there
+will be a moment when merging first looks right, and an unwritten fallback gets improvised
+in exactly that moment. The terms:
 
 - The run happens on **master, immediately**, with no other work merged in between. One
   commit under test, not a pile.
@@ -296,7 +299,9 @@ container from the old image — `dridock --version` kept exiting 2, with no war
 `cb-*` helpers, the in-container `dridock` shim, `profiles/*`, the `Dockerfile` itself —
 the gate also needs one check from inside a container after a restart, and the merge note
 quotes that too. Since #118 (`37e1a1c`), `dridock start` reseeds the project VM whenever
-cb-infra holds a different build, so a plain `dridock down && dridock start` is enough;
+cb-infra holds a different build, so a plain `dridock down && dridock start` is enough —
+that logic lives in the host binary, so it applies once the installed `dridock` includes
+`37e1a1c`, which a gate run on any branch based on it installs before the restart;
 `DRIDOCK_FORCE_RESEED=1` remains the way to force the copy when the drift question comes
 back `image drift not checked`, which is what an unreadable image identity reports.
 
@@ -321,12 +326,20 @@ as #110 did, without touching any of these files. `install.sh` now clears or nam
 unreadable files before it builds (`install_clear_unreadable`), and agents don't run
 builds with their working directory inside the shared checkout.
 
-**The three precedents**, cited by issue and commit because branch names stop resolving
-once the branches are deleted (#103): **#114** `cd57925` merged before its run and is why
-the merged-first terms above exist; **#117** `e21d369` did the same; **#115** `6fee4af`
-ran the gate and passed it while the fix was not live in any container, which is why the
-two facts are separated above. The gate was bent on all three of its first uses, in three
-different places — the text above is those three holes closed (#119).
+**The record**, cited by issue and commit because branch names stop resolving once the
+branches are deleted (#103). **#114** `cd57925`: the gate's first use, and it held — Alan's
+run was on the branch tip and the merge followed it. **#117** `e21d369`: never gated, since
+it touched `.githooks/install.sh` and not the build path above; Alan's run there was a
+confirmation the owner asked for. **#115** `e0a679e`: the one real miss, and not of the
+run — the run happened and passed. What failed was the inference: `✅ setup complete` was
+read as "the fix is live", and the project VM kept the old image (#118), so
+`dridock --version` still exited 2 in the recreated container. That is the hole the
+two-facts paragraph above closes (#119).
+
+One scope question this leaves open for Alan: root `install.sh` *runs*
+`.githooks/install.sh`, so a change there changes what an install does without touching
+anything in the build-path list. Widening the list to "anything `install.sh` runs" would
+cover it; that is a decision, not a precedent, and it is not made here.
 
 ### Claiming something is verified
 

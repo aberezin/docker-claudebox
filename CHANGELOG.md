@@ -185,17 +185,19 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `tests/test_install_unreadable_guard.sh`.
 
 ### Process
-- **The install gate names the merged-first path, the runtime and the checkout** (#119).
-  It was bent on all three of its first uses: #114 (`cd57925`) and #117 (`e21d369`) merged
-  before Alan's run, and #115 (`6fee4af`) passed the gate while the fix was live in no
-  container at all (#118). So: merging first is allowed on stated terms (the run happens on
-  master immediately, the branch is kept until it is green, a failure is a revert of the
-  merge rather than a fix-forward); the run must be macOS with the colima backend, since
-  `Makefile:24` auto-selects the `docker` backend inside a container where the macOS-only
-  failure cannot occur; the merge note quotes the checkout path, not only the final line;
-  and `✅ setup complete` is recorded as a different fact from "the change is live in a
-  container", so a baked change also needs one in-container check after a restart.
-  Docs only — `docs/versioning.md` § The install gate and the CLAUDE.md bullet.
+- **The install gate names the merged-first path, the runtime and the shell** (#119).
+  On the record the gate has held whenever it applied — #114 (`cd57925`) ran before merging,
+  #117 (`e21d369`) was never in the build path — so the merged-first terms are a fallback
+  written before it is needed, not a reaction: the run then happens on master immediately,
+  the branch is kept until it is green, and a failure is a revert of the merge rather than a
+  fix-forward. The real miss was #115 (`e0a679e`), where the run passed and `✅ setup
+  complete` was read as "the fix is live" while the project VM still held the old image
+  (#118), so that is now recorded as two separate facts and a baked change needs one
+  in-container check after a restart. Also: the backend is decided by the shell, not the
+  directory (`Makefile:24` selects `docker` inside a container, so the same checkout builds
+  under Linux from a container shell), and the merge note quotes the shell and the checkout
+  path, not only the final line. Docs only — `docs/versioning.md` § The install gate and
+  the CLAUDE.md bullet.
 - **The install gate** (#114): a branch that touches the build path is merged only
   after Alan has run `./install.sh` on it and it ended in `✅ setup complete`. See
   `docs/versioning.md` § The install gate and the branch bullet in CLAUDE.md.
