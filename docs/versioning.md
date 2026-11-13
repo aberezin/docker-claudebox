@@ -244,20 +244,61 @@ still needs its sign-off before its owner merges it.
 ### The install gate — Alan runs `./install.sh` on the branch before merge
 
 **A branch that touches the build path is not merged until Alan has run `./install.sh`
-on it, in his own checkout, and it has ended in `✅ setup complete`.** The build path is
+on it, on macOS, and it has ended in `✅ setup complete`.** The build path is
 any of: `install.sh`, `Makefile`, `Dockerfile`, `.dockerignore`, and dridock-ts's build
 (`dridock-ts/package.json`, `bunfig.toml`, the lockfile). The reviewer's sign-off is
 still required, but for these branches it isn't enough on its own.
 
-How it runs:
+**The runtime is part of the gate.** It must be a **macOS run with the colima backend**,
+from a checkout on the Mac. `DRIDOCK_BACKEND` auto-selects `docker` inside a container
+(`Makefile:24`), so a run from a container-mounted clone builds on the container's own
+daemon under Linux — which cannot hit the macOS-only xattr failure this gate exists for
+(#114). The merge note quotes **the checkout path the run happened in**, not only the
+final line: #117's confirming run landed its hooks in a second checkout
+(`…/docker-claudebox-in-claudebox`), and a gate whose value is "it read one specific
+working tree" has to say which one.
+
+How it runs — the preferred order:
 
 1. The owner pushes the branch, gets the sign-off, then asks Alan in a WHERE/TYPE block:
    `git fetch && git checkout <branch> && ./install.sh`.
 2. Alan pastes the output. The owner checks that it ended in `✅ setup complete` and
-   quotes that line, with what it built, in the merge note.
+   quotes that line, the checkout path, and what it built (since #111 an install builds
+   both variants), in the merge note.
 3. The owner fast-forwards master. Because the merge is a fast-forward, the binary
    Alan just installed is exactly what master becomes. If the branch is abandoned
    instead, `git checkout master && ./install.sh` puts master's binary back.
+
+**If it merged first.** This is written down because it is what actually happens: the
+gate costs a two-variant image build plus a round trip through Alan, so under momentum
+the cheap move is to merge and ask after. #114 — the branch that *introduced* the gate —
+merged before its run (`cd57925`), and #117 did too (`e21d369`). So the merged-first path
+is allowed, on these terms:
+
+- The run happens on **master, immediately**, with no other work merged in between. One
+  commit under test, not a pile.
+- The **branch is kept** until the run comes back green. Deleting it first is what makes
+  the next step impossible.
+- A failure is a **revert of the merge**, not a fix-forward. Fixing forward on master
+  means the tree nobody has installed successfully is the tree everyone now pulls.
+
+The ordering is safe to vary *because* the merge is a fast-forward: master and the branch
+tip are the same commit, so the run is equally valid on either side of it. What changes
+is the blast radius and who is holding it — which is why the terms above are about
+containing a failure, not about the run itself.
+
+**`✅ setup complete` and "the change is live" are two facts, not one.** The install
+builds into cb-infra and installs the host binary. It does **not** put a baked change
+inside a running container: a project VM holds its own copy of the image, and #115's
+shim fix passed the gate while `dridock down && dridock start` still recreated the
+container from the old image — `dridock --version` kept exiting 2, with no warning
+(#118). So for a branch whose change is **baked into the image** — `entrypoint.sh`, the
+`cb-*` helpers, the in-container `dridock` shim, `profiles/*`, the `Dockerfile` itself —
+the gate also needs one check from inside a container after a restart, and the merge note
+quotes that too. With #118 in, `dridock start` reseeds the project VM whenever cb-infra
+holds a different build, so a plain `dridock down && dridock start` suffices; without it,
+the restart needs `DRIDOCK_FORCE_RESEED=1` — which remains the way to force the copy
+whenever the drift question comes back `image drift not checked`.
 
 Why only Alan's run counts: the build reads **Alan's** working tree, including files
 git doesn't track and no diff shows. In #114, a mode-000 `.bun-build` file that the
@@ -279,6 +320,13 @@ A branch outside the build path can still break the install by leaving state beh
 as #110 did, without touching any of these files. `install.sh` now clears or names
 unreadable files before it builds (`install_clear_unreadable`), and agents don't run
 builds with their working directory inside the shared checkout.
+
+**The three precedents**, cited by issue and commit because branch names stop resolving
+once the branches are deleted (#103): **#114** `cd57925` merged before its run and is why
+the merged-first terms above exist; **#117** `e21d369` did the same; **#115** `6fee4af`
+ran the gate and passed it while the fix was not live in any container, which is why the
+two facts are separated above. The gate was bent on all three of its first uses, in three
+different places — the text above is those three holes closed (#119).
 
 ### Claiming something is verified
 
