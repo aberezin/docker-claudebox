@@ -391,6 +391,8 @@ the script loses `+x` for everyone who pulls it, and a later run fails with
 - Before committing, check: `git diff --cached --summary | grep 'mode change'`. A line
   like `mode change 100755 => 100644` is almost always this, not something you meant.
   Fix it with `chmod +x <file>` and re-stage.
+- A **new** script has no mode change to catch: `chmod +x` it *after* any `sed -i`, and
+  confirm with `git ls-files -s <file>` that it's staged as `100755`.
 - `sed -i` in `/tmp` or the scratchpad is fine; only the workspace mount is affected.
 
 ## Secrets & credentials

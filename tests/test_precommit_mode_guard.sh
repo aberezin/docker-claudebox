@@ -85,10 +85,35 @@ out="$(DRIDOCK_ALLOW_MODE_CHANGE=1 g commit -qm flip-master 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] && [[ "$out" == *"refusing to commit directly to 'master'"* ]] \
     && ok "the mode override doesn't bypass the master guard" || bad "master guard bypassed (rc $rc): $out"
 
-# 7. The baked guidance carries the rule.
+# 7. Finishing a conflicted merge whose branch removed the bit on purpose:
+#    warn, don't refuse (the advice to chmod +x would undo that branch).
+g reset -q --hard          # drop case 6's refused, still-staged flip on master
+g switch -q 116-work
+printf '#!/bin/sh\n' > "$r/m.sh"; chmod 755 "$r/m.sh"; echo base > "$r/c.txt"
+g add -A && g commit -qm base-m
+g switch -qc drop-x
+chmod 644 "$r/m.sh"; echo theirs > "$r/c.txt"; g add -A
+DRIDOCK_ALLOW_MODE_CHANGE=1 g commit -qm drop 2>/dev/null
+g switch -q 116-work
+echo ours > "$r/c.txt"; g add c.txt && g commit -qm ours
+g merge -q drop-x >/dev/null 2>&1
+if [ -f "$r/.git/MERGE_HEAD" ]; then
+    echo resolved > "$r/c.txt"; g add c.txt
+    out="$(g commit -qm merged 2>&1)"; rc=$?
+    if [ "$rc" -eq 0 ] && [[ "$out" == *"this merge brings an exec-bit removal"* ]] && [[ "$out" == *"m.sh"* ]]; then
+        ok "finishing a conflicted merge: the removal is shown, not refused"
+    else
+        bad "conflicted merge with a mode removal (rc $rc): $out"
+    fi
+else
+    bad "fixture: the merge didn't stop on a conflict, so the case tested nothing"
+fi
+
+# 8. The baked guidance carries the rule.
 local ep="$REPO/entrypoint.sh"
 if grep -q "Don't \`sed -i\` files on the workspace mount" "$ep" \
-   && grep -q "git diff --cached --summary | grep 'mode change'" "$ep"; then
+   && grep -q "git diff --cached --summary | grep 'mode change'" "$ep" \
+   && grep -q "git ls-files -s <file>" "$ep"; then
     ok "entrypoint.sh's baked guidance warns about sed -i and gives the check"
 else
     bad "entrypoint.sh guidance section missing or changed"

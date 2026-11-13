@@ -39,7 +39,13 @@ while IFS= read -r _f; do
 done < <(git -c core.quotePath=false diff --cached --summary --no-renames \
            | sed -n 's/^ mode change 100755 => 100644 //p')
 if [ "${#_lost_x[@]}" -gt 0 ]; then
-    if [ "${DRIDOCK_ALLOW_MODE_CHANGE:-}" = "1" ]; then
+    if [ -f "$(git rev-parse --git-dir)/MERGE_HEAD" ]; then
+        # Finishing a conflicted merge by hand. The removal came from the merged
+        # branch, which already passed this guard (or overrode it on purpose);
+        # "chmod +x" here would undo that branch's intent. Show it, don't block.
+        echo "⚠️  this merge brings an exec-bit removal (755 → 644):" >&2
+        printf '       %s\n' "${_lost_x[@]}" >&2
+    elif [ "${DRIDOCK_ALLOW_MODE_CHANGE:-}" = "1" ]; then
         echo "⚠️  committing with the exec bit removed (DRIDOCK_ALLOW_MODE_CHANGE=1):" >&2
         printf '       %s\n' "${_lost_x[@]}" >&2
     else

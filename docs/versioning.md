@@ -182,7 +182,10 @@ this repo has retracted. `make hooks-check` is what notices.
 **The guard also refuses a lost exec bit (#116), on every branch.** A commit that
 takes a tracked file from `100755` to `100644` is refused with the file named and a
 `chmod +x … && git add …` line to fix it. Override for a deliberate removal:
-`DRIDOCK_ALLOW_MODE_CHANGE=1 git commit …` (it doesn't bypass the master check). The
+`DRIDOCK_ALLOW_MODE_CHANGE=1 git commit …` (it doesn't bypass the master check).
+Finishing a conflicted merge by hand only warns: the removal came from the merged
+branch, and `chmod +x` there would undo it. A brand-new script has no mode change to
+catch, so the guidance says to `chmod +x` after any `sed -i` and check `git ls-files -s`. The
 usual cause is GNU `sed -i` on the virtiofs workspace mount: it renames a temp file
 over the original and the mode doesn't survive, so a 755 script comes out 600 and git
 stages it as 644. `entrypoint.sh` lost its bit that way on #105 and #107, and review

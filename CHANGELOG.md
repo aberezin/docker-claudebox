@@ -37,7 +37,8 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to edit with its Edit/Write tools or an in-place write and to check
   `git diff --cached --summary | grep 'mode change'` before committing; and this
   repo's pre-commit hook refuses a `100755 → 100644` change on any branch, naming
-  the files and the fix (`DRIDOCK_ALLOW_MODE_CHANGE=1` overrides). New
+  the files and the fix (`DRIDOCK_ALLOW_MODE_CHANGE=1` overrides; finishing a
+  conflicted merge only warns, since the removal came from the merged branch). New
   `tests/test_precommit_mode_guard.sh`. Existing clones get the new hook from
   `make hooks` (the SessionStart nag says when it's stale).
 - **A project VM picks up a rebuilt image even when no version label changed**
