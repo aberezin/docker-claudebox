@@ -181,21 +181,40 @@ if [ -f "$SCRIPT_DIR/.githooks/install.sh" ] && git -C "$SCRIPT_DIR" rev-parse -
 fi
 
 # >>> install_clear_unreadable (#114) -- tests/test_install_unreadable_guard.sh runs this block
-# A file the current user can't read anywhere in the checkout fails the docker
-# build on macOS with "failed to xattr …: permission denied", and .dockerignore
-# can't prevent it: the sender lists each file's xattrs, which on macOS needs
-# read permission, before the ignore patterns apply. (Linux doesn't need it,
-# which is why no container-side check saw this.) `bun build --compile` run in
-# the container leaves exactly such files, mode 000, in dridock-ts/. One broke
-# ./install.sh on 2026-11-12 (#114).
+# A file or directory the current user can't read anywhere in the checkout fails
+# the docker build on macOS with "failed to xattr …: permission denied", and
+# .dockerignore can't prevent it: the sender lists each entry's xattrs, which on
+# macOS needs read permission, before the ignore patterns apply. (Linux doesn't
+# need it, which is why no container-side check saw this.) `bun build --compile`
+# run in the container leaves exactly such files, mode 000, in dridock-ts/. One
+# broke ./install.sh on 2026-11-12 (#114).
 #
-# Known temp shapes are removed, each one named. Any other unreadable file is
-# NOT deleted: it might be the user's (a locked file, something a container
-# left), so the install stops and names it instead. .git is skipped.
+# Known temp shapes (*.bun-build files) are removed, each one named. Anything
+# else unreadable is NOT deleted: it might be the user's (a locked file, a
+# root-owned file a container left), so the install stops and names it. That
+# includes directories: never rm -rf a directory we don't recognise.
+#
+# Readability is tested with [ -r ] (and [ -x ] for a directory, which the
+# walk must enter), not a mode bit: a mode-600 file owned by someone else has
+# u+r and is still unreadable to us. find's own errors (a directory it couldn't
+# enter) are reported, not discarded: they are the guard's blind spots.
+#
+# Deliberately stricter than the build: .dockerignore's directory excludes
+# (tests/, base/, …) prune the sender's walk, so an unreadable file under one
+# wouldn't break the build, but it stops the install here. That's on purpose;
+# the guard doesn't try to replicate .dockerignore. .git is skipped.
 #   install_clear_unreadable <dir>   rc 1 when something unreadable remains
 install_clear_unreadable() {
-	local dir="$1" f rc=0
+	local dir="$1" f rc=0 err
+	err="$(mktemp)" || { echo "❌ install_clear_unreadable: mktemp failed" >&2; return 1; }
 	while IFS= read -r f; do
+		if [ -d "$f" ]; then
+			[ -r "$f" ] && [ -x "$f" ] && continue
+			echo "❌ $f is a directory $(id -un) can't read or enter; the docker build would fail on it." >&2
+			echo "   install.sh doesn't delete directories. Fix its permissions (chmod u+rx) or remove it." >&2
+			rc=1; continue
+		fi
+		[ -r "$f" ] && continue
 		case "$f" in
 			*.bun-build)
 				if rm -f "$f" 2>/dev/null && [ ! -e "$f" ]; then
@@ -210,7 +229,13 @@ install_clear_unreadable() {
 				echo "   install.sh doesn't delete files it doesn't recognise. Make it readable (chmod u+r) or remove it." >&2
 				rc=1 ;;
 		esac
-	done < <(find "$dir" -path "$dir/.git" -prune -o -type f ! -perm -u+r -print 2>/dev/null)
+	done < <(find "$dir" -path "$dir/.git" -prune -o \( -type f -o -type d \) -print 2>"$err")
+	if [ -s "$err" ]; then
+		echo "❌ couldn't check everything in $dir; find reported:" >&2
+		sed 's/^/   /' "$err" >&2
+		rc=1
+	fi
+	rm -f "$err"
 	return "$rc"
 }
 # <<< install_clear_unreadable

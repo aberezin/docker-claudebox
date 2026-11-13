@@ -128,8 +128,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   xattrs needs read permission there, before any ignore pattern applies. The
   `**/*.bun-build` pattern from `ebc8d1d` covers only readable strays. Known temp files
   (`*.bun-build`, which bun leaves at mode 000) are removed, each named on stderr. Any
-  other unreadable file stops the install with its path and is not deleted. `.git` is
-  skipped. Tested with mode-000 fixtures in `tests/test_install_unreadable_guard.sh`.
+  other unreadable file, and any directory the user can't read or enter, stops the
+  install with its path and is not deleted. Readability is tested directly, so a
+  mode-600 file owned by root counts, and `find`'s own errors are reported rather
+  than discarded. `.git` is skipped. Tested with mode-000 fixtures in
+  `tests/test_install_unreadable_guard.sh`.
 
 ### Process
 - **The install gate** (#114): a branch that touches the build path is merged only

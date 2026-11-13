@@ -9,6 +9,7 @@
 #
 # Runs the real function, extracted between its markers, against a fixture
 # tree. The strays are mode 000, which is the property that caused the break;
+# directories and another user's files are covered too (Arfy's #114 review);
 # a `touch`ed (644) stray would pass for the wrong reason, which is how
 # tests/test_dockerignore.sh missed it. No docker required. Must run as a
 # non-root user: root reads mode-000 files, but the predicate checks the mode,
@@ -64,6 +65,47 @@ case "$out" in
     *) bad "unrecognised unreadable file not reported as expected; got: $out" ;;
 esac
 chmod 644 "$t/sub/locked.txt"
+
+# 3b. an unreadable DIRECTORY (Arfy, #114 review): fails the build the same way,
+# and find can't descend, so a stray inside it is invisible. Named, not
+# deleted, rc 1, and find's own error is reported rather than dropped.
+t="$tmp/dir"; mkdir -p "$t/dridock-ts/hidden"
+touch "$t/dridock-ts/hidden/.a-00000000.bun-build"; chmod 000 "$t/dridock-ts/hidden/.a-00000000.bun-build"
+chmod 000 "$t/dridock-ts/hidden"
+out="$(_ug "$t")"
+case "$out" in
+    *"dridock-ts/hidden is a directory"*"doesn't delete directories"*) ok "a mode-000 directory is named as a directory" ;;
+    *) bad "mode-000 directory not reported; got: $out" ;;
+esac
+case "$out" in
+    *"couldn't check everything"*"hidden"*"rc=1") ok "...find's error on it is reported, not swallowed, and rc is 1" ;;
+    *) bad "find's error on the unreadable dir was dropped or rc wasn't 1; got: $out" ;;
+esac
+chmod 755 "$t/dridock-ts/hidden"
+[ -e "$t/dridock-ts/hidden/.a-00000000.bun-build" ] && ok "...and nothing inside it was touched" || bad "the guard reached into an unreadable dir"
+# a directory that can be listed but not entered (r without x) also fails the walk.
+t="$tmp/noexec"; mkdir -p "$t/d"; touch "$t/d/f"; chmod 600 "$t/d"
+out="$(_ug "$t")"
+case "$out" in
+    *"/d is a directory"*"rc=1") ok "a directory without x (can't enter) is named, rc 1" ;;
+    *) bad "r-without-x directory not reported; got: $out" ;;
+esac
+chmod 755 "$t/d"
+
+# 3c. readability, not a mode bit: a mode-600 file owned by ANOTHER user has
+# u+r and is still unreadable to us. Needs passwordless sudo to set up; says
+# so when it can't, rather than passing.
+t="$tmp/foreign"; mkdir -p "$t"; echo x > "$t/root-owned"; chmod 600 "$t/root-owned"
+if [ "$(id -u)" != 0 ] && sudo -n chown 0:0 "$t/root-owned" 2>/dev/null; then
+    out="$(_ug "$t")"
+    case "$out" in
+        *"root-owned is unreadable"*"rc=1") ok "a mode-600 file owned by root is caught (u+r is set, but we can't read it)" ;;
+        *) bad "another user's mode-600 file passed the guard; got: $out" ;;
+    esac
+    sudo -n rm -f "$t/root-owned"
+else
+    echo "  skip another-user's-600-file case: needs non-root with passwordless sudo (not a pass)"
+fi
 
 # 4. .git is skipped (git's own files are git's business).
 t="$tmp/git"; mkdir -p "$t/.git/objects"
