@@ -295,10 +295,10 @@ container from the old image — `dridock --version` kept exiting 2, with no war
 (#118). So for a branch whose change is **baked into the image** — `entrypoint.sh`, the
 `cb-*` helpers, the in-container `dridock` shim, `profiles/*`, the `Dockerfile` itself —
 the gate also needs one check from inside a container after a restart, and the merge note
-quotes that too. With #118 in, `dridock start` reseeds the project VM whenever cb-infra
-holds a different build, so a plain `dridock down && dridock start` suffices; without it,
-the restart needs `DRIDOCK_FORCE_RESEED=1` — which remains the way to force the copy
-whenever the drift question comes back `image drift not checked`.
+quotes that too. Since #118 (`37e1a1c`), `dridock start` reseeds the project VM whenever
+cb-infra holds a different build, so a plain `dridock down && dridock start` is enough;
+`DRIDOCK_FORCE_RESEED=1` remains the way to force the copy when the drift question comes
+back `image drift not checked`, which is what an unreadable image identity reports.
 
 Why only Alan's run counts: the build reads **Alan's** working tree, including files
 git doesn't track and no diff shows. In #114, a mode-000 `.bun-build` file that the
