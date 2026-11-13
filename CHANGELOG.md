@@ -203,6 +203,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/versioning.md` § The install gate and the branch bullet in CLAUDE.md.
 
 ### Docs
+- The install gate's one open scope question is now recorded as decided (#120). Root
+  `install.sh` runs `.githooks/install.sh`, so a hook change alters what an install does
+  without touching the build-path list; Alan's answer is to leave the list as is, and
+  `docs/versioning.md` § The install gate now says so with the reason instead of asking
+  him. A governing doc that still calls a made decision unmade gets the question re-asked.
 - The overview of `docs/design/agent-teams-delivery.md` and the summary in
   `agent-coordination-hooks.md` still described the Monitor as the only live layer.
   They now show socket delivery (#107) as the primary path, list all four of its

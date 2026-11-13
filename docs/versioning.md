@@ -340,10 +340,15 @@ read as "the fix is live", and the project VM kept the old image (#118), so
 `dridock --version` still exited 2 in the recreated container. That is the hole the
 two-facts paragraph above closes (#119).
 
-One scope question this leaves open for Alan: root `install.sh` *runs*
-`.githooks/install.sh`, so a change there changes what an install does without touching
-anything in the build-path list. Widening the list to "anything `install.sh` runs" would
-cover it; that is a decision, not a precedent, and it is not made here.
+**One scope question was asked and answered: the list is not widened.** Root `install.sh`
+*runs* `.githooks/install.sh`, so a change there changes what an install does without
+touching anything in the build-path list, and widening the list to "anything `install.sh`
+runs" would have covered it. Alan's call (#119, #120) is **leave as is**: `.githooks/install.sh`
+installs the commit guard, it does not build the image, and the gate exists for the failures
+that only Alan's real tree on his real platform can surface (#114 — a gitignored file no diff
+could show). A hook change is reviewable from the diff by either agent, so it does not need
+his machine. That is why #117's run was a confirmation its owner asked for and not the gate
+applying. Don't re-ask; reopen it with a reason if one appears.
 
 ### Claiming something is verified
 
