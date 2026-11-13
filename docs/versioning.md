@@ -257,8 +257,12 @@ still required, but for these branches it isn't enough on its own.
 checkout gives macOS + colima from Alan's Mac shell and Linux + the ambient daemon from a
 container shell — and only the first can hit the macOS-only xattr failure this gate exists
 for (#114). A claudebot's container mounts Alan's checkout at its own host path, so the
-path alone does not tell you which ran. The merge note therefore quotes **the shell and
-the checkout path**, not only the final line: "Alan's bash (aberezin), in
+path alone does not tell you which ran. Nor does "Alan's Mac" narrow it to one tree:
+there are two checkouts of this repo on it, and § Installing the guard above is about the
+other one — measured 2026-11-13, `…/docker-out-of-docker/docker-claudebox` last moved
+2026-09-02 with no hook installed, while `…/docker-claudebox-in-claudebox` moved that day
+and carries the guard. The merge note therefore quotes **the shell and the checkout
+path**, not only the final line: "Alan's bash (aberezin), in
 `/Users/aberezin/…/<checkout>`" is the claim that can be checked; "Alan ran it" is not.
 
 How it runs — the preferred order:
