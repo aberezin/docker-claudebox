@@ -11,9 +11,10 @@
 # tree. The strays are mode 000, which is the property that caused the break;
 # directories and another user's files are covered too (Arfy's #114 review);
 # a `touch`ed (644) stray would pass for the wrong reason, which is how
-# tests/test_dockerignore.sh missed it. No docker required. Must run as a
-# non-root user: root reads mode-000 files, but the predicate checks the mode,
-# so the result is the same either way.
+# tests/test_dockerignore.sh missed it. No docker required. Skipped as root:
+# readability is tested with [ -r ], which root passes for everything, and a
+# root build can't hit the failure either (its sender reads everything), so
+# there is nothing to test (Arfy, #114 re-review).
 
 _UG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -23,6 +24,10 @@ local PASS=0 FAIL=0
 ok()  { echo "  ok   $1"; PASS=$((PASS + 1)); }
 bad() { echo "  FAIL $1"; FAIL=$((FAIL + 1)); }
 echo "--- install.sh: unreadable files are cleared or named before the build (#114) ---"
+if [ "$(id -u)" = 0 ]; then
+    echo "  skip: as root nothing is unreadable, so neither the guard nor the build can fail (not a pass)"
+    echo "  install unreadable guard: 0 passed, 0 failed"; return 0
+fi
 
 local tmp; tmp="$(mktemp -d)"
 local fn="$tmp/fn.sh"
