@@ -39,7 +39,8 @@ CONTAINER-SIDE (runnable here; these delegate to their `cb-*` implementation):
   dridock team <sub>              agent-teams: whoami / roster / post / watch — routes to the
                                   bun-compiled dridock binary at /usr/local/lib/dridock/dridock
                                   (baked in-image; no Colima access needed)
-  dridock version | -v | --version  the dridock semver baked into this image (same binary as team)
+  dridock version | -v | --version  the dridock semver baked into this image (same binary as team;
+                                   also works on your Mac, where it reports the host wrapper)
   dridock help | --help | -h      this help
 
 HOST-SIDE (run these on your Mac; not runnable here — the wrapper needs Colima/docker-context):
@@ -94,7 +95,7 @@ case "${1:-}" in
     version|-v|--version)
         _bin=/usr/local/lib/dridock/dridock
         [ -x "$_bin" ] || _die "dridock: $_bin missing — rebuild image (make build)"
-        exec "$_bin" "$1" ;;
+        exec "$_bin" "$@" ;;   # all args: the binary owns validation, as for team
 
     # ── host-side verbs: not runnable here, print a targeted message ──────────
     start|stop|down|destroy|bootstrap|migrate|info|status|vm|ip|net|features|profiles|\

@@ -52,6 +52,14 @@ for a in --version -v version; do
     fi
 done
 
+# Trailing args reach the binary rather than being dropped by the shim.
+out="$(bash "$tmp/shim" --version --json 2>"$tmp/err")"; rc=$?
+if [ "$rc" -eq 0 ] && grep -qx "stub-argv: --version --json" "$tmp/err"; then
+    ok "dridock --version --json → the binary sees both args"
+else
+    bad "trailing args not forwarded: rc $rc, stderr: $(cat "$tmp/err")"
+fi
+
 # The exact pipeline the hooks run.
 out="$(bash "$tmp/shim" --version 2>/dev/null | awk 'NR==1{print $NF}')"
 [ "$out" = "9.8.7" ] && ok "the hooks' \`dridock --version | awk\` pipeline yields the version" \
