@@ -39,6 +39,7 @@ CONTAINER-SIDE (runnable here; these delegate to their `cb-*` implementation):
   dridock team <sub>              agent-teams: whoami / roster / post / watch — routes to the
                                   bun-compiled dridock binary at /usr/local/lib/dridock/dridock
                                   (baked in-image; no Colima access needed)
+  dridock version | -v | --version  the dridock semver baked into this image (same binary as team)
   dridock help | --help | -h      this help
 
 HOST-SIDE (run these on your Mac; not runnable here — the wrapper needs Colima/docker-context):
@@ -56,8 +57,8 @@ HOST-SIDE (run these on your Mac; not runnable here — the wrapper needs Colima
   dridock harness <verb>                  framework-dev only (sync [--repair])
   dridock framework-bugs [list|clear]     review bugs claudebots filed with cb-report-bug
   dridock consult <verb> (host role)      approve/reject/post — supervised threads (also container-visible)
-  dridock version                         wrapper semver
-  dridock -v | --version | doctor | auth | mcp    passthrough to the Claude CLI
+  dridock doctor | auth | mcp             Claude CLI utilities (doctor in a throwaway container,
+                                          auth/mcp in the project's)
 
 The `cb-*` names remain the canonical implementations — `dridock <verb>` is a thin
 alias. Either works; the alias is for reflex-consistency with the host command surface.
@@ -86,11 +87,19 @@ case "${1:-}" in
         _bin=/usr/local/lib/dridock/dridock
         [ -x "$_bin" ] || _die "dridock: $_bin missing — rebuild image (make build)"
         shift; exec "$_bin" team "$@" ;;
+    # #115: the version verbs are answered by the same binary, which needs no
+    # colima for them. They used to be listed as host-only, so `dridock
+    # --version` exited 2 in here and the team-watch hooks' fetcher staleness
+    # check (#71), which asks exactly that, never ran in a container.
+    version|-v|--version)
+        _bin=/usr/local/lib/dridock/dridock
+        [ -x "$_bin" ] || _die "dridock: $_bin missing — rebuild image (make build)"
+        exec "$_bin" "$1" ;;
 
     # ── host-side verbs: not runnable here, print a targeted message ──────────
     start|stop|down|destroy|bootstrap|migrate|info|status|vm|ip|net|features|profiles|\
-    checkversion|browser-bridge|host-agent|harness|framework-bugs|version|\
-    setup-token|clear-session|claude-dir|completion|-v|--version|doctor|auth|mcp)
+    checkversion|browser-bridge|host-agent|harness|framework-bugs|\
+    setup-token|clear-session|claude-dir|completion|doctor|auth|mcp)
         _host "$1" ;;
 
     # ── unknown ───────────────────────────────────────────────────────────────

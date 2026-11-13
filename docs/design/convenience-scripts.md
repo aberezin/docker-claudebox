@@ -62,6 +62,11 @@ command surface across the host↔container boundary. From either side, the user
   incantation (`cd <DRIDOCK_WORKSPACE> && dridock <verb>`) rather than a generic
   "unknown command" — so the claudebot immediately knows WHY it didn't work and
   WHERE to run it. Exit status 2.
+- **Binary-backed verbs** (`team …`, and `version` / `-v` / `--version` since #115) run
+  the bun-compiled `dridock` baked at `/usr/local/lib/dridock/dridock`, which needs no
+  Colima for them. The version verbs matter more than they look: the team-watch hooks
+  check for a stale fetcher with `dridock --version` (#71), and until #115 the shim
+  refused it as host-only, so that check never ran in a container.
 - **Unknown verbs** exit 1 with a hint to run `dridock help`.
 
 The container also carries a **`/usr/local/bin/claudebox`** symlink pointing at

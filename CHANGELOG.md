@@ -29,6 +29,15 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **`dridock --version` works inside the container** (#115). The in-container shim
+  listed `version`, `-v` and `--version` as host-only (rc 2), though the baked binary
+  answers them without Colima. The team-watch hooks check for a stale fetcher with
+  `dridock --version` (#71), so that check never ran in a container: a fetcher could
+  outlive an image upgrade. The shim now hands those verbs to the baked binary, and
+  its help no longer claims `-v`/`--version` pass through to the Claude CLI. New
+  `tests/test_dridock_shim.sh`. **After the image rebuild the check runs in the
+  container for the first time, so the first session start may restart a fetcher
+  whose `.version` stamp is old.** That's the fix working, not a regression.
 - **`make hooks`, `make hooks-check` and `./install.sh` no longer call a chaining
   `core.hooksPath` a dead guard (#117).** Any set `hooksPath` was reported as
   replacing `.git/hooks/`, which counted as a problem (rc 1 from both make targets,
