@@ -29,6 +29,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **A project VM picks up a rebuilt image even when no version label changed**
+  (#118). The copy from `cb-infra` happened only when the harness semver was newer or
+  the pinned Claude CLI differed, so a baked-file fix shipped without a VERSION bump
+  (#115's shim, for one) never reached existing project VMs: `dridock start`
+  recreated the container on the old image and said nothing. When the semvers are
+  equal, the image IDs are now compared too (`docker save | docker load` keeps the
+  ID), and a different ID in `cb-infra` is copied across with the reason
+  `same version label, different build (<old> → <new>)`. A project VM whose image
+  was built locally rather than copied from `cb-infra` now gets `cb-infra`'s on the
+  next start; `cb-infra` is the source of truth. The "only one side has the CLI
+  label" case no longer needs `DRIDOCK_FORCE_RESEED=1` when both IDs are readable.
 - **`dridock --version` works inside the container** (#115). The in-container shim
   listed `version`, `-v` and `--version` as host-only (rc 2), though the baked binary
   answers them without Colima. The team-watch hooks check for a stale fetcher with

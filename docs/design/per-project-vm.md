@@ -97,7 +97,13 @@ the image seeded into each project VM from the shared `cb-infra` profile:
 > side carries the label — cb-infra rebuilt, the project VM still on a pre-stamp
 > copy — the comparison can't be made, so it reports rather than guesses; set
 > `DRIDOCK_FORCE_RESEED=1` to copy across regardless. That note is deliberate — an unchecked image must never be
-> reported as an up-to-date one (#76). To pick up an image built by a newer
+> reported as an up-to-date one (#76). Labels aren't the whole answer, though: a
+> baked-file fix that ships without a VERSION bump changes the image and no label,
+> so with equal semvers the **image IDs** are compared too, and a different ID in
+> `cb-infra` is copied across (`same version label, different build (<old> → <new>)`).
+> `docker save | docker load` preserves the ID, so a copied image matches its source
+> until `cb-infra` is rebuilt (#118). The label-only rules above apply when an ID
+> can't be read. To pick up an image built by a newer
 > `make build`, start `cb-infra` and re-run. The **first-time seed** (project VM
 > has no image at all) is different: it *requires* `cb-infra` and fails loudly
 > with `cb-infra not running — cannot seed image` rather than proceeding.

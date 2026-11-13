@@ -1,4 +1,4 @@
-import type { Docker } from "../infra/Docker.ts";
+import type { Docker, ImageIdentity } from "../infra/Docker.ts";
 import type { Colima } from "../infra/Colima.ts";
 import { infraContext, INFRA_PROFILE } from "../infra/Docker.ts";
 import { Version } from "../domain/Version.ts";
@@ -14,6 +14,8 @@ import { NULL_PROGRESS } from "../infra/Spinner.ts";
  *   - Target has image present:
  *       - cb-infra is Running AND holds a newer version → save|load
  *         (auto-reseed after `make build`).
+ *       - Same version, but a different image ID (a CLI-only rebuild, #78,
+ *         or a baked-file fix with no VERSION bump, #118) → save|load.
  *       - cb-infra stopped, or holding no comparable version → the drift
  *         question is UNANSWERED: return `unverified` (not `already-current`)
  *         and emit a note, so a stale image is never silently blessed. #76.
@@ -143,28 +145,55 @@ export class ImageEnsureService {
         return { kind: "reseeded", from: targetVersion, to: infraVersion };
       }
 
-      // The harness semver says we're level. That is NOT the whole story: a
-      // `--claude-version` rebuild changes the CLI while DRIDOCK_VERSION stays
-      // put, so comparing only the semver left project VMs on an old CLI
-      // forever -- and a stale CLI SILENTLY DROPS unknown flags (#17) rather
-      // than erroring, so nothing downstream would have surfaced it (#78).
+      // The harness semver says we're level. That is NOT the whole story.
+      // Two builds can carry the same labels and still differ: a
+      // `--claude-version` rebuild changes the CLI while DRIDOCK_VERSION
+      // stays put (#78), and any baked-file fix that, under our versioning
+      // rule, ships without a VERSION bump changes the image and NO label
+      // at all (#118 -- #115's shim fix never reached the project VM).
+      //
+      // So compare the image ID. `docker save | docker load` carries the ID
+      // across (it is the config digest), which makes it a build identity:
+      // equal → same build, different → cb-infra holds a different one, and
+      // cb-infra is the source of truth for what gets deployed. LOAD-BEARING:
+      // if save|load ever stopped preserving the ID, every launch would
+      // reseed (loud: a 15-45s progress phase each time), never the reverse.
       //
       // Only when the semvers are EQUAL. If the target is somehow newer we
-      // leave it alone rather than downgrading the whole image over the CLI.
+      // leave it alone rather than downgrading the whole image.
       if (targetVersion === infraVersion) {
-        const infraCli = await this.claudeCli(infraContext());
-        const targetCli = await this.claudeCli(targetContext);
+        const infraIdent = await this.deps.docker.imageIdentity(infraContext(), this.deps.image);
+        const targetIdent = await this.deps.docker.imageIdentity(targetContext, this.deps.image);
+        const infraCli = cliOf(infraIdent);
+        const targetCli = cliOf(targetIdent);
+
+        if (infraIdent !== undefined && targetIdent !== undefined) {
+          if (infraIdent.id === targetIdent.id) {
+            return { kind: "already-current", version: targetVersion };
+          }
+          const rc = await this.reseed(targetContext);
+          if (rc !== 0) return { kind: "failed", reason: `save|load rc ${rc}` };
+          return {
+            kind: "reseeded",
+            from: targetVersion,
+            to: infraVersion,
+            reason: infraCli !== undefined && targetCli !== undefined && infraCli !== targetCli
+              ? `claude CLI ${targetCli} → ${infraCli}`
+              : `same version label, different build (${shortId(targetIdent.id)} → ${shortId(infraIdent.id)})`,
+          };
+        }
+
+        // An ID we couldn't read: fall back to the labels, which is all the
+        // pre-#118 code had. Reached only when an inspect failed on a side
+        // whose version label we DID read, i.e. rarely.
         if (infraCli === undefined && targetCli === undefined) {
-          // NEITHER side carries the stamp: both images predate it. Nothing has
-          // changed and nothing is knowable, which is exactly the state every
-          // install was in before #78 -- so stay silent. Warning here would nag
-          // on every launch forever until an unrelated rebuild happened.
+          // NEITHER side carries the stamp: both images predate it. Nothing is
+          // knowable from labels, so stay silent rather than nag every launch.
           return { kind: "already-current", version: targetVersion };
         }
         if (infraCli === undefined || targetCli === undefined) {
-          // Exactly ONE side is stamped -- the real upgrade path (cb-infra
-          // rebuilt, project VM still on a pre-stamp copy). Genuinely
-          // ambiguous, so report it rather than guess either way (#76 rule).
+          // Exactly ONE side is stamped -- genuinely ambiguous without an ID,
+          // so report it rather than guess either way (#76 rule).
           // DRIDOCK_FORCE_RESEED is the way across.
           return {
             kind: "unverified",
@@ -245,16 +274,20 @@ export class ImageEnsureService {
     }
   }
 
-  /** Pinned CLI version off the image label, or undefined when absent. */
-  private async claudeCli(context: string): Promise<string | undefined> {
-    const ident = await this.deps.docker.imageIdentity(context, this.deps.image);
-    const v = ident?.labels[CLAUDE_CLI_LABEL];
-    return v === undefined || v === "" ? undefined : v;
-  }
-
   private isNewer(a: string, b: string): boolean {
     try {
       return Version.parseLoose(a).compareTo(Version.parseLoose(b)) === "gt";
     } catch { return false; }
   }
+}
+
+/** Pinned CLI version off the image label, or undefined when absent. */
+function cliOf(ident: ImageIdentity | undefined): string | undefined {
+  const v = ident?.labels[CLAUDE_CLI_LABEL];
+  return v === undefined || v === "" ? undefined : v;
+}
+
+/** `sha256:1daa83165f3c…` → `1daa83165f3c`, the form `docker image ls` prints. */
+function shortId(id: string): string {
+  return id.replace(/^sha256:/, "").slice(0, 12);
 }
