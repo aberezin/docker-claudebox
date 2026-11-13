@@ -380,6 +380,19 @@ Write hooks that are safe to run repeatedly: check before you append, `mkdir -p`
 `mkdir`, `install -m` rather than `cat >>`, and never assume "first run". A hook that
 appends a line to a config file will append it again on every recreate.
 
+## Don't `sed -i` files on the workspace mount (it strips the exec bit)
+The workspace is a virtiofs share from the Mac. GNU `sed -i` (and `perl -i`) writes a
+temp file and renames it over the original, and on this share the mode doesn't survive
+the rename: a `755` script comes out `600`, silently. Git then records it as `644`, so
+the script loses `+x` for everyone who pulls it, and a later run fails with
+`Permission denied`.
+- Edit files with your **Edit/Write tools**, or an in-place write that keeps the inode
+  (`python3 -c "p='f'; s=open(p).read(); open(p,'w').write(s.replace('a','b'))"`).
+- Before committing, check: `git diff --cached --summary | grep 'mode change'`. A line
+  like `mode change 100755 => 100644` is almost always this, not something you meant.
+  Fix it with `chmod +x <file>` and re-stage.
+- `sed -i` in `/tmp` or the scratchpad is fine; only the workspace mount is affected.
+
 ## Secrets & credentials
 NEVER put a secret value on a command line — arguments leak into shell history, `ps`,
 process listings, and logs. This is a hard rule for the flows you build here AND for

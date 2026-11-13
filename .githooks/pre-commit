@@ -27,6 +27,39 @@
 # .git/hooks/ lives outside the worktree and is therefore branch-independent.
 set -uo pipefail
 
+# #116: refuse an exec bit lost in passing. GNU `sed -i` on the virtiofs
+# workspace mount renames a temp file over the original and the mode doesn't
+# survive: a 755 script comes out 600, which git stages as 644. It cost
+# entrypoint.sh its exec bit on #105 and #107, caught only by review both times.
+# Runs on EVERY branch (unlike the master guard below): the flip lands on work
+# branches. Deliberate removals are rare; override with DRIDOCK_ALLOW_MODE_CHANGE=1.
+_lost_x=()
+while IFS= read -r _f; do
+    [ -n "$_f" ] && _lost_x+=("$_f")
+done < <(git -c core.quotePath=false diff --cached --summary --no-renames \
+           | sed -n 's/^ mode change 100755 => 100644 //p')
+if [ "${#_lost_x[@]}" -gt 0 ]; then
+    if [ "${DRIDOCK_ALLOW_MODE_CHANGE:-}" = "1" ]; then
+        echo "⚠️  committing with the exec bit removed (DRIDOCK_ALLOW_MODE_CHANGE=1):" >&2
+        printf '       %s\n' "${_lost_x[@]}" >&2
+    else
+        {
+            echo "❌ refusing to commit: these files lose their exec bit (755 → 644):"
+            printf '       %s\n' "${_lost_x[@]}"
+            echo
+            echo "   On the workspace mount this is usually \`sed -i\` (#116), not intent."
+            echo "   Put the bit back and re-stage:"
+            echo
+            for _f in "${_lost_x[@]}"; do
+                printf '       chmod +x %q && git add %q\n' "$_f" "$_f"
+            done
+            echo
+            echo "   If removing it is deliberate:  DRIDOCK_ALLOW_MODE_CHANGE=1 git commit ..."
+        } >&2
+        exit 1
+    fi
+fi
+
 _branch="$(git symbolic-ref --short -q HEAD || echo detached)"
 case "$_branch" in
     master|main) ;;

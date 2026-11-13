@@ -29,6 +29,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **`sed -i` on the workspace mount no longer costs a script its exec bit unnoticed**
+  (#116). On the virtiofs share, GNU `sed -i` renames a temp file over the original
+  and the mode doesn't survive: a 755 file comes out 600, which git stages as 644.
+  It hit `entrypoint.sh` on #105 and #107. Two parts: the baked framework guidance
+  (the `CLAUDE.md` the entrypoint writes) now has a section telling every claudebot
+  to edit with its Edit/Write tools or an in-place write and to check
+  `git diff --cached --summary | grep 'mode change'` before committing; and this
+  repo's pre-commit hook refuses a `100755 → 100644` change on any branch, naming
+  the files and the fix (`DRIDOCK_ALLOW_MODE_CHANGE=1` overrides). New
+  `tests/test_precommit_mode_guard.sh`. Existing clones get the new hook from
+  `make hooks` (the SessionStart nag says when it's stale).
 - **A project VM picks up a rebuilt image even when no version label changed**
   (#118). The copy from `cb-infra` happened only when the harness semver was newer or
   the pinned Claude CLI differed, so a baked-file fix shipped without a VERSION bump
