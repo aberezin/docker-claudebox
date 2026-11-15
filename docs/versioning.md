@@ -170,9 +170,9 @@ started requiring the step, a second checkout of this repo on the same host
 (`~aberezin/.../docker-out-of-docker/docker-claudebox`, since deleted — 2026-11-15) still
 held only `.git/hooks/*.sample`. The guard was documented as enforced and was absent from a
 live checkout. Name the path, not the owner: the first draft of these comments
-attributed that checkout to Bear, and Bear disproved it — its workspace was a
-*different* directory (`docker-claudebox-in-claudebox`) and `docker-claudebox` was never
-mounted into its container at all.
+attributed that checkout to Bear, and Bear disproved it — its workspace is a
+*different* directory (`docker-claudebox-in-claudebox`, still the one as of 2026-11-15)
+and `docker-claudebox` was never mounted into its container at all.
 
 **Staleness is the quieter half.** `.githooks/pre-commit` has changed twice (5.4.0
 reworded its refusal, #103 added the release-branch advice). A clone that installed
@@ -258,8 +258,9 @@ checkout gives macOS + colima from Alan's Mac shell and Linux + the ambient daem
 container shell — and only the first can hit the macOS-only xattr failure this gate exists
 for (#114). A claudebot's container mounts Alan's checkout at its own host path, so the
 path alone does not tell you which ran. Nor is "Alan's Mac" reliably one tree: on
-2026-11-13 there were three checkouts of this repo on it, two of them months stale and
-without the guard installed (§ Installing the guard above is about one of those). He
+2026-11-13 there were three checkouts on it, two of them months stale and without the
+guard installed (§ Installing the guard above is about one of those; the third, under
+`tmp/`, was identified by layout — it was deleted before anyone read its remote). He
 deleted both on 2026-11-15, so there is one today — but the count is a fact about a
 moment, not a property of the host, and the directories are being renamed
 `*-claudebox` → `*-dridock`, so treat any path literal in this file as dated evidence
