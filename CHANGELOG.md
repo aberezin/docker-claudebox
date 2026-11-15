@@ -203,6 +203,16 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/versioning.md` § The install gate and the branch bullet in CLAUDE.md.
 
 ### Docs
+- New design doc `docs/design/path-independence.md` (#123). A project's identity should be
+  its declared `name:` + `id:`, not its directory path, so the directory is free to be
+  renamed — as it already is for the colima profile and the state dir. The doc inventories
+  what is still path-keyed (container names, sidecars, and Claude Code's session dir,
+  downstream of the deliberately path-derived mount), proposes `claude-<name>-<id>`, and
+  specifies adoption of existing containers by **recreate** rather than `docker rename`:
+  the entrypoint reads its sidecar names from an env var fixed at create
+  (`entrypoint.sh:6`, `858`), which a rename does not update, so renaming would drop
+  secrets and auth on the next start with no stderr line (#30's shape). Includes the
+  measured `docker rename` behaviour and the feature-marker cost of recreating.
 - The install gate's evidence is dated rather than stated as current (#122). It argued
   from "there are two checkouts of this repo on Alan's Mac"; he deleted the two stale ones
   on 2026-11-15 and is renaming `*-claudebox` directories to `*-dridock`, so the count and
