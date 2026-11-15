@@ -203,6 +203,13 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/versioning.md` § The install gate and the branch bullet in CLAUDE.md.
 
 ### Docs
+- The install gate's evidence is dated rather than stated as current (#122). It argued
+  from "there are two checkouts of this repo on Alan's Mac"; he deleted the two stale ones
+  on 2026-11-15 and is renaming `*-claudebox` directories to `*-dridock`, so the count and
+  the paths were facts about a moment. The rule is unchanged and rests on its standing
+  grounds — a claudebot's container mounts the checkout at its own host path, and
+  `Makefile:24` lets the shell pick the backend — so the merge note still quotes the shell
+  and the checkout path.
 - The install gate's one open scope question is now recorded as decided (#120). Root
   `install.sh` runs `.githooks/install.sh`, so a hook change alters what an install does
   without touching the build-path list; Alan's answer is to leave the list as is, and

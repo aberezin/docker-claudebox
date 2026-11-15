@@ -167,12 +167,12 @@ Since #104 you get it for free: `./install.sh` runs the installer before the ima
 build, and a SessionStart hook nags when this clone's copies are missing or stale.
 Three layers because one wasn't enough — on 2026-11-09, two months after this file
 started requiring the step, a second checkout of this repo on the same host
-(`~aberezin/.../docker-out-of-docker/docker-claudebox`) still held only
-`.git/hooks/*.sample`. The guard was documented as enforced and was absent from a
+(`~aberezin/.../docker-out-of-docker/docker-claudebox`, since deleted — 2026-11-15) still
+held only `.git/hooks/*.sample`. The guard was documented as enforced and was absent from a
 live checkout. Name the path, not the owner: the first draft of these comments
-attributed that checkout to Bear, and Bear disproved it — its workspace is a
-*different* directory (`docker-claudebox-in-claudebox`) and `docker-claudebox` is
-not mounted into its container at all.
+attributed that checkout to Bear, and Bear disproved it — its workspace was a
+*different* directory (`docker-claudebox-in-claudebox`) and `docker-claudebox` was never
+mounted into its container at all.
 
 **Staleness is the quieter half.** `.githooks/pre-commit` has changed twice (5.4.0
 reworded its refusal, #103 added the release-branch advice). A clone that installed
@@ -257,12 +257,14 @@ still required, but for these branches it isn't enough on its own.
 checkout gives macOS + colima from Alan's Mac shell and Linux + the ambient daemon from a
 container shell — and only the first can hit the macOS-only xattr failure this gate exists
 for (#114). A claudebot's container mounts Alan's checkout at its own host path, so the
-path alone does not tell you which ran. Nor does "Alan's Mac" narrow it to one tree:
-there are two checkouts of this repo on it, and § Installing the guard above is about the
-other one — measured 2026-11-13, `…/docker-out-of-docker/docker-claudebox` last moved
-2026-09-02 with no hook installed, while `…/docker-claudebox-in-claudebox` moved that day
-and carries the guard. The merge note therefore quotes **the shell and the checkout
-path**, not only the final line: "Alan's bash (aberezin), in
+path alone does not tell you which ran. Nor is "Alan's Mac" reliably one tree: on
+2026-11-13 there were three checkouts of this repo on it, two of them months stale and
+without the guard installed (§ Installing the guard above is about one of those). He
+deleted both on 2026-11-15, so there is one today — but the count is a fact about a
+moment, not a property of the host, and the directories are being renamed
+`*-claudebox` → `*-dridock`, so treat any path literal in this file as dated evidence
+rather than something to look up. The merge note therefore quotes **the shell and the
+checkout path**, not only the final line: "Alan's bash (aberezin), in
 `/Users/aberezin/…/<checkout>`" is the claim that can be checked; "Alan ran it" is not.
 
 How it runs — the preferred order:
