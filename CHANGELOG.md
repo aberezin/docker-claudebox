@@ -203,6 +203,15 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/versioning.md` § The install gate and the branch bullet in CLAUDE.md.
 
 ### Docs
+- `docs/design/path-independence.md` records the decisions it had left open (#123): `name:`
+  lives in the tracked `project.yml`, the scheme change ships in **6.0.0**, and every
+  project-creation path now **requires** a name — `dridock bootstrap --name <label>`, with
+  no `--name` exiting non-zero and printing the name it would have inferred. A name
+  inferred from the directory is a name nobody chose, inferred from the thing this design
+  makes disposable. Adoption of a pre-6.0 project is the one path that may infer, once,
+  with a stderr line saying what it wrote. The 7.0.0 removal of the legacy `claude-<cwd>`
+  derivation gets its roadmap row and deadline check in the same commit as the legacy path,
+  since the deadline test asserts presence until the major arrives.
 - New design doc `docs/design/path-independence.md` (#123). A project's identity should be
   its declared `name:` + `id:`, not its directory path, so the directory is free to be
   renamed — as it already is for the colima profile and the state dir. The doc inventories

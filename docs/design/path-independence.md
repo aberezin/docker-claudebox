@@ -1,6 +1,6 @@
 # Path independence — a project's identity is declared, not inferred
 
-**Status:** design, not yet implemented (#123). The inventory and the measurements below are current; the target design is a proposal.
+**Status:** specified, not yet implemented — **#123, slated for 6.0.0, Bear builds it** (Alan, 2026-11-15). The inventory and the measurements below are current. The two decisions this design left to Alan are now made and marked in place: `name:` lives in the tracked `project.yml`, and the scheme change ships in 6.0.0. **Land [#124](https://github.com/aberezin/docker-claudebox/issues/124) first** — adopt-by-recreate walks straight into its feature-marker gap.
 
 A git repository does not care what its directory is called. You can `mv` a clone anywhere and every commit, branch and remote comes with it, because git's identity lives *inside* the directory. dridock is half of the way there: the VM and the per-project state are keyed on a declared `id:`, but the container, its sidecars and the claudebot's session history are keyed on the absolute path. So a rename silently starts the project over (#121).
 
@@ -54,7 +54,24 @@ Two declared fields, each in the file the [config split](project-config-split.md
 
 Container names become `claude-<name>-<id>`, `claude-<name>-<id>_prog`, `claude-<name>-<id>_cron`; sidecars follow the container name as they do now. **All three roles need adopting**, because all three are persistent containers reused via `docker start` rather than recreated per run (`StartCommand.ts:398`, `:415`) — the mount-source sweep at `:269` already walks the same three names.
 
-**`name:` when it is absent**, which is every project that exists today: bootstrap and adoption write it **once**, as the sanitized basename of the project root, into `project.yml` (created lazily, per the #97 rule that nothing lands in a git tree unasked). Written once is the point — a later directory rename does not change the name, so the container keeps its identity. If sanitization leaves nothing (a basename with no `[a-z0-9]` at all), the name is omitted and the container is plain `claude-<id>`, which is still path-independent and still unique; a label nobody can read is not worth a failed start. `docker ps` becomes *more* legible than today's `claude-_Users_aberezin_Development_ai-claude-code_...`, not less.
+`name:` goes in the **tracked** `project.yml` (Alan's call, 2026-11-15): it is a property of the project, identical in every clone, which is the #97 test.
+
+### A new project must declare its name
+
+**Every project-creation path requires a name explicitly and refuses without one** (Alan, 2026-11-15). `dridock bootstrap` takes `--name <label>`; with no `--name` it exits non-zero and prints the name it *would* have inferred, so supplying it is one copy-paste:
+
+```
+dridock bootstrap: --name is required (a project's name is part of its identity)
+   suggested from this directory:  --name my-proj
+```
+
+A flag rather than a prompt, so a non-interactive or scripted bootstrap behaves the same as an interactive one. No value is secret, so this does not touch the secrets-are-file-based rule — that rule is about credential *values*, and a project label is neither.
+
+Why require it rather than default it: a name inferred from the directory is a name nobody chose, and it is inferred from the very thing this design is making disposable. Two sibling checkouts (`myproj`, `myproj-2`) would silently become two differently-named projects; rename the directory before the first start and the name silently changes with it. Declaring it once at creation is also what makes it stable afterwards — a later rename never touches it.
+
+**The one path that may infer is adoption of a project that predates this**, which is every project that exists today. There, adoption writes `name:` **once**, as the sanitized basename, into `project.yml` (created lazily, per the #97 rule that nothing lands in a git tree unasked), with a stderr line saying it did and what it wrote. That is an inference the user can see and edit, not a silent default — and it only ever happens on the upgrade, never for a new project.
+
+If sanitization leaves nothing (a basename with no `[a-z0-9]` at all) the adoption path omits the name and the container is plain `claude-<id>`: still path-independent, still unique. A label nobody can read is not worth a failed start on an upgrade — but on *creation* the same case is a refusal, because there a human is right there to pick a better one. `docker ps` becomes *more* legible than today's `claude-_Users_aberezin_Development_ai-claude-code_...`, not less.
 
 With that, a rename changes nothing the harness owns. No new container, no orphaned sidecars, no credential files left under a dead name.
 
@@ -128,7 +145,9 @@ Requirements on the implementation, each one a lesson already paid for in this r
 
 A recreated container also picks up the declared `--hostname` again, so sibling addressing by hostname is stable across adoption — which is the right habit anyway, since a container name's DNS entry moves under rename while its hostname does not ([n-tier-networking.md](n-tier-networking.md), [per-project-vm.md](per-project-vm.md)).
 
-Because adoption is built in, **the version question is a free choice rather than a forced one.** A major is not needed to change the scheme; what a major buys is permission to delete the legacy-name computation later. That removal is a `docs/roadmap.md` row with a check in `tests/test_deprecation_deadlines.sh`, per the policy that a prose deadline does not hold and a test that fails on the release does.
+**This ships in 6.0.0** (Alan's call, 2026-11-15). Adoption being built in meant the version was a free choice rather than a forced one — nothing is stranded either way — and the major was chosen anyway, because the scheme change is exactly the kind of thing a reader expects to find in a major's notes alongside 6.0.0's other content (the `.claudebox/` migration-path removal, `docs/roadmap.md`).
+
+What the major buys is permission to delete the legacy-name computation — the `claude-${cwd}` derivation kept only so adoption can find the old container — in **7.0.0**. That deadline needs a `docs/roadmap.md` row and a check in `tests/test_deprecation_deadlines.sh`, and the two land **in the same commit as the legacy path itself**, not before: the test asserts that anything promised for removal is still present until its major arrives (`tests/test_deprecation_deadlines.sh:47`), so a row added today — for code that does not exist yet — would fail the suite. Row, check and code together is what the policy actually requires.
 
 Sidecar filenames are host↔image IPC, so this bumps `VERSION` ([versioning.md](../versioning.md)). It changes no baked file and no build input, so the install gate does not apply — but the first real adoption happens in a live claudebot's container, so verify it there deliberately and name the environment.
 
