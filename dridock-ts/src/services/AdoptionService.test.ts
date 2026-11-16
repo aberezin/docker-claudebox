@@ -230,9 +230,26 @@ describe("AdoptionService — Arfy's review (#123), against what a real daemon r
     fs.seed(`${DATA}/.${LEGACY}-secrets`, "x\n");
     const r = await run();
     expect(r.kind).toBe("refused");
-    if (r.kind === "refused") expect(r.message).toContain("may have started since");
+    if (r.kind === "refused") expect(r.message).toContain("couldn't remove claude-_Users_a_dev_myproj");
     expect(docker.removals).toEqual([]);
     expect(await fs.exists(`${DATA}/.${LEGACY}-secrets`)).toBe(true);
+  });
+
+  test("re-review: a claude-_* container with NO same-path bind isn't ours: skipped, the real one still adopted", async () => {
+    const { docker, run } = setup();
+    docker.seedContainerSummary(CTX, { name: LEGACY, state: "exited", sameBinds: [ROOT] });
+    docker.seedContainerSummary(CTX, { name: "claude-_helper_sidecar_thing", state: "running", sameBinds: [] });
+    const r = await run();
+    expect(r.kind).toBe("ok");
+    if (r.kind === "ok") expect(r.notes.join("")).toContain("skipping claude-_helper_sidecar_thing");
+    expect(docker.removals.map((x) => x.name)).toEqual([LEGACY]);
+  });
+
+  test("re-review: two same-path binds, neither root → still refused (genuinely ambiguous)", async () => {
+    const { docker, run } = setup();
+    docker.seedContainerSummary(CTX, { name: LEGACY, state: "exited", sameBinds: ["/x", "/y"] });
+    expect((await run()).kind).toBe("refused");
+    expect(docker.removals).toEqual([]);
   });
 
   test("SF4: a kept subdirectory container keeps its sidecars; the adopted one's are swept", async () => {

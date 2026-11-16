@@ -85,6 +85,7 @@ export class AdoptionService {
     // ── current-scheme containers: moved or copied? ─────────────────────
     for (const c of all.filter((x) => currentNames.has(x.name))) {
       const ws = workspaceOf(c, inp.root);
+      if (ws.kind === "not-ours") { notes.push(notOursNote(c)); continue; }
       if (ws.kind === "unknown") return { kind: "refused", message: unknownMessage(c, inp) };
       const src = ws.path;
       if (src === inp.root) continue;
@@ -101,6 +102,7 @@ export class AdoptionService {
     for (const c of all.filter((x) => isOld(x.name))) {
       const role = roleOf(c.name);
       const ws = workspaceOf(c, inp.root);
+      if (ws.kind === "not-ours") { kept.add(c.name); notes.push(notOursNote(c)); continue; }
       if (ws.kind === "unknown") return { kind: "refused", message: unknownMessage(c, inp) };
       const src = ws.path;
       // A pre-6.0 container for a SUBDIRECTORY of this project (6.0 starts only
@@ -162,8 +164,8 @@ export class AdoptionService {
       if (rc !== 0) {
         return {
           kind: "refused",
-          message: `❌ couldn't remove ${c.name} to adopt it (rc ${rc}): it may have started since this run looked.\n`
-            + `   Nothing else was changed. Stop it and start again:\n`
+          message: `❌ couldn't remove ${c.name} to adopt it (docker rm rc ${rc}); nothing else was changed.\n`
+            + `   If it's running (it may have started since this run looked), stop it and start again:\n`
             + `     ${inp.binName} down && ${inp.binName} start\n`,
         };
       }
@@ -198,15 +200,26 @@ export class AdoptionService {
  * if `root` is among them, nothing moved; else exactly one is the old
  * workspace; else it can't be told, and adoption must report, not pick.
  */
-export function workspaceOf(c: ContainerSummary, root: string): { kind: "known"; path: string } | { kind: "unknown" } {
+export function workspaceOf(c: ContainerSummary, root: string):
+  { kind: "known"; path: string } | { kind: "unknown" } | { kind: "not-ours" } {
   if (c.labelWorkspace !== undefined && c.labelWorkspace !== "") return { kind: "known", path: c.labelWorkspace };
   if (c.sameBinds.includes(root)) return { kind: "known", path: root };
   if (c.sameBinds.length === 1) return { kind: "known", path: c.sameBinds[0]! };
+  // Every dridock container, before and since 6.0, mounts its workspace at its
+  // own host path. NO same-path bind is evidence it isn't one of ours (the VM
+  // also runs the claudebot's own workloads, some of which may be named
+  // claude-_…): skip it. Two or more with none being root is genuinely
+  // ambiguous: refuse.
+  if (c.sameBinds.length === 0) return { kind: "not-ours" };
   return { kind: "unknown" };
 }
 
+function notOursNote(c: ContainerSummary): string {
+  return `   (skipping ${c.name}: it mounts no directory at its own path, so it isn't a dridock project container)\n`;
+}
+
 function unknownMessage(c: ContainerSummary, inp: AdoptionInput): string {
-  return `❌ can't tell which directory ${c.name} works on: it mounts ${c.sameBinds.length === 0 ? "no same-path directory" : c.sameBinds.join(", ")}\n`
+  return `❌ can't tell which directory ${c.name} works on: it mounts ${c.sameBinds.join(", ")}\n`
     + `   and none of them is ${inp.root}. Rather than guess (adopting could remove it), nothing was changed.\n`
     + `   If it's stale, remove it and start again:\n`
     + `     docker --context ${inp.context} rm ${c.name}\n`;
