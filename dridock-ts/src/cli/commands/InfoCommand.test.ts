@@ -51,12 +51,12 @@ describe("InfoCommand — full project (P4c — no more Phase-3 stubs)", () => {
     // minutes" — instead of `.State.Status`'s "running"). Arfy #38 P4c
     // B2 fix.
     const runtime = new InMemoryContainerRuntime();
-    runtime.seedPs("claude-_p", { name: "claude-_p", status: "Up 3 minutes", image: "dridock:latest" });
+    runtime.seedPs("claude-p-abc12345", { name: "claude-p-abc12345", status: "Up 3 minutes", image: "dridock:latest" });
     const { ctx, stdout } = makeCtx(fs);
     await new InfoCommand("info", "dridock:latest", docker, new StubGitToplevel("/p"), colima, runtime).run([], ctx);
     const out = stdout.text();
     expect(out).toContain("VM:                cb-abc12345   (Running)");
-    expect(out).toContain("container:         claude-_p   Up 3 minutes");
+    expect(out).toContain("container:         claude-p-abc12345   Up 3 minutes");
     expect(out).toContain("VM IP:             192.168.64.13");
     expect(out).toContain("browse:            http://192.168.64.13:<port>");
     expect(out).toContain("hostname:          my-app");
@@ -77,11 +77,11 @@ describe("InfoCommand — full project (P4c — no more Phase-3 stubs)", () => {
     await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), colima).run([], ctx);
     const out = stdout.text();
     expect(out).toContain("VM:                cb-abc   (Stopped)");
-    expect(out).toContain("container:         claude-_p   (VM not running — status unavailable)");
+    expect(out).toContain("container:         claude-p-abc   (VM not running — status unavailable)");
     expect(out).toContain("VM IP:             (VM not running — start with 'dridock start')");
   });
 
-  test("VM Running but no container → 'container: claude-_p <none>'", async () => {
+  test("VM Running but no container → 'container: claude-p-abc <none>'", async () => {
     const fs = new InMemoryFileSystem();
     fs.seed("/p/.dridock/config.yml", "id: abc\n");
     const colima = new InMemoryColima();
@@ -89,7 +89,7 @@ describe("InfoCommand — full project (P4c — no more Phase-3 stubs)", () => {
     // No container seeded
     const { ctx, stdout } = makeCtx(fs);
     await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), colima).run([], ctx);
-    expect(stdout.text()).toContain("container:         claude-_p   <none>");
+    expect(stdout.text()).toContain("container:         claude-p-abc   <none>");
   });
 
   test("no network.hostname set → the '(unset — set network.hostname …)' hint", async () => {

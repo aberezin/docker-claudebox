@@ -16,6 +16,8 @@ import { VmEnsureService } from "../../services/VmEnsureService.ts";
 import { realSpinner } from "../../infra/Spinner.ts";
 import { ImageEnsureService, parseForceReseed } from "../../services/ImageEnsureService.ts";
 import { containerName } from "../../services/ContainerName.ts";
+import { guardWorkspace, notRootMessage } from "../../services/WorkspaceGuard.ts";
+import { resolveIdentity } from "../../services/ProjectIdentity.ts";
 
 /**
  * `dridock mcp <sub>` / `dridock auth <sub>` — passthrough verbs that
@@ -52,6 +54,14 @@ export abstract class ProjectPassthroughCommand implements Command {
   async run(args: readonly string[], ctx: Context): Promise<number> {
     const git = this.deps.git ?? new RealGitToplevel();
     const project = await new ProjectRootResolver(ctx.fs, git).resolve(ctx.cwd);
+    // Mounts the workspace and keys local-scope MCP config by cwd, so it runs
+    // from the root like start does (#123).
+    const guard = guardWorkspace(ctx.cwd, ctx.env.raw(), project.root);
+    for (const n of guard.notes) ctx.stderr.write(n);
+    if (guard.kind === "not-root") {
+      ctx.stderr.write(notRootMessage(ctx.cwd, guard.root, ctx.binName, this.verb));
+      return 1;
+    }
     const projectCfg = new ProjectConfig(ctx.fs);
     const id = await projectCfg.projectId(project.configPath);
     if (id === undefined) {
@@ -94,7 +104,8 @@ export abstract class ProjectPassthroughCommand implements Command {
     const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
     const dataDir = await machine.projectDataDir(id);
     await ctx.fs.mkdirRecursive(dataDir);
-    const cname = `${containerName(ctx.cwd)}_${this.verb}_${Date.now()}`;
+    const ident = await resolveIdentity(projectCfg, project, id, "read-only", (m) => ctx.stderr.write(m));
+    const cname = `${containerName(ident)}_${this.verb}_${Date.now()}`;
 
     const ctxDocker = projectContext(id);
     void projectProfile;

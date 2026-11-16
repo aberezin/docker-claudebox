@@ -57,7 +57,7 @@ function seedProjectVmRunning(): ReturnType<typeof seedProjectWithInfra> {
 }
 
 describe("StartCommand — guards", () => {
-  test("cwd inside .dridock/ → rc 1 with cd advice", async () => {
+  test("cwd inside .dridock/ is a subdirectory → rc 1 with cd advice (#123)", async () => {
     const fs = new InMemoryFileSystem();
     const cmd = new StartCommand("dridock:latest", {
       colima: new InMemoryColima(), docker: new InMemoryDocker(), runtime: new InMemoryContainerRuntime(),
@@ -66,7 +66,8 @@ describe("StartCommand — guards", () => {
     const { ctx, stderr } = makeCtx(fs, "/proj/.dridock");
     const rc = await cmd.run([], ctx);
     expect(rc).toBe(1);
-    expect(stderr.text()).toContain("inside a '.dridock'");
+    expect(stderr.text()).toContain("runs from the project root, not a subdirectory");
+    expect(stderr.text()).toContain("cd /proj && dridock start");
   });
 
   test("no config.yml → rc 1 + bootstrap hint", async () => {
@@ -151,13 +152,13 @@ describe("StartCommand — #48 liveness status lines on stderr", () => {
     const { fs, runtime, cmd } = seedProjectVmRunning();
     // Seed the interactive container as already-present so runInteractive
     // hits the attach branch (not the fresh-run branch).
-    runtime.seedPs("claude-_p", { name: "claude-_p", status: "Exited (0) 2 hours ago", image: "dridock:latest" });
+    runtime.seedPs("claude-p-abc", { name: "claude-p-abc", status: "Exited (0) 2 hours ago", image: "dridock:latest" });
     const { ctx, stderr } = makeCtx(fs);
     const rc = await cmd.run([], ctx);
     expect(rc).toBe(0);
     const err = stderr.text();
     expect(err).toContain(`🚀 dridock start (project: abc)`);
-    expect(err).toContain(`🔄 attaching to container claude-_p`);
+    expect(err).toContain(`🔄 attaching to container claude-p-abc`);
     // Warm-path skips the "VM ready" line to avoid narration noise.
     expect(err).not.toContain(`VM cb-abc ready`);
     // Attach branch — startAttached called, no fresh run.
@@ -175,7 +176,7 @@ describe("StartCommand — #48 liveness status lines on stderr", () => {
     const err = stderr.text();
     expect(err).toContain(`🚀 dridock start (project: abc)`);
     expect(err).toContain(`✓ VM cb-abc ready`);
-    expect(err).toContain(`🔧 starting container claude-_p`);
+    expect(err).toContain(`🔧 starting container claude-p-abc`);
     expect(runtime.runs).toHaveLength(1);
   });
 
@@ -186,7 +187,7 @@ describe("StartCommand — #48 liveness status lines on stderr", () => {
     expect(rc).toBe(0);
     const err = stderr.text();
     expect(err).toContain(`🚀 dridock start (project: abc)`);
-    expect(err).toContain(`🔧 starting container claude-_p_prog (-p mode)`);
+    expect(err).toContain(`🔧 starting container claude-p-abc_prog (-p mode)`);
     expect(runtime.runs).toHaveLength(1);
   });
 });
@@ -248,7 +249,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     // Essential env
     expect(run.env).toContainEqual({ key: "DRIDOCK_WORKSPACE", value: "/p" });
     expect(run.env).toContainEqual({ key: "DRIDOCK_PROJECT_ID", value: "abc" });
-    expect(run.env).toContainEqual({ key: "DRIDOCK_CONTAINER_NAME", value: "claude-_p" });
+    expect(run.env).toContainEqual({ key: "DRIDOCK_CONTAINER_NAME", value: "claude-p-abc" });
     expect(run.env).toContainEqual({ key: "DRIDOCK_FRAMEWORK_BUGS_DIR", value: "/home/claude/framework-bugs" });
     expect(run.env).toContainEqual({ key: "DRIDOCK_CONSULT_DIR", value: "/home/claude/framework-consult" });
     expect(run.env).toContainEqual({ key: "DRIDOCK_VM_IP", value: "192.168.64.13" });
@@ -272,7 +273,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     });
     await cmd.run([], ctx);
     for (const suffix of ["", "_prog", "_cron"]) {
-      const path = `/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p${suffix}-auth`;
+      const path = `/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc${suffix}-auth`;
       expect(await fs.readText(path)).toContain("ANTHROPIC_API_KEY=sk-ant-test-abc");
       expect(await fs.readText(path)).toContain("CLAUDE_CODE_OAUTH_TOKEN=oauth-test-xyz");
       expect(fs.modeOf(path)).toBe(0o600);
@@ -285,7 +286,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
     for (const suffix of ["", "_prog", "_cron"]) {
-      const path = `/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p${suffix}-secrets`;
+      const path = `/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc${suffix}-secrets`;
       expect(await fs.readText(path)).toBe("GH_TOKEN=ghp_test\n");
       expect(fs.modeOf(path)).toBe(0o600);
     }
@@ -295,7 +296,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     const { fs, cmd } = seedProjectVmRunning();
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
-    const path = "/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p_prog-vmip";
+    const path = "/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc_prog-vmip";
     expect(await fs.readText(path)).toContain("DRIDOCK_VM_IP=192.168.64.13");
     expect(fs.modeOf(path)).toBe(0o644);
   });
@@ -306,7 +307,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     fs.seed("/p/.dridock/config.yml", "id: abc\nnetwork:\n  hostname: my-project\n");
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
-    const path = "/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-vmip";
+    const path = "/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc-vmip";
     expect(await fs.readText(path)).toContain("DRIDOCK_HOSTNAME=my-project");
     expect(runtime.runs[0]!.env).toContainEqual({ key: "DRIDOCK_HOSTNAME", value: "my-project" });
   });
@@ -316,9 +317,9 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
     for (const suffix of ["", "_prog", "_cron"]) {
-      expect(await fs.readText(`/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p${suffix}-cdp`)).toBe("");
+      expect(await fs.readText(`/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc${suffix}-cdp`)).toBe("");
       // host-agent sidecar always has the two vars, empty when down
-      expect(await fs.readText(`/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p${suffix}-hostagent`))
+      expect(await fs.readText(`/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc${suffix}-hostagent`))
         .toBe("DRIDOCK_HOST_AGENT_URL=\nDRIDOCK_HOST_AGENT_TOKEN=\n");
     }
   });
@@ -328,7 +329,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     fs.seed("/home/alan/.config/dridock/projects/abc/.cdp-url", "http://192.168.64.1:9223\n");
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
-    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-cdp")).toContain("DRIDOCK_HOST_CDP_URL=http://192.168.64.1:9223");
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc-cdp")).toContain("DRIDOCK_HOST_CDP_URL=http://192.168.64.1:9223");
     expect(runtime.runs[0]!.env).toContainEqual({ key: "DRIDOCK_HOST_CDP_URL", value: "http://192.168.64.1:9223" });
   });
 
@@ -337,7 +338,7 @@ describe("StartCommand — full argv-parity (all P4b sidecars + mounts + env)", 
     const { ctx } = makeCtx(fs, { env: { DRIDOCK_ENV_MY_VAR: "hello" } });
     await cmd.run([], ctx);
     expect(runtime.runs[0]!.env).toContainEqual({ key: "MY_VAR", value: "hello" });
-    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p_prog-env")).toBe("MY_VAR=hello\n");
+    expect(await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc_prog-env")).toBe("MY_VAR=hello\n");
   });
 
   test("DRIDOCK_MOUNT_SCRATCH=/opt → -v /opt:/opt added to mounts", async () => {
@@ -393,7 +394,7 @@ describe("StartCommand — programmatic path with all fidelity", () => {
     const rc = await cmd.run(["-p", "hello world"], ctx);
     expect(rc).toBe(0);
     const run = runtime.runs[0]!;
-    expect(run.containerName).toBe("claude-_p_prog");
+    expect(run.containerName).toBe("claude-p-abc_prog");
     expect(run.mode).toBe("attached");
     // Bare cmd (entrypoint prepends claude)
     expect(run.cmd).not.toContain("claude");
@@ -405,17 +406,17 @@ describe("StartCommand — programmatic path with all fidelity", () => {
     // the interactive name).
     const containerNameEntries = run.env.filter((e) => e.key === "DRIDOCK_CONTAINER_NAME");
     expect(containerNameEntries).toHaveLength(1);
-    expect(containerNameEntries[0]!.value).toBe("claude-_p_prog");
+    expect(containerNameEntries[0]!.value).toBe("claude-p-abc_prog");
   });
 
   test("second -p reuses via _prog args sidecar + startAttached (no name collision)", async () => {
     const { runtime, cmd, fs } = seedProjectVmRunning();
-    runtime.seedPs("claude-_p_prog", { name: "claude-_p_prog", status: "Exited (0) 3m", image: "dridock:latest" });
+    runtime.seedPs("claude-p-abc_prog", { name: "claude-p-abc_prog", status: "Exited (0) 3m", image: "dridock:latest" });
     const { ctx } = makeCtx(fs);
     await cmd.run(["-p", "hi again"], ctx);
     expect(runtime.runs).toEqual([]);
-    expect(runtime.starts).toEqual([{ context: "colima-cb-abc", container: "claude-_p_prog" }]);
-    const argsFile = await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p_prog-args");
+    expect(runtime.starts).toEqual([{ context: "colima-cb-abc", container: "claude-p-abc_prog" }]);
+    const argsFile = await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc_prog-args");
     expect(argsFile).toContain("hi again");
   });
 
@@ -423,7 +424,7 @@ describe("StartCommand — programmatic path with all fidelity", () => {
     const { fs, cmd } = seedProjectVmRunning();
     const { ctx } = makeCtx(fs);
     await cmd.run(["-p", "hi", "--update"], ctx);
-    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p_prog-update")).toBe(true);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc_prog-update")).toBe(true);
   });
 });
 
@@ -431,20 +432,20 @@ describe("StartCommand — interactive path with sidecars", () => {
   test("interactive with --no-continue writes the sidecar; without removes it", async () => {
     const { fs, cmd } = seedProjectVmRunning();
     // Seed a stale sidecar to prove we remove it on the no-flag path
-    fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-no-continue", "");
+    fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc-no-continue", "");
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);   // no --no-continue → removed
-    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-no-continue")).toBe(false);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc-no-continue")).toBe(false);
     // With --no-continue → written
     await cmd.run(["--no-continue"], ctx);
-    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-no-continue")).toBe(true);
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc-no-continue")).toBe(true);
   });
 
   test("interactive extra args written to sidecar (excluding wrapper-only flags)", async () => {
     const { runtime, cmd, fs } = seedProjectVmRunning();
     const { ctx } = makeCtx(fs);
     await cmd.run(["--resume", "--update"], ctx);
-    const sidecar = await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-interactive-args");
+    const sidecar = await fs.readText("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-p-abc-interactive-args");
     expect(sidecar).toContain("--resume");
     expect(sidecar).not.toContain("--update"); // wrapper flag, not passed to claude
     // Container CMD stays bare
@@ -548,9 +549,9 @@ describe("StartCommand — migration invalidates existing containers", () => {
     // container picks up the new source is being recreated, and `dridock down`
     // does not remove. Found on a live project during the #80 gate test.
     const removed = docker.removals.map((r) => r.name);
-    expect(removed).toContain("claude-_p");
-    expect(removed).toContain("claude-_p_prog");
-    expect(removed).toContain("claude-_p_cron");
+    expect(removed).toContain("claude-p-abc");
+    expect(removed).toContain("claude-p-abc_prog");
+    expect(removed).toContain("claude-p-abc_cron");
     void runtime;
   });
 

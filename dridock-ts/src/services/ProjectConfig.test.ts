@@ -1,5 +1,5 @@
 import { test, expect, describe } from "bun:test";
-import { ProjectConfig, parseFeatures, parsePlugins, parseTopLevelString, stripFeaturesBlock } from "./ProjectConfig.ts";
+import { ProjectConfig, parseFeatures, parsePlugins, parseTopLevelString, setTopLevelString, stripFeaturesBlock } from "./ProjectConfig.ts";
 import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 
 describe("parseFeatures — YAML tolerance (matches wrapper.sh awk)", () => {
@@ -311,5 +311,52 @@ describe("ProjectConfig.features", () => {
     fs.seed("/p/.dridock/config.yml", "features: [typescript]\n");
     expect(await new ProjectConfig(fs).features("/p/.dridock/config.yml"))
       .toEqual(["typescript"]);
+  });
+});
+
+/* ── #123: the project's declared name ──────────────────────────────────── */
+
+describe("ProjectConfig.projectName / setProjectName (#123)", () => {
+  test("absent file or key → no name", async () => {
+    const fs = new InMemoryFileSystem();
+    const pc = new ProjectConfig(fs);
+    expect(await pc.projectName("/p/.dridock/project.yml")).toEqual({});
+    fs.seed("/p/.dridock/project.yml", "features: [go]\n");
+    expect(await pc.projectName("/p/.dridock/project.yml")).toEqual({});
+  });
+
+  test("declared name → raw and sanitized", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/project.yml", "name: My Proj\n");
+    expect(await new ProjectConfig(fs).projectName("/p/.dridock/project.yml"))
+      .toEqual({ raw: "My Proj", sanitized: "my-proj" });
+  });
+
+  test("setProjectName creates the file lazily with the header, then the key", async () => {
+    const fs = new InMemoryFileSystem();
+    const pc = new ProjectConfig(fs);
+    await pc.setProjectName("/p/.dridock/project.yml", "myproj");
+    const text = (await fs.readTextOrUndefined("/p/.dridock/project.yml"))!;
+    expect(text.startsWith("# .dridock/project.yml")).toBe(true);
+    expect(text).toContain("\nname: myproj\n");
+    expect(await pc.projectName("/p/.dridock/project.yml")).toEqual({ raw: "myproj", sanitized: "myproj" });
+  });
+
+  test("setProjectName keeps features/plugins and replaces an existing name", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed("/p/.dridock/project.yml", "# hdr\nname: old\nfeatures: [go]\nplugins:\n  - a@b/c\n");
+    await new ProjectConfig(fs).setProjectName("/p/.dridock/project.yml", "new");
+    expect(await fs.readTextOrUndefined("/p/.dridock/project.yml"))
+      .toBe("# hdr\nname: new\nfeatures: [go]\nplugins:\n  - a@b/c\n");
+  });
+});
+
+describe("setTopLevelString", () => {
+  test("inserts after the leading comment block, above existing keys", () => {
+    expect(setTopLevelString("# a\n# b\n\nfeatures: [go]\n", "name", "x"))
+      .toBe("# a\n# b\n\nname: x\nfeatures: [go]\n");
+  });
+  test("an indented `name:` (a child of another key) is not the top-level key", () => {
+    expect(setTopLevelString("vm:\n  name: inner\n", "name", "x")).toBe("name: x\nvm:\n  name: inner\n");
   });
 });

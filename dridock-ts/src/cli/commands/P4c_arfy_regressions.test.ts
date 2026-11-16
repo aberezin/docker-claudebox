@@ -58,12 +58,12 @@ describe("Arfy #38 P4c B2 — info container status uses psFilter (Up N min), no
     const colima = new InMemoryColima();
     colima.seedVm({ name: "cb-abc", status: "Running", address: "1.2.3.4" });
     const runtime = new InMemoryContainerRuntime();
-    runtime.seedPs("claude-_p", { name: "claude-_p", status: "Up 3 minutes", image: "dridock:latest" });
+    runtime.seedPs("claude-p-abc", { name: "claude-p-abc", status: "Up 3 minutes", image: "dridock:latest" });
     const { ctx, stdout } = makeCtx(fs);
     await new InfoCommand("info", "dridock:latest", new InMemoryDocker(), new StubGitToplevel("/p"), colima, runtime).run([], ctx);
-    expect(stdout.text()).toContain("container:         claude-_p   Up 3 minutes");
+    expect(stdout.text()).toContain("container:         claude-p-abc   Up 3 minutes");
     // NOT the previous ugly "<none>" from an empty .State.Status parse
-    expect(stdout.text()).not.toContain("container:         claude-_p   <none>");
+    expect(stdout.text()).not.toContain("container:         claude-p-abc   <none>");
   });
 });
 

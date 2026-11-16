@@ -36,6 +36,30 @@ export interface ContainerIdentity {
   readonly status?: string;
 }
 
+/**
+ * One container as adoption sees it (#123): its name, docker state, and the
+ * host path of its WORKSPACE mount, i.e. the bind mounted at its own host path
+ * (Source === Destination), which is how every dridock container mounts the
+ * project. undefined when no such bind exists.
+ */
+export interface ContainerSummary {
+  readonly name: string;
+  /** `.State.Status`: "running", "exited", "created", "paused", … */
+  readonly state: string;
+  readonly workspaceSource?: string;
+}
+
+/** Pick the workspace bind out of `docker inspect`'s `.Mounts`. Exported for tests. */
+export function workspaceSourceOf(mounts: readonly { Type?: string; Source?: string; Destination?: string }[]): string | undefined {
+  for (const m of mounts) {
+    if (m.Type !== undefined && m.Type !== "bind") continue;
+    if (m.Source === undefined || m.Source !== m.Destination) continue;
+    if (m.Source === "/var/run/docker.sock") continue;
+    return m.Source;
+  }
+  return undefined;
+}
+
 export interface Docker {
   /**
    * Read the org.dridock.version label off an image inside a docker
@@ -74,6 +98,13 @@ export interface Docker {
    * the container doesn't exist. Used by cb_refresh_container equivalent.
    */
   containerIdentity(context: string, containerName: string): Promise<ContainerIdentity | undefined>;
+
+  /**
+   * Every container in `context` whose name starts with `namePrefix`, with
+   * its state and workspace mount source (#123 adoption). Empty when the
+   * daemon can't be reached; adoption treats that as "nothing to adopt".
+   */
+  listContainers(context: string, namePrefix: string): Promise<ContainerSummary[]>;
 
   /**
    * `docker rm -f <container>` — force-remove. No-op if absent. Used by
@@ -205,6 +236,30 @@ export class RealDocker implements Docker {
       return { name: containerName, imageId, status };
     } catch {
       return undefined;
+    }
+  }
+
+  async listContainers(context: string, namePrefix: string): Promise<ContainerSummary[]> {
+    try {
+      const ps = Bun.spawn(["docker", "--context", context, "ps", "-a", "--format", "{{.Names}}"],
+        { stdout: "pipe", stderr: "ignore" });
+      const names = (await new Response(ps.stdout).text()).split(/\r?\n/)
+        .map((n) => n.trim()).filter((n) => n !== "" && n.startsWith(namePrefix));
+      if ((await ps.exited) !== 0) return [];
+      const out: ContainerSummary[] = [];
+      for (const name of names) {
+        const ins = Bun.spawn(["docker", "--context", context, "container", "inspect", name,
+          "--format", "{{.State.Status}}\u001f{{json .Mounts}}"], { stdout: "pipe", stderr: "ignore" });
+        const text = (await new Response(ins.stdout).text()).split(/\r?\n/)[0] ?? "";
+        if ((await ins.exited) !== 0) continue;
+        const [state, mountsJson] = text.split("\u001f");
+        let mounts: { Type?: string; Source?: string; Destination?: string }[] = [];
+        try { mounts = JSON.parse(mountsJson ?? "[]") ?? []; } catch { mounts = []; }
+        out.push({ name, state: state ?? "", workspaceSource: workspaceSourceOf(mounts) });
+      }
+      return out;
+    } catch {
+      return [];
     }
   }
 

@@ -41,7 +41,6 @@ List every verb with a one-line synopsis. \`dridock <verb> --help\` for one verb
     ctx.stdout.write(`  DRIDOCK_MINIMAL=1             use the minimal image variant\n`);
     ctx.stdout.write(`  DRIDOCK_NO_API_KEY=1          never forward ANTHROPIC_API_KEY (use Claude subscription)\n`);
     ctx.stdout.write(`  DRIDOCK_NO_OAUTH_TOKEN=1      never forward CLAUDE_CODE_OAUTH_TOKEN\n`);
-    ctx.stdout.write(`  DRIDOCK_ALLOW_SUBDIR=1        skip the '.dridock subdir' launch guard\n`);
     ctx.stdout.write(`  DRIDOCK_NO_AUTO_MIGRATE=1     skip the 3.0 auto-migration of a legacy .claudebox/ workspace\n`);
     ctx.stdout.write(`  DRIDOCK_ENV_FOO=bar           forward FOO=bar into the container\n`);
     ctx.stdout.write(`  DRIDOCK_MOUNT_SCRATCH=/path   extra volume mount into the container\n`);

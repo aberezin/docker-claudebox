@@ -1,4 +1,4 @@
-import type { Docker, ImageVersion, ImageIdentity, ContainerIdentity, RunCaptureOpts } from "../../infra/Docker.ts";
+import type { Docker, ImageVersion, ImageIdentity, ContainerIdentity, ContainerSummary, RunCaptureOpts } from "../../infra/Docker.ts";
 import { IMAGE_UNAVAILABLE } from "../../infra/Docker.ts";
 
 /**
@@ -63,9 +63,21 @@ export class InMemoryDocker implements Docker {
     return this.containerIdentities.get(this.key(context, containerName));
   }
 
+  /** #123: containers listContainers reports, per context. */
+  private readonly summaries = new Map<string, ContainerSummary[]>();
+  seedContainerSummary(context: string, s: ContainerSummary): void {
+    const list = this.summaries.get(context) ?? [];
+    this.summaries.set(context, [...list.filter((x) => x.name !== s.name), s]);
+  }
+  async listContainers(context: string, namePrefix: string): Promise<ContainerSummary[]> {
+    return (this.summaries.get(context) ?? []).filter((s) => s.name.startsWith(namePrefix));
+  }
+
   async containerRemove(context: string, containerName: string): Promise<void> {
     this.removals.push({ context, name: containerName });
     this.containerIdentities.delete(this.key(context, containerName));
+    const list = this.summaries.get(context);
+    if (list !== undefined) this.summaries.set(context, list.filter((s) => s.name !== containerName));
   }
 
   async saveAndLoad(sourceContext: string, image: string, targetContext: string): Promise<number> {

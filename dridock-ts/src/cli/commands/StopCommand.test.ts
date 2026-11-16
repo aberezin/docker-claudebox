@@ -46,7 +46,7 @@ describe("StopCommand", () => {
     const { ctx, stdout } = makeCtx(fs);
     const rc = await new StopCommand(colima, new InMemoryContainerRuntime(), new StubGitToplevel("/p")).run([], ctx);
     expect(rc).toBe(0);
-    expect(stdout.text()).toContain("no container claude-_p");
+    expect(stdout.text()).toContain("no container claude-p-abc");
   });
 
   test("VM running + container exists → stops it + prints 'stopped'", async () => {
@@ -55,11 +55,11 @@ describe("StopCommand", () => {
     const colima = new InMemoryColima();
     colima.seedVm({ name: "cb-abc", status: "Running", address: "1.2.3.4" });
     const runtime = new InMemoryContainerRuntime();
-    runtime.seedPs("claude-_p", { name: "claude-_p", status: "Up 5m", image: "dridock:latest" });
+    runtime.seedPs("claude-p-abc", { name: "claude-p-abc", status: "Up 5m", image: "dridock:latest" });
     const { ctx, stdout } = makeCtx(fs);
     const rc = await new StopCommand(colima, runtime, new StubGitToplevel("/p")).run([], ctx);
     expect(rc).toBe(0);
-    expect(stdout.text()).toContain("stopped claude-_p");
-    expect(runtime.stops).toEqual([{ context: "colima-cb-abc", container: "claude-_p" }]);
+    expect(stdout.text()).toContain("stopped claude-p-abc");
+    expect(runtime.stops).toEqual([{ context: "colima-cb-abc", container: "claude-p-abc" }]);
   });
 });

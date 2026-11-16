@@ -14,8 +14,10 @@ import type { ProcessProbe } from "../../infra/ProcessProbe.ts";
 import { RealProcessProbe } from "../../infra/ProcessProbe.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
 import { ProjectConfig, legacyLocationNotice } from "../../services/ProjectConfig.ts";
-import { containerName } from "../../services/ContainerName.ts";
-import { guardWorkspace } from "../../services/WorkspaceGuard.ts";
+import { containerName, legacyContainerName, type ContainerRole } from "../../services/ContainerName.ts";
+import { guardWorkspace, notRootMessage } from "../../services/WorkspaceGuard.ts";
+import { resolveIdentity } from "../../services/ProjectIdentity.ts";
+import { AdoptionService } from "../../services/AdoptionService.ts";
 import { validateProgArgs } from "../../services/ProgArgValidator.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
@@ -77,24 +79,26 @@ mode (-p) they are validated against an allowlist first.
   ) {}
 
   async run(args: string[], ctx: Context): Promise<number> {
-    // ── guards ─────────────────────────────────────────────────────────
-    const guard = guardWorkspace(ctx.cwd, ctx.env.raw(), ctx.cwd);
-    if (guard.kind === "in-dotdir") {
-      ctx.stderr.write(`⚠️  You're inside a '${guard.dotName}' directory (${ctx.cwd}).\n`);
-      ctx.stderr.write(`   claudebot would mount THIS dir as its workspace. You probably want:\n`);
-      ctx.stderr.write(`     cd ${guard.suggestedCd} && ${ctx.binName} start\n`);
-      ctx.stderr.write(`   (override with DRIDOCK_ALLOW_SUBDIR=1 if this is intentional)\n`);
+    const git = this.deps.git ?? new RealGitToplevel();
+    const project = await new ProjectRootResolver(ctx.fs, git).resolve(ctx.cwd);
+
+    // ── guard: launch only from the project root (#123) ───────────────
+    // A subdirectory would land in the root's container while asking to mount
+    // a different path. Subsumes the pre-6.0 `.dridock`-dir guard.
+    const guard = guardWorkspace(ctx.cwd, ctx.env.raw(), project.root);
+    for (const n of guard.notes) ctx.stderr.write(n);
+    if (guard.kind === "not-root") {
+      ctx.stderr.write(notRootMessage(ctx.cwd, guard.root, ctx.binName, "start"));
       return 1;
     }
 
-    const git = this.deps.git ?? new RealGitToplevel();
-    const project = await new ProjectRootResolver(ctx.fs, git).resolve(ctx.cwd);
     const projectCfg = new ProjectConfig(ctx.fs);
     const id = await projectCfg.projectId(project.configPath);
     if (id === undefined) {
       ctx.stderr.write(`no dridock project here — run '${ctx.binName} bootstrap' to scaffold ${project.dotName}/config.yml first.\n`);
       return 1;
     }
+    const ident = await resolveIdentity(projectCfg, project, id, "adopt", (m) => ctx.stderr.write(m));
     // Liveness signal — the biggest UX complaint on 4.0.0 was that
     // `dridock start` printed NOTHING until claude appeared, which felt
     // hung on a warm-path launch (VM up, container exists → sub-second
@@ -200,7 +204,24 @@ mode (-p) they are validated against an allowlist first.
 
     const dataDir = await machine.projectDataDir(id);
     await ctx.fs.mkdirRecursive(dataDir);
-    const cnameBase = containerName(ctx.cwd); // matches wrapper.sh's `container_name`
+    const ctxDocker = projectContext(id);
+
+    // ── adopt pre-6.0 / moved containers (#123) ───────────────────────
+    // Before any sidecar is written: adoption decides which names this run
+    // uses, and clears sidecars under names nothing will read again.
+    const adoption = await new AdoptionService(docker, ctx.fs).adopt({
+      context: ctxDocker, root: project.root, ident, dataDir, binName: ctx.binName,
+    });
+    if (adoption.kind === "refused") {
+      ctx.stderr.write(adoption.message);
+      return 1;
+    }
+    for (const n of adoption.notes) ctx.stderr.write(n);
+    // Deferred = a pre-6.0 container is running: keep its names this run.
+    const nameFor = (role: ContainerRole): string => adoption.kind === "deferred"
+      ? legacyContainerName(project.root, role)
+      : containerName(ident, role);
+    const cnameBase = nameFor("interactive");
     const sidecars = new SidecarWriter(ctx.fs, dataDir, cnameBase);
 
     // ── Provision every sidecar the entrypoint reads ──────────────────
@@ -242,7 +263,6 @@ mode (-p) they are validated against an allowlist first.
       `DRIDOCK_VM_IP=${vmIp}\nDRIDOCK_HOSTNAME=${hostname}\n`);
 
     // ── ContainerRefresher: recreate if image drifted ────────────────
-    const ctxDocker = projectContext(id);
 
     // #80 phase 2: decide the $HOME mount only AFTER VmEnsure has seeded /
     // reseeded the image, since the gate reads that image's version label. A
@@ -271,7 +291,7 @@ mode (-p) they are validated against an allowlist first.
     // first project only because that upgrade also rebuilt the image, which
     // triggered a recreate for unrelated reasons.
     if (dataDirMoved) {
-      for (const name of [cnameBase, containerName(ctx.cwd, "programmatic"), containerName(ctx.cwd, "cron")]) {
+      for (const name of [cnameBase, nameFor("programmatic"), nameFor("cron")]) {
         await docker.containerRemove(ctxDocker, name);
       }
       ctx.stderr.write(`🔄 recreating containers — the data dir moved, so their mounts are stale\n`);
@@ -282,7 +302,7 @@ mode (-p) they are validated against an allowlist first.
       ctx.stderr.write(`🔄 recreating container ${cnameBase} (image drifted)\n`);
     }
     if (isProg) {
-      const progName = containerName(ctx.cwd, "programmatic");
+      const progName = nameFor("programmatic");
       if (await refresher.maybeRefresh(ctxDocker, progName, this.imageName)) {
         ctx.stderr.write(`🔄 recreating container ${progName} (image drifted)\n`);
       }
@@ -368,7 +388,7 @@ mode (-p) they are validated against an allowlist first.
     maybeCaffeinate(ctx.env, this.deps.keepAwake ?? new RealKeepAwake(), process.pid, ctx.stderr);
 
     // ── mode dispatch ─────────────────────────────────────────────────
-    if (isProg) return await this.runProgrammatic(validated!, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec, dotMount);
+    if (isProg) return await this.runProgrammatic(nameFor("programmatic"), validated!, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec, dotMount);
     // (#17) --remote-control against an image whose claude CLI predates
     // the flag: claude ignores unknown flags silently (exit 0), so the
     // session starts, looks healthy, RC never activates, no signal ever
@@ -378,16 +398,15 @@ mode (-p) they are validated against an allowlist first.
     if (hasRemoteControlFlag(args)) {
       await warnIfRemoteControlBelowFloor(docker, ctxDocker, this.imageName, ctx.stderr);
     }
-    return await this.runInteractive(args, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec, dotMount);
+    return await this.runInteractive(cnameBase, args, id, ctx, runtime, ctxDocker, dataDir, baseEnv, mountPassthrough.mountAdditions, sidecars, tmpfsSpec, dotMount);
   }
 
   private async runInteractive(
-    args: readonly string[], id: string, ctx: Context, runtime: ContainerRuntime,
+    cname: string, args: readonly string[], id: string, ctx: Context, runtime: ContainerRuntime,
     ctxDocker: string, dataDir: string, baseEnv: RunArgs["env"],
     extraMounts: readonly RunArgs["mounts"][number][], sidecars: SidecarWriter,
     tmpfs: readonly string[], dotMount?: string,
   ): Promise<number> {
-    const cname = containerName(ctx.cwd);
     // Extra interactive args go through the sidecar (entrypoint reads
     // them; `docker start -ai` can't take new argv).
     const extraArgs = args.filter((a) => a !== "--update" && a !== "--no-continue");
@@ -406,12 +425,11 @@ mode (-p) they are validated against an allowlist first.
   }
 
   private async runProgrammatic(
-    validated: ReturnType<typeof validateProgArgs>, id: string, ctx: Context, runtime: ContainerRuntime,
+    cname: string, validated: ReturnType<typeof validateProgArgs>, id: string, ctx: Context, runtime: ContainerRuntime,
     ctxDocker: string, dataDir: string, baseEnv: RunArgs["env"],
     extraMounts: readonly RunArgs["mounts"][number][], sidecars: SidecarWriter,
     tmpfs: readonly string[], dotMount?: string,
   ): Promise<number> {
-    const cname = containerName(ctx.cwd, "programmatic");
     const existing = await runtime.psFilter(ctxDocker, cname);
     if (existing !== undefined) {
       await sidecars.writeOneRole("args", "_prog", shellQuote(validated.claudeArgs) + "\n");

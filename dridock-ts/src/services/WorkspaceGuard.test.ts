@@ -1,40 +1,41 @@
 import { test, expect, describe } from "bun:test";
-import { guardWorkspace } from "./WorkspaceGuard.ts";
+import { guardWorkspace, notRootMessage } from "./WorkspaceGuard.ts";
 
-describe("guardWorkspace", () => {
-  test("normal cwd -> ok", () => {
+describe("guardWorkspace — launch only from the project root (#123)", () => {
+  test("cwd is the root → ok", () => {
     expect(guardWorkspace("/repo", {}, "/repo").kind).toBe("ok");
   });
 
-  test("cwd is exactly a project's .dridock -> in-dotdir with suggested cd", () => {
-    const v = guardWorkspace("/repo/.dridock", {}, "/repo");
-    expect(v).toEqual({ kind: "in-dotdir", dotName: ".dridock", suggestedCd: "/repo" });
+  test("a trailing slash on either side doesn't matter", () => {
+    expect(guardWorkspace("/repo/", {}, "/repo").kind).toBe("ok");
+    expect(guardWorkspace("/repo", {}, "/repo/").kind).toBe("ok");
   });
 
-  test("cwd inside .dridock/ subdir -> in-dotdir", () => {
-    const v = guardWorkspace("/repo/.dridock/host-agent", {}, "/repo");
-    expect(v.kind).toBe("in-dotdir");
-    if (v.kind === "in-dotdir") expect(v.dotName).toBe(".dridock");
+  test("a subdirectory → not-root, naming the root", () => {
+    const v = guardWorkspace("/repo/src", {}, "/repo");
+    expect(v).toEqual({ kind: "not-root", root: "/repo", notes: [] });
   });
 
-  test("legacy .claudebox path detected", () => {
-    const v = guardWorkspace("/legacy/.claudebox", {}, "/legacy");
-    expect(v).toEqual({ kind: "in-dotdir", dotName: ".claudebox", suggestedCd: "/legacy" });
+  test("inside .dridock is just a subdirectory (the pre-6.0 dotdir guard, subsumed)", () => {
+    expect(guardWorkspace("/repo/.dridock", {}, "/repo").kind).toBe("not-root");
+    expect(guardWorkspace("/legacy/.claudebox/x", {}, "/legacy").kind).toBe("not-root");
   });
 
-  test("DRIDOCK_ALLOW_SUBDIR=1 overrides", () => {
-    expect(guardWorkspace("/repo/.dridock", { DRIDOCK_ALLOW_SUBDIR: "1" }, "/repo").kind).toBe("ok");
+  test("DRIDOCK_ALLOW_SUBDIR no longer overrides anything, and says so", () => {
+    const v = guardWorkspace("/repo/src", { DRIDOCK_ALLOW_SUBDIR: "1" }, "/repo");
+    expect(v.kind).toBe("not-root");
+    expect(v.notes.join("")).toContain("DRIDOCK_ALLOW_SUBDIR=1 no longer does anything");
   });
 
-  test("legacy CLAUDEBOX_ALLOW_SUBDIR=1 no longer overrides (5.0.0)", () => {
-    // The legacy name is inert: the guard still fires.
-    expect(guardWorkspace("/repo/.dridock", { CLAUDEBOX_ALLOW_SUBDIR: "true" }, "/repo").kind).toBe("in-dotdir");
-    // ...and the canonical one still works.
-    expect(guardWorkspace("/repo/.dridock", { DRIDOCK_ALLOW_SUBDIR: "1" }, "/repo").kind).toBe("ok");
+  test("the removal note fires at the root too (the setting is dead everywhere)", () => {
+    const v = guardWorkspace("/repo", { DRIDOCK_ALLOW_SUBDIR: "1" }, "/repo");
+    expect(v.kind).toBe("ok");
+    expect(v.notes.length).toBe(1);
   });
 
-  test("random truthy strings don't override — only whitelist values", () => {
-    expect(guardWorkspace("/repo/.dridock", { DRIDOCK_ALLOW_SUBDIR: "no" }, "/repo").kind).toBe("in-dotdir");
-    expect(guardWorkspace("/repo/.dridock", { DRIDOCK_ALLOW_SUBDIR: "" }, "/repo").kind).toBe("in-dotdir");
+  test("the refusal names where you are, the root, and the cd", () => {
+    const m = notRootMessage("/repo/src", "/repo", "dridock", "start");
+    expect(m).toContain("/repo/src");
+    expect(m).toContain("cd /repo && dridock start");
   });
 });

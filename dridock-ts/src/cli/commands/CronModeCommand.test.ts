@@ -100,12 +100,12 @@ describe("CronModeCommand — fresh spawn (no existing container)", () => {
     expect(runtime.runs.length).toBe(1);
     const run = runtime.runs[0]!;
     expect(run.mode).toBe("detached");
-    expect(run.containerName).toBe("claude-_p_cron");
+    expect(run.containerName).toBe("claude-p-abc_cron");
     expect(run.context).toBe(projectContext("abc"));
     expect(run.env).toContainEqual({ key: "DRIDOCK_MODE_CRON", value: "1" });
-    expect(run.env).toContainEqual({ key: "DRIDOCK_CONTAINER_NAME", value: "claude-_p_cron" });
-    expect(stdout.text()).toContain("starting cron container (claude-_p_cron)");
-    expect(stdout.text()).toContain("docker --context colima-cb-abc logs -f claude-_p_cron");
+    expect(run.env).toContainEqual({ key: "DRIDOCK_CONTAINER_NAME", value: "claude-p-abc_cron" });
+    expect(stdout.text()).toContain("starting cron container (claude-p-abc_cron)");
+    expect(stdout.text()).toContain("docker --context colima-cb-abc logs -f claude-p-abc_cron");
   });
 
   test("DRIDOCK_MODE_CRON_FILE=/etc/cron.yml → forwarded as -e", async () => {
@@ -131,27 +131,27 @@ describe("CronModeCommand — existing container branches", () => {
   test("cron container ALREADY running → prints 'already running' + logs hint, rc 0, no run/start", async () => {
     setEnv("DRIDOCK_MODE_CRON", "1");
     const { runtime, cmd, fs } = seedProject();
-    runtime.seedPs("claude-_p_cron", { name: "claude-_p_cron", status: "Up 5 minutes", image: "dridock:latest" });
+    runtime.seedPs("claude-p-abc_cron", { name: "claude-p-abc_cron", status: "Up 5 minutes", image: "dridock:latest" });
     const { ctx, stdout } = makeCtx(fs);
     const rc = await cmd.run([], ctx);
     expect(rc).toBe(0);
     expect(runtime.runs).toEqual([]);
     expect(runtime.backgroundStarts).toEqual([]);
-    expect(stdout.text()).toContain("cron already running (claude-_p_cron)");
-    expect(stdout.text()).toContain("docker --context colima-cb-abc logs -f claude-_p_cron");
+    expect(stdout.text()).toContain("cron already running (claude-p-abc_cron)");
+    expect(stdout.text()).toContain("docker --context colima-cb-abc logs -f claude-p-abc_cron");
   });
 
   test("cron container EXISTS but stopped → docker start (background, no attach), NO fresh run", async () => {
     setEnv("DRIDOCK_MODE_CRON", "1");
     const { runtime, cmd, fs } = seedProject();
-    runtime.seedPs("claude-_p_cron", { name: "claude-_p_cron", status: "Exited (0) 2 hours ago", image: "dridock:latest" });
+    runtime.seedPs("claude-p-abc_cron", { name: "claude-p-abc_cron", status: "Exited (0) 2 hours ago", image: "dridock:latest" });
     const { ctx, stdout } = makeCtx(fs);
     const rc = await cmd.run([], ctx);
     expect(rc).toBe(0);
     expect(runtime.runs).toEqual([]);
-    expect(runtime.backgroundStarts).toEqual([{ context: "colima-cb-abc", container: "claude-_p_cron" }]);
+    expect(runtime.backgroundStarts).toEqual([{ context: "colima-cb-abc", container: "claude-p-abc_cron" }]);
     expect(runtime.starts).toEqual([]); // NOT startAttached — cron is detached
-    expect(stdout.text()).toContain("restarting cron container (claude-_p_cron)");
+    expect(stdout.text()).toContain("restarting cron container (claude-p-abc_cron)");
   });
 });
 
@@ -159,12 +159,12 @@ describe("CronModeCommand — stop sub-command", () => {
   test("`stop` + cron running → docker stop, prints stopped message", async () => {
     setEnv("DRIDOCK_MODE_CRON", "1");
     const { runtime, cmd, fs } = seedProject();
-    runtime.seedPs("claude-_p_cron", { name: "claude-_p_cron", status: "Up 5 minutes", image: "dridock:latest" });
+    runtime.seedPs("claude-p-abc_cron", { name: "claude-p-abc_cron", status: "Up 5 minutes", image: "dridock:latest" });
     const { ctx, stdout } = makeCtx(fs);
     const rc = await cmd.run(["stop"], ctx);
     expect(rc).toBe(0);
-    expect(runtime.stops).toEqual([{ context: "colima-cb-abc", container: "claude-_p_cron" }]);
-    expect(stdout.text()).toContain("stopped claude-_p_cron");
+    expect(runtime.stops).toEqual([{ context: "colima-cb-abc", container: "claude-p-abc_cron" }]);
+    expect(stdout.text()).toContain("stopped claude-p-abc_cron");
   });
 
   test("`stop` + cron NOT running → 'cron not running', rc 0, no docker stop", async () => {
@@ -216,7 +216,7 @@ describe("CronModeCommand — #42 tightening: pre-launch orphan-session sanity",
     setEnv("DRIDOCK_MODE_CRON", "1");
     setEnv("XDG_CONFIG_HOME", "/home/alan/.config");
     const { runtime, cmd, fs } = seedProject();
-    runtime.seedPs("claude-_p_cron", { name: "claude-_p_cron", status: "Up 5 minutes", image: "dridock:latest" });
+    runtime.seedPs("claude-p-abc_cron", { name: "claude-p-abc_cron", status: "Up 5 minutes", image: "dridock:latest" });
     fs.seed("/home/alan/.config/dridock/projects/orphan01/dot/.claude/projects/-p/history.jsonl", "{}");
     const { ctx, stderr, stdout } = makeCtx(fs);
     const rc = await cmd.run(["stop"], ctx);

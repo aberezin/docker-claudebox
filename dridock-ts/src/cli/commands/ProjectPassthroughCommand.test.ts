@@ -183,10 +183,10 @@ describe("ProjectPassthroughCommand — #39 fix: correct project scope + HOME + 
     // Container name includes the verb and a timestamp — never
     // collides with the persistent claudebot container name.
     const run = runtime.runs[0]!;
-    expect(run.containerName).toMatch(/^claude-_p_mcp_\d+$/);
+    expect(run.containerName).toMatch(/^claude-p-abc_mcp_\d+$/);
     // Explicitly NOT the persistent interactive name (would race)
-    expect(run.containerName).not.toBe("claude-_p");
-    expect(run.containerName).not.toBe("claude-_p_prog");
+    expect(run.containerName).not.toBe("claude-p-abc");
+    expect(run.containerName).not.toBe("claude-p-abc_prog");
   });
 
   test("#40 fix: workdir = ctx.cwd → -w in argv → claude runs in the REAL workspace path (not /workspace)", async () => {

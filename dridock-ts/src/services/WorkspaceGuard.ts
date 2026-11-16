@@ -1,41 +1,47 @@
 /**
- * Prevent the launch verbs from mounting `.dridock/` (or legacy
- * `.claudebox/`) as the workspace — a stray, almost-never-intended setup
- * that would spawn a separate container per dot-dir subdir. Ports
- * cb_guard_workspace at wrapper.sh:224. Pure — accepts cwd + env, returns
- * a decision, never prompts (the CLI wrapper decides how to surface it).
+ * The launch verbs run only from the project root (#123, 6.0.0).
+ *
+ * Before 6.0 a container's name and its workspace mount both came from the
+ * cwd, so `dridock start` from `myproj/src` made a second, separate container
+ * with `src/` as its workspace and its own session history: almost always an
+ * accident. Containers are now named by the project's declared identity, so a
+ * subdirectory would land in the SAME container as the root while asking to
+ * mount a different path. Alan's call (2026-11-16): refuse, with no override.
+ *
+ * This subsumes the pre-6.0 `.dridock`-dir guard (a `.dridock` dir is a
+ * subdirectory of the root) and its `DRIDOCK_ALLOW_SUBDIR` override, which is
+ * gone. Setting it is reported, not silently ignored.
+ *
+ * Pure: takes cwd, env and the resolved root, returns a decision.
  */
 
 export type WorkspaceGuardVerdict =
-  | { kind: "ok" }
-  | { kind: "in-dotdir"; dotName: ".dridock" | ".claudebox"; suggestedCd: string };
+  | { kind: "ok"; notes: readonly string[] }
+  | { kind: "not-root"; root: string; notes: readonly string[] };
 
-const OVERRIDE_ENV_KEYS = ["DRIDOCK_ALLOW_SUBDIR"] as const;
+export const REMOVED_ENV_KEYS = ["DRIDOCK_ALLOW_SUBDIR"] as const;
 
-export function guardWorkspace(cwd: string, env: Record<string, string | undefined>, projectRoot: string): WorkspaceGuardVerdict {
-  // Explicit override — user knows what they're doing.
-  for (const key of OVERRIDE_ENV_KEYS) {
+export function guardWorkspace(
+  cwd: string,
+  env: Record<string, string | undefined>,
+  projectRoot: string,
+): WorkspaceGuardVerdict {
+  const notes: string[] = [];
+  for (const key of REMOVED_ENV_KEYS) {
     const v = env[key];
-    if (v === "1" || v === "true" || v === "yes" || v === "on") return { kind: "ok" };
+    if (v !== undefined && v !== "") {
+      notes.push(`!  ${key}=${v} no longer does anything (removed in 6.0.0, #123): dridock runs only from the project root.\n`);
+    }
   }
-  const inDridock = cwd === `${cwd.split("/.dridock")[0]}/.dridock`
-    || cwd.startsWith(`${cwd.split("/.dridock")[0]}/.dridock/`);
-  const inClaudebox = cwd === `${cwd.split("/.claudebox")[0]}/.claudebox`
-    || cwd.startsWith(`${cwd.split("/.claudebox")[0]}/.claudebox/`);
+  const norm = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, "") : p);
+  if (norm(cwd) !== norm(projectRoot)) return { kind: "not-root", root: norm(projectRoot), notes };
+  return { kind: "ok", notes };
+}
 
-  if (inDridock) {
-    return {
-      kind: "in-dotdir",
-      dotName: ".dridock",
-      suggestedCd: cwd.split("/.dridock")[0] || projectRoot,
-    };
-  }
-  if (inClaudebox) {
-    return {
-      kind: "in-dotdir",
-      dotName: ".claudebox",
-      suggestedCd: cwd.split("/.claudebox")[0] || projectRoot,
-    };
-  }
-  return { kind: "ok" };
+/** The refusal text, shared by every launch verb so they say the same thing. */
+export function notRootMessage(cwd: string, root: string, binName: string, verb: string): string {
+  return `❌ ${binName} ${verb} runs from the project root, not a subdirectory.\n`
+    + `   You're in:        ${cwd}\n`
+    + `   Project root is:  ${root}\n`
+    + `     cd ${root} && ${binName} ${verb}\n`;
 }

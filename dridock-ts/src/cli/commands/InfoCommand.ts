@@ -11,7 +11,8 @@ import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
 import { ProjectConfig } from "../../services/ProjectConfig.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
-import { containerName } from "../../services/ContainerName.ts";
+import { containerName, legacyContainerName } from "../../services/ContainerName.ts";
+import { resolveIdentity } from "../../services/ProjectIdentity.ts";
 import { DRIDOCK_TS_VERSION } from "../../domain/dridockVersion.ts";
 
 /**
@@ -94,11 +95,19 @@ the alias.`;
       // (which returns just "running"/"exited" from
       // `.State.Status`). Arfy #38 P4c B2 caught the ugly "<none>"
       // rendering — psFilter matches bash cb_info at :1193.
-      const cname = containerName(ctx.cwd);
+      const ident = await resolveIdentity(projectCfg, project, projectId, "read-only", (m) => ctx.stderr.write(m));
+      let cname = containerName(ident);
       const ctxDocker = projectContext(projectId);
+      ctx.stdout.write(`  name:              ${ident.name ?? "(none declared)"}\n`);
       if (vmStatus === "Running") {
         const runtime = this.runtimeOverride ?? new RealContainerRuntime();
-        const container = await runtime.psFilter(ctxDocker, cname);
+        let container = await runtime.psFilter(ctxDocker, cname);
+        if (container === undefined) {
+          // Not adopted yet (#123): show the pre-6.0 container if that's what exists.
+          const legacy = legacyContainerName(project.root);
+          const old = await runtime.psFilter(ctxDocker, legacy);
+          if (old !== undefined) { container = old; cname = `${legacy} (pre-6.0 name; adopted on next start)`; }
+        }
         const status = container !== undefined ? container.status : "<none>";
         ctx.stdout.write(`  container:         ${cname}   ${status}\n`);
       } else {

@@ -1,3 +1,4 @@
+import { sanitizeProjectName } from "./ContainerName.ts";
 import type { FileSystem } from "../infra/FileSystem.ts";
 import { cbNum } from "../domain/units.ts";
 
@@ -148,6 +149,28 @@ export class ProjectConfig {
    * The read-only variant intentionally does NOT trigger a bootstrap
    * (cb_project_id / cb_init_project_config) — that's a write path.
    */
+  /**
+   * The project's declared `name:` from the TRACKED project.yml (#123). Returns
+   * the raw value and its sanitized form; both undefined when none is declared.
+   * A raw value that sanitizes to "" yields `sanitized: ""`, which callers
+   * treat as "no usable name".
+   */
+  async projectName(projectPath: string): Promise<{ raw?: string; sanitized?: string }> {
+    const text = await this.fs.readTextOrUndefined(projectPath);
+    const raw = text === undefined ? undefined : parseTopLevelString(text, "name");
+    return raw === undefined ? {} : { raw, sanitized: sanitizeProjectName(raw) };
+  }
+
+  /**
+   * Write `name:` into project.yml, creating the file lazily with the standard
+   * header (#97: nothing lands in a git tree unasked, so only the paths that
+   * mean to declare a name call this). Replaces an existing top-level `name:`.
+   */
+  async setProjectName(projectPath: string, name: string): Promise<void> {
+    const existing = await this.fs.readTextOrUndefined(projectPath);
+    await this.fs.writeTextAtomic(projectPath, setTopLevelString(existing ?? PROJECT_YML_HEADER, "name", name));
+  }
+
   async projectId(configPath: string): Promise<string | undefined> {
     const text = await this.fs.readTextOrUndefined(configPath);
     if (text === undefined) return undefined;
@@ -227,6 +250,28 @@ export function parseTopLevelString(text: string, key: string): string | undefin
     return v === "" ? undefined : v;
   }
   return undefined;
+}
+
+/**
+ * Set a top-level `key: value` in a small YAML document: replace the first
+ * unindented `key:` line if there is one, otherwise insert it after the leading
+ * comment block (so it sits under the header, above any lists). Everything else
+ * is preserved byte-for-byte.
+ */
+export function setTopLevelString(text: string, key: string, value: string): string {
+  const lines = text.split("\n");
+  const re = new RegExp(`^${escapeRegex(key)}\\s*:`);
+  const at = lines.findIndex((l) => re.test(l));
+  const line = `${key}: ${value}`;
+  if (at >= 0) {
+    lines[at] = line;
+    return lines.join("\n");
+  }
+  let insert = 0;
+  while (insert < lines.length && (lines[insert]!.startsWith("#") || lines[insert]!.trim() === "")) insert++;
+  lines.splice(insert, 0, line);
+  const out = lines.join("\n");
+  return out.endsWith("\n") ? out : `${out}\n`;
 }
 
 function escapeRegex(s: string): string {

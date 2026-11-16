@@ -14,7 +14,10 @@ import { MachineConfig } from "../../services/MachineConfig.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
 import { realSpinner } from "../../infra/Spinner.ts";
 import { ImageEnsureService, parseForceReseed } from "../../services/ImageEnsureService.ts";
-import { containerName } from "../../services/ContainerName.ts";
+import { containerName, legacyContainerName } from "../../services/ContainerName.ts";
+import { guardWorkspace, notRootMessage } from "../../services/WorkspaceGuard.ts";
+import { resolveIdentity } from "../../services/ProjectIdentity.ts";
+import { AdoptionService } from "../../services/AdoptionService.ts";
 import { collectEnvPassthrough, collectMountPassthrough } from "../../services/EnvMountPassthrough.ts";
 import { xdgRoot } from "../../domain/paths.ts";
 import { scanOrphans, formatLaunchWarning } from "../../services/OrphanSessionScanner.ts";
@@ -54,13 +57,26 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
   async run(args: readonly string[], ctx: Context): Promise<number> {
     const git = this.deps.git ?? new RealGitToplevel();
     const project = await new ProjectRootResolver(ctx.fs, git).resolve(ctx.cwd);
-    const id = await new ProjectConfig(ctx.fs).projectId(project.configPath);
+    const isStop = args[0] === "stop";
+    // Launching mounts the workspace, so it runs only from the root (#123).
+    // `cron stop` mounts nothing and may run from anywhere in the project.
+    if (!isStop) {
+      const guard = guardWorkspace(ctx.cwd, ctx.env.raw(), project.root);
+      for (const n of guard.notes) ctx.stderr.write(n);
+      if (guard.kind === "not-root") {
+        ctx.stderr.write(notRootMessage(ctx.cwd, guard.root, ctx.binName, "cron"));
+        return 1;
+      }
+    }
+    const projectCfg = new ProjectConfig(ctx.fs);
+    const id = await projectCfg.projectId(project.configPath);
     if (id === undefined) {
       ctx.stderr.write(`no dridock project here — cron mode needs a project context (${project.dotName}/config.yml missing).\n`);
       return 1;
     }
+    const ident = await resolveIdentity(projectCfg, project, id, isStop ? "read-only" : "adopt", (m) => ctx.stderr.write(m));
 
-    const cronName = containerName(ctx.cwd, "cron");
+    let cronName = containerName(ident, "cron");
     const ctxDocker = projectContext(id);
     const colima = this.deps.colima ?? new RealColima();
     const docker = this.deps.docker ?? new RealDocker();
@@ -79,7 +95,13 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
     // `stop` sub-branch — mirrors wrapper.sh:3074-3084.
     if (args[0] === "stop") {
       const running = await this.isProfileRunning(colima, projectProfile(id));
-      const ps = running ? await runtime.psFilter(ctxDocker, cronName) : undefined;
+      let ps = running ? await runtime.psFilter(ctxDocker, cronName) : undefined;
+      if (running && ps === undefined) {
+        // Not adopted yet (#123): the pre-6.0 name is what's running.
+        const legacy = legacyContainerName(project.root, "cron");
+        ps = await runtime.psFilter(ctxDocker, legacy);
+        if (ps !== undefined) cronName = legacy;
+      }
       if (ps === undefined || !ps.status.startsWith("Up")) {
         ctx.stdout.write(`cron not running\n`);
         return 0;
@@ -124,6 +146,20 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
       { wrapperVersion: DRIDOCK_TS_VERSION, image: this.imageName, variant: this.imageVariant, binName: ctx.binName },
     )) ctx.stderr.write(line);
 
+    // Adopt pre-6.0 / moved containers before touching this role (#123).
+    const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
+    const dataDir = await machine.projectDataDir(id);
+    await ctx.fs.mkdirRecursive(dataDir);
+    const adoption = await new AdoptionService(docker, ctx.fs).adopt({
+      context: ctxDocker, root: project.root, ident, dataDir, binName: ctx.binName,
+    });
+    if (adoption.kind === "refused") {
+      ctx.stderr.write(adoption.message);
+      return 1;
+    }
+    for (const n of adoption.notes) ctx.stderr.write(n);
+    if (adoption.kind === "deferred") cronName = legacyContainerName(project.root, "cron");
+
     // "cron already running" idempotent branch — matches wrapper.sh:3086.
     const existing = await runtime.psFilter(ctxDocker, cronName);
     if (existing !== undefined && existing.status.startsWith("Up")) {
@@ -141,9 +177,6 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
     }
 
     // Fresh spawn — `docker run -d`.
-    const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
-    const dataDir = await machine.projectDataDir(id);
-    await ctx.fs.mkdirRecursive(dataDir);
 
     const envPassthrough = collectEnvPassthrough(ctx.env.raw());
     const mountPassthrough = collectMountPassthrough(ctx.env.raw());
