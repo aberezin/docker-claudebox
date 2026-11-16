@@ -26,7 +26,7 @@ describe("BootstrapCommand — greenfield", () => {
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stdout } = makeCtx(fs);
-    const rc = await cmd.run(["build the thing"], ctx);
+    const rc = await cmd.run(["--name", "repo", "build the thing"], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain("🚀 bootstrapped");
     // Files present
@@ -49,7 +49,7 @@ describe("BootstrapCommand — greenfield", () => {
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx } = makeCtx(fs);
-    await cmd.run(["--brief-file", "/tmp/brief.txt"], ctx);
+    await cmd.run(["--name", "repo", "--brief-file", "/tmp/brief.txt"], ctx);
     expect(await fs.readText("/repo/.dridock/BRIEF.md")).toContain("the intent from a file");
   });
 
@@ -59,7 +59,7 @@ describe("BootstrapCommand — greenfield", () => {
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "piped intent\n");
     const { ctx } = makeCtx(fs);
-    await cmd.run([], ctx);
+    await cmd.run(["--name", "repo"], ctx);
     expect(await fs.readText("/repo/.dridock/BRIEF.md")).toContain("piped intent");
   });
 
@@ -69,7 +69,7 @@ describe("BootstrapCommand — greenfield", () => {
     const host = new StubHostCommandRunner();
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stderr } = makeCtx(fs);
-    const rc = await cmd.run(["intent"], ctx);
+    const rc = await cmd.run(["--name", "repo", "intent"], ctx);
     expect(rc).toBe(1);
     expect(stderr.text()).toContain("already exists");
   });
@@ -81,7 +81,7 @@ describe("BootstrapCommand — greenfield", () => {
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx } = makeCtx(fs);
-    const rc = await cmd.run(["--force", "new intent"], ctx);
+    const rc = await cmd.run(["--name", "repo", "--force", "new intent"], ctx);
     expect(rc).toBe(0);
     expect(await fs.readText("/repo/.dridock/BRIEF.md")).toContain("new intent");
   });
@@ -91,7 +91,7 @@ describe("BootstrapCommand — greenfield", () => {
     const host = new StubHostCommandRunner();
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx } = makeCtx(fs);
-    await cmd.run(["--brief-only", "intent"], ctx);
+    await cmd.run(["--name", "repo", "--brief-only", "intent"], ctx);
     expect(await fs.exists("/repo/.dridock/BRIEF.md")).toBe(true);
     expect(await fs.exists("/repo/.dridock/config.yml")).toBe(true);
     // But NO greenfield artifacts
@@ -109,7 +109,7 @@ describe("BootstrapCommand — adopt", () => {
     const host = new StubHostCommandRunner();
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stdout } = makeCtx(fs);
-    await cmd.run(["--adopt", "intent"], ctx);
+    await cmd.run(["--name", "repo", "--adopt", "intent"], ctx);
     expect(stdout.text()).toContain("🚀 adopted");
     // No README written, no workloads
     expect(await fs.exists("/repo/README.md")).toBe(false);
@@ -123,7 +123,7 @@ describe("BootstrapCommand — adopt", () => {
     const host = new StubHostCommandRunner();
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stderr } = makeCtx(fs);
-    const rc = await cmd.run(["--adopt"], ctx);
+    const rc = await cmd.run(["--name", "repo", "--adopt"], ctx);
     expect(rc).toBe(1);
     expect(stderr.text()).toContain("no git repo");
   });
@@ -137,7 +137,7 @@ describe("BootstrapCommand — adopt", () => {
     const { ctx, stdout } = makeCtx(fs);
     // Simulate that the clone created .git after cloning
     fs.seedDir("/repo/.git");
-    const rc = await cmd.run(["--adopt", "https://github.com/x/y.git"], ctx);
+    const rc = await cmd.run(["--name", "repo", "--adopt", "https://github.com/x/y.git"], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain("cloned y");
     expect(stdout.text()).toContain("🚀 adopted");
@@ -151,7 +151,7 @@ describe("BootstrapCommand — adopt", () => {
     fs.seedDir("/repo/.git");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stdout } = makeCtx(fs);
-    await cmd.run(["--adopt", "https://github.com/x/y.git"], ctx);
+    await cmd.run(["--name", "repo", "--adopt", "https://github.com/x/y.git"], ctx);
     expect(stdout.text()).toContain("cloned y");
   });
 
@@ -161,7 +161,7 @@ describe("BootstrapCommand — adopt", () => {
     // Both unseeded → both rc 127 (fake default)
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stderr } = makeCtx(fs);
-    const rc = await cmd.run(["--adopt", "https://github.com/private/repo.git"], ctx);
+    const rc = await cmd.run(["--name", "repo", "--adopt", "https://github.com/private/repo.git"], ctx);
     expect(rc).toBe(1);
     expect(stderr.text()).toContain("clone failed");
   });
@@ -174,7 +174,7 @@ describe("BootstrapCommand — workspace + repos", () => {
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stdout } = makeCtx(fs);
-    await cmd.run(["--workspace", "intent"], ctx);
+    await cmd.run(["--name", "repo", "--workspace", "intent"], ctx);
     expect(stdout.text()).toContain("🚀 multi-repo workspace");
     const gi = await fs.readText("/repo/.gitignore");
     expect(gi).toContain("/.dridock/config.yml");
@@ -188,7 +188,7 @@ describe("BootstrapCommand — workspace + repos", () => {
     host.seedCommand(`command -v gh >/dev/null 2>&1 && gh repo clone 'https://github.com/x/y.git' '/repo/y' 2>/dev/null`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stdout } = makeCtx(fs);
-    await cmd.run(["--repo", "https://github.com/x/y.git", "intent"], ctx);
+    await cmd.run(["--name", "repo", "--repo", "https://github.com/x/y.git", "intent"], ctx);
     expect(stdout.text()).toContain("cloned + gitignored");
     expect(await fs.readText("/repo/.gitignore")).toContain("/y/");
   });
@@ -200,7 +200,7 @@ describe("BootstrapCommand — workspace + repos", () => {
     // Both clone commands unseeded → both fail
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stderr } = makeCtx(fs);
-    const rc = await cmd.run(["--repo", "https://github.com/x/y.git"], ctx);
+    const rc = await cmd.run(["--name", "repo", "--repo", "https://github.com/x/y.git"], ctx);
     expect(rc).toBe(1);
     expect(stderr.text()).toContain("clone failed");
     expect(stderr.text()).toContain("bootstrap partial");
@@ -212,7 +212,7 @@ describe("BootstrapCommand — workspace + repos", () => {
     const cmd = new BootstrapCommand(new StubHostCommandRunner(), async () => "");
     const { ctx } = makeCtx(fs);
     try {
-      await cmd.run(["--adopt", "--workspace"], ctx);
+      await cmd.run(["--name", "repo", "--adopt", "--workspace"], ctx);
       throw new Error("expected DridockError");
     } catch (e) { expect(e).toBeInstanceOf(DridockError); }
   });
@@ -226,7 +226,7 @@ describe("BootstrapCommand — secrets", () => {
     host.seedCommand("gh auth token", 0, "ghp_test-token\n");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx } = makeCtx(fs);
-    await cmd.run(["--seed-secret", "GH_TOKEN=gh auth token"], ctx);
+    await cmd.run(["--name", "repo", "--seed-secret", "GH_TOKEN=gh auth token"], ctx);
     const secrets = await fs.readText("/repo/.dridock/secrets.env");
     expect(secrets).toContain("GH_TOKEN=ghp_test-token");
     expect(fs.modeOf("/repo/.dridock/secrets.env")).toBe(0o600);
@@ -239,7 +239,7 @@ describe("BootstrapCommand — secrets", () => {
     host.seedCommand("gh auth token", 0, "ghp_test-abc\n");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx } = makeCtx(fs);
-    await cmd.run(["--gh-token"], ctx);
+    await cmd.run(["--name", "repo", "--gh-token"], ctx);
     expect(await fs.readText("/repo/.dridock/secrets.env")).toContain("GH_TOKEN=ghp_test-abc");
   });
 
@@ -251,7 +251,7 @@ describe("BootstrapCommand — secrets", () => {
     host.seedCommand("cat token.txt", 0, "another-token\n");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stderr } = makeCtx(fs);
-    await cmd.run(["--seed-secret", "GH_TOKEN=gh auth token", "--seed-secret", "OTHER=cat token.txt"], ctx);
+    await cmd.run(["--name", "repo", "--seed-secret", "GH_TOKEN=gh auth token", "--seed-secret", "OTHER=cat token.txt"], ctx);
     expect(stderr.text()).toContain("seed-secret GH_TOKEN: command failed");
     const secrets = await fs.readText("/repo/.dridock/secrets.env");
     expect(secrets).not.toContain("GH_TOKEN=");
@@ -265,7 +265,7 @@ describe("BootstrapCommand — secrets", () => {
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx } = makeCtx(fs);
-    await cmd.run(["--secrets-file", "/tmp/merge.env"], ctx);
+    await cmd.run(["--name", "repo", "--secrets-file", "/tmp/merge.env"], ctx);
     const secrets = await fs.readText("/repo/.dridock/secrets.env");
     expect(secrets).toContain("A=1");
     expect(secrets).toContain("B=2");
@@ -279,7 +279,7 @@ describe("BootstrapCommand — secrets", () => {
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stderr } = makeCtx(fs);
-    const rc = await cmd.run(["--secrets-file", "/tmp/missing.env"], ctx);
+    const rc = await cmd.run(["--name", "repo", "--secrets-file", "/tmp/missing.env"], ctx);
     expect(rc).toBe(1);
     expect(stderr.text()).toContain("--secrets-file not found");
   });
@@ -288,7 +288,7 @@ describe("BootstrapCommand — secrets", () => {
     const fs = new InMemoryFileSystem();
     const { ctx } = makeCtx(fs);
     try {
-      await new BootstrapCommand(new StubHostCommandRunner(), async () => "").run(["--seed-secret", "NO_EQUALS_HERE"], ctx);
+      await new BootstrapCommand(new StubHostCommandRunner(), async () => "").run(["--name", "repo", "--seed-secret", "NO_EQUALS_HERE"], ctx);
       throw new Error("expected DridockError");
     } catch (e) { expect(e).toBeInstanceOf(DridockError); }
   });
@@ -298,14 +298,14 @@ describe("BootstrapCommand — misc flags", () => {
   test("unknown flag → DridockError", async () => {
     const { ctx } = makeCtx(new InMemoryFileSystem());
     try {
-      await new BootstrapCommand(new StubHostCommandRunner(), async () => "").run(["--nonsense"], ctx);
+      await new BootstrapCommand(new StubHostCommandRunner(), async () => "").run(["--name", "repo", "--nonsense"], ctx);
       throw new Error("expected DridockError");
     } catch (e) { expect(e).toBeInstanceOf(DridockError); }
   });
 
   test("--help prints usage + rc 1 (usage returns undefined → 1)", async () => {
     const { ctx, stdout } = makeCtx(new InMemoryFileSystem());
-    const rc = await new BootstrapCommand(new StubHostCommandRunner(), async () => "").run(["--help"], ctx);
+    const rc = await new BootstrapCommand(new StubHostCommandRunner(), async () => "").run(["--name", "repo", "--help"], ctx);
     expect(rc).toBe(1);
     expect(stdout.text()).toContain("usage: dridock bootstrap");
   });
@@ -344,7 +344,7 @@ network:
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stdout } = makeCtx(fs);
     // --force lets the BRIEF check pass so we exercise the config write path
-    const rc = await cmd.run(["--force", "rebootstrap intent"], ctx);
+    const rc = await cmd.run(["--name", "repo", "--force", "rebootstrap intent"], ctx);
     expect(rc).toBe(0);
     // Config.yml is byte-identical to what we seeded — nothing rewritten.
     expect(await fs.readText("/repo/.dridock/config.yml")).toBe(preExisting);
@@ -359,7 +359,7 @@ network:
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx } = makeCtx(fs);
-    const rc = await cmd.run(["fresh intent"], ctx);
+    const rc = await cmd.run(["--name", "repo", "fresh intent"], ctx);
     expect(rc).toBe(0);
     // A real id was minted (matches [a-f0-9]{8}) — replaced "auto".
     const cfg = await fs.readText("/repo/.dridock/config.yml");
@@ -373,7 +373,7 @@ network:
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx } = makeCtx(fs);
-    const rc = await cmd.run(["intent"], ctx);
+    const rc = await cmd.run(["--name", "repo", "intent"], ctx);
     expect(rc).toBe(0);
     const cfg = await fs.readText("/repo/.dridock/config.yml");
     expect(cfg).toMatch(/^id: [a-f0-9]{8}$/m);
@@ -386,7 +386,7 @@ network:
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx } = makeCtx(fs);
-    await cmd.run(["intent"], ctx);
+    await cmd.run(["--name", "repo", "intent"], ctx);
     const cfg = await fs.readText("/repo/.dridock/config.yml");
     expect(cfg).toMatch(/^id: [a-f0-9]{8}$/m);
   });
@@ -405,7 +405,7 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stderr } = makeCtx(fs);
-    const rc = await cmd.run(["intent"], ctx);
+    const rc = await cmd.run(["--name", "repo", "intent"], ctx);
     expect(rc).toBe(0);
     const warn = stderr.text();
     expect(warn).toContain(`⚠️  bootstrap: minting a NEW project id will silently orphan`);
@@ -424,7 +424,7 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stderr } = makeCtx(fs);
-    await cmd.run(["intent"], ctx);
+    await cmd.run(["--name", "repo", "intent"], ctx);
     expect(stderr.text()).toBe("");
   });
 
@@ -439,7 +439,7 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
     host.seedCommand(`git -C '/repo' init -q`, 0, "");
     const cmd = new BootstrapCommand(host, async () => "");
     const { ctx, stderr } = makeCtx(fs);
-    await cmd.run(["--force", "rebootstrap"], ctx);
+    await cmd.run(["--name", "repo", "--force", "rebootstrap"], ctx);
     expect(stderr.text()).toBe("");
   });
 
@@ -452,7 +452,93 @@ describe("BootstrapCommand — #42 facet 2: orphan-session warning on mint", () 
     // #51: env now flows through ctx, not process.env. No more
     // snapshot/restore dance — pass XDG_CONFIG_HOME in via makeCtx.
     const { ctx, stderr } = makeCtx(fs, { env: { XDG_CONFIG_HOME: "/custom/xdg" } });
-    await cmd.run(["intent"], ctx);
+    await cmd.run(["--name", "repo", "intent"], ctx);
     expect(stderr.text()).toContain(`/custom/xdg/dridock/projects/aa112233/dot/.claude/projects/-repo`);
+  });
+});
+
+/* ── #123: a name is required where an identity is created ─────────────── */
+describe("BootstrapCommand — --name (#123)", () => {
+  function fresh(): { fs: InMemoryFileSystem; cmd: BootstrapCommand; host: StubHostCommandRunner } {
+    const fs = new InMemoryFileSystem();
+    const host = new StubHostCommandRunner();
+    host.seedCommand(`git -C '/repo' init -q`, 0, "");
+    return { fs, host, cmd: new BootstrapCommand(host, async () => "") };
+  }
+
+  test("new project, no --name → refused, suggesting the directory's name, nothing written", async () => {
+    const { fs, cmd } = fresh();
+    const { ctx, stderr } = makeCtx(fs, "/home/a/My_Proj");
+    const rc = await cmd.run(["intent"], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("--name is required");
+    expect(stderr.text()).toContain("suggested from this directory:  --name my-proj");
+    expect(await fs.exists("/home/a/My_Proj/.dridock/config.yml")).toBe(false);
+  });
+
+  test("new project with --name → written to the tracked project.yml", async () => {
+    const { fs, cmd } = fresh();
+    const { ctx } = makeCtx(fs);
+    expect(await cmd.run(["--name", "my-proj", "intent"], ctx)).toBe(0);
+    expect(await fs.readText("/repo/.dridock/project.yml")).toContain("\nname: my-proj\n");
+  });
+
+  test("--name is sanitized, and both forms are shown", async () => {
+    const { fs, cmd } = fresh();
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run(["--name", "My Proj", "intent"], ctx)).toBe(0);
+    expect(stderr.text()).toContain("--name 'My Proj' is used as 'my-proj'");
+    expect(await fs.readText("/repo/.dridock/project.yml")).toContain("\nname: my-proj\n");
+  });
+
+  test("--name with nothing usable → refused", async () => {
+    const { fs, cmd } = fresh();
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run(["--name", "___", "intent"], ctx)).toBe(1);
+    expect(stderr.text()).toContain("no usable characters");
+  });
+
+  test("a repo that already declares a name (a clone) needs no --name, and keeps it", async () => {
+    const { fs, cmd } = fresh();
+    fs.seedDir("/repo/.git");
+    fs.seed("/repo/.dridock/project.yml", "name: upstream-name\n");
+    const { ctx } = makeCtx(fs);
+    expect(await cmd.run(["--adopt", "intent"], ctx)).toBe(0);
+    expect(await fs.readText("/repo/.dridock/project.yml")).toBe("name: upstream-name\n");
+  });
+
+  test("a --name that disagrees with the tracked name → refused naming both, project.yml untouched", async () => {
+    const { fs, cmd } = fresh();
+    fs.seedDir("/repo/.git");
+    fs.seed("/repo/.dridock/project.yml", "name: upstream-name\n");
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run(["--adopt", "--name", "mine", "intent"], ctx)).toBe(1);
+    expect(stderr.text()).toContain("--name mine disagrees");
+    expect(stderr.text()).toContain("name: upstream-name");
+    expect(await fs.readText("/repo/.dridock/project.yml")).toBe("name: upstream-name\n");
+  });
+
+  test("the same name as tracked is fine", async () => {
+    const { fs, cmd } = fresh();
+    fs.seedDir("/repo/.git");
+    fs.seed("/repo/.dridock/project.yml", "name: upstream-name\n");
+    const { ctx } = makeCtx(fs);
+    expect(await cmd.run(["--adopt", "--name", "upstream-name", "intent"], ctx)).toBe(0);
+  });
+
+  test("re-run on a project with an id but no name → not a creation: allowed (start adopts it)", async () => {
+    const { fs, cmd } = fresh();
+    fs.seed("/repo/.dridock/config.yml", "id: abc12345\n");
+    const { ctx } = makeCtx(fs);
+    expect(await cmd.run(["intent"], ctx)).toBe(0);
+    expect(await fs.exists("/repo/.dridock/project.yml")).toBe(false);
+  });
+
+  test("--brief-only creates no identity: needs no --name, and ignores one with a note", async () => {
+    const { fs, cmd } = fresh();
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run(["--brief-only", "--name", "x", "intent"], ctx)).toBe(0);
+    expect(stderr.text()).toContain("--name ignored with --brief-only");
+    expect(await fs.exists("/repo/.dridock/project.yml")).toBe(false);
   });
 });

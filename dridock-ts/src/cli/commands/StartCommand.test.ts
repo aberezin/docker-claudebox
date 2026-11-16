@@ -612,3 +612,74 @@ describe("StartCommand — #110 launch-time wiring", () => {
     expect(holds).toEqual([process.pid]);
   });
 });
+
+/* ── #123: identity, root-only start, adoption wiring ──────────────────── */
+describe("StartCommand — #123 path independence", () => {
+  test("first 6.0 start writes the inferred name once and names the container by it", async () => {
+    const { fs, cmd, runtime } = seedProjectVmRunning();
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(await fs.readText("/p/.dridock/project.yml")).toContain("\nname: p\n");
+    expect(stderr.text()).toContain("wrote  name: p  to .dridock/project.yml");
+    expect(runtime.runs[0]!.containerName).toBe("claude-p-abc");
+  });
+
+  test("a declared name wins over the directory, so a rename changes nothing", async () => {
+    const { fs, cmd, runtime } = seedProjectVmRunning();
+    fs.seed("/p/.dridock/project.yml", "name: stable\n");
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(runtime.runs[0]!.containerName).toBe("claude-stable-abc");
+    expect(stderr.text()).not.toContain("wrote  name:");
+  });
+
+  test("from a subdirectory → refused before any VM or container work", async () => {
+    const { fs, cmd, colima, runtime } = seedProjectWithInfra();
+    const { ctx, stderr } = makeCtx(fs, { cwd: "/p/src" });
+    expect(await cmd.run([], ctx)).toBe(1);
+    expect(stderr.text()).toContain("cd /p && dridock start");
+    expect(runtime.runs).toEqual([]);
+    expect(colima.starts).toEqual([]);
+  });
+
+  test("DRIDOCK_ALLOW_SUBDIR is reported as dead, and doesn't bypass the refusal", async () => {
+    const { fs, cmd } = seedProjectWithInfra();
+    const { ctx, stderr } = makeCtx(fs, { cwd: "/p/src", env: { DRIDOCK_ALLOW_SUBDIR: "1" } });
+    expect(await cmd.run([], ctx)).toBe(1);
+    expect(stderr.text()).toContain("DRIDOCK_ALLOW_SUBDIR=1 no longer does anything");
+  });
+
+  test("a stopped pre-6.0 container is adopted: removed, then created under the new name", async () => {
+    const { fs, cmd, docker, runtime } = seedProjectVmRunning();
+    docker.seedContainerSummary("colima-cb-abc", { name: "claude-_p", state: "exited", workspaceSource: "/p" });
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(docker.removals.map((r) => r.name)).toContain("claude-_p");
+    expect(stderr.text()).toContain("adopting claude-_p → claude-p-abc");
+    expect(runtime.runs[0]!.containerName).toBe("claude-p-abc");
+    expect(runtime.runs[0]!.env).toContainEqual({ key: "DRIDOCK_CONTAINER_NAME", value: "claude-p-abc" });
+  });
+
+  test("a RUNNING pre-6.0 container: nothing removed, this run attaches to it under its old name", async () => {
+    const { fs, cmd, docker, runtime } = seedProjectVmRunning();
+    docker.seedContainerSummary("colima-cb-abc", { name: "claude-_p", state: "running", workspaceSource: "/p" });
+    runtime.seedPs("claude-_p", { name: "claude-_p", status: "Up 2 hours", image: "dridock:latest" });
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(docker.removals).toEqual([]);
+    expect(stderr.text()).toContain("dridock down");
+    expect(stderr.text()).toContain("attaching to container claude-_p");
+    // Its sidecars are refreshed under the name it actually reads.
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/dot/.claude/.claude-_p-auth")).toBe(true);
+  });
+
+  test("adoption refused (a copy) → rc 1, no container started", async () => {
+    const { fs, cmd, docker, runtime } = seedProjectVmRunning();
+    fs.seedDir("/p-copy");
+    docker.seedContainerSummary("colima-cb-abc", { name: "claude-_p-copy", state: "exited", workspaceSource: "/p-copy" });
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(1);
+    expect(stderr.text()).toContain("COPY");
+    expect(runtime.runs).toEqual([]);
+  });
+});

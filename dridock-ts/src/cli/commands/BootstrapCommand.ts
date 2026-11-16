@@ -5,6 +5,8 @@ import type { HostCommandRunner } from "../../infra/HostCommandRunner.ts";
 import { RealHostCommandRunner } from "../../infra/HostCommandRunner.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
 import { BootstrapService } from "../../services/BootstrapService.ts";
+import { ProjectConfig } from "../../services/ProjectConfig.ts";
+import { sanitizeProjectName } from "../../services/ContainerName.ts";
 
 /**
  * `dridock bootstrap` — scaffold a new claudebot project + write the mission
@@ -22,6 +24,8 @@ import { BootstrapService } from "../../services/BootstrapService.ts";
  *   --seed-secret KEY=CMD        run CMD, store stdout as KEY (repeatable)
  *   --gh-token                   deprecated alias for --seed-secret
  *   --force                      overwrite existing BRIEF.md
+ *   --name <label>               the project's name (#123): required when this
+ *                                bootstrap mints an id and project.yml declares none
  *
  * `--no-start` default is 1 (don't auto-launch); bash's default IS to
  * launch. That's a deliberate TS opinion — bootstrap is a one-shot; the
@@ -31,10 +35,11 @@ import { BootstrapService } from "../../services/BootstrapService.ts";
  */
 export class BootstrapCommand implements Command {
   readonly verb = "bootstrap" as const;
-  readonly usage = `dridock bootstrap ["<intent>"] [--gh-token] [--secrets-file F]
+  readonly usage = `dridock bootstrap --name <label> ["<intent>"] [--gh-token] [--secrets-file F]
 
 Scaffold a new dridock project here: .dridock/config.yml, a project id, and a
-per-project Colima VM. Secrets enter only via file (--secrets-file) or the
+per-project Colima VM. --name is the project's label (tracked in
+.dridock/project.yml, used in container names); a new project must declare one. Secrets enter only via file (--secrets-file) or the
 host's own gh auth token (--gh-token) — never as a flag value.`;
 
   constructor(
@@ -71,6 +76,16 @@ host's own gh auth token (--gh-token) — never as a flag value.`;
       return 1;
     }
 
+    // ── the project's name (#123) ─────────────────────────────────────
+    // After any clone (a cloned repo may already declare one in its tracked
+    // project.yml), before anything is written.
+    const naming = await resolveBootstrapName(ctx, parsed);
+    for (const n of naming.notes) ctx.stderr.write(n);
+    if (naming.kind === "refuse") {
+      ctx.stderr.write(naming.message);
+      return 1;
+    }
+
     const flavor: "adopt" | "workspace" | "greenfield" =
       parsed.adopt || parsed.adoptUrl !== undefined ? "adopt"
       : parsed.workspace ? "workspace"
@@ -92,6 +107,11 @@ host's own gh auth token (--gh-token) — never as a flag value.`;
     if (outcome.kind === "brief-exists") {
       ctx.stderr.write(`❌ .dridock/BRIEF.md already exists — use --force to overwrite\n`);
       return 1;
+    }
+
+    if (naming.kind === "write") {
+      await new ProjectConfig(ctx.fs).setProjectName(`${ctx.cwd}/.dridock/project.yml`, naming.name);
+      ctx.stdout.write(`  ✓ .dridock/project.yml (name: ${naming.name}; tracked, commit it)\n`);
     }
 
     // Multi-repo: gitignore parent's machine-local files + clone --repo siblings
@@ -159,7 +179,7 @@ host's own gh auth token (--gh-token) — never as a flag value.`;
     const out: ParsedBootstrap = {
       briefOnly: false, force: false,
       briefFile: undefined, secretsFile: undefined, adopt: false, adoptUrl: undefined,
-      workspace: false, repos: [], seedSecrets: [],
+      workspace: false, repos: [], seedSecrets: [], name: undefined,
       intent: "",
     };
     let i = 0;
@@ -189,6 +209,12 @@ host's own gh auth token (--gh-token) — never as a flag value.`;
           break;
         }
         case "--workspace": case "--multi-repo": out.workspace = true; break;
+        case "--name": {
+          const v = args[++i];
+          if (v === undefined || v.startsWith("-")) throw new DridockError(`bootstrap: --name expects a label, e.g. --name my-proj`);
+          out.name = v;
+          break;
+        }
         case "--repo": {
           out.workspace = true;
           const url = args[++i];
@@ -196,7 +222,7 @@ host's own gh auth token (--gh-token) — never as a flag value.`;
           break;
         }
         case "-h": case "--help":
-          ctx.stdout.write(`usage: ${ctx.binName} bootstrap [--adopt [<url>]] [--brief-only] [--no-start] [--force] [--brief-file F] [--secrets-file F] [--seed-secret KEY=CMD]... [--workspace] [--repo <url>]... [--gh-token] ["intent…"]\n`);
+          ctx.stdout.write(`usage: ${ctx.binName} bootstrap [--name <label>] [--adopt [<url>]] [--brief-only] [--no-start] [--force] [--brief-file F] [--secrets-file F] [--seed-secret KEY=CMD]... [--workspace] [--repo <url>]... [--gh-token] ["intent…"]\n`);
           ctx.stdout.write(`  scaffold a claudebot project in the current directory + write .dridock/BRIEF.md.\n`);
           return undefined;
         case "--":
@@ -283,6 +309,60 @@ host's own gh auth token (--gh-token) — never as a flag value.`;
   }
 }
 
+type BootstrapNaming =
+  | { readonly kind: "keep"; readonly notes: readonly string[] }
+  | { readonly kind: "write"; readonly name: string; readonly notes: readonly string[] }
+  | { readonly kind: "refuse"; readonly message: string; readonly notes: readonly string[] };
+
+/**
+ * #123: "a name is required wherever a project's identity is created"
+ * (docs/design/path-independence.md § A new project must declare its name).
+ *
+ *   --brief-only                      creates no identity: --name is ignored
+ *   project.yml already declares one  it wins; a different --name is an error
+ *   no declared name, --name given    written to project.yml
+ *   no declared name, no --name:
+ *     this run mints an id            refuse, suggesting the inferred name
+ *     an id already exists            keep: the next start adopts it
+ */
+export async function resolveBootstrapName(ctx: Context, parsed: Pick<ParsedBootstrap, "briefOnly" | "name">): Promise<BootstrapNaming> {
+  const notes: string[] = [];
+  if (parsed.briefOnly) {
+    if (parsed.name !== undefined) notes.push(`!  --name ignored with --brief-only: it only rewrites BRIEF.md and creates no identity.\n`);
+    return { kind: "keep", notes };
+  }
+  const cfg = new ProjectConfig(ctx.fs);
+  const declared = await cfg.projectName(`${ctx.cwd}/.dridock/project.yml`);
+  let given: string | undefined;
+  if (parsed.name !== undefined) {
+    given = sanitizeProjectName(parsed.name);
+    if (given === "") {
+      return { kind: "refuse", notes, message: `❌ bootstrap: --name '${parsed.name}' has no usable characters (a name is lowercase [a-z0-9-]).\n` };
+    }
+    if (given !== parsed.name) notes.push(`!  --name '${parsed.name}' is used as '${given}' (container names allow [a-z0-9-]).\n`);
+  }
+  if (declared.raw !== undefined) {
+    if (given !== undefined && given !== declared.sanitized) {
+      return {
+        kind: "refuse", notes,
+        message: `❌ bootstrap: --name ${given} disagrees with the name this project already declares.\n`
+          + `   .dridock/project.yml (tracked) says:  name: ${declared.raw}\n`
+          + `   Drop --name to keep it, or edit project.yml if the project should be renamed.\n`,
+      };
+    }
+    return { kind: "keep", notes };
+  }
+  if (given !== undefined) return { kind: "write", name: given, notes };
+  const id = await cfg.projectId(`${ctx.cwd}/.dridock/config.yml`);
+  if (id !== undefined) return { kind: "keep", notes };   // no mint: start will adopt
+  const suggestion = sanitizeProjectName(ctx.cwd.replace(/\/+$/, "").split("/").pop() ?? "");
+  return {
+    kind: "refuse", notes,
+    message: `${ctx.binName} bootstrap: --name is required (a project's name is part of its identity)\n`
+      + (suggestion !== "" ? `   suggested from this directory:  --name ${suggestion}\n` : `   pick one: lowercase letters, digits and dashes, e.g. --name my-project\n`),
+  };
+}
+
 interface ParsedBootstrap {
   briefOnly: boolean;
   force: boolean;
@@ -293,6 +373,7 @@ interface ParsedBootstrap {
   workspace: boolean;
   repos: string[];
   seedSecrets: string[];
+  name: string | undefined;
   intent: string;
 }
 
