@@ -854,9 +854,28 @@ fi
 #
 # Read with plain `export "$name=$value"` — no printf %q, no eval — so a value containing
 # shell metacharacters is data, never code.
+# #123: a missing -auth / -secrets is normal for a project without them, and
+# wrong for a container that is looking under a name the wrapper no longer
+# writes (DRIDOCK_CONTAINER_NAME is fixed at `docker run`; a container renamed
+# or left over from before 6.0 keeps its old one). Returning 0 silently there
+# starts the claudebot with no credentials and nothing on stderr. The tell is
+# the same kind of sidecar existing under ANOTHER container name in the same
+# dir: the wrapper is writing them, just not for this name. Say so.
+_warn_missing_sidecar() {   # $1 = suffix, $2 = the path that was expected
+	case "$1" in auth|secrets) ;; *) return 0 ;; esac
+	local others=() o
+	for o in /home/claude/.claude/.claude-*-"$1"; do
+		[ -f "$o" ] && [ "$o" != "$2" ] && others+=("${o##*/}")
+	done
+	[ "${#others[@]}" -gt 0 ] || return 0
+	echo "dridock: this container reads ${2##*/}, which doesn't exist, but ${others[0]} does$([ "${#others[@]}" -gt 1 ] && echo " (and $((${#others[@]} - 1)) more)")." >&2
+	echo "         Its DRIDOCK_CONTAINER_NAME ('${CLAUDE_CONTAINER_NAME}') no longer matches what dridock writes, so its -$1 sidecar is NOT loaded." >&2
+	echo "         Recreate it so it gets the current name: on the Mac, 'dridock down && dridock start' (#123)." >&2
+}
+
 _load_env_sidecar() {   # $1 = sidecar suffix, $2 = debug label
 	local f="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-$1" line name value
-	[ -f "$f" ] || return 0
+	[ -f "$f" ] || { _warn_missing_sidecar "$1" "$f"; return 0; }
 	dbg "$2 sidecar: $f"
 	# Parse KEY=VALUE tolerantly. These files are copied verbatim from a HAND-EDITABLE
 	# host file (.dridock/secrets.env), so they pick up human formatting: `KEY = value`,
