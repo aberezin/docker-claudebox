@@ -37,7 +37,7 @@ done
 [ "$n" -ge 5 ] && ok "found $n features (the glob matched)" || bad "found only $n features: the glob is wrong, so the invariant checked nothing"
 
 local tmp; tmp="$(mktemp -d)"
-local cfg="$tmp/cfg" rc
+local cfg="$tmp/cfg" rc out
 
 # 2. The plugin-backed features: present only when the plugin db names it AND its dir exists.
 if command -v jq >/dev/null 2>&1; then
@@ -69,6 +69,9 @@ fi
 
 # 3. modeguard: the "not a git repo yet" deferral must not stick once git exists.
 local ws="$tmp/ws"
+out="$(env -u DRIDOCK_WORKSPACE bash "$REPO/features/modeguard/check.sh" 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && [[ "$out" == *"can't verify"* ]] && ok "modeguard: DRIDOCK_WORKSPACE unset → fails loudly, not a silent pass" \
+    || bad "modeguard: unset DRIDOCK_WORKSPACE gave rc $rc: $out"
 mg() { DRIDOCK_WORKSPACE="$ws" bash "$REPO/features/modeguard/check.sh" >/dev/null 2>&1; }
 mkdir -p "$ws"
 mg; rc=$?
