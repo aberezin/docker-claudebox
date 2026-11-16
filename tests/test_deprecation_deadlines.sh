@@ -113,6 +113,14 @@ deadline_claude_tier
 deadline "migrate verb + migrators" 6 \
     --include=*.ts -e 'autoMigrateIfNeeded\|class .*Migrator' "$REPO/dridock-ts/src"
 
+# ── 7.0.0: adoption of pre-6.0 containers (#123) ───────────────────────────
+# 6.0 names containers by declared identity and adopts `claude-_<path>` ones by
+# recreate. The legacy name computation exists only for that adoption; one
+# major of overlap, then it goes. Added in the same commit as the code, since
+# this check asserts presence until the deadline.
+deadline "pre-6.0 container adoption (legacyContainerName)" 7 \
+    --include=*.ts -e 'export function legacyContainerName' "$REPO/dridock-ts/src"
+
 echo ""
 
 # --- 6.0.0: `team:` becomes REQUIRED in .dridock/agents.yml -----------

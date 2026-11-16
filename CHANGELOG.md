@@ -28,6 +28,45 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed — 6.0.0 (breaking)
+- **A project's directory name is free to change** (#123,
+  [path-independence.md](docs/design/path-independence.md)). Containers are named
+  `claude-<name>-<id>` (`_prog`, `_cron`) instead of `claude-<absolute path>`, so a
+  rename or move no longer starts the project over: the container, its sidecars and its
+  credentials keep working. `name:` lives in the tracked `.dridock/project.yml`; `id:`
+  stays in the gitignored `config.yml`.
+  - **Existing containers are adopted, not stranded.** On the first 6.0 `start`, a
+    stopped pre-6.0 container is removed and recreated under the new name; session
+    history, settings and init.d live in the mount and come through. It's a recreate,
+    not a `docker rename`: the entrypoint finds its sidecars through
+    `DRIDOCK_CONTAINER_NAME`, which is fixed at `docker run`, so a renamed container
+    would come up with no secrets. A **running** container is never touched: that run
+    attaches under the old name and says adoption happens after `dridock down`. Stale
+    sidecars are removed afterwards, credential files counted.
+  - **Hard errors, each naming what it found:** both an old and a new container for the
+    same role; a project **copied** with `cp -r` (two directories sharing one `id:`,
+    detected because the other workspace still exists; the fix is a new `id:`); a
+    running container whose workspace path has vanished.
+  - **The first 6.0 `start` writes `name:`** into `project.yml` from the directory's
+    name, once, and says so. Commit it. Later renames don't change it.
+  - **`dridock bootstrap` requires `--name`** when it creates a project's identity
+    (mints an id with no tracked name). A clone that already declares one needs none;
+    a disagreeing `--name` is an error. `--brief-only` ignores it.
+  - **`start`, `cron`, `auth` and `mcp` run only from the project root.** From a
+    subdirectory they exit 1 with the `cd`. No override: **`DRIDOCK_ALLOW_SUBDIR` is
+    removed**, and setting it prints that it does nothing. The old `.dridock`-dir
+    guard is folded in. `stop` and `info` work from anywhere and find a not-yet-adopted
+    container by its old name.
+  - **A moved project's session history is reported, not lost silently.** Claude keys
+    history by directory. The first `start` after a move prints the old and new session
+    dirs, the entry count and the exact `mv`, and exits 1; starting again proceeds fresh.
+  - **The entrypoint says when a container reads sidecars under a stale name**: a missing
+    `-auth`/`-secrets` with the same kind present under another container name now
+    prints both names and the recreate fix, instead of starting with no credentials.
+  - `docs/roadmap.md`: adoption of pre-6.0 containers (`legacyContainerName`) is removed
+    in **7.0.0**, enforced by `tests/test_deprecation_deadlines.sh`. The stray
+    `team:`-required row is folded into the 6.0.0 entry (#125).
+
 ### Fixed
 - **Every feature now verifies what it installed, not just that it ran once** (#124).
   `go`, `python`, `typescript` and `modeguard` had no `check.sh`, so the entrypoint

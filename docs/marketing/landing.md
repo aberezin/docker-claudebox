@@ -224,7 +224,7 @@ git clone <your-fork-url> dridock && cd dridock
 
 # scaffold a project with a mission brief
 mkdir project-a && cd project-a
-dridock bootstrap "Build a 3-tier app: React UI, Node API, Postgres."
+dridock bootstrap --name my-proj "Build a 3-tier app: React UI, Node API, Postgres."
 
 # or drop into interactive mode in an existing repo
 cd my-existing-repo

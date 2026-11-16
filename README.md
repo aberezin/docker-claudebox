@@ -157,9 +157,9 @@ brief** at `.dridock/BRIEF.md`. On first boot, claudebot is pointed at that brie
 
 ```bash
 mkdir project-a && cd project-a
-dridock bootstrap "Build a 3-tier app: React UI, Node API, Postgres, all in containers."
-#   ...or pipe a longer brief:   dridock bootstrap < intent.md
-#   ...or from a file:           dridock bootstrap --brief-file intent.md
+dridock bootstrap --name project-a "Build a 3-tier app: React UI, Node API, Postgres, all in containers."
+#   ...or pipe a longer brief:   dridock bootstrap --name project-a < intent.md
+#   ...or from a file:           dridock bootstrap --name project-a --brief-file intent.md
 ```
 
 Flags: `--no-start` (scaffold but don't boot claudebot — a host Claude session uses

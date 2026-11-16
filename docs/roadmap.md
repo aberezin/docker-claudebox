@@ -15,7 +15,8 @@ not happened. A deadline nobody can miss beats a deadline everybody means to kee
 | Release | What goes away | Enforced by |
 |---|---|---|
 | **5.0.0** ✅ done | Legacy `CLAUDEBOX_*` / `CLAUDE_*` env tiers, the container env aliaser, and silent `.claudebox/` directory fallbacks. | `tests/test_deprecation_deadlines.sh` |
-| **6.0.0** | The `.claudebox/` → `.dridock/` migration path: the `dridock migrate` verb, `autoMigrateIfNeeded`, and the five migrators under `dridock-ts/src/services/migrators/`. | `tests/test_deprecation_deadlines.sh` |
+| **6.0.0** | The `.claudebox/` → `.dridock/` migration path: the `dridock migrate` verb, `autoMigrateIfNeeded`, and the five migrators under `dridock-ts/src/services/migrators/`. **Also:** `team:` becomes **required** in `.dridock/agents.yml` (optional through 5.x, where its absence warns and names the fix; `dridock team dir` errors without it). | `tests/test_deprecation_deadlines.sh` |
+| **7.0.0** | Adoption of pre-6.0 containers: `legacyContainerName` (the `claude-_<path>` form) and the `claude-_` branch of `AdoptionService`. 6.0 names containers `claude-<name>-<id>` and adopts the old ones on their next stopped start (#123); a project not started once in all of 6.x keeps an orphan container in its VM, which `dridock vm gc` / `destroy` still clears. | `tests/test_deprecation_deadlines.sh` |
 | **7.0.0** | Reading `features:` / `plugins:` from `.dridock/config.yml`. They moved to the tracked `.dridock/project.yml` in 5.10.0 (#97); until 7.0 the old location is unioned in and nudged about. | `tests/test_deprecation_deadlines.sh` |
 
 ### Why 7.0 and not 6.0 for the config.yml project keys
@@ -58,5 +59,3 @@ without a check is the failure mode this whole file exists to prevent.
 - [versioning.md](versioning.md) — semver rules and the release process.
 - [design/env-var-rename.md](design/env-var-rename.md) — the 3.0 rename these removals conclude.
 - [../CHANGELOG.md](../CHANGELOG.md) — what actually shipped.
-
-| `team:` optional in `.dridock/agents.yml` | 6.0.0 | `dridock team dir` errors without it; absence warns in 5.x | `tests/test_deprecation_deadlines.sh` |

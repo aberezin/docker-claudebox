@@ -46,7 +46,7 @@ gets one obvious place for its API token.
 its stdout into `.dridock/secrets.env` as `KEY=<value>`:
 
 ```bash
-dridock bootstrap --seed-secret GH_TOKEN='gh auth token' \
+dridock bootstrap --name my-proj --seed-secret GH_TOKEN='gh auth token' \
                   --seed-secret GITLAB_TOKEN='glab auth token' \
                   "build project-A"
 ```
@@ -97,11 +97,11 @@ Two supported paths (both file-based — never on the command line):
 
 ```bash
 # from any dir inside the project workspace, seed a single provider:
-dridock bootstrap --seed-secret GH_TOKEN='gh auth token'
+dridock bootstrap --name my-proj --seed-secret GH_TOKEN='gh auth token'
 # (--seed-secret runs 'gh auth token' on the HOST, stores the output in secrets.env)
 
 # or merge a whole file:
-dridock bootstrap --secrets-file ./api-tokens.env
+dridock bootstrap --name my-proj --secrets-file ./api-tokens.env
 ```
 
 `.dridock/secrets.env` can also be edited by hand — the wrapper picks it up on the

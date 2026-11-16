@@ -1,6 +1,6 @@
 # Path independence — a project's identity is declared, not inferred
 
-**Status:** specified, not yet implemented — **#123, slated for 6.0.0, Bear builds it** (Alan, 2026-11-15). The inventory and the measurements below are current. The two decisions this design left to Alan are now made and marked in place: `name:` lives in the tracked `project.yml`, and the scheme change ships in 6.0.0.
+**Status:** implemented on `123-path-independence` (#123), shipping in **6.0.0** (Alan, 2026-11-15). The decisions this design left to Alan are made and marked in place: `name:` lives in the tracked `project.yml`, the scheme ships in 6.0.0, and launches run only from the project root with no override (2026-11-16). The inventory and measurements below describe the pre-6.0 code they were taken from.
 
 A git repository does not care what its directory is called. You can `mv` a clone anywhere and every commit, branch and remote comes with it, because git's identity lives *inside* the directory. dridock is half of the way there: the VM and the per-project state are keyed on a declared `id:`, but the container, its sidecars and the claudebot's session history are keyed on the absolute path. So a rename silently starts the project over (#121).
 
@@ -92,13 +92,17 @@ If sanitization leaves nothing (a basename with no `[a-z0-9]` at all) the adopti
 
 With that, a rename changes nothing the harness owns. No new container, no orphaned sidecars, no credential files left under a dead name.
 
+### Launches run from the project root only
+
+Before 6.0 the container name and the workspace mount both came from the cwd, so `dridock start` from `myproj/src` made a second container with `src/` as its workspace. Under `claude-<name>-<id>` the root and every subdirectory resolve to one container, so a subdirectory would ask that container for a different mount, and the move-vs-copy check below would misreport it as a copy. **Alan's call (2026-11-16): refuse, with no override.** `start`, `cron` and `auth`/`mcp` exit 1 from a subdirectory, naming the root and the `cd`. This subsumes the old `.dridock`-dir guard; its `DRIDOCK_ALLOW_SUBDIR` override is gone, and setting it prints that it does nothing. `stop` and `info` mount nothing and work from anywhere in the project. A pre-6.0 container that was started from a subdirectory is named by adoption and left alone, with the `docker rm` to clear it.
+
 ## The mount is the exception
 
 The workspace is mounted at **its own host path** inside the container, and that is load-bearing rather than incidental: a claudebot runs `docker` against the host daemon, so a `-v $PWD/x:/y` issued *inside* the container has to name a path the *host* daemon can resolve. Mount the workspace at a fixed `/workspace` instead and every docker-out-of-docker volume mount silently points at a path that doesn't exist outside the container — the failure is quiet and shows up as an empty directory in a sibling container.
 
 So the mount keeps tracking `$PWD`, and the one consequence we cannot design away is that Claude Code keys its session directory by its cwd. A rename therefore still moves the claudebot's history, even under the design above.
 
-That is handled by **detecting the move and reporting it, not migrating it**: record the last mounted path in the id-keyed state dir, and on `start`, when the current path differs, print the old slug, the new one, how many entries the old holds, and the exact `mv` that adopts it. Loud, derived from the current run, and a rc the caller can act on — the never-silently-discard rule. Making it fully invisible would mean a path-translation layer between the container's view and the host daemon's, which is a much larger change and should not be smuggled in here.
+That is handled by **detecting the move and reporting it, not migrating it**: record the last mounted path in the id-keyed state dir, and on `start`, when the current path differs, print the old slug, the new one, how many entries the old holds, and the exact `mv` that adopts it, and exit 1. The new path is recorded first, so it is said **once**: starting again proceeds with a fresh history if that is what the user wants, with no override flag. Loud, derived from the current run, and a rc the caller can act on — the never-silently-discard rule. Making it fully invisible would mean a path-translation layer between the container's view and the host daemon's, which is a much larger change and should not be smuggled in here.
 
 **The line between migrating and reporting is ownership.** The harness owns its container names and its sidecars, so it adopts those itself. Claude Code's session directory is not ours — it is the user's history, written by a process we don't control, under a key we don't define — so we report it with the command to run. That is also why this doc rejects a `dridock move` verb below without contradicting itself: the automatic step is confined to harness-owned state. The same rule as `OrphanSessionScanner`, which reports session dirs under another id and tells the user how to adopt one (`OrphanSessionScanner.ts:112`) rather than moving them.
 
@@ -120,7 +124,7 @@ entrypoint.sh:859   [ -f "$f" ] || return 0
 
 ### What `docker rename` actually does
 
-Measured rather than assumed — macOS + colima (`cb-infra`), `dridock:latest-minimal`, 2026-11-15:
+Measured rather than assumed — macOS + colima (`cb-infra`), `dridock:latest-minimal`, on a bridge network, 2026-11-15:
 
 ```
 docker rename <old> <new>, container RUNNING:
@@ -153,7 +157,7 @@ Requirements on the implementation, each one a lesson already paid for in this r
 5. **Distinguish a move from a copy.** `id:` travels inside the directory, so `cp -r myproj myproj-copy` — not `git clone`, which gets a fresh `config.yml` — produces two workspaces sharing one id. Today their containers differ because the names differ by path; under `claude-<name>-<id>` both resolve to the *same* container, mounted at whichever path created it, and the second `dridock start` would silently attach the user to the wrong tree. So on start, compare the existing container's workspace mount source with `$PWD`: if they differ and **the old path still exists**, it is a copy — stop with both paths and the remedy (delete the `id:` line from `.dridock/config.yml` and re-run `dridock bootstrap`, which mints a fresh 8-hex id, `BootstrapService.ts:119`). If the old path is gone, it is a move — adopt. The VM is already shared by id today, so this exposure is new to the container, not to the model.
 6. **Make the loader loud.** `_load_env_sidecar` returning 0 for a missing file is correct for a project that has no secrets and wrong for one whose sidecar just vanished. When the expected `-secrets` / `-auth` file is absent but a sibling sidecar under a *different* container name exists in the same dir, say so on stderr with both names. That is the never-silently-discard backstop, and it would have caught the rename-adoption bug on its first run rather than at the first failed API call.
 
-A recreated container also picks up the declared `--hostname` again, so sibling addressing by hostname is stable across adoption — which is the right habit anyway, since a container name's DNS entry moves under rename while its hostname does not ([n-tier-networking.md](n-tier-networking.md), [per-project-vm.md](per-project-vm.md)).
+**No `--hostname` caveat applies.** Every dridock container runs with `network: "host"` (`StartCommand.ts`, `buildRunArgs`), so it has no `--hostname` and no container-name DNS entry of its own: it sees the VM's hostname, and siblings reach it by the VM IP. The DNS-name movement in the `docker rename` measurement above is real, but it was taken on a **bridge** network (`--network rntest`), which this harness doesn't use.
 
 **This ships in 6.0.0** (Alan's call, 2026-11-15). Adoption being built in meant the version was a free choice rather than a forced one — nothing is stranded either way — and the major was chosen anyway, because the scheme change is exactly the kind of thing a reader expects to find in a major's notes alongside 6.0.0's other content (the `.claudebox/` migration-path removal, `docs/roadmap.md`).
 

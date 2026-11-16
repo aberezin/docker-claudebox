@@ -108,15 +108,33 @@ A standard command host-Claude (or Alan) runs to create the brief the same way
 every time. Non-interactive so host-Claude can drive it in one shot:
 
 ```bash
-dridock bootstrap --brief-file intent.md      # from a file
-dridock bootstrap "one-line intent"           # from an arg
-dridock bootstrap <<'EOF' ... EOF             # from stdin (multi-line)
-dridock bootstrap                             # no input -> writes a TODO template
+dridock bootstrap --name my-proj --brief-file intent.md      # from a file
+dridock bootstrap --name my-proj "one-line intent"           # from an arg
+dridock bootstrap --name my-proj <<'EOF' ... EOF             # from stdin (multi-line)
+dridock bootstrap --name my-proj                             # no input -> writes a TODO template
 ```
 
 It wraps whatever intent it's given in the standard BRIEF.md template, ensures
 `.dridock/` exists, and initializes project config. It is **idempotent-safe**: it
 won't clobber an existing brief without `--force`.
+
+### 2a. `--name` — the project's label (6.0, #123)
+
+A project's name is part of its identity: containers are named `claude-<name>-<id>`
+([path-independence.md](path-independence.md)). It lives in the **tracked**
+`.dridock/project.yml`, so every clone shares it.
+
+- A bootstrap that **mints an id** needs one. Without `--name` it exits 1 and suggests
+  the directory's sanitized name, so supplying it is one copy-paste.
+- A repo that **already declares** `name:` (a clone of a dridock project) needs none.
+  A `--name` that disagrees with it is an error naming both; the tracked file is never
+  overwritten.
+- `--brief-only` creates no identity and ignores `--name`, with a note.
+- Names are sanitized to lowercase `[a-z0-9-]`; when that changes what you typed, both
+  forms are printed.
+
+A project from before 6.0 has no `name:`. Its first 6.0 `start` writes one, from the
+directory's name, once, and says so.
 
 ### 2b. `--adopt` — an existing repo, without the nesting tangle
 

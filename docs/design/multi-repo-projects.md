@@ -83,7 +83,7 @@ parent never tracks them as gitlinks):
 
 ```bash
 mkdir -p ~/Development/myproject && cd ~/Development/myproject
-dridock bootstrap --workspace \
+dridock bootstrap --name my-proj --workspace \
   --repo <frontend-url> --repo <backend-url> --repo <infra-url> \
   "myproject spans frontend + backend + infra — <goal>"
 # → git init parent (orchestration, NO workloads/), README, multi-repo BRIEF,
