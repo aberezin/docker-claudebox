@@ -1404,11 +1404,12 @@ _install_features() {
 		# recreate, the payload isn't and doesn't — so the feature reports
 		# enabled with its tools missing, silently.
 		#
-		# If the feature ships an optional `check.sh`, run it and treat failure
-		# as "not installed" regardless of the marker. Same shape as the
-		# team-watch fetcher's two-part liveness (pid AND cmdline): an existence
-		# RECORD is not evidence the thing still exists. Features without a
-		# check.sh keep the old marker-only behavior.
+		# If the feature ships a `check.sh`, run it and treat failure as "not
+		# installed" regardless of the marker. Same shape as the team-watch
+		# fetcher's two-part liveness (pid AND cmdline): an existence RECORD is
+		# not evidence the thing still exists. Every SHIPPED feature has one
+		# (#124, enforced by tests/test_feature_checks.sh); a user-authored
+		# feature without one keeps the old marker-only behavior.
 		if [ -f "$CLAUDE_CONFIG_DIR/.feature-$feat" ] || [ -f "$CLAUDE_CONFIG_DIR/.profile-$feat" ]; then
 			_check="$lib_new/$feat/check.sh"
 			if [ -x "$_check" ]; then
@@ -1417,7 +1418,7 @@ _install_features() {
 					>/dev/null 2>&1; then
 					continue    # marker present AND payload verified
 				fi
-				echo "dridock: feature '$feat' is marked installed but its check failed — reinstalling (payload likely lost with a container recreate; #75)" >&2
+				echo "dridock: feature '$feat' is marked installed but its check failed — reinstalling (what it installed is gone or was removed; #75, #124)" >&2
 				rm -f "$CLAUDE_CONFIG_DIR/.feature-$feat" "$CLAUDE_CONFIG_DIR/.profile-$feat"
 			else
 				continue    # no check.sh — marker-only, as before

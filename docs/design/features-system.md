@@ -136,11 +136,25 @@ A marker records that `on.sh` ran once. That is not the same claim as "the
 payload is present", and the two diverge exactly when the persistence domains
 disagree.
 
-A feature may ship an optional executable `check.sh` beside `on.sh`. When the
-marker exists, the entrypoint runs it (30s timeout, as the `claude` user, with
+Every shipped feature has an executable `check.sh` beside `on.sh` (#124;
+`tests/test_feature_checks.sh` fails on a feature without one). When the marker
+exists, the entrypoint runs it (30s timeout, as the `claude` user, with
 `~/.claude/bin` on PATH); a non-zero exit means "not installed" and the feature
-is reinstalled, marker regardless. Features without a `check.sh` keep the
-marker-only behavior.
+is reinstalled, marker regardless. A user-authored feature without a `check.sh`
+keeps the marker-only behavior.
+
+Checking matters even when the placement rule above is followed, which it is for
+every shipped feature: their payloads are all on the mount, so a recreate loses
+nothing. The marker can still disagree with reality. A plugin can be uninstalled
+by hand, a hook can be overwritten, and modeguard's `on.sh` exits 0 in a
+workspace that isn't a git repo yet, so its marker used to be written with no
+hook installed and never revisited. The check for each:
+
+| Feature | `check.sh` passes when |
+|---|---|
+| `go`, `python`, `typescript` | `installed_plugins.json` lists the `*-lsp` plugin **and** its install dir exists. The language server binary is baked and not checked: reinstalling the plugin couldn't restore it. |
+| `modeguard` | the workspace has no `.git/hooks` yet (nothing to guard), or its `pre-commit` carries the `# dridock-modeguard` marker |
+| `web-scaffolders` | `create-vite` is on PATH |
 
 ```sh
 #!/usr/bin/env bash

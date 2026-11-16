@@ -29,6 +29,16 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **Every feature now verifies what it installed, not just that it ran once** (#124).
+  `go`, `python`, `typescript` and `modeguard` had no `check.sh`, so the entrypoint
+  trusted their marker alone. The three LSP features now check that
+  `installed_plugins.json` lists their plugin and its install dir exists. modeguard
+  checks for its hook, which fixes a real bug: in a workspace that wasn't a git repo
+  yet, its `on.sh` exited 0, the marker was written with no hook, and the hook was
+  never installed after `git init`. New `tests/test_feature_checks.sh` fails on any
+  shipped feature without an executable `check.sh`. Correction to #124's premise:
+  no shipped feature loses its payload on a container recreate, since all of them
+  install onto the mount (#75). The gap was drift and the modeguard deferral.
 - **`sed -i` on the workspace mount no longer costs a script its exec bit unnoticed**
   (#116). On the virtiofs share, GNU `sed -i` renames a temp file over the original
   and the mode doesn't survive: a 755 file comes out 600, which git stages as 644.
