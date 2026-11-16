@@ -47,6 +47,12 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     same role; a project **copied** with `cp -r` (two directories sharing one `id:`,
     detected because the other workspace still exists; the fix is a new `id:`); a
     running container whose workspace path has vanished.
+  - **Containers carry their identity as labels**, `org.dridock.workspace` and
+    `org.dridock.id`, set at `docker run`, so adoption reads them rather than guessing
+    from mounts (`docker inspect` lists mounts unordered, and a same-path
+    `DRIDOCK_MOUNT_*` looks just like the workspace). For an unlabelled pre-6.0
+    container that can't be settled, adoption refuses and changes nothing; a failed
+    container listing does the same; removal is a non-force `docker rm`.
   - **The first 6.0 `start` writes `name:`** into `project.yml` from the directory's
     name, once, and says so. Commit it. Later renames don't change it.
   - **`dridock bootstrap` requires `--name`** when it creates a project's identity
