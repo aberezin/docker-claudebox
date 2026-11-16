@@ -58,7 +58,7 @@ Container names become `claude-<name>-<id>`, `claude-<name>-<id>_prog`, `claude-
 
 ### A new project must declare its name
 
-**Every project-creation path requires a name explicitly and refuses without one** (Alan, 2026-11-15). `dridock bootstrap` takes `--name <label>`; with no `--name` it exits non-zero and prints the name it *would* have inferred, so supplying it is one copy-paste:
+**A name is required wherever a project's identity is created** (Alan, 2026-11-15). `dridock bootstrap` is the only such path — `dridock start` refuses outside an existing project (`StartCommand.ts:95`) — and it takes `--name <label>`. With no name available it exits non-zero and prints the name it *would* have inferred, so supplying it is one copy-paste:
 
 ```
 dridock bootstrap: --name is required (a project's name is part of its identity)
@@ -67,9 +67,26 @@ dridock bootstrap: --name is required (a project's name is part of its identity)
 
 A flag rather than a prompt, so a non-interactive or scripted bootstrap behaves the same as an interactive one. No value is secret, so this does not touch the secrets-are-file-based rule — that rule is about credential *values*, and a project label is neither.
 
+**"Creates an identity" is narrower than "runs bootstrap", and the difference matters** (`BootstrapCommand.ts:14-24`):
+
+| Mode | Needs `--name`? |
+|---|---|
+| plain `bootstrap` (new project) | **yes** — nothing declares a name yet |
+| `--adopt [<url>]` of a repo whose tracked `project.yml` already has `name:` | **no** — it already has one; see precedence below |
+| `--adopt` of a repo with no `name:` | **yes** |
+| `--brief-only` | **no** — rewrites BRIEF.md, creates no identity |
+| `--workspace` / `--multi-repo` with `--repo <url>` | **yes, for the parent only** — the cloned siblings are not dridock projects |
+| `--secrets-file`, `--seed-secret`, `--force`, `--no-start`, `--brief-file` | unchanged — orthogonal |
+
+**Precedence, because `name:` is tracked and therefore travels with a clone:** a tracked `name:` wins and is never rewritten. `--name` is required only when none is present, and a `--name` that **disagrees** with a tracked `name:` is a hard error naming both values — not a silent overwrite of a file in the user's git tree, and not a silent ignore of what they typed. Without this rule, requiring a name would fail the bootstrap of every second clone of a dridock project, demanding a name the repo already carries (Bear, #123 review).
+
+**Sanitization, defined once and applied everywhere** (`--name`, and the adoption inference below): lowercase, keep `[a-z0-9-]`, collapse runs of `-`, trim leading and trailing `-`. If the sanitized form differs from what was supplied, the command prints both and uses the sanitized one — `--name "My Proj"` becomes `my-proj` visibly, never silently. If sanitization leaves nothing, creation refuses.
+
+**Two clones of one project share a `name:` and differ by `id:`.** That is the design working, not a collision: `docker ps` shows `claude-myproj-69adc719` beside `claude-myproj-3f2ab891`, which is also how the colima profiles already look (`cb-<id>`).
+
 Why require it rather than default it: a name inferred from the directory is a name nobody chose, and it is inferred from the very thing this design is making disposable. Two sibling checkouts (`myproj`, `myproj-2`) would silently become two differently-named projects; rename the directory before the first start and the name silently changes with it. Declaring it once at creation is also what makes it stable afterwards — a later rename never touches it.
 
-**The one path that may infer is adoption of a project that predates this**, which is every project that exists today. There, adoption writes `name:` **once**, as the sanitized basename, into `project.yml` (created lazily, per the #97 rule that nothing lands in a git tree unasked), with a stderr line saying it did and what it wrote. That is an inference the user can see and edit, not a silent default — and it only ever happens on the upgrade, never for a new project.
+**The one path that may infer is adoption of a project that predates this**, which is every project that exists today. There, adoption writes `name:` **once**, as the sanitized basename, into `project.yml` (created lazily, per the #97 rule that nothing lands in a git tree unasked), with a stderr line saying it did and what it wrote. Note the asymmetry with `--adopt` above: a *clone* of an already-migrated project needs no name because the tracked file carries one, while a project being migrated for the first time has no such file to read. That is an inference the user can see and edit, not a silent default — and it only ever happens on the upgrade, never for a new project.
 
 If sanitization leaves nothing (a basename with no `[a-z0-9]` at all) the adoption path omits the name and the container is plain `claude-<id>`: still path-independent, still unique. A label nobody can read is not worth a failed start on an upgrade — but on *creation* the same case is a refusal, because there a human is right there to pick a better one. `docker ps` becomes *more* legible than today's `claude-_Users_aberezin_Development_ai-claude-code_...`, not less.
 

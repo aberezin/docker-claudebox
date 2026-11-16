@@ -208,8 +208,11 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   project-creation path now **requires** a name — `dridock bootstrap --name <label>`, with
   no `--name` exiting non-zero and printing the name it would have inferred. A name
   inferred from the directory is a name nobody chose, inferred from the thing this design
-  makes disposable. Adoption of a pre-6.0 project is the one path that may infer, once,
-  with a stderr line saying what it wrote. The 7.0.0 removal of the legacy `claude-<cwd>`
+  makes disposable. A tracked `name:` wins and is never rewritten, so `--name` is required
+  only where an identity is actually created — not for `--brief-only`, and not for an
+  `--adopt` of a clone whose `project.yml` already names it — and a `--name` that disagrees
+  with a tracked one is a hard error naming both. Adoption of a pre-6.0 project is the one
+  path that may infer, once, with a stderr line saying what it wrote. The 7.0.0 removal of the legacy `claude-<cwd>`
   derivation gets its roadmap row and deadline check in the same commit as the legacy path,
   since the deadline test asserts presence until the major arrives.
 - New design doc `docs/design/path-independence.md` (#123). A project's identity should be
