@@ -145,10 +145,14 @@ describe("BrowserBridgeCommand.down — end-to-end", () => {
     fs.seed("/repo/.dridock/config.yml", "id: abc12345\n");
     fs.seed("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "");
     const processes = new InMemoryHostProcessManager();
-    // Bring it up first.
+    // Bring it up first. `up` probes the CDP socket before reporting success
+    // (#94), so the probe has to be stubbed here as it is everywhere else —
+    // without it this reaches the real HTTP probe and returns probe-failed
+    // (#127).
     await new BrowserBridgeCommand({
       git: new StubGitToplevel("/repo"), processes,
       sleep: async () => {}, randomHex: () => "abababab",
+      cdpProbe: async () => true,
     }).run(["up"], makeCtx(fs).ctx);
     expect(processes.alive.size).toBe(2);
     expect(await fs.exists("/home/alan/.config/dridock/projects/abc12345/.cdp-url")).toBe(true);
@@ -158,6 +162,7 @@ describe("BrowserBridgeCommand.down — end-to-end", () => {
     const rc = await new BrowserBridgeCommand({
       git: new StubGitToplevel("/repo"), processes,
       sleep: async () => {}, randomHex: () => "abababab",
+      cdpProbe: async () => true,          // not reached by down; kept symmetric
     }).run(["down"], ctx);
     expect(rc).toBe(0);
     expect(stdout.text()).toContain("CDP bridge down");

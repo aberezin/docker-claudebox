@@ -110,6 +110,10 @@ describe("BrowserBridgeService.up — first-time launch (cold start)", () => {
       home: "/home/alan",
       randomHex: () => "deadbeef",
       sleep: async () => {},
+      // up() probes the CDP socket before reporting success (#94). This case
+      // builds the service directly instead of through build(), which stubs
+      // the probe, so it has to stub it too (#127).
+      cdpProbe: async () => true,
     });
     const outcome = await svc.up("abc12345");
     expect(outcome.kind).toBe("up");
