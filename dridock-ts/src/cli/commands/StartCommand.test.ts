@@ -683,3 +683,16 @@ describe("StartCommand — #123 path independence", () => {
     expect(runtime.runs).toEqual([]);
   });
 });
+
+test("#123: first start after a move → rc 1 with the session-history mv; the next start proceeds", async () => {
+  const { fs, cmd, runtime } = seedProjectVmRunning();
+  fs.seed("/home/alan/.config/dridock/projects/abc/last-workspace", "/old\n");
+  fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/projects/-old/s.jsonl", "{}");
+  const first = makeCtx(fs);
+  expect(await cmd.run([], first.ctx)).toBe(1);
+  expect(first.stderr.text()).toContain("this project moved: /old → /p");
+  expect(first.stderr.text()).toContain("mv '/home/alan/.config/dridock/projects/abc/dot/.claude/projects/-old'");
+  expect(runtime.runs).toEqual([]);
+  const second = makeCtx(fs);
+  expect(await cmd.run([], second.ctx)).toBe(0);
+});

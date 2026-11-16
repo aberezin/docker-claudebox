@@ -18,6 +18,7 @@ import { containerName, legacyContainerName, type ContainerRole } from "../../se
 import { guardWorkspace, notRootMessage } from "../../services/WorkspaceGuard.ts";
 import { resolveIdentity } from "../../services/ProjectIdentity.ts";
 import { AdoptionService } from "../../services/AdoptionService.ts";
+import { checkWorkspaceMove } from "../../services/WorkspaceMoveReporter.ts";
 import { validateProgArgs } from "../../services/ProgArgValidator.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
@@ -205,6 +206,15 @@ mode (-p) they are validated against an allowlist first.
     const dataDir = await machine.projectDataDir(id);
     await ctx.fs.mkdirRecursive(dataDir);
     const ctxDocker = projectContext(id);
+
+    // ── the project moved? Claude's session history didn't (#123) ─────
+    const moved = await checkWorkspaceMove(ctx.fs, {
+      stateRoot: await machine.projectRoot(id), dataDir, root: project.root, binName: ctx.binName,
+    });
+    if (moved.kind === "moved") {
+      ctx.stderr.write(moved.message);
+      return 1;
+    }
 
     // ── adopt pre-6.0 / moved containers (#123) ───────────────────────
     // Before any sidecar is written: adoption decides which names this run
