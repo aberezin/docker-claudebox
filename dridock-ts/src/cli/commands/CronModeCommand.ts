@@ -5,7 +5,7 @@ import { RealColima } from "../../infra/Colima.ts";
 import type { ContainerRuntime, RunArgs } from "../../infra/ContainerRuntime.ts";
 import { RealContainerRuntime } from "../../infra/ContainerRuntime.ts";
 import type { Docker } from "../../infra/Docker.ts";
-import { RealDocker, projectContext, projectProfile } from "../../infra/Docker.ts";
+import { RealDocker, projectContext, projectProfile, WORKSPACE_LABEL, ID_LABEL } from "../../infra/Docker.ts";
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
 import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
@@ -14,7 +14,7 @@ import { MachineConfig } from "../../services/MachineConfig.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
 import { realSpinner } from "../../infra/Spinner.ts";
 import { ImageEnsureService, parseForceReseed } from "../../services/ImageEnsureService.ts";
-import { containerName, legacyContainerName } from "../../services/ContainerName.ts";
+import { containerName, legacyContainerName, withRole } from "../../services/ContainerName.ts";
 import { guardWorkspace, notRootMessage } from "../../services/WorkspaceGuard.ts";
 import { resolveIdentity } from "../../services/ProjectIdentity.ts";
 import { AdoptionService } from "../../services/AdoptionService.ts";
@@ -60,6 +60,12 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
     const isStop = args[0] === "stop";
     // Launching mounts the workspace, so it runs only from the root (#123).
     // `cron stop` mounts nothing and may run from anywhere in the project.
+    const projectCfg = new ProjectConfig(ctx.fs);
+    const id = await projectCfg.projectId(project.configPath);
+    if (id === undefined) {
+      ctx.stderr.write(`no dridock project here — cron mode needs a project context (${project.dotName}/config.yml missing).\n`);
+      return 1;
+    }
     if (!isStop) {
       const guard = guardWorkspace(ctx.cwd, ctx.env.raw(), project.root);
       for (const n of guard.notes) ctx.stderr.write(n);
@@ -67,12 +73,6 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
         ctx.stderr.write(notRootMessage(ctx.cwd, guard.root, ctx.binName, "cron"));
         return 1;
       }
-    }
-    const projectCfg = new ProjectConfig(ctx.fs);
-    const id = await projectCfg.projectId(project.configPath);
-    if (id === undefined) {
-      ctx.stderr.write(`no dridock project here — cron mode needs a project context (${project.dotName}/config.yml missing).\n`);
-      return 1;
     }
     const ident = await resolveIdentity(projectCfg, project, id, isStop ? "read-only" : "adopt", (m) => ctx.stderr.write(m));
 
@@ -158,7 +158,7 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
       return 1;
     }
     for (const n of adoption.notes) ctx.stderr.write(n);
-    if (adoption.kind === "deferred") cronName = legacyContainerName(project.root, "cron");
+    if (adoption.kind === "deferred") cronName = withRole(adoption.legacyBase, "cron");
 
     // "cron already running" idempotent branch — matches wrapper.sh:3086.
     const existing = await runtime.psFilter(ctxDocker, cronName);
@@ -189,12 +189,13 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
       context: ctxDocker,
       containerName: cronName,
       image: this.imageName,
+      labels: [{ key: WORKSPACE_LABEL, value: project.root }, { key: ID_LABEL, value: id }],
       mode: "detached",
       network: "host",
       mounts: [
         { host: ctx.env.raw()["DRIDOCK_SSH_DIR"] ?? `${ctx.home}/.ssh/claudebox`, container: "/home/claude/.ssh" },
         { host: dataDir, container: "/home/claude/.claude" },
-        { host: ctx.cwd, container: ctx.cwd },
+        { host: project.root, container: project.root },
         { host: "/var/run/docker.sock", container: "/var/run/docker.sock" },
         { host: `${xdg}/framework-bugs`, container: "/home/claude/framework-bugs" },
         { host: `${xdg}/consult`, container: "/home/claude/framework-consult" },
@@ -203,7 +204,7 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
       env: [
         // The signal that makes entrypoint.sh dispatch to cron.py.
         { key: "DRIDOCK_MODE_CRON", value: "1" },
-        { key: "DRIDOCK_WORKSPACE", value: ctx.cwd },
+        { key: "DRIDOCK_WORKSPACE", value: project.root },
         { key: "DRIDOCK_CONTAINER_NAME", value: cronName },
         ...(cronFile !== undefined && cronFile !== "" ? [{ key: "DRIDOCK_MODE_CRON_FILE", value: cronFile }] : []),
         ...(ctx.env.raw()["DEBUG"] === "true" ? [{ key: "DEBUG", value: "true" }] : []),

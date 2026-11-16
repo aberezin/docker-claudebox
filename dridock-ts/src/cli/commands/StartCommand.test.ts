@@ -59,6 +59,7 @@ function seedProjectVmRunning(): ReturnType<typeof seedProjectWithInfra> {
 describe("StartCommand — guards", () => {
   test("cwd inside .dridock/ is a subdirectory → rc 1 with cd advice (#123)", async () => {
     const fs = new InMemoryFileSystem();
+    fs.seed("/proj/.dridock/config.yml", "id: abc\n");
     const cmd = new StartCommand("dridock:latest", {
       colima: new InMemoryColima(), docker: new InMemoryDocker(), runtime: new InMemoryContainerRuntime(),
       git: new StubGitToplevel("/proj"), hostGit: new StubHostGit(), probe: new StubProcessProbe(),
@@ -624,6 +625,28 @@ describe("StartCommand — #123 path independence", () => {
     expect(runtime.runs[0]!.containerName).toBe("claude-p-abc");
   });
 
+  test("the container is labelled with its workspace and id, so adoption never has to infer them", async () => {
+    const { fs, cmd, runtime } = seedProjectVmRunning();
+    const { ctx } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(runtime.runs[0]!.labels).toEqual([
+      { key: "org.dridock.workspace", value: "/p" },
+      { key: "org.dridock.id", value: "abc" },
+    ]);
+  });
+
+  test("a git subdirectory that isn't a dridock project gets 'no dridock project', not a bogus root", async () => {
+    const fs = new InMemoryFileSystem();
+    const cmd = new StartCommand("dridock:latest", {
+      colima: new InMemoryColima(), docker: new InMemoryDocker(), runtime: new InMemoryContainerRuntime(),
+      git: new StubGitToplevel("/repo"), hostGit: new StubHostGit(), probe: new StubProcessProbe(),
+    });
+    const { ctx, stderr } = makeCtx(fs, { cwd: "/repo/src" });
+    expect(await cmd.run([], ctx)).toBe(1);
+    expect(stderr.text()).toContain("no dridock project here");
+    expect(stderr.text()).not.toContain("runs from the project root");
+  });
+
   test("a declared name wins over the directory, so a rename changes nothing", async () => {
     const { fs, cmd, runtime } = seedProjectVmRunning();
     fs.seed("/p/.dridock/project.yml", "name: stable\n");
@@ -651,7 +674,7 @@ describe("StartCommand — #123 path independence", () => {
 
   test("a stopped pre-6.0 container is adopted: removed, then created under the new name", async () => {
     const { fs, cmd, docker, runtime } = seedProjectVmRunning();
-    docker.seedContainerSummary("colima-cb-abc", { name: "claude-_p", state: "exited", workspaceSource: "/p" });
+    docker.seedContainerSummary("colima-cb-abc", { name: "claude-_p", state: "exited", sameBinds: ["/p"] });
     const { ctx, stderr } = makeCtx(fs);
     expect(await cmd.run([], ctx)).toBe(0);
     expect(docker.removals.map((r) => r.name)).toContain("claude-_p");
@@ -662,7 +685,7 @@ describe("StartCommand — #123 path independence", () => {
 
   test("a RUNNING pre-6.0 container: nothing removed, this run attaches to it under its old name", async () => {
     const { fs, cmd, docker, runtime } = seedProjectVmRunning();
-    docker.seedContainerSummary("colima-cb-abc", { name: "claude-_p", state: "running", workspaceSource: "/p" });
+    docker.seedContainerSummary("colima-cb-abc", { name: "claude-_p", state: "running", sameBinds: ["/p"] });
     runtime.seedPs("claude-_p", { name: "claude-_p", status: "Up 2 hours", image: "dridock:latest" });
     const { ctx, stderr } = makeCtx(fs);
     expect(await cmd.run([], ctx)).toBe(0);
@@ -676,7 +699,7 @@ describe("StartCommand — #123 path independence", () => {
   test("adoption refused (a copy) → rc 1, no container started", async () => {
     const { fs, cmd, docker, runtime } = seedProjectVmRunning();
     fs.seedDir("/p-copy");
-    docker.seedContainerSummary("colima-cb-abc", { name: "claude-_p-copy", state: "exited", workspaceSource: "/p-copy" });
+    docker.seedContainerSummary("colima-cb-abc", { name: "claude-_p-copy", state: "exited", sameBinds: ["/p-copy"] });
     const { ctx, stderr } = makeCtx(fs);
     expect(await cmd.run([], ctx)).toBe(1);
     expect(stderr.text()).toContain("COPY");

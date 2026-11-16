@@ -40,7 +40,8 @@ export function legacyContainerName(cwd: string, role: ContainerRole = "interact
 
 export const ALL_ROLES: readonly ContainerRole[] = ["interactive", "programmatic", "cron"];
 
-function withRole(base: string, role: ContainerRole): string {
+/** `base` plus the role suffix. Exported for callers holding a base name (a deferred adoption's). */
+export function withRole(base: string, role: ContainerRole): string {
   switch (role) {
     case "interactive": return base;
     case "programmatic": return `${base}_prog`;

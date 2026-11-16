@@ -54,18 +54,18 @@ export abstract class ProjectPassthroughCommand implements Command {
   async run(args: readonly string[], ctx: Context): Promise<number> {
     const git = this.deps.git ?? new RealGitToplevel();
     const project = await new ProjectRootResolver(ctx.fs, git).resolve(ctx.cwd);
+    const projectCfg = new ProjectConfig(ctx.fs);
+    const id = await projectCfg.projectId(project.configPath);
+    if (id === undefined) {
+      ctx.stderr.write(`no dridock project here — '${ctx.binName} ${this.verb}' needs a project context (config.yml missing). Run '${ctx.binName} bootstrap' first.\n`);
+      return 1;
+    }
     // Mounts the workspace and keys local-scope MCP config by cwd, so it runs
     // from the root like start does (#123).
     const guard = guardWorkspace(ctx.cwd, ctx.env.raw(), project.root);
     for (const n of guard.notes) ctx.stderr.write(n);
     if (guard.kind === "not-root") {
       ctx.stderr.write(notRootMessage(ctx.cwd, guard.root, ctx.binName, this.verb));
-      return 1;
-    }
-    const projectCfg = new ProjectConfig(ctx.fs);
-    const id = await projectCfg.projectId(project.configPath);
-    if (id === undefined) {
-      ctx.stderr.write(`no dridock project here — '${ctx.binName} ${this.verb}' needs a project context (config.yml missing). Run '${ctx.binName} bootstrap' first.\n`);
       return 1;
     }
 

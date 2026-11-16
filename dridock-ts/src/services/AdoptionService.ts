@@ -62,26 +62,34 @@ export class AdoptionService {
   constructor(private readonly docker: Docker, private readonly fs: FileSystem) {}
 
   async adopt(inp: AdoptionInput): Promise<AdoptionOutcome> {
-    const all = await this.docker.listContainers(inp.context, "claude-");
+    const listed = await this.docker.listContainers(inp.context, "claude-");
+    if (listed === undefined) {
+      // A failed read must not look like an empty one: the sweep below deletes
+      // credential sidecars on "nothing found". Change nothing.
+      return {
+        kind: "refused",
+        message: `❌ couldn't list the containers in ${inp.context} (is its docker daemon up yet?).\n`
+          + `   Adoption of pre-6.0 containers can't be checked, so nothing was changed. Try again:\n`
+          + `     ${inp.binName} start\n`,
+      };
+    }
+    // A container labelled with another id isn't this project's (rule: identity is declared).
+    const all = listed.filter((c) => c.labelId === undefined || c.labelId === inp.ident.id);
     const notes: string[] = [];
     const current = new Map<ContainerRole, string>(ALL_ROLES.map((r) => [r, containerName(inp.ident, r)]));
     const currentNames = new Set(current.values());
     const toRemove: ContainerSummary[] = [];
+    const kept = new Set<string>();
     const runningBlockers: ContainerSummary[] = [];
 
     // ── current-scheme containers: moved or copied? ─────────────────────
     for (const c of all.filter((x) => currentNames.has(x.name))) {
-      const src = c.workspaceSource;
-      if (src === undefined || src === inp.root) continue;
+      const ws = workspaceOf(c, inp.root);
+      if (ws.kind === "unknown") return { kind: "refused", message: unknownMessage(c, inp) };
+      const src = ws.path;
+      if (src === inp.root) continue;
       if (await this.fs.isDirectory(src)) return { kind: "refused", message: copyMessage(c.name, src, inp) };
-      if (c.state === "running") {
-        return {
-          kind: "refused",
-          message: `❌ container ${c.name} is running with its workspace at ${src}, which no longer exists\n`
-            + `   (the project moved to ${inp.root}). Stop it, then start again so it is recreated here:\n`
-            + `     ${inp.binName} down && ${inp.binName} start\n`,
-        };
-      }
+      if (c.state === "running") return { kind: "refused", message: runningMovedMessage(c.name, src, inp) };
       notes.push(`🔄 project moved from ${src}: recreating ${c.name} at ${inp.root}\n`);
       toRemove.push(c);
     }
@@ -90,20 +98,23 @@ export class AdoptionService {
     const oldLabel = new RegExp(`^claude-(?:[a-z0-9-]+-)?${escapeRe(inp.ident.id)}(?:_prog|_cron)?$`);
     const isOld = (n: string): boolean => !currentNames.has(n) && !THROWAWAY.test(n)
       && (n.startsWith(LEGACY_PREFIX) || oldLabel.test(n));
-    let legacyBase: string | undefined;
     for (const c of all.filter((x) => isOld(x.name))) {
       const role = roleOf(c.name);
-      const src = c.workspaceSource;
+      const ws = workspaceOf(c, inp.root);
+      if (ws.kind === "unknown") return { kind: "refused", message: unknownMessage(c, inp) };
+      const src = ws.path;
       // A pre-6.0 container for a SUBDIRECTORY of this project (6.0 starts only
       // from the root). Not a copy; its history lives under its own slug. Named,
-      // left alone.
-      if (src !== undefined && src !== inp.root && src.startsWith(`${inp.root}/`)) {
+      // left alone, and so are its sidecars.
+      if (src !== inp.root && src.startsWith(`${inp.root}/`)) {
+        kept.add(c.name);
         notes.push(`!  pre-6.0 container ${c.name} was started from a subdirectory (${src}).\n`
-          + `   6.0 starts only from the project root, so nothing will use it again. Remove it with:\n`
+          + `   6.0 starts only from the project root, so nothing will use it again. It and its\n`
+          + `   sidecars are left as they are. Remove it with:\n`
           + `     docker --context ${inp.context} rm ${c.name}\n`);
         continue;
       }
-      if (src !== undefined && src !== inp.root && await this.fs.isDirectory(src)) {
+      if (src !== inp.root && await this.fs.isDirectory(src)) {
         return { kind: "refused", message: copyMessage(c.name, src, inp) };
       }
       const target = current.get(role)!;
@@ -111,24 +122,18 @@ export class AdoptionService {
         return {
           kind: "refused",
           message: `❌ can't adopt ${c.name}: ${target} already exists.\n`
-            + `   Both are this project's ${role} container, under the pre-6.0 and the 6.0 name.\n`
+            + `   Both are this project's ${role} container, under an old and the current name.\n`
             + `   Keep one. To keep the new one, remove the old:\n`
             + `     docker --context ${inp.context} rm ${c.name}\n`,
         };
       }
-      if (c.state === "running" && src !== undefined && src !== inp.root) {
+      if (c.state === "running" && src !== inp.root) {
         // Live, and working on a directory that's gone (the project moved
         // under it). Attaching would put the user in the old, missing path.
-        return {
-          kind: "refused",
-          message: `❌ ${c.name} is running with its workspace at ${src}, which no longer exists\n`
-            + `   (the project moved to ${inp.root}). Stop it, then start again so it is recreated here:\n`
-            + `     ${inp.binName} down && ${inp.binName} start\n`,
-        };
+        return { kind: "refused", message: runningMovedMessage(c.name, src, inp) };
       }
       if (c.state === "running") {
         runningBlockers.push(c);
-        if (role === "interactive") legacyBase = c.name;
         continue;
       }
       toRemove.push(c);
@@ -136,26 +141,41 @@ export class AdoptionService {
     }
 
     if (runningBlockers.length > 0) {
-      // Rule 1: touch nothing. Use the legacy names for this run.
-      const base = legacyBase ?? stripRole(runningBlockers[0]!.name);
+      // Rule 1: touch nothing. This run uses the RUNNING container's own names
+      // (it reads its sidecars under them), whatever role is running.
+      const base = stripRole(runningBlockers[0]!.name);
       return {
         kind: "deferred",
         legacyBase: base,
         notes: [
-          `!  ${runningBlockers.map((c) => c.name).join(", ")} ${runningBlockers.length === 1 ? "is" : "are"} running under the pre-6.0 name.\n`
-          + `   Not touching a live container. It is adopted (renamed to ${containerName(inp.ident)}) on the\n`
+          `!  ${runningBlockers.map((c) => c.name).join(", ")} ${runningBlockers.length === 1 ? "is" : "are"} running under an old name.\n`
+          + `   Not touching a live container. It is adopted (as ${containerName(inp.ident)}) on the\n`
           + `   next start after:  ${inp.binName} down\n`,
         ],
       };
     }
 
-    for (const c of toRemove) await this.docker.containerRemove(inp.context, c.name);
+    // Non-force rm: if a container started since the listing, the daemon
+    // refuses, so rule 1 holds where the race is.
+    for (const c of toRemove) {
+      const rc = await this.docker.containerRemoveStopped(inp.context, c.name);
+      if (rc !== 0) {
+        return {
+          kind: "refused",
+          message: `❌ couldn't remove ${c.name} to adopt it (rc ${rc}): it may have started since this run looked.\n`
+            + `   Nothing else was changed. Stop it and start again:\n`
+            + `     ${inp.binName} down && ${inp.binName} start\n`,
+        };
+      }
+    }
 
-    // Rule 5: with no legacy container left, legacy sidecars are dead weight
-    // (and some hold credentials).
+    // Rule 5: sidecars under old names nothing will read again (some hold
+    // credentials). Not those of a container deliberately kept.
     const stale = (await this.listOrEmpty(inp.dataDir)).filter((f) => {
       const m = SIDECAR_FILE.exec(f);
-      return m !== null && isOld(m[1]!);
+      if (m === null) return false;
+      const owner = m[1]!;
+      return isOld(owner) && !kept.has(owner);
     });
     for (const f of stale) await this.fs.removeFile(`${inp.dataDir}/${f}`);
     if (stale.length > 0) {
@@ -169,6 +189,33 @@ export class AdoptionService {
   private async listOrEmpty(dir: string): Promise<string[]> {
     try { return await this.fs.listDir(dir); } catch { return []; }
   }
+}
+
+/**
+ * A container's workspace (#123, Arfy's review). Since 6.0 it's the
+ * `org.dridock.workspace` label. A pre-6.0 container has none, and its
+ * same-path binds are unordered and may include DRIDOCK_MOUNT_* extras, so:
+ * if `root` is among them, nothing moved; else exactly one is the old
+ * workspace; else it can't be told, and adoption must report, not pick.
+ */
+export function workspaceOf(c: ContainerSummary, root: string): { kind: "known"; path: string } | { kind: "unknown" } {
+  if (c.labelWorkspace !== undefined && c.labelWorkspace !== "") return { kind: "known", path: c.labelWorkspace };
+  if (c.sameBinds.includes(root)) return { kind: "known", path: root };
+  if (c.sameBinds.length === 1) return { kind: "known", path: c.sameBinds[0]! };
+  return { kind: "unknown" };
+}
+
+function unknownMessage(c: ContainerSummary, inp: AdoptionInput): string {
+  return `❌ can't tell which directory ${c.name} works on: it mounts ${c.sameBinds.length === 0 ? "no same-path directory" : c.sameBinds.join(", ")}\n`
+    + `   and none of them is ${inp.root}. Rather than guess (adopting could remove it), nothing was changed.\n`
+    + `   If it's stale, remove it and start again:\n`
+    + `     docker --context ${inp.context} rm ${c.name}\n`;
+}
+
+function runningMovedMessage(name: string, src: string, inp: AdoptionInput): string {
+  return `❌ ${name} is running with its workspace at ${src}, which no longer exists\n`
+    + `   (the project moved to ${inp.root}). Stop it, then start again so it is recreated here:\n`
+    + `     ${inp.binName} down && ${inp.binName} start\n`;
 }
 
 function roleOf(name: string): ContainerRole {

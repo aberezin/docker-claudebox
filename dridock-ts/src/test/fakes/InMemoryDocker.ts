@@ -69,8 +69,20 @@ export class InMemoryDocker implements Docker {
     const list = this.summaries.get(context) ?? [];
     this.summaries.set(context, [...list.filter((x) => x.name !== s.name), s]);
   }
-  async listContainers(context: string, namePrefix: string): Promise<ContainerSummary[]> {
+  /** Set to make listContainers report "couldn't ask the daemon". */
+  listFails = false;
+  async listContainers(context: string, namePrefix: string): Promise<ContainerSummary[] | undefined> {
+    if (this.listFails) return undefined;
     return (this.summaries.get(context) ?? []).filter((s) => s.name.startsWith(namePrefix));
+  }
+  /** Names whose non-force rm the "daemon" refuses (it started meanwhile). */
+  readonly rmRefuses = new Set<string>();
+  async containerRemoveStopped(context: string, containerName: string): Promise<number> {
+    if (this.rmRefuses.has(containerName)) return 1;
+    const list = this.summaries.get(context) ?? [];
+    if (list.find((s) => s.name === containerName)?.state === "running") return 1;
+    await this.containerRemove(context, containerName);
+    return 0;
   }
 
   async containerRemove(context: string, containerName: string): Promise<void> {

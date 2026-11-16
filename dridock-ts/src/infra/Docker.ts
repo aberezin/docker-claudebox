@@ -46,18 +46,32 @@ export interface ContainerSummary {
   readonly name: string;
   /** `.State.Status`: "running", "exited", "created", "paused", … */
   readonly state: string;
-  readonly workspaceSource?: string;
+  /** `org.dridock.workspace` / `org.dridock.id` labels, stamped at `docker run` since 6.0. */
+  readonly labelWorkspace?: string;
+  readonly labelId?: string;
+  /**
+   * Every bind mounted at its own host path (Source === Destination), docker
+   * socket excluded. Unordered: `docker inspect` does NOT return mounts in `-v`
+   * order. The workspace is one of these, but so is any same-path
+   * DRIDOCK_MOUNT_* extra, so a pre-6.0 (unlabelled) container's workspace is
+   * only knowable when this list settles it (see AdoptionService).
+   */
+  readonly sameBinds: readonly string[];
 }
 
-/** Pick the workspace bind out of `docker inspect`'s `.Mounts`. Exported for tests. */
-export function workspaceSourceOf(mounts: readonly { Type?: string; Source?: string; Destination?: string }[]): string | undefined {
+export const WORKSPACE_LABEL = "org.dridock.workspace";
+export const ID_LABEL = "org.dridock.id";
+
+/** Same-path binds out of `docker inspect`'s `.Mounts`, socket excluded. Exported for tests. */
+export function sameBindsOf(mounts: readonly { Type?: string; Source?: string; Destination?: string }[]): string[] {
+  const out: string[] = [];
   for (const m of mounts) {
     if (m.Type !== undefined && m.Type !== "bind") continue;
     if (m.Source === undefined || m.Source !== m.Destination) continue;
     if (m.Source === "/var/run/docker.sock") continue;
-    return m.Source;
+    out.push(m.Source);
   }
-  return undefined;
+  return out;
 }
 
 export interface Docker {
@@ -100,11 +114,18 @@ export interface Docker {
   containerIdentity(context: string, containerName: string): Promise<ContainerIdentity | undefined>;
 
   /**
-   * Every container in `context` whose name starts with `namePrefix`, with
-   * its state and workspace mount source (#123 adoption). Empty when the
-   * daemon can't be reached; adoption treats that as "nothing to adopt".
+   * Every container in `context` whose name starts with `namePrefix` (#123
+   * adoption). **undefined when the daemon couldn't be asked** — distinct from
+   * `[]`, because adoption deletes credential sidecars on "nothing found".
    */
-  listContainers(context: string, namePrefix: string): Promise<ContainerSummary[]>;
+  listContainers(context: string, namePrefix: string): Promise<ContainerSummary[] | undefined>;
+
+  /**
+   * `docker rm` WITHOUT `-f`: the daemon refuses a running container. Adoption
+   * uses this so "never remove a running container" is enforced where the race
+   * is, not by a listing taken earlier. Returns the rc.
+   */
+  containerRemoveStopped(context: string, containerName: string): Promise<number>;
 
   /**
    * `docker rm -f <container>` — force-remove. No-op if absent. Used by
@@ -239,28 +260,42 @@ export class RealDocker implements Docker {
     }
   }
 
-  async listContainers(context: string, namePrefix: string): Promise<ContainerSummary[]> {
+  async listContainers(context: string, namePrefix: string): Promise<ContainerSummary[] | undefined> {
     try {
       const ps = Bun.spawn(["docker", "--context", context, "ps", "-a", "--format", "{{.Names}}"],
         { stdout: "pipe", stderr: "ignore" });
       const names = (await new Response(ps.stdout).text()).split(/\r?\n/)
         .map((n) => n.trim()).filter((n) => n !== "" && n.startsWith(namePrefix));
-      if ((await ps.exited) !== 0) return [];
+      if ((await ps.exited) !== 0) return undefined;
       const out: ContainerSummary[] = [];
       for (const name of names) {
         const ins = Bun.spawn(["docker", "--context", context, "container", "inspect", name,
-          "--format", "{{.State.Status}}\u001f{{json .Mounts}}"], { stdout: "pipe", stderr: "ignore" });
+          "--format", `{{.State.Status}}\u001f{{json .Mounts}}\u001f{{json .Config.Labels}}`],
+          { stdout: "pipe", stderr: "ignore" });
         const text = (await new Response(ins.stdout).text()).split(/\r?\n/)[0] ?? "";
-        if ((await ins.exited) !== 0) continue;
-        const [state, mountsJson] = text.split("\u001f");
+        // A container listed a moment ago that can't be inspected now: we can't
+        // say what it is, so the whole read is unreliable.
+        if ((await ins.exited) !== 0) return undefined;
+        const [state, mountsJson, labelsJson] = text.split("\u001f");
         let mounts: { Type?: string; Source?: string; Destination?: string }[] = [];
-        try { mounts = JSON.parse(mountsJson ?? "[]") ?? []; } catch { mounts = []; }
-        out.push({ name, state: state ?? "", workspaceSource: workspaceSourceOf(mounts) });
+        let labels: Record<string, string> = {};
+        try { mounts = JSON.parse(mountsJson ?? "[]") ?? []; } catch { return undefined; }
+        try { labels = JSON.parse(labelsJson ?? "{}") ?? {}; } catch { labels = {}; }
+        out.push({
+          name, state: state ?? "",
+          labelWorkspace: labels[WORKSPACE_LABEL], labelId: labels[ID_LABEL],
+          sameBinds: sameBindsOf(mounts),
+        });
       }
       return out;
     } catch {
-      return [];
+      return undefined;
     }
+  }
+
+  async containerRemoveStopped(context: string, containerName: string): Promise<number> {
+    const proc = Bun.spawn(["docker", "--context", context, "rm", containerName], { stdout: "ignore", stderr: "ignore" });
+    return await proc.exited;
   }
 
   async containerRemove(context: string, containerName: string): Promise<void> {

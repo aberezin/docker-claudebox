@@ -35,6 +35,9 @@ export interface RunArgs {
    */
   readonly volumes?: readonly { readonly name: string; readonly container: string }[];
   readonly envFile?: string;
+  /** `--label k=v` pairs. #123 stamps org.dridock.workspace / org.dridock.id so
+   *  adoption reads identity instead of inferring it from mounts. */
+  readonly labels?: readonly { readonly key: string; readonly value: string }[];
   /** Env pairs, listed on the command line as `-e KEY=VALUE`. */
   readonly env: readonly { readonly key: string; readonly value: string }[];
   readonly workdir?: string;
@@ -187,6 +190,7 @@ export function buildRunArgv(args: RunArgs): string[] {
   if (args.network !== undefined) argv.push("--network", args.network);
   if (args.workdir !== undefined) argv.push("-w", args.workdir);
   if (args.envFile !== undefined) argv.push("--env-file", args.envFile);
+  for (const l of args.labels ?? []) argv.push("--label", `${l.key}=${l.value}`);
   for (const e of args.env) argv.push("-e", `${e.key}=${e.value}`);
   for (const m of args.mounts) {
     const spec = m.ro === true

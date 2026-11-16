@@ -21,6 +21,17 @@ describe("buildRunArgv — the docker run command line", () => {
     ]);
   });
 
+  test("#123: labels become --label k=v, before the env", () => {
+    const argv = buildRunArgv({
+      context: "c", containerName: "n", image: "i", mounts: [], mode: "detached", cmd: [], publishPorts: [],
+      env: [{ key: "A", value: "1" }],
+      labels: [{ key: "org.dridock.workspace", value: "/p" }, { key: "org.dridock.id", value: "abc" }],
+    });
+    const at = argv.indexOf("--label");
+    expect(argv.slice(at, at + 4)).toEqual(["--label", "org.dridock.workspace=/p", "--label", "org.dridock.id=abc"]);
+    expect(argv.indexOf("-e")).toBeGreaterThan(at);
+  });
+
   test("detached uses -d instead of -it", () => {
     const argv = buildRunArgv({
       context: "cx", containerName: "c", image: "i",
