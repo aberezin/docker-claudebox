@@ -1588,7 +1588,18 @@ else
 	# place, `dridock start` continued an older conversation; with it removed,
 	# the same start continued the right one.
 	#
-	# Only `entrypoint: "cli"` entries whose pidDomain isn't ours. `-p`/SDK runs
+	# Two kinds of `entrypoint: "cli"` entry are dead and removed:
+	#   - pidDomain isn't ours: a previous container's;
+	#   - pidDomain IS ours but its pid isn't running: an earlier run of THIS
+	#     container. Needed because a `docker start` restart keeps
+	#     /etc/machine-id and is handed the same pid-ns inode (measured
+	#     2026-11-17: one container started 3x read pid:[4026532415] each time,
+	#     and so did another container started in between), so the domain alone
+	#     can't tell an earlier run from this one. This runs before any claude
+	#     starts here, so our own entry doesn't exist yet; a live `docker exec`
+	#     session keeps its entry (live pid). A recycled pid that happens to be
+	#     alive keeps a dead entry, which is today's behaviour, never worse.
+	# `-p`/SDK runs
 	# register as "sdk-cli" and may belong to a LIVE sibling container (_prog,
 	# _cron, passthrough share this ~/.claude), so they're never touched; this
 	# runs on the interactive path only, for the same reason.
@@ -1600,17 +1611,25 @@ else
 	# sibling's registration and let two processes write one transcript.
 	# tests/test_continue_no_fallback.sh ties the two together.
 	_prune_foreign_cli_sessions() {   # $1 = sessions dir, $2 = this container's pidDomain
-		local dir="$1" mine="$2" f ep dom sid stem
+		local dir="$1" mine="$2" f ep dom sid stem pid why
 		[ -d "$dir" ] || return 0  # swallow-ok: no registry yet means nothing to prune
 		for f in "$dir"/*.json; do
 			[ -f "$f" ] || continue
 			ep="$(jq -r '.entrypoint // empty' "$f" 2>/dev/null)" || continue  # swallow-ok: an unreadable entry is left alone, never pruned on a guess
 			dom="$(jq -r '.pidDomain // empty' "$f" 2>/dev/null)" || continue  # swallow-ok: an unreadable entry is left alone, never pruned on a guess
-			[ "$ep" = "cli" ] && [ -n "$dom" ] && [ "$dom" != "$mine" ] || continue
+			[ "$ep" = "cli" ] && [ -n "$dom" ] || continue
+			if [ "$dom" != "$mine" ]; then
+				why="left by a previous container ($dom)"
+			else
+				pid="$(jq -r '.pid // empty' "$f" 2>/dev/null)"
+				case "$pid" in ''|*[!0-9]*) continue ;; esac
+				[ -d "/proc/$pid" ] && continue
+				why="left by an earlier run of this container (pid $pid is gone)"
+			fi
 			sid="$(jq -r '.sessionId // "?"' "$f" 2>/dev/null)"
 			stem="$(basename "$f" .json)"
 			rm -f "$f" "$dir/$stem".*.key
-			echo "dridock: removed a stale registration of session $sid left by a previous container ($dom), so --continue can resume it (#128)" >&2
+			echo "dridock: removed a stale registration of session $sid $why, so --continue can resume it (#128)" >&2
 		done
 	}
 	_MY_MID="$(cat /etc/machine-id 2>/dev/null)"

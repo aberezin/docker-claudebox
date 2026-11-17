@@ -15,12 +15,14 @@ dridock start --resume <session-id>   # resume a specific conversation (skips --
 If `--continue` fails, the session does **not** silently start fresh (#128). Claude's own
 reason stays on screen, and dridock adds how to get the conversation back, as
 `dridock start --resume <id>` with the id of the newest transcript for this workspace.
-The known cause is handled on start: a previous container's stale session registration
-(left behind when a remote-control session had been moved to the background) is removed,
-with a stderr line naming the session.
-That can be a cron job's run rather than your conversation; `claude --resume` lists them all. One known cause: after the container is
-recreated, a conversation that ran with `--remote-control` can be refused as "registered
-from another machine or container".
+That can be a cron job's run rather than your conversation; `claude --resume` lists them all.
+
+The known cause was a stale session registration: a session moved to the background
+(for example with `--remote-control`) leaves one in `~/.claude/sessions/`, and after its
+container is restarted or recreated, `--continue` skipped or refused that conversation as
+"registered from another machine or container". It's now removed on start, before Claude
+runs. That happens before the TUI takes the screen, so the line saying so is in
+`docker logs <container>`, not on screen.
 
 ## Utility commands
 

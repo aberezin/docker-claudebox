@@ -122,18 +122,26 @@ else
     mkdir -p "$S"
     printf '{"pid":11,"sessionId":"dead-bg","entrypoint":"cli","kind":"bg","pidDomain":"%s"}' "$OTHER" > "$S/11.json"
     : > "$S/11.abc.key"
-    printf '{"pid":12,"sessionId":"live-me","entrypoint":"cli","kind":"interactive","pidDomain":"%s"}' "$MINE" > "$S/12.json"
+    # Our domain, LIVE pid (this test shell): a running session, kept.
+    printf '{"pid":%s,"sessionId":"live-me","entrypoint":"cli","kind":"interactive","pidDomain":"%s"}' "$$" "$MINE" > "$S/12.json"
     : > "$S/12.def.key"
+    # Our domain, DEAD pid: an earlier run of this container (a `docker start`
+    # restart keeps the machine-id and gets the same pid-ns inode), removed.
+    printf '{"pid":999999,"sessionId":"dead-me","entrypoint":"cli","kind":"bg","pidDomain":"%s"}' "$MINE" > "$S/15.json"
+    : > "$S/15.ghi.key"
     printf '{"pid":13,"sessionId":"sibling-p","entrypoint":"sdk-cli","kind":"interactive","pidDomain":"%s"}' "$OTHER" > "$S/13.json"
     printf 'not json' > "$S/14.json"
     out="$(bash -c ". '$tmp/prune.sh'; _prune_foreign_cli_sessions '$S' '$MINE'" 2>&1)"
     [ ! -e "$S/11.json" ] && [ ! -e "$S/11.abc.key" ] && [[ "$out" == *"session dead-bg left by a previous container"* ]] \
         && ok "a dead container's cli entry (and its .key) is removed, and named on stderr" \
         || bad "foreign cli entry not pruned as expected: $(ls "$S") / $out"
-    [ -e "$S/12.json" ] && [ -e "$S/12.def.key" ] && ok "this container's own entry is kept" || bad "own entry removed"
+    [ -e "$S/12.json" ] && [ -e "$S/12.def.key" ] && ok "our domain with a LIVE pid is kept" || bad "live own entry removed"
+    [ ! -e "$S/15.json" ] && [ ! -e "$S/15.ghi.key" ] && [[ "$out" == *"session dead-me left by an earlier run of this container (pid 999999 is gone)"* ]] \
+        && ok "our domain with a DEAD pid (an earlier run, same machine-id + pid ns) is removed, said as such" \
+        || bad "dead own-domain entry not pruned: $(ls "$S") / $out"
     [ -e "$S/13.json" ] && ok "a foreign sdk-cli (-p) entry is kept: it may be a live sibling" || bad "sdk-cli entry removed"
     [ -e "$S/14.json" ] && ok "an unreadable entry is left alone" || bad "malformed entry removed"
-    [ "$(printf '%s' "$out" | grep -c 'removed a stale')" -eq 1 ] && ok "exactly one removal reported" || bad "removal lines: $out"
+    [ "$(printf '%s' "$out" | grep -c 'removed a stale')" -eq 2 ] && ok "exactly two removals reported" || bad "removal lines: $out"
 fi
 # LOAD-BEARING tie: the prune is safe only while one data dir has one
 # interactive container, which #123's copy refusal enforces. If that refusal
