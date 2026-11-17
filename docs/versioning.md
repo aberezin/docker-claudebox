@@ -143,6 +143,11 @@ master ── v5.14.0 ───────────────────�
   label isn't a substitute: `Version.parseLoose` reads `6.0.0-dev` as `6.0.0`, the strict
   parser rejects it, and bumping early would also turn `test_deprecation_deadlines` red on
   every commit until the version's removals have landed.
+- **The tag goes on the branch tip, and the tip's CHANGELOG must describe the tip.** That
+  is the invariant; "the bump is the last commit" is only the usual way to get it. A fix
+  found by the release gate after the release commit lands *on top* (don't rebase under a
+  version branch others have pulled), and that same fix adds its CHANGELOG line to the
+  release's section. 6.0.0 did exactly this: #139 landed after `603ca8d` (Arfy, #139).
 - **Releasing** is done by the version branch's owner, in this order:
   1. the milestone's open issues are 0;
   2. Alan runs `./install.sh` on the branch tip from his Mac shell, ending in

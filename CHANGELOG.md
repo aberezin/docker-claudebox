@@ -40,6 +40,9 @@ The first release cut from a version branch (#137): everything below accumulated
 - **`dridock start` runs only from the project root** (#123); `DRIDOCK_ALLOW_SUBDIR` is gone.
 - **`.claudebox/` projects are refused** with manual steps; `dridock migrate` is gone (#135).
 - **`.dridock/agents.yml` needs `team:`** (#136). Add `team: <name>` at column 0.
+- **Setting a removed variable is reported** on every launch, with why
+  (`DRIDOCK_ALLOW_SUBDIR`, #123; `DRIDOCK_NO_AUTO_MIGRATE`, #135/#139), instead of being
+  silently ignored. Drop them from your environment.
 
 To upgrade: `./install.sh`, then in each project `dridock down && dridock start`.
 
