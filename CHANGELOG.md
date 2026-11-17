@@ -28,6 +28,84 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [6.0.0] - 2026-11-17
+
+The first release cut from a version branch (#137): everything below accumulated on
+`release-6.0.0` and reached `master` as one tagged fast-forward. **Breaking**, so read
+*Changed* before upgrading:
+
+- **Container names change** to `claude-<name>-<id>` (`claude-<id>` with no `name:`, #123). Pre-6.0 containers are
+  adopted (recreated, session history kept) on the first start after `dridock down`;
+  a running one is left alone and adopted later.
+- **`dridock start` runs only from the project root** (#123); `DRIDOCK_ALLOW_SUBDIR` is gone.
+- **`.claudebox/` projects are refused** with manual steps; `dridock migrate` is gone (#135).
+- **`.dridock/agents.yml` needs `team:`** (#136). Add `team: <name>` at column 0.
+
+To upgrade: `./install.sh`, then in each project `dridock down && dridock start`.
+
+### Changed — breaking
+- **The `.claudebox/` → `.dridock/` migration path is removed** (#135), as
+  `docs/roadmap.md` committed for 6.0.0: the `dridock migrate` verb, the auto-migration
+  on first run (and its `DRIDOCK_NO_AUTO_MIGRATE` opt-out), and the four migrators. A
+  project still on `.claudebox/` is refused, as since 5.0, but the error now gives the
+  manual steps (`mv .claudebox .dridock`, the `.gitignore` lines, `~/.config/claudebox/`
+  → `~/.config/dridock/`) and names dridock 5.x as the other way out. Typing
+  `dridock migrate` says it was removed and why, rather than "unknown verb". The
+  deprecation check now names the removed classes exactly: its old `class .*Migrator`
+  pattern also matched the unrelated `DotDirMigrator` (#80), so it couldn't have told
+  the migrators were gone.
+- **`team:` is required in `.dridock/agents.yml`** (#136), as `docs/roadmap.md`
+  committed for 6.0.0. A roster without it, or with an empty one, is refused with the
+  line to add (`team: my-project`); through 5.x only `dridock team dir` needed it. Every
+  `dridock team` verb now refuses such a roster. `dridock start` keeps launching, but
+  now **warns** when the roster can't be read, for any reason, instead of silently
+  skipping the `DRIDOCK_AGENT_NAME` auto-inject, a silent drop that #136 would
+  otherwise have made reachable for every 5.x roster. **To upgrade:** add `team:` at
+  column 0 of each project's `agents.yml`.
+- **A project's directory name is free to change** (#123,
+  [path-independence.md](docs/design/path-independence.md)). Containers are named
+  `claude-<name>-<id>` (`_prog`, `_cron`) instead of `claude-<absolute path>`, so a
+  rename or move no longer starts the project over: the container, its sidecars and its
+  credentials keep working. `name:` lives in the tracked `.dridock/project.yml`; `id:`
+  stays in the gitignored `config.yml`.
+  - **Existing containers are adopted, not stranded.** On the first 6.0 `start`, a
+    stopped pre-6.0 container is removed and recreated under the new name; session
+    history, settings and init.d live in the mount and come through. It's a recreate,
+    not a `docker rename`: the entrypoint finds its sidecars through
+    `DRIDOCK_CONTAINER_NAME`, which is fixed at `docker run`, so a renamed container
+    would come up with no secrets. A **running** container is never touched: that run
+    attaches under the old name and says adoption happens after `dridock down`. Stale
+    sidecars are removed afterwards, credential files counted.
+  - **Hard errors, each naming what it found:** both an old and a new container for the
+    same role; a project **copied** with `cp -r` (two directories sharing one `id:`,
+    detected because the other workspace still exists; the fix is a new `id:`); a
+    running container whose workspace path has vanished.
+  - **Containers carry their identity as labels**, `org.dridock.workspace` and
+    `org.dridock.id`, set at `docker run`, so adoption reads them rather than guessing
+    from mounts (`docker inspect` lists mounts unordered, and a same-path
+    `DRIDOCK_MOUNT_*` looks just like the workspace). For an unlabelled pre-6.0
+    container that can't be settled, adoption refuses and changes nothing; a failed
+    container listing does the same; removal is a non-force `docker rm`.
+  - **The first 6.0 `start` writes `name:`** into `project.yml` from the directory's
+    name, once, and says so. Commit it. Later renames don't change it.
+  - **`dridock bootstrap` requires `--name`** when it creates a project's identity
+    (mints an id with no tracked name). A clone that already declares one needs none;
+    a disagreeing `--name` is an error. `--brief-only` ignores it.
+  - **`start`, `cron`, `auth` and `mcp` run only from the project root.** From a
+    subdirectory they exit 1 with the `cd`. No override: **`DRIDOCK_ALLOW_SUBDIR` is
+    removed**, and setting it prints that it does nothing. The old `.dridock`-dir
+    guard is folded in. `stop` and `info` work from anywhere and find a not-yet-adopted
+    container by its old name.
+  - **A moved project's session history is reported, not lost silently.** Claude keys
+    history by directory. The first `start` after a move prints the old and new session
+    dirs, the entry count and the exact `mv`, and exits 1; starting again proceeds fresh.
+  - **The entrypoint says when a container reads sidecars under a stale name**: a missing
+    `-auth`/`-secrets` with the same kind present under another container name now
+    prints both names and the recreate fix, instead of starting with no credentials.
+  - `docs/roadmap.md`: adoption of pre-6.0 containers (`legacyContainerName`) is removed
+    in **7.0.0**, enforced by `tests/test_deprecation_deadlines.sh`. The stray
+    `team:`-required row is folded into the 6.0.0 entry (#125).
+
 ### Fixed
 - **A cron container now picks up a new image** (#138). `dridock` in cron mode used to
   `docker start` its existing container as is, so a cron daemon ran the image it was
@@ -108,71 +186,6 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   runs cron.py's `slugify()` and the TS `cronHistorySlug()` over the same inputs and
   diffs them — the two rules differ, and using one for the other points the check at a
   directory that never existed.
-
-### Changed — 6.0.0 (breaking)
-- **The `.claudebox/` → `.dridock/` migration path is removed** (#135), as
-  `docs/roadmap.md` committed for 6.0.0: the `dridock migrate` verb, the auto-migration
-  on first run (and its `DRIDOCK_NO_AUTO_MIGRATE` opt-out), and the four migrators. A
-  project still on `.claudebox/` is refused, as since 5.0, but the error now gives the
-  manual steps (`mv .claudebox .dridock`, the `.gitignore` lines, `~/.config/claudebox/`
-  → `~/.config/dridock/`) and names dridock 5.x as the other way out. Typing
-  `dridock migrate` says it was removed and why, rather than "unknown verb". The
-  deprecation check now names the removed classes exactly: its old `class .*Migrator`
-  pattern also matched the unrelated `DotDirMigrator` (#80), so it couldn't have told
-  the migrators were gone.
-- **`team:` is required in `.dridock/agents.yml`** (#136), as `docs/roadmap.md`
-  committed for 6.0.0. A roster without it, or with an empty one, is refused with the
-  line to add (`team: my-project`); through 5.x only `dridock team dir` needed it. Every
-  `dridock team` verb now refuses such a roster. `dridock start` keeps launching, but
-  now **warns** when the roster can't be read, for any reason, instead of silently
-  skipping the `DRIDOCK_AGENT_NAME` auto-inject, a silent drop that #136 would
-  otherwise have made reachable for every 5.x roster. **To upgrade:** add `team:` at
-  column 0 of each project's `agents.yml`.
-- **A project's directory name is free to change** (#123,
-  [path-independence.md](docs/design/path-independence.md)). Containers are named
-  `claude-<name>-<id>` (`_prog`, `_cron`) instead of `claude-<absolute path>`, so a
-  rename or move no longer starts the project over: the container, its sidecars and its
-  credentials keep working. `name:` lives in the tracked `.dridock/project.yml`; `id:`
-  stays in the gitignored `config.yml`.
-  - **Existing containers are adopted, not stranded.** On the first 6.0 `start`, a
-    stopped pre-6.0 container is removed and recreated under the new name; session
-    history, settings and init.d live in the mount and come through. It's a recreate,
-    not a `docker rename`: the entrypoint finds its sidecars through
-    `DRIDOCK_CONTAINER_NAME`, which is fixed at `docker run`, so a renamed container
-    would come up with no secrets. A **running** container is never touched: that run
-    attaches under the old name and says adoption happens after `dridock down`. Stale
-    sidecars are removed afterwards, credential files counted.
-  - **Hard errors, each naming what it found:** both an old and a new container for the
-    same role; a project **copied** with `cp -r` (two directories sharing one `id:`,
-    detected because the other workspace still exists; the fix is a new `id:`); a
-    running container whose workspace path has vanished.
-  - **Containers carry their identity as labels**, `org.dridock.workspace` and
-    `org.dridock.id`, set at `docker run`, so adoption reads them rather than guessing
-    from mounts (`docker inspect` lists mounts unordered, and a same-path
-    `DRIDOCK_MOUNT_*` looks just like the workspace). For an unlabelled pre-6.0
-    container that can't be settled, adoption refuses and changes nothing; a failed
-    container listing does the same; removal is a non-force `docker rm`.
-  - **The first 6.0 `start` writes `name:`** into `project.yml` from the directory's
-    name, once, and says so. Commit it. Later renames don't change it.
-  - **`dridock bootstrap` requires `--name`** when it creates a project's identity
-    (mints an id with no tracked name). A clone that already declares one needs none;
-    a disagreeing `--name` is an error. `--brief-only` ignores it.
-  - **`start`, `cron`, `auth` and `mcp` run only from the project root.** From a
-    subdirectory they exit 1 with the `cd`. No override: **`DRIDOCK_ALLOW_SUBDIR` is
-    removed**, and setting it prints that it does nothing. The old `.dridock`-dir
-    guard is folded in. `stop` and `info` work from anywhere and find a not-yet-adopted
-    container by its old name.
-  - **A moved project's session history is reported, not lost silently.** Claude keys
-    history by directory. The first `start` after a move prints the old and new session
-    dirs, the entry count and the exact `mv`, and exits 1; starting again proceeds fresh.
-  - **The entrypoint says when a container reads sidecars under a stale name**: a missing
-    `-auth`/`-secrets` with the same kind present under another container name now
-    prints both names and the recreate fix, instead of starting with no credentials.
-  - `docs/roadmap.md`: adoption of pre-6.0 containers (`legacyContainerName`) is removed
-    in **7.0.0**, enforced by `tests/test_deprecation_deadlines.sh`. The stray
-    `team:`-required row is folded into the 6.0.0 entry (#125).
-
-### Fixed
 - **Every feature now verifies what it installed, not just that it ran once** (#124).
   `go`, `python`, `typescript` and `modeguard` had no `check.sh`, so the entrypoint
   trusted their marker alone. The three LSP features now check that
