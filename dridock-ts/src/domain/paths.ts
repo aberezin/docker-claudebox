@@ -35,8 +35,9 @@ export async function xdgRoot(fs: FileSystem, env: Record<string, string | undef
  * The XDG sub-tree for a specific state kind (consult, framework-bugs, cdp,
  * host-agent). Ports _cb_state_home from wrapper.sh (added in 3.2.4 for
  * #29). Uses PER-SUBDIR preference so a user who has ~/.config/dridock/
- * config.yml but not-yet-migrated legacy state dirs sees the legacy path
- * for those specific subdirs until `dridock migrate` moves them.
+ * config.yml but legacy state dirs still under ~/.config/claudebox/ keeps
+ * using those subdirs until they're moved by hand (the `migrate` verb that
+ * moved them was removed in 6.0.0, #135).
  */
 export async function stateHome(
   fs: FileSystem,

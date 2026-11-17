@@ -196,8 +196,9 @@ the current project.
 
 Each project's claudebot config/session/auth lives in its own host dir (canonical
 `~/.config/dridock/projects/<id>/claude` or legacy 2.x `~/.config/claudebox/projects/<id>/claude`,
-mounted at `/home/claude/.claude`; `dridock migrate` moves the legacy tree to the
-`~/.config/dridock/` one) — this fork is shared-nothing, so there's no global
+mounted at `/home/claude/.claude`; dridock 5.x's `dridock migrate` moved the legacy
+tree to the `~/.config/dridock/` one, and 6.0 refuses a `.claudebox/` project with
+the manual steps) — this fork is shared-nothing, so there's no global
 `~/.claude`. `dridock claude-dir` prints that path for the current project.
 
 **Init hooks.** Drop executable `*.sh` scripts in that dir's `init.d/` (i.e.

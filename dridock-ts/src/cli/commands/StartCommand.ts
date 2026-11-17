@@ -49,7 +49,6 @@ import { makeTargetFor, type ImageChoice } from "../../domain/ImageRef.ts";
  * Composes:
  *   - guards: workspace (not-in-dotdir), projectId presence
  *   - `-p` arg validation BEFORE any side effect (allowlist)
- *   - auto-migrate `.claudebox` → `.dridock` on first run (via Migrate)
  *   - VmEnsureService: profile guard → count limit → colima start → wait-reachable
  *   - ImageEnsureService (via VmEnsure callback): first-seed or drift-reseed
  *   - Every sidecar the entrypoint reads: auth, secrets, env, cdp,

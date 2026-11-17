@@ -40,7 +40,8 @@ directory and relay it. It's fast and safe (reads state; never boots a VM or pol
   (classifies MAJOR=must / MINOR=should / PATCH=optional).
 - Disk usage across VMs → `dridock vm usage`; reclaim → `dridock vm gc`.
 - The reachable IP + `/etc/hosts` line for a friendly hostname → `dridock net`.
-- Upgrading a 2.x project to 3.0 → `dridock migrate` (or `--all` to sweep every
-  legacy project data dir under `~/.config/claudebox/projects/` into `~/.config/dridock/`).
+- A project still on the 2.x `.claudebox/` layout → dridock 6.0 refuses it and prints the
+  manual steps (`mv .claudebox .dridock`, plus `~/.config/claudebox/` → `~/.config/dridock/`);
+  the `migrate` verb was removed in 6.0.0 (#135).
 
 Keep it a quick glance — this is a human status check, not a deep dive.

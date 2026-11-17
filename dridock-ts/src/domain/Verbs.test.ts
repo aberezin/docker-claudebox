@@ -1,8 +1,8 @@
 import { test, expect, describe } from "bun:test";
-import { VERBS, isKnownVerb, allVerbNames } from "./Verbs.ts";
+import { VERBS, isKnownVerb, allVerbNames, REMOVED_VERBS } from "./Verbs.ts";
 
 describe("isKnownVerb", () => {
-  test.each(["start", "info", "migrate", "consult", "framework-bugs", "browser-bridge"])(
+  test.each(["start", "info", "bootstrap", "consult", "framework-bugs", "browser-bridge"])(
     "'%s' is a known verb", (v) => { expect(isKnownVerb(v)).toBe(true); }
   );
   test.each(["chrome", "hello", "", "START", "info-x", "startt"])(
@@ -20,7 +20,7 @@ describe("allVerbNames — parity with wrapper.sh dispatch", () => {
   // Regression pin: every verb wrapper.sh:2172-2757 handles must be in the
   // catalog. If someone adds a verb to bash but forgets TS, this fails.
   test.each([
-    "start", "stop", "down", "destroy", "migrate", "bootstrap",
+    "start", "stop", "down", "destroy", "bootstrap",
     "info", "status", "version", "checkversion",
     "features", "profiles", "vm",
     "browser-bridge", "host-agent", "harness",
@@ -59,5 +59,12 @@ describe("VerbSpec invariants", () => {
         expect(spec.subcommands.length).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe("removed verbs (#135)", () => {
+  test("migrate is no longer a verb, and is listed as removed", () => {
+    expect(isKnownVerb("migrate")).toBe(false);
+    expect(REMOVED_VERBS["migrate"]).toContain("6.0.0");
   });
 });

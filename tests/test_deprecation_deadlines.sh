@@ -51,6 +51,21 @@ deadline() {
     fi
 }
 
+# removed <label> <due-major> <grep-args...>
+#   For a commitment delivered EARLY, on the version branch before VERSION
+#   reaches <due-major>: asserts the pattern is ABSENT whatever $MAJOR is.
+removed() {
+    local label="$1" due="$2"; shift 2
+    local hits
+    hits=$(grep -rl "$@" 2>/dev/null | grep -v "tests/.tmp\|/logs/\|/roadmap.md\|test_deprecation_deadlines" | head -5)
+    if [ -z "$hits" ]; then
+        ok "$label — removed (committed for ${due}.0.0)"
+    else
+        bad "$label — marked done for ${due}.0.0 in docs/roadmap.md, but it is PRESENT again:"
+        printf '         %s\n' $hits >&2
+    fi
+}
+
 # ── 5.0.0: legacy env tiers + the container aliaser ────────────────────────
 # Match a READ, not a mention. Tests must still NAME the legacy variable in
 # order to assert it is ignored (`{ CLAUDEBOX_X: "v" }` as input, expecting no
@@ -107,11 +122,17 @@ deadline_claude_tier() {
 deadline_claude_tier
 
 # ── 6.0.0: the .claudebox -> .dridock migration path ───────────────────────
-# Kept through 5.x deliberately: 5.0 makes a legacy dot-dir a LOUD error that
-# names `dridock migrate`, so the migrators are what that error points at.
-# Removing both at once would delete the bridge and the destination together.
-deadline "migrate verb + migrators" 6 \
-    --include=*.ts -e 'autoMigrateIfNeeded\|class .*Migrator' "$REPO/dridock-ts/src"
+# Removed by #135 on release-6.0.0, ahead of the VERSION bump that makes 6.0
+# official, so this asserts ABSENCE regardless of $MAJOR (a `deadline` would
+# read "gone before 6" as a stale row). The legacy-layout error that used to
+# point at `dridock migrate` now gives the manual steps (src/services/LegacyLayout.ts).
+#
+# The pattern names the removed classes exactly. Until #135 it was
+# `class .*Migrator`, which also matches DotDirMigrator (#80's ~/.claude fold,
+# unrelated and staying), so the "still present" check passed for the wrong
+# reason and would have kept passing after the real migrators were deleted.
+removed "migrate verb + migrators (#135)" 6 \
+    --include=*.ts -e 'autoMigrateIfNeeded\|class \(Workspace\|DataDir\|MachineConfig\|StateDirs\)Migrator\|class MigrateCommand' "$REPO/dridock-ts/src"
 
 # ── 7.0.0: adoption of pre-6.0 containers (#123) ───────────────────────────
 # 6.0 names containers by declared identity and adopts `claude-_<path>` ones by

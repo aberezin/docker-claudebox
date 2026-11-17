@@ -76,6 +76,16 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   New `tests/test_fetcher_no_duplicate.sh` (9 cases, stubbed `pgrep`/`ps`).
 
 ### Changed — 6.0.0 (breaking)
+- **The `.claudebox/` → `.dridock/` migration path is removed** (#135), as
+  `docs/roadmap.md` committed for 6.0.0: the `dridock migrate` verb, the auto-migration
+  on first run (and its `DRIDOCK_NO_AUTO_MIGRATE` opt-out), and the four migrators. A
+  project still on `.claudebox/` is refused, as since 5.0, but the error now gives the
+  manual steps (`mv .claudebox .dridock`, the `.gitignore` lines, `~/.config/claudebox/`
+  → `~/.config/dridock/`) and names dridock 5.x as the other way out. Typing
+  `dridock migrate` says it was removed and why, rather than "unknown verb". The
+  deprecation check now names the removed classes exactly: its old `class .*Migrator`
+  pattern also matched the unrelated `DotDirMigrator` (#80), so it couldn't have told
+  the migrators were gone.
 - **A project's directory name is free to change** (#123,
   [path-independence.md](docs/design/path-independence.md)). Containers are named
   `claude-<name>-<id>` (`_prog`, `_cron`) instead of `claude-<absolute path>`, so a

@@ -17,7 +17,7 @@ export type VerbClass =
   | "launch"
   /** Manages VM/project lifecycle — potentially destructive. */
   | "vm-mgmt"
-  /** Manages project state (migrate, bootstrap, features). */
+  /** Manages project state (bootstrap, features). */
   | "state-mgmt"
   /** Cross-project framework-dev channels (consult, framework-bugs). */
   | "framework"
@@ -46,7 +46,6 @@ export const VERBS = {
   stop:             { summary: "stop the claudebot container (survives)",           class: "vm-mgmt",      needsProject: true } as const,
   down:             { summary: "stop the project's VM",                             class: "vm-mgmt",      needsProject: true } as const,
   destroy:          { summary: "destroy the project VM (workload goes with it)",    class: "vm-mgmt",      needsProject: true,  subcommands: ["--purge"] as const } as const,
-  migrate:          { summary: "migrate legacy .claudebox → .dridock",              class: "state-mgmt",   needsProject: false, subcommands: ["--all"] as const } as const,
   bootstrap:        { summary: "scaffold a new project in $PWD",                    class: "state-mgmt",   needsProject: false } as const,
   info:             { summary: "human-facing project overview",                     class: "readonly",     needsProject: true } as const,
   status:           { summary: "alias of `info`",                                   class: "readonly",     needsProject: true } as const,
@@ -79,6 +78,17 @@ export const VERBS = {
 export type Verb = keyof typeof VERBS;
 
 /** Type-safe check: is this string a known verb? */
+/**
+ * Verbs that existed and were removed, with what to do instead. Dispatch
+ * checks these before "unknown verb", so typing one says it's gone and why
+ * rather than looking like a typo.
+ */
+export const REMOVED_VERBS: Readonly<Record<string, string>> = {
+  migrate: "was removed in 6.0.0 (#135) along with the rest of the .claudebox/ → .dridock/ migration path.\n"
+    + "   A project still on .claudebox/ is refused with the manual steps when you run dridock there;\n"
+    + "   or use 'dridock migrate' from a dridock 5.x install. See docs/design/3.0-migration.md.",
+};
+
 export function isKnownVerb(v: string): v is Verb {
   return v in VERBS;
 }
@@ -108,8 +118,7 @@ export function verbsWithSubcommands(): readonly (readonly [Verb, readonly strin
 }
 
 /**
- * Subcommands that are really FLAGS, not subverbs — `destroy --purge`,
- * `migrate --all`. They belong in `subcommands` because completion should
+ * Subcommands that are really FLAGS, not subverbs — `destroy --purge`. They belong in `subcommands` because completion should
  * offer them, but a `Command` must not declare them as `subverbs`: there is
  * no `dridock destroy --purge --help`. The #101 cross-check uses this to
  * compare only the subverb-shaped entries.

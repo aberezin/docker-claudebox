@@ -12,8 +12,8 @@ import type { Verb } from "../domain/Verbs.ts";
  * - `.run(args, ctx)` returns the process exit code, EXPLICIT. No throws
  *   escape (subclasses of `DridockError` are caught in `main.ts` and
  *   translated to `err.exitCode`).
- * - `args` is the post-verb argv slice — for `dridock migrate --all`,
- *   `args === ["--all"]`.
+ * - `args` is the post-verb argv slice — for `dridock destroy --purge`,
+ *   `args === ["--purge"]`.
  * - `.usage` is REQUIRED. Making it part of the interface rather than a
  *   convention is the point of #60: a command physically cannot be
  *   registered without help text, so "new verb ships with no --help"

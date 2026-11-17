@@ -116,8 +116,9 @@ start, so a running container picks up rotations without a rebuild).
 
 ## Migration from 2.x
 
-- Existing `.claudebox/secrets.env` files are read by the 3.0 wrapper (backward-compat
-  via `cb_project_dot`); `dridock migrate` moves them to `.dridock/secrets.env`.
+- Existing `.claudebox/secrets.env` files were read by the 3.0 wrapper (backward-compat
+  via `cb_project_dot`), and dridock 5.x's `dridock migrate` moved them to
+  `.dridock/secrets.env`. The verb was removed in 6.0.0 (#135).
 - Existing `GH_TOKEN` entries keep working — the token is still injected into env; only
   the `gh auth setup-git` boot step goes away.
 - Users who relied on the credential-helper for `git push https://github.com/…` need

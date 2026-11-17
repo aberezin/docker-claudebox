@@ -3,7 +3,7 @@
  * state-dir migrator's live-Chrome guard is testable without spawning
  * real Chrome processes.
  *
- * Ports the pgrep call in cb_migrate_state_dirs's Defect A guard:
+ * First written for the (since removed, #135) state-dir migrator's live-Chrome guard:
  *   `pgrep -f -- "--user-data-dir=$old"`
  */
 export interface ProcessProbe {

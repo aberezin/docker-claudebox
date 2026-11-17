@@ -15,7 +15,6 @@ import { FeaturesCommand } from "./commands/FeaturesCommand.ts";
 import { PluginsCommand } from "./commands/PluginsCommand.ts";
 import { CheckversionCommand } from "./commands/CheckversionCommand.ts";
 import { InfoCommand } from "./commands/InfoCommand.ts";
-import { MigrateCommand } from "./commands/MigrateCommand.ts";
 import { DownCommand } from "./commands/DownCommand.ts";
 import { DestroyCommand } from "./commands/DestroyCommand.ts";
 import { StopCommand } from "./commands/StopCommand.ts";
@@ -45,7 +44,6 @@ import { RealProcessProbe } from "../infra/ProcessProbe.ts";
 import { RealClock } from "../infra/Clock.ts";
 import { RealGitToplevel } from "../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../services/ProjectRoot.ts";
-import { autoMigrateIfNeeded } from "../services/AutoMigrate.ts";
 import type { Context, TextWriter } from "./Context.ts";
 import { resolveImage, type ImageChoice } from "../domain/ImageRef.ts";
 
@@ -68,7 +66,6 @@ export function buildRegistry(
   registry.register(new CheckversionCommand(image, undefined, undefined, undefined, undefined, choice));
   registry.register(new InfoCommand("info", image));
   registry.register(new InfoCommand("status", image));   // `status` is an alias of `info`
-  registry.register(new MigrateCommand());
   registry.register(new DownCommand());
   registry.register(new DestroyCommand());
   registry.register(new StopCommand());

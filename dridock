@@ -4,7 +4,7 @@
 # Baked in-container shim (#1). Lets a claudebot use ONE command name — `dridock` —
 # regardless of whether it's typing verbs the container can serve (consult, report-bug,
 # browser, df) or verbs only the host wrapper handles (start, stop, vm, ip, net,
-# bootstrap, migrate, checkversion, …). Container-side verbs delegate to their existing
+# bootstrap, checkversion, …). Container-side verbs delegate to their existing
 # `cb-*` implementations. Host-side verbs print a specific "run on the Mac" message
 # rather than a generic "unknown command" — so a claudebot immediately knows WHY it
 # didn't work and WHERE to run it.
@@ -46,7 +46,6 @@ CONTAINER-SIDE (runnable here; these delegate to their `cb-*` implementation):
 HOST-SIDE (run these on your Mac; not runnable here — the wrapper needs Colima/docker-context):
   dridock start | stop | down | destroy   claudebot lifecycle for a project
   dridock bootstrap [...]                 scaffold a new project + mission brief
-  dridock migrate [--all]                 3.0 workspace/data-dir migration
   dridock info | status                   project versions/paths/VM/network
   dridock vm ls | usage | gc              inventory / disk / reclaim across all project VMs
   dridock ip | net [<hostname>]           the project VM's reachable IP + /etc/hosts helper
@@ -98,7 +97,7 @@ case "${1:-}" in
         exec "$_bin" "$@" ;;   # all args: the binary owns validation, as for team
 
     # ── host-side verbs: not runnable here, print a targeted message ──────────
-    start|stop|down|destroy|bootstrap|migrate|info|status|vm|ip|net|features|profiles|\
+    start|stop|down|destroy|bootstrap|info|status|vm|ip|net|features|profiles|\
     checkversion|browser-bridge|host-agent|harness|framework-bugs|\
     setup-token|clear-session|claude-dir|completion|doctor|auth|mcp)
         _host "$1" ;;

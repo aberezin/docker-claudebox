@@ -11,12 +11,12 @@
  */
 import { basename } from "node:path";
 import { CommandRegistry } from "./CommandRegistry.ts";
+import { legacyLayoutRefusal } from "../services/LegacyLayout.ts";
 import { VersionCommand } from "./commands/VersionCommand.ts";
 import { ConsultCommand } from "./commands/ConsultCommand.ts";
 import { FeaturesCommand } from "./commands/FeaturesCommand.ts";
 import { CheckversionCommand } from "./commands/CheckversionCommand.ts";
 import { InfoCommand } from "./commands/InfoCommand.ts";
-import { MigrateCommand } from "./commands/MigrateCommand.ts";
 import { DownCommand } from "./commands/DownCommand.ts";
 import { DestroyCommand } from "./commands/DestroyCommand.ts";
 import { StopCommand } from "./commands/StopCommand.ts";
@@ -42,11 +42,8 @@ import { findNoDridockMarker, formatNoDridockRefusal, shouldCheckNoDridock } fro
 import { RealFileSystem } from "../infra/RealFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
 import { DridockError } from "../domain/errors.ts";
-import { RealProcessProbe } from "../infra/ProcessProbe.ts";
-import { RealClock } from "../infra/Clock.ts";
 import { RealGitToplevel } from "../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../services/ProjectRoot.ts";
-import { autoMigrateIfNeeded } from "../services/AutoMigrate.ts";
 import type { Context, TextWriter } from "./Context.ts";
 import { buildRegistry, buildCronModeCommand } from "./buildRegistry.ts";
 import { resolveImage } from "../domain/ImageRef.ts";
@@ -109,7 +106,7 @@ async function main(): Promise<number> {
     const fs = new RealFileSystem();
 
     // .nodridock opt-out — MUST run before any project-touching side
-    // effect (auto-migrate reads/writes .dridock; cron/start spawn
+    // effect (cron/start spawn
     // containers). Fires for cron mode + any project-scoped verb; safe,
     // non-project verbs (help/version/completion/framework-bugs/consult/
     // report-bug) skip the check so users can `dridock help` from
@@ -127,34 +124,18 @@ async function main(): Promise<number> {
       }
     }
 
-    // Auto-migrate: legacy `.claudebox/`-only project → `.dridock/`. Ports
-    // cb_auto_migrate at wrapper.sh:2105. Silent no-op when: opt-out env
-    // set, .claudebox absent, or .dridock already present. Runs BEFORE
-    // dispatch so verbs read from the correct dot dir.
-    const project = await new ProjectRootResolver(fs, new RealGitToplevel()).resolve(ctx.cwd);
-    await autoMigrateIfNeeded(project.root, {
-      fs, probe: new RealProcessProbe(), clock: new RealClock(),
-      env: ctx.env.raw(), home: ctx.home,
-      onNotice: (m) => ctx.stderr.write(m),
-    });
-
-    // 5.0.0: a project left on `.claudebox/` no longer works SILENTLY.
-    //
-    // Auto-migrate above is the bridge and still runs, so the common case is
-    // converted before anyone notices. This fires only when the project is
-    // STILL legacy afterwards — auto-migrate opted out via
-    // DRIDOCK_NO_AUTO_MIGRATE, or it could not complete. Through 4.x that
-    // state quietly kept working off the legacy paths; now it stops and says
-    // what to run. `migrate` itself is exempt, or the fix would be
-    // unreachable. The migrators stay until 6.0 — see docs/roadmap.md.
-    const verb0 = userArgs[0];
-    if (verb0 !== "migrate") {
-      const after = await new ProjectRootResolver(fs, new RealGitToplevel()).resolve(ctx.cwd);
-      if (after.dotName === ".claudebox") {
-        ctx.stderr.write(`❌ ${after.root} still uses the legacy .claudebox/ layout.\n`);
-        ctx.stderr.write(`   Support for it was removed in 5.0.0 — it is no longer read silently.\n`);
-        ctx.stderr.write(`   Convert it:  ${ctx.binName} migrate\n`);
-        ctx.stderr.write(`   (The migration path itself is removed in 6.0.0 — see docs/roadmap.md.)\n`);
+    // A project still on the legacy `.claudebox/` layout stops here, loudly.
+    // 5.0.0 made it an error instead of silently reading the legacy paths;
+    // 6.0.0 removed the migration path itself (the `migrate` verb, the
+    // auto-migration and the migrators, #135; docs/roadmap.md). Nothing here
+    // can convert it any more, so the message names the manual steps, and
+    // dridock 5.x's `dridock migrate` as the other way out.
+    // `.claudebox/` is only reported when there is no `.dridock/` beside it
+    // (ProjectRootResolver prefers `.dridock/`), so the `mv` can't clobber one.
+    {
+      const project = await new ProjectRootResolver(fs, new RealGitToplevel()).resolve(ctx.cwd);
+      if (project.dotName === ".claudebox") {
+        for (const line of legacyLayoutRefusal(project.root, ctx.home)) ctx.stderr.write(line);
         return 1;
       }
     }

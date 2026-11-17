@@ -1,7 +1,7 @@
 import type { Command } from "./Command.ts";
 import type { Context } from "./Context.ts";
-import { isKnownVerb, allVerbNames, VERBS, type Verb } from "../domain/Verbs.ts";
-import { UnknownVerbError } from "../domain/errors.ts";
+import { isKnownVerb, allVerbNames, VERBS, REMOVED_VERBS, type Verb } from "../domain/Verbs.ts";
+import { UnknownVerbError, DridockError } from "../domain/errors.ts";
 
 /**
  * The top-level dispatcher. Ports wrapper.sh's main `case "${1:-}" in ...`
@@ -94,6 +94,10 @@ export class CommandRegistry {
       return await start.run(argv, ctx);
     }
 
+    const removed = REMOVED_VERBS[verb];
+    if (removed !== undefined) {
+      throw new DridockError(`dridock ${verb} ${removed}`, 1);
+    }
     if (!isKnownVerb(verb)) {
       throw new UnknownVerbError(verb);
     }

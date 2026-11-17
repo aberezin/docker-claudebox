@@ -4,7 +4,7 @@ import { VersionCommand } from "./commands/VersionCommand.ts";
 import { StringWriter, type Context } from "./Context.ts";
 import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 import { EnvResolver } from "../domain/EnvResolver.ts";
-import { UnknownVerbError } from "../domain/errors.ts";
+import { UnknownVerbError, DridockError } from "../domain/errors.ts";
 import { DRIDOCK_TS_VERSION } from "../domain/dridockVersion.ts";
 
 /** Small factory so each test gets a fresh context with fresh writers. */
@@ -190,6 +190,15 @@ describe("CommandRegistry — register + has", () => {
     expect(un).not.toContain("version");
     expect(un.length).toBeGreaterThan(20);   // most verbs still un-ported in Phase 2
     expect(un).toContain("info");
-    expect(un).toContain("migrate");
+    expect(un).toContain("bootstrap");
+  });
+
+  test("a REMOVED verb says it's gone and why, instead of looking like a typo (#135)", async () => {
+    const registry = new CommandRegistry();
+    let err: unknown;
+    try { await registry.dispatch(["migrate"], {} as never); } catch (e) { err = e; }
+    expect(err).toBeInstanceOf(DridockError);
+    expect((err as Error).message).toContain("dridock migrate was removed in 6.0.0 (#135)");
+    expect((err as Error).message).toContain("dridock 5.x");
   });
 });
