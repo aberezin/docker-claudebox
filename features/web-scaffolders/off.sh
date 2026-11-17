@@ -10,4 +10,5 @@ npm uninstall -g --prefix /home/claude/.claude \
     create-next-app \
     @vue/cli \
     @angular/cli \
-    express-generator >/dev/null 2>&1 || true
+    express-generator >/dev/null 2>&1 \
+    || echo "web-scaffolders off: npm uninstall failed; some scaffolders may still be in ~/.claude/bin" >&2  # swallow-ok: B, the line itself is the trace

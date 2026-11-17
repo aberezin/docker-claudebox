@@ -32,6 +32,11 @@ _SA_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Files gated so far, relative to the repo root.
 SWALLOW_SWEPT=(
     cb-browser cb-consult cb-df cb-harness-watch-consults cb-help cb-host-shim cb-report-bug
+    features/go/on.sh features/go/off.sh features/go/check.sh
+    features/modeguard/on.sh features/modeguard/off.sh features/modeguard/check.sh
+    features/python/on.sh features/python/off.sh features/python/check.sh
+    features/typescript/on.sh features/typescript/off.sh features/typescript/check.sh
+    features/web-scaffolders/on.sh features/web-scaffolders/off.sh features/web-scaffolders/check.sh
 )
 
 # Echo the pattern name a line needs annotating for, or nothing. Comment-only

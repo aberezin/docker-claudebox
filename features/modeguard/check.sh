@@ -18,5 +18,5 @@ if [ -z "$WS" ] || [ ! -d "$WS" ]; then
     echo "modeguard check: DRIDOCK_WORKSPACE is '${WS}', not a directory — can't verify the hook" >&2
     exit 1
 fi
-[ -d "$WS/.git/hooks" ] || exit 0
+[ -d "$WS/.git/hooks" ] || exit 0  # swallow-ok: no git repo yet means nothing to guard (see header)
 grep -qF "# dridock-modeguard" "$WS/.git/hooks/pre-commit" 2>/dev/null
