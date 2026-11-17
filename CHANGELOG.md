@@ -28,6 +28,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **A refused `--continue` no longer silently starts a fresh session** (#128). The
+  entrypoint ran `claude --continue … || exec claude …`. After a container recreate on
+  2026-11-16, `--continue` was refused ("moved to a background session … registered from
+  another machine or container"), and the fallback started a fresh session whose TUI
+  cleared the reason, so a long conversation looked lost. With nothing to continue,
+  `--continue` exits 0 (CLI 2.1.319 and 2.1.326), so the fallback only ever hid real
+  failures. Both launch paths now run `--continue` with no fallback. Interactively, a
+  non-zero exit other than Ctrl-C's 130 adds `dridock start --resume <session-id>`, and
+  `--resume` among the start args no longer also gets `--continue`. New
+  `tests/test_continue_no_fallback.sh` (runs the real command with a stub `claude`).
+  Not in this fix: pruning the stale session registration that caused the refusal; a
+  planted stale entry didn't reproduce it, so the trigger isn't pinned down yet.
+
 ### Changed — 6.0.0 (breaking)
 - **A project's directory name is free to change** (#123,
   [path-independence.md](docs/design/path-independence.md)). Containers are named

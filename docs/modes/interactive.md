@@ -9,7 +9,14 @@ Works just like the native `claude` CLI but runs inside a container. The contain
 ```bash
 dridock --update        # opt in to a Claude Code CLI update on this run
 dridock --no-continue   # start a fresh session instead of resuming the last one
+dridock start --resume <session-id>   # resume a specific conversation (skips --continue)
 ```
+
+If `--continue` fails, the session does **not** silently start fresh (#128). Claude's own
+reason stays on screen, and dridock adds how to get the conversation back with
+`dridock start --resume <session-id>`. One known cause: after the container is
+recreated, a conversation that ran with `--remote-control` can be refused as "registered
+from another machine or container".
 
 ## Utility commands
 

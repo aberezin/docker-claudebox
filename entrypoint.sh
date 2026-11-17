@@ -1490,7 +1490,12 @@ elif [ $# -gt 0 ]; then
 	else
 		ESCAPED_ARGS=$(printf '%q ' "$@")
 		dbg "mode: programmatic (first run), args: $ESCAPED_ARGS"
-		CMD="$CMD && (claude --dangerously-skip-permissions --continue $SYSTEM_HINT_FLAG $ESCAPED_ARGS || exec claude --dangerously-skip-permissions $SYSTEM_HINT_FLAG $ESCAPED_ARGS)"
+		# #128: no `|| exec claude` fallback. `--continue` with nothing to
+		# continue exits 0 (checked on CLI 2.1.319 here and 2.1.326 on macOS),
+		# so the fallback only ever fired on a REAL failure, and replaced the
+		# reason with a fresh, unrelated run. The subsequent-run path above never
+		# had one. A refusal now reaches the caller as claude's own stderr + rc.
+		CMD="$CMD && exec claude --dangerously-skip-permissions --continue $SYSTEM_HINT_FLAG $ESCAPED_ARGS"
 	fi
 else
 	dbg "mode: interactive"
@@ -1558,8 +1563,21 @@ else
 		rm -f "$NO_CONTINUE_FILE"
 		dbg "no-continue flag set, skipping --continue"
 		CMD="$CMD && exec claude --dangerously-skip-permissions $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA"
+	elif printf '%s' "$INTERACTIVE_EXTRA" | grep -qE "(^|[ '])--resume([=' ]|\$)"; then
+		# `dridock start --resume <id>` (the remedy printed below): --resume and
+		# --continue together are contradictory; --resume is the explicit ask.
+		dbg "interactive: --resume given, not adding --continue"
+		CMD="$CMD && exec claude --dangerously-skip-permissions $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA"
 	else
-		CMD="$CMD && (claude --dangerously-skip-permissions --continue $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA || exec claude --dangerously-skip-permissions $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA)"
+		# #128: no `|| exec claude` fallback. On 2026-11-16 `--continue` was
+		# REFUSED after a container recreate ("moved to a background session …
+		# registered from another machine or container"), and the fallback
+		# started a fresh session whose TUI cleared the refusal off the screen:
+		# the conversation looked lost. With nothing to continue, `--continue`
+		# exits 0, so the fallback only ever hid real failures. Now claude's own
+		# message stays on screen, and a non-zero exit (other than Ctrl-C's 130)
+		# adds how to get the conversation back.
+		CMD="$CMD && { claude --dangerously-skip-permissions --continue $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA; _rc=\$?; if [ \"\$_rc\" -ne 0 ] && [ \"\$_rc\" -ne 130 ]; then echo \"dridock: claude exited with rc \$_rc. If it refused to continue your last conversation (reason above), get it back with:  dridock start --resume <session-id>  (#128)\" >&2; fi; exit \"\$_rc\"; }"
 	fi
 fi
 

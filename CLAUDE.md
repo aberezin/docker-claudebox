@@ -80,7 +80,7 @@ Runs as root (PID 1) inside every container, then drops to the `claude` user via
 3. Patch `.claude.json` (`installMethod=native`, disable auto-updates, pre-accept the workspace trust dialog).
 4. Run `~/.claude/init.d/*.sh` **once** on first container create (guarded by `/var/run/claude-initialized`, which lives in the container fs, not the mount).
 5. **Mode dispatch** via `CLAUDEBOX_MODE_*`: if `API`, `TELEGRAM`, `CRON`, or combined `TELEGRAM+CRON` is set, `exec` the corresponding Python daemon instead of Claude and stop here.
-6. Otherwise build the `claude --dangerously-skip-permissions ...` command. Note the **auto-continue** logic: interactive and programmatic runs default to `--continue` (resume the session) and fall back to a fresh session if that fails; `--no-continue` / `--resume` opt out. Always-active skills from `~/.claude/.always-skills/**/SKILL.md` are concatenated into the `--append-system-prompt` payload here.
+6. Otherwise build the `claude --dangerously-skip-permissions ...` command. Note the **auto-continue** logic: interactive and programmatic runs default to `--continue` (resume the session). There is deliberately **no** fallback to a fresh session (#128): with nothing to continue, `--continue` exits 0, so a fallback only ever hid a real refusal; a failure now keeps claude's own reason on screen plus a `dridock start --resume <id>` hint. `--no-continue` / `--resume` opt out. Always-active skills from `~/.claude/.always-skills/**/SKILL.md` are concatenated into the `--append-system-prompt` payload here.
 
 `--dangerously-skip-permissions` is *always* passed. That is the intended design — the container is the isolation boundary.
 

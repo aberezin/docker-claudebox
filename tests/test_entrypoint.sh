@@ -139,11 +139,12 @@ DEOF
     docker rmi -f "$img" >/dev/null 2>&1 || true
 }
 
-# ── auto --continue (first run tries --continue, falls back) ────────────────
+# ── auto --continue (first run uses --continue; nothing to continue is rc 0) ──
 
 test_entrypoint_auto_continue() {
-    # on a fresh container with no previous session, --continue should fail
-    # then the entrypoint falls back to running without --continue
+    # on a fresh container with no previous session, --continue has nothing to
+    # continue and exits 0 with a normal run. There is no `|| exec claude`
+    # fallback any more (#128): it only ever hid real refusals.
     local out
     out=$(docker run --rm \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
