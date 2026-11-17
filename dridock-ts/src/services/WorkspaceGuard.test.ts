@@ -21,6 +21,12 @@ describe("guardWorkspace — launch only from the project root (#123)", () => {
     expect(guardWorkspace("/legacy/.claudebox/x", {}, "/legacy").kind).toBe("not-root");
   });
 
+  test("DRIDOCK_NO_AUTO_MIGRATE (#135) is reported too, with its own reason", () => {
+    const v = guardWorkspace("/repo", { DRIDOCK_NO_AUTO_MIGRATE: "1" }, "/repo");
+    expect(v.kind).toBe("ok");
+    expect(v.notes.join("")).toContain("DRIDOCK_NO_AUTO_MIGRATE=1 no longer does anything (removed in 6.0.0, #135");
+  });
+
   test("DRIDOCK_ALLOW_SUBDIR no longer overrides anything, and says so", () => {
     const v = guardWorkspace("/repo/src", { DRIDOCK_ALLOW_SUBDIR: "1" }, "/repo");
     expect(v.kind).toBe("not-root");

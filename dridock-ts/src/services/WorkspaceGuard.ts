@@ -19,7 +19,16 @@ export type WorkspaceGuardVerdict =
   | { kind: "ok"; notes: readonly string[] }
   | { kind: "not-root"; root: string; notes: readonly string[] };
 
-export const REMOVED_ENV_KEYS = ["DRIDOCK_ALLOW_SUBDIR"] as const;
+/**
+ * Settings that were removed, with why. Setting one is REPORTED on every launch
+ * (never-silently-discard), and docs/environment-variables.md keeps a
+ * `**Removed in X.Y.Z**` row for each. tests/test_env_var_readers.sh holds the
+ * two together: every such row must be listed here and read nowhere else.
+ */
+export const REMOVED_ENV_KEYS: Readonly<Record<string, string>> = {
+  DRIDOCK_ALLOW_SUBDIR: "removed in 6.0.0, #123: dridock runs only from the project root",
+  DRIDOCK_NO_AUTO_MIGRATE: "removed in 6.0.0, #135: there is no auto-migration left to turn off",
+};
 
 export function guardWorkspace(
   cwd: string,
@@ -27,10 +36,10 @@ export function guardWorkspace(
   projectRoot: string,
 ): WorkspaceGuardVerdict {
   const notes: string[] = [];
-  for (const key of REMOVED_ENV_KEYS) {
+  for (const [key, why] of Object.entries(REMOVED_ENV_KEYS)) {
     const v = env[key];
     if (v !== undefined && v !== "") {
-      notes.push(`!  ${key}=${v} no longer does anything (removed in 6.0.0, #123): dridock runs only from the project root.\n`);
+      notes.push(`!  ${key}=${v} no longer does anything (${why}).\n`);
     }
   }
   const norm = (p: string): string => (p.length > 1 ? p.replace(/\/+$/, "") : p);

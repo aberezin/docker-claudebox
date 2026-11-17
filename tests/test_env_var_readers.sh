@@ -33,6 +33,13 @@
 # setting but read only by install.sh passes, which is why DRIDOCK_IMAGE_NAME
 # and DRIDOCK_MINIMAL stayed green before #109 (only DRIDOCK_IMAGE showed).
 #
+# A REMOVED setting keeps its row as a tombstone (`| \`DRIDOCK_X\` | **Removed
+# in X.Y.Z** …`), so someone who still has it set can find out why it stopped
+# mattering (#135's DRIDOCK_NO_AUTO_MIGRATE). Those rows are the inverse fact:
+# they must have NO reader, so the tombstone can't outlive a re-added reader.
+# Until 6.0.0's release gate this test couldn't tell "documented but unread"
+# from "documented as removed" (Arfy, #137).
+#
 # Names that aren't settings are listed below with a reason, not
 # pattern-matched away, so a new exclusion is a reviewed decision.
 #
@@ -69,10 +76,26 @@ has_reader() {
     return 1
 }
 
-local names dead=0 total=0 family=0 n
+# Tombstones: table rows whose description starts with **Removed in <ver>**.
+local removed
+removed=" $(grep -E '^\| `DRIDOCK_[A-Z0-9_]+` +\| \*\*Removed in [0-9]' "$DOC" | grep -oE '^\| `DRIDOCK_[A-Z0-9_]+`' | tr -d '|` ' | tr '\n' ' ')"
+local names dead=0 total=0 family=0 n tomb=0 revived=0
 names="$(grep -ohE 'DRIDOCK_[A-Z0-9_]+' "$DOC" | sort -u)"
 for n in $names; do
     case "$PLACEHOLDERS" in *" $n "*) continue ;; esac
+    case "$removed" in *" $n "*)
+        tomb=$((tomb + 1))
+        # Reported, not silently ignored: listed in REMOVED_ENV_KEYS, which
+        # warns on every launch that it does nothing.
+        if ! grep -qE "^[[:space:]]+${n}:" "$REPO/dridock-ts/src/services/WorkspaceGuard.ts"; then
+            echo "    NOT REPORTED: $n is documented as removed but isn't in REMOVED_ENV_KEYS (WorkspaceGuard.ts), so setting it is silently ignored" >&2
+            revived=$((revived + 1))
+        elif has_reader "$n"; then
+            echo "    READ AGAIN: $n is documented as removed but shipped code reads it" >&2
+            revived=$((revived + 1))
+        fi
+        continue ;;
+    esac
     # Prefix families are mechanisms: DRIDOCK_ENV_GITHUB_TOKEN is read by the
     # DRIDOCK_ENV_ prefix reader, not by its own name. Checked once below.
     case "$n" in DRIDOCK_ENV_*|DRIDOCK_MOUNT_*) family=$((family + 1)); continue ;; esac
@@ -84,6 +107,11 @@ if [ "$dead" -eq 0 ]; then
     ok "all $total documented settings have a reader"
 else
     bad "$dead of $total documented settings have no reader in shipped code"
+fi
+if [ "$revived" -eq 0 ]; then
+    ok "all $tomb setting(s) documented as removed have no reader, and warn when set (REMOVED_ENV_KEYS)"
+else
+    bad "$revived of $tomb setting(s) documented as removed are read again or not reported (see above)"
 fi
 
 # The two prefix families. A READ only: a description string or comment that
