@@ -275,6 +275,13 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   tag and the push is a fast-forward (append-only; `DRIDOCK_ALLOW_MASTER_PUSH=1`
   overrides), with `tests/test_prepush_master_guard.sh`.
   Master as of `1fd5bfc` is frozen as is; `release-6.0.0` and milestone `6.0.0` exist.
+- **Error-discarding `||` in shell must say why** (#129). New
+  `tests/test_swallow_annotations.sh` requires `# swallow-ok: <reason>` on every
+  `|| true` / `|| :` / `|| return 0` / `|| exit 0` / `|| exec` and every line with both
+  `2>/dev/null` and `||`, in the files it has swept so far. It self-tests its patterns
+  against fixtures. First group swept: the `cb-*` helpers (22 sites: 20 harmless, 1
+  given a trace, 1 filed as #131). `cb-browser script-cdp` now reports tabs it couldn't
+  close instead of dropping them from the count.
 - **The install gate names the merged-first path, the runtime and the shell** (#119).
   On the record the gate has held whenever it applied — #114 (`cd57925`) ran before merging,
   #117 (`e21d369`) was never in the build path — so the merged-first terms are a fallback

@@ -74,7 +74,7 @@ case "${1:-}" in
         slug="${2:-}"; [ -n "$slug" ] || usage
         f="$DIR/${slug}.md"
         [ -f "$f" ] || { echo "no such bug: $slug" >&2; exit 1; }
-        date +%Y-%m-%dT%H-%M-%S > "${f}.reviewed" 2>/dev/null || echo reviewed > "${f}.reviewed"
+        date +%Y-%m-%dT%H-%M-%S > "${f}.reviewed" 2>/dev/null || echo reviewed > "${f}.reviewed"  # swallow-ok: the fallback still writes the .reviewed marker, without the timestamp
         echo "cb-report-bug: marked $slug reviewed."
         exit 0
         ;;
@@ -105,13 +105,13 @@ fi
 # Prefer the shared host-mounted drop dir; fall back to a per-project file if the
 # mount isn't present (older host wrapper, or the mount failed).
 APPEND=""
-if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then
+if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then  # swallow-ok: a branch, not a discard: the failure arm says so and falls back loudly
     echo "cb-report-bug: shared report dir unavailable ($DIR); falling back to ./.dridock/FRAMEWORK-BUGS.md" >&2
     DIR="$(pwd)/.dridock"; mkdir -p "$DIR"
     OUT="$DIR/FRAMEWORK-BUGS.md"; APPEND=1
 fi
 
-TS="$(date +%Y-%m-%dT%H-%M-%S 2>/dev/null || echo unknown)"
+TS="$(date +%Y-%m-%dT%H-%M-%S 2>/dev/null || echo unknown)"  # swallow-ok: a timestamp is only part of the file name; "unknown" is an honest fallback
 SLUG="$(printf '%s' "$TITLE" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' | cut -c1-40)"
 [ -n "${OUT:-}" ] || OUT="$DIR/${PID}-${TS}-${SLUG}.md"
 

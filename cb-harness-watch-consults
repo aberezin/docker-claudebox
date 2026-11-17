@@ -39,7 +39,7 @@ case "$iv" in ''|*[!0-9]*) iv=20 ;; esac
 # awaiting-framework. Turn-count is in the key so a fresh `cb-consult say` on an
 # already-awaiting-framework thread (claudebot added more context) also wakes us.
 _consult_sig() {
-    [ -d "$CDIR" ] || return 0
+    [ -d "$CDIR" ] || return 0  # swallow-ok: no consult dir yet means nothing awaiting framework: an empty signature
     local td m n
     for td in "$CDIR"/*/; do
         [ -d "$td" ] || continue; td="${td%/}"; m="$td/meta"; [ -f "$m" ] || continue
@@ -53,7 +53,7 @@ _consult_sig() {
 # sidecar. A `cb-report-bug done <slug>` creates the sidecar and silently drops the
 # item from the signature (no false wake).
 _bug_sig() {
-    [ -d "$BDIR" ] || return 0
+    [ -d "$BDIR" ] || return 0  # swallow-ok: no bug drop dir yet means no reports: an empty signature
     local f
     for f in "$BDIR"/*.md; do
         [ -f "$f" ] || continue
@@ -81,8 +81,8 @@ while :; do
         base="$cur"
         continue
     fi
-    new_consults="$(printf '%s\n' "$new" | grep '^CONSULT|' | cut -d'|' -f2- || true)"
-    new_bugs="$(printf '%s\n' "$new" | grep '^BUG|' | cut -d'|' -f2- || true)"
+    new_consults="$(printf '%s\n' "$new" | grep '^CONSULT|' | cut -d'|' -f2- || true)"  # swallow-ok: grep exits 1 when no line matches; empty is the right answer
+    new_bugs="$(printf '%s\n' "$new" | grep '^BUG|' | cut -d'|' -f2- || true)"  # swallow-ok: grep exits 1 when no line matches; empty is the right answer
     if [ -n "${new_consults:-}" ]; then
         echo "🗣  new / updated cross-project awaiting-framework consult(s):" >&2
         printf '%s\n' "$new_consults" | while IFS='|' read -r cid _cn; do

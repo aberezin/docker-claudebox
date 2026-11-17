@@ -31,5 +31,5 @@ while IFS= read -r _line <&3; do
         *) printf '%s\n' "$_line" ;;
     esac
 done
-exec 3>&- 2>/dev/null || true
+exec 3>&- 2>/dev/null || true  # swallow-ok: closing fd 3 when it is already closed is a no-op
 exit "$_ec"
