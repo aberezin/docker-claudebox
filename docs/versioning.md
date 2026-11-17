@@ -55,30 +55,67 @@ one but not the other — you get subtle, confusing breakage. The version makes 
 
 ## Release steps
 
-1. Bump **`VERSION`** and the `DRIDOCK_TS_VERSION` constant in **`dridock-ts/src/domain/dridockVersion.ts`** to the
-   same value. `tests/test_version_sync.sh` enforces it — until #103 that line
-   claimed a "sync test" which did not exist, so the two could silently diverge
-   and the first symptom was `dridock checkversion` reporting host↔image drift
-   at runtime, long after the commit that caused it.
-2. Add a **`CHANGELOG.md`** entry under a new `## [X.Y.Z] - <date>` heading — one
-   entry per bump (see the changelog policy below). **Keep `## [Unreleased]`**:
-   the new heading goes directly **below** it, with any entries that were waiting
-   under `Unreleased` moved into the release. Don't rename `Unreleased` to the
-   version. `dridock harness update-cli` writes under that heading; the 5.13.0
-   cut renamed it and #105 had to restore it (#106). `update-cli` now puts a
-   missing one back, but `tests/test_version_sync.sh` fails unless there is
-   exactly one, above every release heading.
-3. Commit it as the **last commit on the version branch** (see
-   [Version branches](#version-branches--release-xyz-137); `master` refuses direct
-   commits and, since #137, pushes of untagged commits), then ff-merge it into master
-   and **tag** the merged commit, pushing the tag before master: `git tag -a vX.Y.Z -m "vX.Y.Z"` and push it
-   (`git push <remote> vX.Y.Z`). **Fork gotcha:** the clone inherited upstream's
-   `v0.x`–`v1.x` tags locally, so `git tag vX.Y.Z` may collide with an ancient
-   upstream tag pointing at the wrong commit. Verify with `git rev-list -n1 vX.Y.Z`,
-   and use `git tag -f -a vX.Y.Z HEAD` (then `git push --force <remote> vX.Y.Z`) if it
-   resolved to an upstream commit. The remote fork only carries the tags we push.
-4. `./install.sh` to stamp both images (full and minimal, #111) and reinstall the
-   binary. `dridock checkversion` should then read **in sync** for both variants.
+How a version branch becomes a release. This is the order 6.0.0 ran (#137, #142); the
+model behind it is in [Version branches](#version-branches--release-xyz-137). The
+version branch's owner drives it, Alan runs the Mac steps, Arfy runs the macOS suite.
+
+**0. Ready:** the milestone's open count is 0, and every issue branch is merged into
+`release-X.Y.Z`.
+
+**1. The release commit**, on the version branch tip. It goes **first**, so every check
+below runs against the exact commit that will be tagged, with the new version in force
+(`test_deprecation_deadlines` reads its rows from `VERSION`'s major).
+- Bump **`VERSION`** and **`DRIDOCK_TS_VERSION`** in `dridock-ts/src/domain/dridockVersion.ts`
+  together; `tests/test_version_sync.sh` enforces it (until #103 nothing did, and the
+  first symptom of a mismatch was `dridock checkversion` reporting drift at runtime).
+- **`CHANGELOG.md`:** move the `## [Unreleased]` entries under a new
+  `## [X.Y.Z] - <date>` heading directly **below** it, and **keep `## [Unreleased]`**, empty
+  (`dridock harness update-cli` writes under it; renaming it broke 5.13.0, #105/#106).
+  Open with a short upgrade summary when anything is breaking; merge duplicate `###`
+  headings; count the entries before and after.
+- Run **every** docker-free test function before pushing it: loop over each
+  `tests/test_*.sh`'s `ALL_TESTS+=(…)` names, plus `bun test` and `tsc --noEmit`. **Not a
+  hand-picked list**: 6.0.0's picked list missed `test_env_var_readers`, and #139 was found
+  only at step 3.
+
+**2. The gate**, all against that tip:
+1. **Install (Alan, Mac shell):** `./install.sh` on the tip, ending in `✅ setup complete`
+   ([the install gate](#the-install-gate--alan-runs-installsh-from-his-mac-shell)), then
+   `dridock down && dridock start` in the harness project. If the export fails with
+   `parent snapshot … does not exist`, run `docker --context colima-cb-infra builder prune -af`
+   and install again (cb-infra's image store, not the code; seen at 6.0.0).
+2. **In-container (Bear):** the container runs the new image (its `.Image` is the
+   `dridock:latest` id, label `X.Y.Z`); the baked files are the new ones; the **full
+   `bash test.sh` with no arguments** (it takes *function* names, not file names: 6.0.0's
+   first run passed file names and ran nothing); and every `tests/test_*.py` (CLAUDE.md
+   names them).
+3. **macOS (Arfy):** every docker-free test function, `bun test`, `tsc --noEmit`.
+4. **Hands-on checks**, listed on the release issue: the behaviours no test can show,
+   usually "a second live process survives" (6.0.0: #126's refusal with the first
+   session still alive, #138's cron refresh). Before any check that retags
+   `dridock:latest`, **keep a name on the original**
+   (`docker --context colima-cb-infra tag dridock:latest dridock:gate-backup`): in a
+   containerd image store an untagged image is dropped, and 6.0.0 had to restore it with a
+   `save | load` from the project VM.
+
+A failure is fixed on an issue branch, reviewed, and merged **on top** of the release
+commit (don't rebase under a branch others have pulled). It adds its CHANGELOG line to the
+release's section, and the gate re-runs on the new tip.
+
+**3. Tag and fast-forward:**
+```sh
+git tag -a vX.Y.Z -m vX.Y.Z <tip>          # check it's free first: see the fork gotcha
+git push <remote> vX.Y.Z                   # the tag BEFORE master: the pre-push guard needs it
+git push <remote> <tip>:refs/heads/master  # refused unless a fast-forward onto an exact vX.Y.Z
+```
+**Fork gotcha:** the clone inherited upstream's `v0.x`–`v1.x` tags locally, so a tag name
+may already exist pointing at an ancient upstream commit. Check `git rev-list -n1 vX.Y.Z`
+first; the remote fork only carries the tags we push.
+
+**4. Close out:** close the milestone; post the release record on the release issue (the
+tag, the master range, and each gate step with its evidence and environment); delete
+`release-X.Y.Z` (the tag marks the commit; a hotfix branches from the tag); cut the next
+`release-X.Y.(Z+1)` or `release-X.(Y+1).0` from master, with a milestone of the same name.
 
 ## Branch naming — `<issue#>-<slug>`
 
@@ -148,15 +185,10 @@ master ── v5.14.0 ───────────────────�
   found by the release gate after the release commit lands *on top* (don't rebase under a
   version branch others have pulled), and that same fix adds its CHANGELOG line to the
   release's section. 6.0.0 did exactly this: #139 landed after `603ca8d` (Arfy, #139).
-- **Releasing** is done by the version branch's owner, in this order:
-  1. the milestone's open issues are 0;
-  2. Alan runs `./install.sh` on the branch tip from his Mac shell, ending in
-     `✅ setup complete` ([the install gate](#the-install-gate--alan-runs-installsh-from-his-mac-shell));
-  3. one in-container check after `dridock down && dridock start`, since baked files
-     (`entrypoint.sh`, `cb-*`, `features/`, the shim) reach a container only then (#118);
-  4. Arfy runs the full host suite on macOS;
-  5. the release commit, then `git merge --ff-only` it into master, tag it, push the
-     tag and then master, and delete the branch.
+- **Releasing** follows [Release steps](#release-steps): the release commit first, then the
+  gate against it (install, in-container, macOS, hands-on), then tag, fast-forward master,
+  close out. Baked files (`entrypoint.sh`, `cb-*`, `features/`, the shim) reach a container
+  only after `dridock down && dridock start`, which is why the gate has an in-container step (#118).
 - **Hotfixes** to the released version: `release-X.Y.(Z+1)` from the last tag, released
   to master the same way, then **merged forward** into the open version branch so the
   fix isn't lost at the next release.
@@ -174,10 +206,10 @@ master ── v5.14.0 ───────────────────�
   require linear history), which Alan sets in the repo settings; the hook complements
   it, it doesn't replace it.
 
-**Today's master is frozen as is** (Alan, option A): it holds #123's 6.0 change under the
-5.14.0 label, and it isn't rewritten. `v5.14.0` stays the honest last release; a 5.14.x
-hotfix branches from that tag, not from master's tip. `release-6.0.0` was cut from
-master `1fd5bfc`.
+**The first one:** `release-6.0.0` was cut from master `1fd5bfc`, which had been frozen as
+is (Alan, option A: it held #123's 6.0 change under the 5.14.0 label and wasn't rewritten).
+It released as `v6.0.0` → `3afe3db` on 2026-11-17, with #139 found and fixed by the gate.
+`release-6.1.0` was cut from that.
 
 #### History: the standalone release commit (#103)
 
