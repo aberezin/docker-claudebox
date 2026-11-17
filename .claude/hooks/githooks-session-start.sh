@@ -26,7 +26,7 @@ CHECK="$REPO/.githooks/install.sh"
 
 # Not the dridock harness repo (or an old checkout that predates the installer)
 # → nothing to say. This hook is project-scoped, so that is a clean no-op.
-[ -f "$CHECK" ] || exit 0
+[ -f "$CHECK" ] || exit 0  # swallow-ok: not this repo (or a pre-installer checkout): nothing to check, as the comment above says
 
 _out="$(bash "$CHECK" --check 2>&1)"
 _rc=$?

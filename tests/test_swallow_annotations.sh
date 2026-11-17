@@ -38,6 +38,10 @@ SWALLOW_SWEPT=(
     features/typescript/on.sh features/typescript/off.sh features/typescript/check.sh
     features/web-scaffolders/on.sh features/web-scaffolders/off.sh features/web-scaffolders/check.sh
     install.sh .githooks/install.sh .githooks/pre-commit test.sh run-e2e-cron-telegram.sh
+    .claude/hooks/consult-session-start.sh .claude/hooks/githooks-session-start.sh
+    .claude/hooks/lib/team-inbox-watch.sh .claude/hooks/team-watch-session-end.sh
+    .claude/hooks/team-watch-session-start.sh .claude/hooks/team-watch-user-prompt-submit.sh
+    .claude/statusline-dridock.sh dridock claudebox-shell.sh
 )
 
 # Echo the pattern name a line needs annotating for, or nothing. Comment-only

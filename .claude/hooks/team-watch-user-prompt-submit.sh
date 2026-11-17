@@ -28,7 +28,7 @@
 set -u
 
 # Silent no-op guards.
-command -v dridock >/dev/null 2>&1 || exit 0
+command -v dridock >/dev/null 2>&1 || exit 0  # swallow-ok: no dridock on PATH means no team bus here; a per-prompt hook stays silent
 
 # ─── opt-in gate + roster health (#85). See team-watch-session-start.sh
 # for the full comment; keep in sync.
@@ -62,10 +62,10 @@ if dridock team fetcher status --inbox /dev/null 2>&1 | grep -q "unknown subcomm
 fi
 
 # Session id from stdin payload (UserPromptSubmit shape includes it).
-_payload="$(cat 2>/dev/null || echo '')"
+_payload="$(cat 2>/dev/null || echo '')"  # swallow-ok: an empty stdin is a prompt with no payload; handled as "no session id" below
 _session_id=""
 if [ -n "$_payload" ] && command -v jq >/dev/null 2>&1; then
-    _session_id="$(printf '%s' "$_payload" | jq -r '.session_id // empty' 2>/dev/null || true)"
+    _session_id="$(printf '%s' "$_payload" | jq -r '.session_id // empty' 2>/dev/null || true)"  # swallow-ok: unparsable payload means no session id; handled below
 fi
 
 # Convention paths.
@@ -81,14 +81,14 @@ _cursors="$_inbox.session-cursors.json"
 # two drift apart.
 _twh_set_cursor() {
     local _off="$1"
-    [ -n "$_session_id" ] || return 0
-    command -v jq >/dev/null 2>&1 || return 0
+    [ -n "$_session_id" ] || return 0  # swallow-ok: no session id means nothing to key a cursor on; the worst case is a re-drain (a duplicate), never a loss
+    command -v jq >/dev/null 2>&1 || return 0  # swallow-ok: no jq means no cursor write; the worst case is a re-drain (a duplicate), never a loss
     if [ ! -f "$_cursors" ]; then echo '{}' > "$_cursors"; fi
     # Raise, never lower (#107): the fetcher writes this file too, after a
     # successful socket post. If the two race, max() keeps the higher offset,
     # so the worst outcome is a duplicate, never a re-surfaced gap or a skip.
     # Temp file beside the target so the mv is an atomic rename.
-    local _tmp; _tmp="$(mktemp "$_cursors.XXXXXX")" || return 0
+    local _tmp; _tmp="$(mktemp "$_cursors.XXXXXX")" || return 0  # swallow-ok: no temp file means no cursor write; the worst case is a re-drain (a duplicate), never a loss
     if jq --arg id "$_session_id" --argjson off "$_off" \
         '. + {($id): ([(.[$id] // 0), $off] | max)}' "$_cursors" > "$_tmp" 2>/dev/null; then
         mv "$_tmp" "$_cursors"
@@ -122,9 +122,9 @@ mkdir -p "$(dirname "$_inbox")"
 # in a subdirectory would otherwise skip this check silently — which is exactly
 # the defect flagged on #85's first draft, and it would be embarrassing to ship
 # it in the fix for the issue that found it.
-_hroot="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+_hroot="$(git rev-parse --show-toplevel 2>/dev/null || true)"  # swallow-ok: not in a git checkout: the dev-repo version check below simply does not apply
 if [ -n "$_hroot" ] && [ -f "$_hroot/dridock-ts/src/domain/dridockVersion.ts" ] && [ -f "$_hroot/VERSION" ]; then
-    _repo_ver="$(tr -d '[:space:]' < "$_hroot/VERSION" 2>/dev/null || true)"
+    _repo_ver="$(tr -d '[:space:]' < "$_hroot/VERSION" 2>/dev/null || true)"  # swallow-ok: an unreadable VERSION skips the dev-repo version comparison; it only ever adds a hint
     _inst_ver="$(dridock --version 2>/dev/null | awk 'NR==1{print $NF}')"
     if [ -n "$_repo_ver" ] && [ -n "$_inst_ver" ] && [ "$_repo_ver" != "$_inst_ver" ]; then
         echo ""
@@ -139,15 +139,15 @@ fi
 _check_fetcher_alive() {
     local pid="$1"
     [ -n "$pid" ] || return 1
-    kill -0 "$pid" 2>/dev/null || return 1
-    ps -p "$pid" -o command= 2>/dev/null | grep -qF "dridock team watch" || return 1
-    ps -p "$pid" -o command= 2>/dev/null | grep -qF "$_inbox" || return 1
+    kill -0 "$pid" 2>/dev/null || return 1  # swallow-ok: a liveness predicate: any failure means "not our live fetcher", which the caller acts on
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF "dridock team watch" || return 1  # swallow-ok: a liveness predicate: any failure means "not our live fetcher", which the caller acts on
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF "$_inbox" || return 1  # swallow-ok: a liveness predicate: any failure means "not our live fetcher", which the caller acts on
     return 0
 }
 
 _fetcher_alive=0
 if [ -f "$_pid" ]; then
-    _pidval="$(cat "$_pid" 2>/dev/null || true)"
+    _pidval="$(cat "$_pid" 2>/dev/null || true)"  # swallow-ok: an unreadable pid file reads as "no fetcher", which the respawn path below handles loudly
     if _check_fetcher_alive "$_pidval"; then
         _fetcher_alive=1
     fi
@@ -162,10 +162,10 @@ fi
 # this is host-only — matching the SessionStart rationale.
 if [ "$_fetcher_alive" = 1 ] && [ ! -f /.dockerenv ]; then
     _cur_ver="$(dridock --version 2>/dev/null | awk 'NR==1{print $NF}')"
-    _run_ver="$(cat "$_inbox.version" 2>/dev/null || true)"
+    _run_ver="$(cat "$_inbox.version" 2>/dev/null || true)"  # swallow-ok: no stamp means no known mismatch; SessionStart handles a missing stamp loudly, this only acts on a known one
     if [ -n "$_cur_ver" ] && [ -n "$_run_ver" ] && [ "$_run_ver" != "$_cur_ver" ]; then
         echo "♻ team fetcher: running $_run_ver but $_cur_ver is installed — restarting so watcher fixes take effect."
-        dridock team fetcher stop --inbox "$_inbox" >/dev/null 2>&1 || true
+        dridock team fetcher stop --inbox "$_inbox" >/dev/null 2>&1 || true  # swallow-ok: stop is async anyway; the bounded wait below verifies the exit and never starts a second writer
         # WAIT for it to actually exit before clearing the pid file. `stop` is
         # asynchronous; clearing early makes the respawn below start a SECOND
         # writer on one inbox, which is the hazard the SessionStart guard exists
@@ -192,23 +192,23 @@ if [ "$_fetcher_alive" = 0 ]; then
     # Respawn backoff: skip if we tried within the last 60s.
     _now=$(date +%s)
     _last_attempt=0
-    [ -f "$_respawn_stamp" ] && _last_attempt=$(cat "$_respawn_stamp" 2>/dev/null || echo 0)
+    [ -f "$_respawn_stamp" ] && _last_attempt=$(cat "$_respawn_stamp" 2>/dev/null || echo 0)  # swallow-ok: an unreadable stamp means no recent attempt, so the respawn proceeds (and reports)
     if [ $((_now - _last_attempt)) -lt 60 ]; then
         echo "⚠ team fetcher: still not alive (backoff active — last attempt $((_now - _last_attempt))s ago; will retry in $((60 - _now + _last_attempt))s). See $_log."
     else
         # Surface last log line for diagnosis + respawn + VERIFY the spawn.
         if [ -f "$_log" ]; then
-            _last_log="$(tail -n 1 "$_log" 2>/dev/null || true)"
+            _last_log="$(tail -n 1 "$_log" 2>/dev/null || true)"  # swallow-ok: only feeds a log excerpt into the message; the message is printed either way
             [ -n "$_last_log" ] && echo "⚠ team fetcher: gone — last log line: $_last_log"
         fi
         rm -f "$_pid"
-        ( nohup dridock team watch --inbox "$_inbox" >>"$_log" 2>&1 & disown ) >/dev/null 2>&1 || true
+        ( nohup dridock team watch --inbox "$_inbox" >>"$_log" 2>&1 & disown ) >/dev/null 2>&1 || true  # swallow-ok: the backgrounded subshell always returns 0; a failed spawn is caught by the liveness check below
         echo "$_now" > "$_respawn_stamp"
 
         # Verify (Arfy's nit #1): the subshell + & always returns 0,
         # so we need to check pidfile + cmdline before claiming success.
         sleep 1
-        _spawn_pid="$(cat "$_pid" 2>/dev/null || true)"
+        _spawn_pid="$(cat "$_pid" 2>/dev/null || true)"  # swallow-ok: no pid file means the spawn failed, which the liveness check right after reports with the log
         if _check_fetcher_alive "$_spawn_pid"; then
             # Stamp the version this fetcher is RUNNING. Without it the
             # version check above reads a stale stamp on the next prompt,
@@ -223,7 +223,7 @@ if [ "$_fetcher_alive" = 0 ]; then
         else
             echo "⚠ team fetcher: respawn attempted but pid not alive OR cmdline mismatch."
             if [ -f "$_log" ]; then
-                _tail_log="$(tail -n 3 "$_log" 2>/dev/null || true)"
+                _tail_log="$(tail -n 3 "$_log" 2>/dev/null || true)"  # swallow-ok: only feeds a log excerpt into the failure message, which is printed either way
                 if [ -n "$_tail_log" ]; then
                     echo "  Last log lines:"
                     printf '%s\n' "$_tail_log" | sed 's/^/    /'
@@ -236,8 +236,8 @@ fi
 
 # ── Check 2: consumer liveness ───────────────────────────────────────
 # Only meaningful if the inbox actually exists and has content.
-[ -f "$_inbox" ] || exit 0
-_inbox_size=$(stat -c %s "$_inbox" 2>/dev/null || stat -f %z "$_inbox" 2>/dev/null || echo 0)
+[ -f "$_inbox" ] || exit 0  # swallow-ok: no inbox file means nothing to drain
+_inbox_size=$(stat -c %s "$_inbox" 2>/dev/null || stat -f %z "$_inbox" 2>/dev/null || echo 0)  # swallow-ok: stat on a file just tested with -f; 0 would only mean "nothing new" for one prompt
 
 # What did we drain up to for this session?
 # Default to CURRENT EOF (matches SessionStart's fallback) so an unknown/
@@ -245,7 +245,7 @@ _inbox_size=$(stat -c %s "$_inbox" 2>/dev/null || stat -f %z "$_inbox" 2>/dev/nu
 # (Arfy's blocking finding #2, spec #56 open loop #3).
 _last_offset="$_inbox_size"
 if [ -n "$_session_id" ] && [ -f "$_cursors" ] && command -v jq >/dev/null 2>&1; then
-    _v="$(jq -r --arg id "$_session_id" '.[$id] // empty' "$_cursors" 2>/dev/null || true)"
+    _v="$(jq -r --arg id "$_session_id" '.[$id] // empty' "$_cursors" 2>/dev/null || true)"  # swallow-ok: an unreadable cursors file means no recorded offset, handled (and announced) below
     if [ -n "$_v" ] && [ "$_v" != "null" ]; then _last_offset="$_v"; fi
 fi
 

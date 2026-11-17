@@ -73,10 +73,10 @@ fi
 # Payload shape: {"session_id":"...","hook_event_name":"SessionStart",
 #                 "cwd":"...","source":"startup|resume|clear"}
 # stdin might be an empty pipe (no payload from CC) — tolerate that.
-_payload="$(cat 2>/dev/null || echo '')"
+_payload="$(cat 2>/dev/null || echo '')"  # swallow-ok: an empty stdin is a SessionStart with no payload; handled as "no session id" below
 _session_id=""
 if [ -n "$_payload" ] && command -v jq >/dev/null 2>&1; then
-    _session_id="$(printf '%s' "$_payload" | jq -r '.session_id // empty' 2>/dev/null || true)"
+    _session_id="$(printf '%s' "$_payload" | jq -r '.session_id // empty' 2>/dev/null || true)"  # swallow-ok: unparsable payload means no session id, which takes the announced unknown-session path below
 fi
 
 # ─── resolve self name ────────────────────────────────────────────────
@@ -115,9 +115,9 @@ mkdir -p "$(dirname "$_inbox")"
 _check_fetcher_alive() {
     local pid="$1"
     [ -n "$pid" ] || return 1
-    kill -0 "$pid" 2>/dev/null || return 1
-    ps -p "$pid" -o command= 2>/dev/null | grep -qF "dridock team watch" || return 1
-    ps -p "$pid" -o command= 2>/dev/null | grep -qF "$_inbox" || return 1
+    kill -0 "$pid" 2>/dev/null || return 1  # swallow-ok: a liveness predicate: any failure means "not our live fetcher", which the caller acts on
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF "dridock team watch" || return 1  # swallow-ok: a liveness predicate: any failure means "not our live fetcher", which the caller acts on
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF "$_inbox" || return 1  # swallow-ok: a liveness predicate: any failure means "not our live fetcher", which the caller acts on
     return 0
 }
 
@@ -214,13 +214,13 @@ _stop_fetcher_and_wait() {
 
 _spawn_fetcher=0
 if [ -f "$_pid" ]; then
-    _pidval="$(cat "$_pid" 2>/dev/null || true)"
+    _pidval="$(cat "$_pid" 2>/dev/null || true)"  # swallow-ok: an unreadable pid file reads as "no fetcher", which respawns one below
     if _check_fetcher_alive "$_pidval"; then
         # Alive and cmdline matches — but is it running CURRENT code? (#71)
         # Host-only — see the _version_check_enabled rationale above.
         if [ "$_version_check_enabled" = 1 ]; then
             _cur_ver="$(_installed_version)"
-            _run_ver="$(cat "$_verfile" 2>/dev/null || true)"
+            _run_ver="$(cat "$_verfile" 2>/dev/null || true)"  # swallow-ok: no readable stamp is handled loudly just below (restart once to establish it)
             if [ -z "$_cur_ver" ]; then
                 # Can't ask the binary its version → can't compare. Don't churn
                 # a working fetcher on missing information, but don't be silent
@@ -250,7 +250,7 @@ if [ -f "$_pid" ]; then
         # Surface log's last line so an immediate-crash loop is
         # diagnosable, then respawn.
         if [ -f "$_log" ]; then
-            _last_log="$(tail -n 1 "$_log" 2>/dev/null || true)"
+            _last_log="$(tail -n 1 "$_log" 2>/dev/null || true)"  # swallow-ok: only feeds a log excerpt into the message; the message is printed either way
             if [ -n "$_last_log" ]; then
                 echo "⚠ team fetcher: previous fetcher gone (pid $_pidval not alive or cmdline mismatch). Last log line: $_last_log"
                 echo "  Full log: $_log"
@@ -274,7 +274,7 @@ if [ "$_spawn_fetcher" = 1 ]; then
     # Monitor-arm idiom already used elsewhere in this hook.
     _log_size_before=0
     if [ -f "$_log" ]; then
-        _log_size_before=$(stat -c %s "$_log" 2>/dev/null || stat -f %z "$_log" 2>/dev/null || echo 0)
+        _log_size_before=$(stat -c %s "$_log" 2>/dev/null || stat -f %z "$_log" 2>/dev/null || echo 0)  # swallow-ok: stat on a file just tested with -f; 0 would only widen the log slice shown
     fi
 
     # Detach fully: stdin from /dev/null, stdout+stderr to log, subshell
@@ -293,7 +293,7 @@ if [ "$_spawn_fetcher" = 1 ]; then
     # exit). `stdbuf -oL -eL` didn't help — Bun bypasses libc stdio.
     # Solution needs to be TS-side (timestamp inside the fetcher's
     # own write path), not shell-side. Filed as a follow-up.
-    ( nohup dridock team watch --inbox "$_inbox" >>"$_log" 2>&1 & disown ) >/dev/null 2>&1 || true
+    ( nohup dridock team watch --inbox "$_inbox" >>"$_log" 2>&1 & disown ) >/dev/null 2>&1 || true  # swallow-ok: the backgrounded subshell always returns 0; a failed spawn is caught by the liveness check below
 
     # Verify the spawn actually took (Arfy's nit #1): a subshell + &
     # returns immediately regardless of the child's fate, so we need to
@@ -301,7 +301,7 @@ if [ "$_spawn_fetcher" = 1 ]; then
     # claiming "spawned". If the child died at startup (missing binary,
     # rejected flag, permission), surface the log so it's obvious.
     sleep 1
-    _spawn_pid="$(cat "$_pid" 2>/dev/null || true)"
+    _spawn_pid="$(cat "$_pid" 2>/dev/null || true)"  # swallow-ok: no pid file means the spawn failed, which the liveness check right after reports with the log
     if _check_fetcher_alive "$_spawn_pid"; then
         echo "🚀 team fetcher: spawned (nohup, detached, pid=$_spawn_pid). log=$_log"
         # Stamp the version this fetcher is running (#71). Written only after
@@ -312,7 +312,7 @@ if [ "$_spawn_fetcher" = 1 ]; then
         [ "$_version_check_enabled" = 1 ] && _stamp_ver="$(_installed_version)"
         if [ -n "$_stamp_ver" ]; then
             printf '%s' "$_stamp_ver" > "$_verfile" 2>/dev/null \
-                || echo "⚠ team fetcher: could not write version stamp to $_verfile — staleness check will re-restart next session."
+                || echo "⚠ team fetcher: could not write version stamp to $_verfile — staleness check will re-restart next session."  # swallow-ok: B, the line itself is the trace
         fi
         # Surface any FRESH START warning from THIS spawn's log output
         # (bytes appended after `_log_size_before`). Rule: a diagnostic
@@ -328,7 +328,7 @@ if [ "$_spawn_fetcher" = 1 ]; then
     else
         echo "⚠ team fetcher: spawn attempted but pid not alive OR cmdline mismatch."
         if [ -f "$_log" ]; then
-            _tail_log="$(tail -n 3 "$_log" 2>/dev/null || true)"
+            _tail_log="$(tail -n 3 "$_log" 2>/dev/null || true)"  # swallow-ok: only feeds a log excerpt into the failure message, which is printed either way
             if [ -n "$_tail_log" ]; then
                 echo "  Last log lines:"
                 printf '%s\n' "$_tail_log" | sed 's/^/    /'
@@ -341,7 +341,7 @@ fi
 # ─── Step 2: drain unread inbox slice into SessionStart context ──────
 _inbox_size=0
 if [ -f "$_inbox" ]; then
-    _inbox_size=$(stat -c %s "$_inbox" 2>/dev/null || stat -f %z "$_inbox" 2>/dev/null || echo 0)
+    _inbox_size=$(stat -c %s "$_inbox" 2>/dev/null || stat -f %z "$_inbox" 2>/dev/null || echo 0)  # swallow-ok: stat on a file just tested with -f; the value is only the EOF default for a corrupt cursor, which is announced
 fi
 
 # Integer validator — treats anything non-decimal-digit as invalid.
@@ -392,7 +392,7 @@ _is_uint() {
 _last_offset=0
 _drain_note=""
 if [ -n "$_session_id" ] && [ -f "$_cursors" ] && command -v jq >/dev/null 2>&1; then
-    _lookup="$(jq -r --arg id "$_session_id" '.[$id] // empty' "$_cursors" 2>/dev/null || true)"
+    _lookup="$(jq -r --arg id "$_session_id" '.[$id] // empty' "$_cursors" 2>/dev/null || true)"  # swallow-ok: an unreadable cursors file means no recorded offset, which takes the announced unknown-session path
     if [ -n "$_lookup" ] && [ "$_lookup" != "null" ]; then
         if _is_uint "$_lookup"; then
             _last_offset="$_lookup"
@@ -402,7 +402,7 @@ if [ -n "$_session_id" ] && [ -f "$_cursors" ] && command -v jq >/dev/null 2>&1;
         fi
     else
         # Unknown session id → option (d): infer from max of existing offsets.
-        _max_known="$(jq -r '. | to_entries | map(.value) | if length > 0 then max else empty end' "$_cursors" 2>/dev/null || true)"
+        _max_known="$(jq -r '. | to_entries | map(.value) | if length > 0 then max else empty end' "$_cursors" 2>/dev/null || true)"  # swallow-ok: no readable max means no prior consumer, handled (and announced) below
         if [ -n "$_max_known" ] && [ "$_max_known" != "null" ]; then
             if _is_uint "$_max_known"; then
                 _last_offset="$_max_known"

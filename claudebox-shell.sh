@@ -78,7 +78,7 @@ cbx-claude() {
         echo "  To shell into a workload container instead:  cbx-ps   then   cbx-sh <name>" >&2
         return 1
     fi
-    docker --context "$c" exec -it "$n" bash 2>/dev/null || docker --context "$c" exec -it "$n" sh
+    docker --context "$c" exec -it "$n" bash 2>/dev/null || docker --context "$c" exec -it "$n" sh  # swallow-ok: no bash in the container falls back to sh; a real docker error reappears from that second exec
 }
 
 # print this project's host .claude data dir (authoritative — asks the wrapper so it
@@ -94,7 +94,7 @@ cbx-claude-dir() {
         d="${XDG_CONFIG_HOME:-$HOME/.config}/dridock/projects/$id/claude"
         [ -d "$d" ] || d="${XDG_CONFIG_HOME:-$HOME/.config}/claudebox/projects/$id/claude"
     fi
-    if [ "${1:-}" = "-o" ]; then command open "$d" 2>/dev/null || printf '%s\n' "$d"
+    if [ "${1:-}" = "-o" ]; then command open "$d" 2>/dev/null || printf '%s\n' "$d"  # swallow-ok: no `open` (Linux, or not a desktop) prints the path instead, which is the useful part
     else printf '%s\n' "$d"; fi
 }
 
@@ -116,7 +116,10 @@ _cbx_up_profile() {   # $1=profile (cb-<id>)
         nm="$(docker --context "$ctx" inspect -f '{{.Name}}' "$c" 2>/dev/null | sed 's:^/::')"
         case "$nm" in
             claude-*|"") ;;                                  # skip ephemeral harness containers
-            *) printf '  starting container %s\n' "$nm"; docker --context "$ctx" start "$c" >/dev/null 2>&1 || true ;;
+            # #129 (B): a failed start used to follow "starting container X" with nothing.
+            *) printf '  starting container %s\n' "$nm"
+               docker --context "$ctx" start "$c" >/dev/null 2>&1 \
+                   || printf '  could not start %s (docker --context %s start %s to see why)\n' "$nm" "$ctx" "$c" >&2 ;;  # swallow-ok: B, the line itself is the trace
         esac
     done
 }
@@ -134,14 +137,14 @@ cbx-up-all() {
     for p in $(colima list 2>/dev/null | awk 'NR>1 && $1 ~ /^cb-/ {print $1}'); do
         found=1; _cbx_up_profile "$p"
     done
-    [ -n "$found" ] && echo "cbx-up-all: done" || echo "cbx-up-all: no claudebox (cb-*) VMs found"
+    if [ -n "$found" ]; then echo "cbx-up-all: done"; else echo "cbx-up-all: no claudebox (cb-*) VMs found"; fi
 }
 
 # ── tab-completion: complete container names for cbx-sh / cbx-logs ────────────
 # Completes the first argument from the containers live in this project's VM.
 _cbx_complete_containers() {
     local ctx names cur
-    ctx="$(_cbx_ctx 2>/dev/null)" || return 0
+    ctx="$(_cbx_ctx 2>/dev/null)" || return 0  # swallow-ok: a shell completion function must never print or fail; no context means no completions
     names="$(docker --context "$ctx" ps --format '{{.Names}}' 2>/dev/null)"
     cur="${COMP_WORDS[COMP_CWORD]}"
     if [ "${COMP_CWORD:-1}" -eq 1 ]; then

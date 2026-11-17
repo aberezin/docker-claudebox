@@ -36,7 +36,7 @@ else
     WATCHER_PS_PATTERN='consult watch'
 fi
 
-[ -d "$CH" ] || exit 0
+[ -d "$CH" ] || exit 0  # swallow-ok: no consult dir means no threads to report on; a SessionStart hook says nothing
 
 draft=0; appr=0; dids=""
 for td in "$CH"/*/; do

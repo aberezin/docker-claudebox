@@ -19,13 +19,13 @@
 set -u
 
 # ── resolve starting dir ─────────────────────────────────────────────
-input="$(cat 2>/dev/null || true)"
+input="$(cat 2>/dev/null || true)"  # swallow-ok: no JSON on stdin just means no cwd from Claude; the fallback below supplies one
 cwd=""
 if [ -n "$input" ] && command -v jq >/dev/null 2>&1; then
     cwd="$(printf '%s' "$input" | jq -r '.cwd // .workspace.current_dir // empty' 2>/dev/null)"
 fi
 [ -z "$cwd" ] && cwd="${CLAUDE_PROJECT_DIR:-$PWD}"
-[ -d "$cwd" ] || exit 0
+[ -d "$cwd" ] || exit 0  # swallow-ok: a statusline with no directory renders nothing rather than erroring every frame
 
 # ── long-running work indicator (#66) ────────────────────────────────
 # Printed BEFORE the dridock-project walk below, and deliberately NOT
@@ -46,7 +46,7 @@ fi
 #
 # ONE pgrep covering all patterns, then ONE ps for elapsed + label.
 # Measured here: three separate pgreps cost 58ms/render, this costs 23ms.
-_busy_pid="$(pgrep -o -f 'bash .*test\.sh|docker( [a-z-]+)* build|make( [a-zA-Z-]+)* build' 2>/dev/null || true)"
+_busy_pid="$(pgrep -o -f 'bash .*test\.sh|docker( [a-z-]+)* build|make( [a-zA-Z-]+)* build' 2>/dev/null || true)"  # swallow-ok: pgrep exits 1 when nothing is building, the common case
 
 if [ -n "$_busy_pid" ]; then
     # `read` (not `${_info%% *}`) because Linux procps-ng LEFT-PADS etime while
@@ -61,7 +61,7 @@ if [ -n "$_busy_pid" ]; then
     # strips leading IFS and splits on the first gap, so it is correct on both.
     # Caught by Bear dogfooding in-container on #66; not reproducible on macOS.
     _et=""; _cmd=""
-    read -r _et _cmd < <(ps -o etime=,command= -p "$_busy_pid" 2>/dev/null) || true
+    read -r _et _cmd < <(ps -o etime=,command= -p "$_busy_pid" 2>/dev/null) || true  # swallow-ok: the busy pid can exit between pgrep and ps; then there is simply no label
     case "$_cmd" in
         *test.sh*) _busy_label="tests" ;;
         *)         _busy_label="build" ;;

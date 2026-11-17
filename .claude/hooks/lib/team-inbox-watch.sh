@@ -33,10 +33,10 @@ twh_find_tail() {
     TWH_TAIL_PID=""
     TWH_TAIL_ARM=""
     local _inbox="$1" _p _cmd _comm
-    command -v pgrep >/dev/null 2>&1 || return 0
+    command -v pgrep >/dev/null 2>&1 || return 0  # swallow-ok: no pgrep means no tail can be detected; procps is in both images, so this is a defensive guard
     # pgrep narrows by the fixed string, then the cmdline is filtered with a
     # glob, so the `.` in `.jsonl` isn't a regex wildcard (Arfy's nit #2, #56).
-    for _p in $(pgrep -f 'tail -F' 2>/dev/null || true); do
+    for _p in $(pgrep -f 'tail -F' 2>/dev/null || true); do  # swallow-ok: pgrep exits 1 when no tail is running: an empty loop
         # The process must actually BE a tail. Until #105's review this also
         # accepted any process whose cmdline merely MENTIONED the arm command —
         # a `bash -c` wrapper (deliberately), but equally a diagnostic `pgrep`
@@ -50,7 +50,7 @@ twh_find_tail() {
         # because comm can carry a path on BSD.
         _comm="$(ps -p "$_p" -o comm= 2>/dev/null | tr -d ' ')"
         case "${_comm##*/}" in tail) ;; *) continue ;; esac
-        _cmd="$(ps -p "$_p" -o command= 2>/dev/null || true)"
+        _cmd="$(ps -p "$_p" -o command= 2>/dev/null || true)"  # swallow-ok: the pid can exit between pgrep and ps; an empty command matches no case below
         case "$_cmd" in
             *"$_inbox"*)
                 TWH_TAIL_PID="$_p"
@@ -159,10 +159,10 @@ twh_claude_settings_flag() {
     local _pid="${TWH_ANCESTOR_PID:-${PPID:-}}" _i _comm _next="" _a
     TWH_SETTINGS_FLAG=""
     for _i in 1 2 3 4 5 6 7 8; do
-        [ -n "$_pid" ] && [ "$_pid" -gt 1 ] 2>/dev/null || return 0
+        [ -n "$_pid" ] && [ "$_pid" -gt 1 ] 2>/dev/null || return 0  # swallow-ok: walked past the top of the process tree: no claude ancestor, so no flags to read
         _comm="$(ps -p "$_pid" -o comm= 2>/dev/null | tr -d ' ')"
         if [ "${_comm##*/}" = "claude" ]; then
-            [ -r "/proc/$_pid/cmdline" ] || return 0   # no exact argv → no flag source (see above)
+            [ -r "/proc/$_pid/cmdline" ] || return 0   # no exact argv → no flag source (see above)  # swallow-ok: no readable argv means no flag source, as the comment says
             while IFS= read -r -d '' _a; do
                 if [ "$_next" = 1 ]; then TWH_SETTINGS_FLAG="$_a"; return 0; fi
                 case "$_a" in
@@ -201,7 +201,7 @@ twh_inbound_in_force() {
 twh_socket_live() {
     local _wake="$1.wake.json" _sid="$2" _ws _wsid
     TWH_SOCKET_LIVE=""
-    [ -n "$_sid" ] && [ -f "$_wake" ] && command -v jq >/dev/null 2>&1 || return 0
+    [ -n "$_sid" ] && [ -f "$_wake" ] && command -v jq >/dev/null 2>&1 || return 0  # swallow-ok: no wake file or no jq means socket delivery is not live; callers fall back to polling
     _wsid="$(jq -r '.sessionId // empty' "$_wake" 2>/dev/null)"
     _ws="$(jq -r '.socket // empty' "$_wake" 2>/dev/null)"
     [ "$_wsid" = "$_sid" ] && [ -S "$_ws" ] && TWH_SOCKET_LIVE=1
@@ -273,7 +273,7 @@ twh_fetcher_version() {
 twh_fetcher_can_post() {
     TWH_FETCHER_TOO_OLD_MSG=""
     twh_fetcher_version "$1"
-    [ -n "$TWH_FETCHER_VER" ] || return 0
+    [ -n "$TWH_FETCHER_VER" ] || return 0  # swallow-ok: by contract (comment above) only a KNOWN too-old version blocks; unknown keeps socket delivery on, and missed events are drained at the next prompt
     [ "$(printf '%s\n%s\n' "$TWH_SOCKET_MIN_FETCHER" "$TWH_FETCHER_VER" | sort -V | head -1)" = "$TWH_SOCKET_MIN_FETCHER" ] && return 0
     if [ -f /.dockerenv ]; then
         TWH_FETCHER_TOO_OLD_MSG="the fetcher is running $TWH_FETCHER_VER (from $TWH_FETCHER_VER_SRC); socket delivery needs $TWH_SOCKET_MIN_FETCHER — it comes with the image, so on the Mac: ./install.sh (it builds the image too), then dridock down + dridock start"
