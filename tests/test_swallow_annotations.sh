@@ -42,6 +42,7 @@ SWALLOW_SWEPT=(
     .claude/hooks/lib/team-inbox-watch.sh .claude/hooks/team-watch-session-end.sh
     .claude/hooks/team-watch-session-start.sh .claude/hooks/team-watch-user-prompt-submit.sh
     .claude/statusline-dridock.sh dridock claudebox-shell.sh
+    entrypoint.sh
 )
 
 # Echo the pattern name a line needs annotating for, or nothing. Comment-only

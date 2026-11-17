@@ -65,7 +65,7 @@ _repair_dns() {
 	cands+=("192.168.5.1" "192.168.5.2")
 
 	for cand in "${cands[@]}"; do
-		printf 'nameserver %s\n' "$cand" > /etc/resolv.conf 2>/dev/null || continue
+		printf 'nameserver %s\n' "$cand" > /etc/resolv.conf 2>/dev/null || continue  # swallow-ok: a candidate that can't be written is skipped for the next one; failure overall is reported below
 		if _dns_resolves; then
 			echo "dridock: DNS was unreachable; repaired /etc/resolv.conf -> nameserver $cand (#72)" >&2
 			ok=1
@@ -75,7 +75,7 @@ _repair_dns() {
 
 	if [ "$ok" != 1 ]; then
 		# Restore rather than leave a container pointed at the last thing we tried.
-		printf '%s\n' "$backup" > /etc/resolv.conf 2>/dev/null || true
+		printf '%s\n' "$backup" > /etc/resolv.conf 2>/dev/null || true  # swallow-ok: the loud "DNS is unreachable" lines follow either way
 		echo "dridock: DNS is unreachable and no local resolver answered (tried: ${cands[*]})." >&2
 		echo "  Name resolution will fail inside this container. Routing may still be fine —" >&2
 		echo "  test with: curl --resolve <host>:443:<ip> https://<host>/" >&2
@@ -104,7 +104,7 @@ if [ -S /var/run/docker.sock ]; then
 		# calls fail with permission errors later — hard to diagnose without
 		# a trace here.
 		groupmod -g "$SOCKET_GID" docker \
-			|| echo "dridock: groupmod -g $SOCKET_GID docker FAILED — docker socket access likely broken" >&2
+			|| echo "dridock: groupmod -g $SOCKET_GID docker FAILED — docker socket access likely broken" >&2  # swallow-ok: B, the line itself is the trace
 	fi
 fi
 dbg "docker socket done"
@@ -119,8 +119,11 @@ case "${DRIDOCK_PRUNE_ON_START:-}" in
 	1|true|yes|on)
 		if [ -S /var/run/docker.sock ]; then
 			dbg "prune-on-start: docker builder prune -f + docker image prune -f"
-			docker builder prune -f >/dev/null 2>&1 || true
-			docker image prune -f   >/dev/null 2>&1 || true
+			# #129 (B): you opted in, so a failed prune shouldn't be silent.
+			docker builder prune -f >/dev/null 2>&1 \
+				|| echo "dridock: DRIDOCK_PRUNE_ON_START: docker builder prune failed; continuing" >&2  # swallow-ok: B, the line itself is the trace
+			docker image prune -f   >/dev/null 2>&1 \
+				|| echo "dridock: DRIDOCK_PRUNE_ON_START: docker image prune failed; continuing" >&2  # swallow-ok: B, the line itself is the trace
 		fi ;;
 esac
 
@@ -140,12 +143,12 @@ if [ -n "$CLAUDE_WORKSPACE" ] && [ -d "$CLAUDE_WORKSPACE" ]; then
 			# host files misowned when the container exits, invisible to
 			# the user until they hit a permission error on their Mac.
 			groupmod -g "$HOST_GID" claude \
-				|| echo "dridock: groupmod -g $HOST_GID claude FAILED — host files may end up misowned" >&2
+				|| echo "dridock: groupmod -g $HOST_GID claude FAILED — host files may end up misowned" >&2  # swallow-ok: B, the line itself is the trace
 		fi
 		if [ "$HOST_UID" != "$CURRENT_UID" ]; then
 			dbg "fixing UID: $CURRENT_UID -> $HOST_UID"
 			usermod -u "$HOST_UID" claude \
-				|| echo "dridock: usermod -u $HOST_UID claude FAILED — host files may end up misowned" >&2
+				|| echo "dridock: usermod -u $HOST_UID claude FAILED — host files may end up misowned" >&2  # swallow-ok: B, the line itself is the trace
 		fi
 		PARALLEL=$(( $(nproc) / 2 ))
 		[ "$PARALLEL" -lt 1 ] && PARALLEL=1
@@ -196,7 +199,7 @@ dbg "WORKSPACE_DIR=$WORKSPACE_DIR"
 # stall for no benefit. Only the root needs to be writable for new dotfiles.
 if [ "$(stat -c %u /home/claude 2>/dev/null)" != "$(id -u claude)" ]; then
 	chown claude:claude /home/claude 2>/dev/null \
-		|| echo "dridock: chown /home/claude FAILED — the agent may be unable to write dotfiles (\$HOME mount owned by another uid)" >&2
+		|| echo "dridock: chown /home/claude FAILED — the agent may be unable to write dotfiles (\$HOME mount owned by another uid)" >&2  # swallow-ok: B, the line itself is the trace
 fi
 
 # ── seed shell skel into a mounted $HOME (#80 phase 2) ──────────────────────
@@ -216,7 +219,7 @@ for _skel in /etc/skel/.[!.]*; do
 	_dest="/home/claude/$(basename "$_skel")"
 	if [ ! -e "$_dest" ]; then
 		if cp "$_skel" "$_dest" 2>/dev/null; then
-			chown claude:claude "$_dest" 2>/dev/null || true
+			chown claude:claude "$_dest" 2>/dev/null || true  # swallow-ok: a failed /home/claude chown is already reported above; the seeded file stays readable
 			dbg "seeded $(basename "$_dest") from /etc/skel"
 		else
 			echo "dridock: FAILED to seed $_dest from skel — the shell may lack its rc" >&2
@@ -231,7 +234,7 @@ if ! mkdir -p /home/claude/.claude; then
 	echo "dridock: FAILED to create /home/claude/.claude — framework guidance (CLAUDE.md, system-hint) will NOT be injected" >&2
 fi
 chown claude:claude /home/claude/.claude 2>/dev/null \
-	|| echo "dridock: chown /home/claude/.claude FAILED — claude user may be unable to write its own config" >&2
+	|| echo "dridock: chown /home/claude/.claude FAILED — claude user may be unable to write its own config" >&2  # swallow-ok: B, the line itself is the trace
 
 CLAUDE_MD_USER="/home/claude/.claude/CLAUDE.md"
 dbg "writing framework guidance to user memory (variant: ${CLAUDE_IMAGE_VARIANT:-full})"
@@ -620,8 +623,8 @@ if [ -n "${DRIDOCK_VERSION:-}" ]; then
 		HARNESS_UPDATE_NOTE="NOTE: the dridock harness was updated from v${_seen} to v${DRIDOCK_VERSION} since this project last ran. Read /opt/dridock/CHANGELOG.md (top entry) for what changed before relying on prior assumptions about how the harness behaves."
 		dbg "harness update detected: $_seen -> $DRIDOCK_VERSION"
 	fi
-	printf '%s' "$DRIDOCK_VERSION" > "$HARNESS_VER_FILE" 2>/dev/null || true
-	chown claude:claude "$HARNESS_VER_FILE" 2>/dev/null || true
+	printf '%s' "$DRIDOCK_VERSION" > "$HARNESS_VER_FILE" 2>/dev/null || true  # swallow-ok: only feeds next start's "harness was updated" note; the run itself is unaffected
+	chown claude:claude "$HARNESS_VER_FILE" 2>/dev/null || true  # swallow-ok: only feeds next start's "harness was updated" note; the run itself is unaffected
 fi
 
 # (A) Consult surfacing — if a framework-consult reply is waiting for THIS project
@@ -737,7 +740,7 @@ environment. Do NOT try to run the host `dridock` command — it isn't in here.
 
 Keep it a concise self-report, not a deep dive.
 CBSKILL
-chown -R claude:claude "$CB_SKILL_DIR" 2>/dev/null || true
+chown -R claude:claude "$CB_SKILL_DIR" 2>/dev/null || true  # swallow-ok: the skill files stay readable if root-owned; claude only reads them
 dbg "seeded container /dridock skill"
 
 # NOTE: we deliberately do NOT create a workspace ./CLAUDE.md. Framework guidance lives in
@@ -867,7 +870,7 @@ _warn_missing_sidecar() {   # $1 = suffix, $2 = the path that was expected
 	for o in /home/claude/.claude/.claude-*-"$1"; do
 		[ -f "$o" ] && [ "$o" != "$2" ] && others+=("${o##*/}")
 	done
-	[ "${#others[@]}" -gt 0 ] || return 0
+	[ "${#others[@]}" -gt 0 ] || return 0  # swallow-ok: no sidecar of that kind under another name: nothing to warn about
 	echo "dridock: this container reads ${2##*/}, which doesn't exist, but ${others[0]} does$([ "${#others[@]}" -gt 1 ] && echo " (and $((${#others[@]} - 1)) more)")." >&2
 	echo "         Its DRIDOCK_CONTAINER_NAME ('${CLAUDE_CONTAINER_NAME}') no longer matches what dridock writes, so its -$1 sidecar is NOT loaded." >&2
 	echo "         Recreate it so it gets the current name: on the Mac, 'dridock down && dridock start' (#123)." >&2
@@ -961,7 +964,7 @@ _load_env_sidecar env       forwarded-env
 # to claude:claude so the setpriv'd child owns it — mkdir here runs as
 # root and would default to root:root without an explicit chown.
 mkdir -p /home/claude/.claude/xdg-config
-chown -R claude:claude /home/claude/.claude/xdg-config 2>/dev/null || true
+chown -R claude:claude /home/claude/.claude/xdg-config 2>/dev/null || true  # swallow-ok: under ~/.claude, whose chown above reports failure loudly
 # chmod 700 the xdg-config root — anything XDG-stored in-container is now
 # persistent host-side, and gh's OAuth token in particular lands under
 # ~/.config/dridock/projects/<id>/claude/xdg-config/gh/hosts.yml on the
@@ -972,7 +975,10 @@ chown -R claude:claude /home/claude/.claude/xdg-config 2>/dev/null || true
 # credential dir is invisible to other host uids. CLAUDE.md rule:
 # credentials live in chmod-600 files — extend that to their containing
 # dir too when the containing dir is on host disk.
-chmod 700 /home/claude/.claude/xdg-config 2>/dev/null || true
+# #129 (B): this dir holds gh's OAuth token on the host; if it can't be locked
+# down, other host accounts can see what's in it. Say so.
+chmod 700 /home/claude/.claude/xdg-config 2>/dev/null \
+	|| echo "dridock: chmod 700 ~/.claude/xdg-config FAILED; credential files under it may be listable by other host users" >&2  # swallow-ok: B, the line itself is the trace
 export XDG_CONFIG_HOME=/home/claude/.claude/xdg-config
 dbg "XDG_CONFIG_HOME=$XDG_CONFIG_HOME (persistence via ~/.claude bind mount, #58)"
 
@@ -996,7 +1002,7 @@ if [ "$_mode_telegram" = "1" ] && [ "$_mode_cron" = "1" ]; then
 	fi
 	mkdir -p /workspaces /home/claude/.claude/cron/history
 	chown claude:claude /workspaces
-	chown -R claude:claude /home/claude/.claude/cron 2>/dev/null || true
+	chown -R claude:claude /home/claude/.claude/cron 2>/dev/null || true  # swallow-ok: under ~/.claude, whose chown above reports failure loudly
 	CLAUDE_UID=$(id -u claude)
 	CLAUDE_GID=$(id -g claude)
 	# NOTE: use `;` to terminate the exports so they run in the *current* shell.
@@ -1055,7 +1061,7 @@ if [ "$_mode_cron" = "1" ]; then
 	CLAUDE_GID=$(id -g claude)
 	# ensure claude owns the cron history dir
 	mkdir -p /home/claude/.claude/cron/history
-	chown -R claude:claude /home/claude/.claude/cron 2>/dev/null || true
+	chown -R claude:claude /home/claude/.claude/cron 2>/dev/null || true  # swallow-ok: under ~/.claude, whose chown above reports failure loudly
 	exec setpriv --reuid="$CLAUDE_UID" --regid="$CLAUDE_GID" --init-groups \
 		bash -c "export HOME=/home/claude && export CLAUDE_CONFIG_DIR=/home/claude/.claude && export DRIDOCK_MODE_CRON_FILE=$(printf '%q' "$_mode_cron_file") && export DRIDOCK_WORKSPACE=$(printf '%q' "${CLAUDE_WORKSPACE:-/workspace}") && export PATH=/home/claude/.claude/bin:/opt/claude-cli/bin:\$PATH && exec /usr/bin/python3 /opt/dridock/cron.py"
 fi
@@ -1102,13 +1108,13 @@ _ssh_seed_hosts() {
 	local kh="$ssh_dir/known_hosts" cfg="$ssh_dir/config"
 	local stamp="$ssh_dir/.dridock-known-hosts-seeded-v1"
 	local marker="# dridock: accept-new for first-connect git SSH (#10)"
-	[ -d "$ssh_dir" ] || return 0
+	[ -d "$ssh_dir" ] || return 0  # swallow-ok: no ~/.ssh mount means no git SSH to seed
 	if [ ! -f "$stamp" ] && command -v ssh-keyscan >/dev/null 2>&1; then
-		touch "$kh" 2>/dev/null || true
+		touch "$kh" 2>/dev/null || true  # swallow-ok: the merge below still works without it (cat of a missing file contributes nothing)
 		( ssh-keyscan -T 5 github.com gitlab.com bitbucket.org codeberg.org 2>/dev/null; cat "$kh" 2>/dev/null ) \
 			| sort -u > "$kh.tmp" 2>/dev/null && mv "$kh.tmp" "$kh" && chmod 644 "$kh"
 		touch "$stamp" 2>/dev/null
-		chown claude:claude "$stamp" "$kh" 2>/dev/null || true
+		chown claude:claude "$stamp" "$kh" 2>/dev/null || true  # swallow-ok: root-owned is fine: ssh accepts root-owned config and known_hosts
 		dbg "ssh: seeded known_hosts (github/gitlab/bitbucket/codeberg)"
 	fi
 	if [ ! -f "$cfg" ] || ! grep -qF "$marker" "$cfg" 2>/dev/null; then
@@ -1118,7 +1124,7 @@ _ssh_seed_hosts() {
 			echo "Host *"
 			echo "    StrictHostKeyChecking accept-new"
 		} > "$cfg.tmp" 2>/dev/null && mv "$cfg.tmp" "$cfg" && chmod 600 "$cfg"
-		chown claude:claude "$cfg" 2>/dev/null || true
+		chown claude:claude "$cfg" 2>/dev/null || true  # swallow-ok: root-owned is fine: ssh accepts root-owned config and known_hosts
 		dbg "ssh: appended accept-new fallback to ~/.ssh/config"
 	fi
 }
@@ -1257,7 +1263,7 @@ _maybe_install_default_plugin() {
 		bash -c 'export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:$PATH; claude plugin marketplace add anthropics/claude-plugins-official && exec claude plugin install commit-commands@claude-plugins-official --scope user' \
 		</dev/null >/dev/null 2>&1
 	then
-		touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
+		touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true  # swallow-ok: the marker only needs to exist; root-owned is fine (the entrypoint, as root, manages it)
 		dbg "default plugin installed"
 	else
 		echo "note: default plugin (commit-commands) not installed (offline, or the install timed out) — set DRIDOCK_DEFAULT_PLUGINS=0 to silence" >&2
@@ -1302,8 +1308,8 @@ _maybe_install_default_plugin "$@"
 _resolve_marketplace_name() {
 	local repo="$1"
 	local km="$CLAUDE_CONFIG_DIR/plugins/known_marketplaces.json"
-	[ -f "$km" ] || return 0
-	command -v jq >/dev/null 2>&1 || return 0
+	[ -f "$km" ] || return 0  # swallow-ok: no known_marketplaces.json degrades to pre-#98 behaviour, as the comment above says
+	command -v jq >/dev/null 2>&1 || return 0  # swallow-ok: no jq degrades to pre-#98 behaviour, as the comment above says
 	# --arg (not string interpolation) so the repo value is data to jq, never
 	# program text -- same discipline as the shape check above.
 	jq -r --arg repo "$repo" '
@@ -1319,7 +1325,7 @@ _install_project_plugins() {
 	[ -f "$ARGS_FILE" ] && return 0
 	local a; for a in "$@"; do case "$a" in -p|--print) return 0 ;; esac; done
 	local pf="$CLAUDE_CONFIG_DIR/.plugins"
-	[ -f "$pf" ] || return 0
+	[ -f "$pf" ] || return 0  # swallow-ok: no .plugins sidecar means no project plugins to install
 	local entry name marketplace_full marketplace_short install_spec marker slug
 	# Disable globbing for the word-split: an entry containing `*`/`?` would
 	# otherwise glob-expand against the cwd before the shape check sees it
@@ -1378,7 +1384,7 @@ _install_project_plugins() {
 			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:\$PATH; exec claude plugin install '$install_spec' --scope user" \
 			</dev/null >/dev/null 2>&1
 		then
-			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
+			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true  # swallow-ok: the marker only needs to exist; root-owned is fine (the entrypoint, as root, manages it)
 			dbg "project plugin installed: $entry"
 		else
 			echo "note: project plugin ($entry) not installed — 'claude plugin install $install_spec' failed (marketplace '$marketplace_full' registered as '$marketplace_short'); will retry next start; set DRIDOCK_DEFAULT_PLUGINS=0 to silence" >&2
@@ -1404,7 +1410,7 @@ _install_features() {
 	local feat marker on_script
 	# Prefer the new sidecar; fall back to legacy `.profiles` if only that's present.
 	if [ ! -f "$pf" ] && [ -f "$pf_legacy" ]; then pf="$pf_legacy"; fi
-	[ -f "$pf" ] || return 0
+	[ -f "$pf" ] || return 0  # swallow-ok: no .features sidecar means no features to install
 	for feat in $(cat "$pf" 2>/dev/null); do
 		# #37 Tier 1 #8 — was `continue ;` bare, the ONLY silent path in an
 		# otherwise-loud loop (unknown-feature + install-failed branches below
@@ -1456,7 +1462,7 @@ _install_features() {
 			bash -c "export HOME=/home/claude CLAUDE_CONFIG_DIR=/home/claude/.claude PATH=/opt/claude-cli/bin:/home/claude/.claude/bin:\$PATH; exec '$on_script'" \
 			</dev/null >/dev/null 2>&1
 		then
-			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true
+			touch "$marker"; chown claude:claude "$marker" 2>/dev/null || true  # swallow-ok: the marker only needs to exist; root-owned is fine (the entrypoint, as root, manages it)
 			echo "dridock: enabled feature '$feat'" >&2
 		else
 			echo "dridock: feature '$feat' install failed (offline, or the install timed out) — retries next start" >&2

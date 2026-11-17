@@ -277,13 +277,23 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Master as of `1fd5bfc` is frozen as is; `release-6.0.0` and milestone `6.0.0` exist.
 - **Error-discarding `||` in shell must say why** (#129). New
   `tests/test_swallow_annotations.sh` requires `# swallow-ok: <reason>` on every
-  `|| true` / `|| :` / `|| return 0` / `|| exit 0` / `|| exec` and every line with both
-  `2>/dev/null` and `||` (outside an `if`/`elif`/`while` condition), plus `|| echo` /
-  `|| printf`, in the files it has swept so far. It self-tests its patterns against
-  fixtures. First group swept: the `cb-*` helpers. Three silent conflations fixed:
-  `cb-browser script-cdp` reports tabs it couldn't close, `cb-browser watch-stop` tells
-  "no watch running" from "docker unreachable", and `cb-df` tells "no images" from
-  "docker unreachable". One class-C finding is filed as #131.
+  `|| true` / `|| :` / `|| return 0` / `|| exit 0` / `|| exec` / `|| echo` / `|| printf`,
+  and every line with both `2>/dev/null` and `||` outside an `if`/`elif`/`while`
+  condition. It self-tests its patterns against fixtures and gates every in-scope shell
+  file (`cb-*`, `features/`, `install.sh`, `.githooks/`, the `.claude` hooks and
+  statusline, the `dridock` shim, `claudebox-shell.sh`, `entrypoint.sh`). The audit
+  found and fixed silent failures, each now one stderr line:
+  - `cb-browser` uncounted unclosed tabs, and watch-stop calling "docker unreachable"
+    "no watch running";
+  - `cb-df` calling "docker unreachable" "no images";
+  - `features/*/off.sh` uninstalls that failed while the feature reported disabled;
+  - `install.sh` stamping `0.0.0` on an unreadable `VERSION`, and hiding a failed
+    `bun install` (see #132);
+  - `claudebox-shell.sh` workload starts that failed;
+  - the entrypoint's opted-in prune;
+  - a failed `chmod 700` on the credential-holding `xdg-config`.
+
+  One class-C finding is filed as #131.
 - **The install gate names the merged-first path, the runtime and the shell** (#119).
   On the record the gate has held whenever it applied — #114 (`cd57925`) ran before merging,
   #117 (`e21d369`) was never in the build path — so the merged-first terms are a fallback
