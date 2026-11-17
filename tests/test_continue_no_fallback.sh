@@ -54,7 +54,7 @@ local assign; assign="$(sed -n "${line}p" "$EP" | sed 's/^[[:space:]]*//')"
 build() {
     # Read by the eval'd assignment below.
     # shellcheck disable=SC2034
-    local CMD="true" SYSTEM_HINT_FLAG="" INTERACTIVE_EXTRA="'--remote-control'"
+    local CMD="true" SYSTEM_HINT_FLAG="" INTERACTIVE_EXTRA="'--remote-control'" _RESUME_HINT="dridock start --resume 0c5e5f31-test-sid"
     eval "$assign"
     printf '%s' "$CMD"
 }
@@ -72,30 +72,43 @@ runit 0
     || bad "rc 0 case: rc=$rc calls=$calls out=$out"
 
 runit 1
-if [ "$rc" -eq 1 ] && [ "$calls" -eq 1 ] && [[ "$out" == *"dridock start --resume <session-id>"* ]]; then
-    ok "refused (rc 1): NOT followed by a fresh run, rc kept, and the way back is printed"
+if [ "$rc" -eq 1 ] && [ "$calls" -eq 1 ] && [[ "$out" == *"dridock start --resume 0c5e5f31-test-sid"* ]]; then
+    ok "refused (rc 1): NOT followed by a fresh run, rc kept, and the way back is printed with the id"
 else
     bad "refusal case: rc=$rc calls=$calls out=$out"
 fi
 
-runit 130
-[ "$rc" -eq 130 ] && [ "$calls" -eq 1 ] && [ -z "$out" ] \
-    && ok "Ctrl-C (rc 130): exit kept, no misleading hint" || bad "rc 130 case: rc=$rc calls=$calls out=$out"
+local k
+for k in 130 137 143; do
+    runit "$k"
+    [ "$rc" -eq "$k" ] && [ "$calls" -eq 1 ] && [ -z "$out" ] \
+        && ok "rc $k (Ctrl-C / killed / SIGTERM): exit kept, no misleading hint" || bad "rc $k case: rc=$rc calls=$calls out=$out"
+done
 
-# 3. `dridock start --resume <id>` must not also get --continue. Use the real
-#    condition from entrypoint.sh.
-local cond; cond="$(grep -o 'grep -qE "(^|\[ '"'"'\])--resume(\[='"'"' \]|\\\$)"' "$EP" | head -1)"
-if [ -z "$cond" ]; then
-    bad "couldn't find the --resume detection in entrypoint.sh"
+# 3. The helpers, taken from entrypoint.sh: --resume is judged on argv
+#    elements, and the hint names the newest session for the workspace.
+awk '/^\t_has_resume\(\) \{/,/^\t\}/' "$EP" > "$tmp/fns.sh"
+awk '/^\t_last_session_id\(\) \{/,/^\t\}/' "$EP" | sed "s#/home/claude/.claude#$tmp/c#g" >> "$tmp/fns.sh"
+if ! grep -q '_has_resume()' "$tmp/fns.sh" || ! grep -q '_last_session_id()' "$tmp/fns.sh"; then
+    bad "couldn't extract _has_resume/_last_session_id from entrypoint.sh"
 else
-    local pat; pat="$(printf '%s' "$cond" | sed -e 's/^grep -qE "//' -e 's/"$//' -e 's/\\\$/$/')"
-    m() { printf '%s' "$1" | grep -qE "$pat"; }
-    m "'--resume' 'abc'" && m "'--resume=abc'" && m "'--remote-control' '--resume' 'x'" \
+    # shellcheck disable=SC1091
+    . "$tmp/fns.sh"
+    _has_resume "'--resume' 'abc'" && _has_resume "'--resume=abc'" && _has_resume "'--remote-control' '--resume' 'x'" \
         && ok "--resume (separate or =value, anywhere in the args) skips --continue" \
-        || bad "--resume not detected (pattern: $pat)"
-    ! m "'--remote-control'" && ! m "'--resumex'" \
-        && ok "--remote-control / --resumex don't count as --resume" \
-        || bad "false --resume match (pattern: $pat)"
+        || bad "--resume not detected"
+    ! _has_resume "'--remote-control'" && ! _has_resume "'--resumex'" \
+        && ! _has_resume "'--append-system-prompt' 'prefer --resume over restarting'" \
+        && ok "--remote-control, --resumex, and --resume inside a VALUE don't count" \
+        || bad "false --resume match"
+    # Read by the sourced _last_session_id.
+    # shellcheck disable=SC2034
+    local WORKSPACE_DIR="/u/my_proj.v2" d
+    d="$tmp/c/projects/-u-my-proj-v2"
+    mkdir -p "$d"
+    [ -z "$(_last_session_id)" ] && ok "no transcripts → no id (the hint falls back to the placeholder)" || bad "id from an empty dir"
+    : > "$d/old-1111.jsonl"; touch -d '2 hours ago' "$d/old-1111.jsonl"; : > "$d/new-2222.jsonl"
+    [ "$(_last_session_id)" = "new-2222" ] && ok "the newest transcript's id, under Claude's slug for the path" || bad "wrong id: '$(_last_session_id)'"
 fi
 
 rm -rf "$tmp"

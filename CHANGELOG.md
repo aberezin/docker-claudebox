@@ -36,8 +36,10 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   cleared the reason, so a long conversation looked lost. With nothing to continue,
   `--continue` exits 0 (CLI 2.1.319 and 2.1.326), so the fallback only ever hid real
   failures. Both launch paths now run `--continue` with no fallback. Interactively, a
-  non-zero exit other than Ctrl-C's 130 adds `dridock start --resume <session-id>`, and
-  `--resume` among the start args no longer also gets `--continue`. New
+  non-zero exit (other than 130/137/143: Ctrl-C, killed, SIGTERM) adds
+  `dridock start --resume <id>`, naming the newest session for the workspace, and
+  `--resume` among the start args (judged per argument, so a value that merely contains
+  the text doesn't count) no longer also gets `--continue`. New
   `tests/test_continue_no_fallback.sh` (runs the real command with a stub `claude`).
   Not in this fix: pruning the stale session registration that caused the refusal; a
   planted stale entry didn't reproduce it, so the trigger isn't pinned down yet.

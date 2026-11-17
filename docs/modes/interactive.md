@@ -13,8 +13,8 @@ dridock start --resume <session-id>   # resume a specific conversation (skips --
 ```
 
 If `--continue` fails, the session does **not** silently start fresh (#128). Claude's own
-reason stays on screen, and dridock adds how to get the conversation back with
-`dridock start --resume <session-id>`. One known cause: after the container is
+reason stays on screen, and dridock adds how to get the conversation back, as
+`dridock start --resume <id>` with the id of the newest session for this workspace. One known cause: after the container is
 recreated, a conversation that ran with `--remote-control` can be refused as "registered
 from another machine or container".
 

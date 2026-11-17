@@ -1558,12 +1558,38 @@ else
 				echo "  See docs/design/git-and-api-auth.md and https://code.claude.com/docs/en/remote-control" >&2
 			fi ;;
 	esac
+	# #128: test --resume on argv ELEMENTS, not the joined string, so a value
+	# that merely contains the text ("--append-system-prompt 'prefer --resume…'")
+	# doesn't silently drop --continue. INTERACTIVE_EXTRA is shell-quoted argv
+	# written by the host and is already word-split into CMD unquoted below, so
+	# `eval set --` assumes nothing that isn't assumed there.
+	_has_resume() {
+		eval "set -- $1"
+		local a
+		for a in "$@"; do case "$a" in --resume|--resume=*) return 0 ;; esac; done
+		return 1
+	}
+	# The session `--continue` would take: the newest transcript for this
+	# workspace (Claude's slug: every non-alphanumeric character → '-'). Read
+	# BEFORE the run; a refusal creates no session, so it's the one to resume.
+	_last_session_id() {
+		local d f
+		d="/home/claude/.claude/projects/$(printf '%s' "$WORKSPACE_DIR" | sed 's/[^a-zA-Z0-9]/-/g')"
+		f="$(ls -t "$d"/*.jsonl 2>/dev/null | head -1)"
+		[ -n "$f" ] && basename "$f" .jsonl
+	}
+	_LAST_SID="$(_last_session_id)"
+	if [ -n "$_LAST_SID" ]; then
+		_RESUME_HINT="dridock start --resume $_LAST_SID"
+	else
+		_RESUME_HINT="dridock start --resume <session-id>   (list them with: claude --resume)"
+	fi
 	NO_CONTINUE_FILE="/home/claude/.claude/.${CLAUDE_CONTAINER_NAME}-no-continue"
 	if [ -f "$NO_CONTINUE_FILE" ]; then
 		rm -f "$NO_CONTINUE_FILE"
 		dbg "no-continue flag set, skipping --continue"
 		CMD="$CMD && exec claude --dangerously-skip-permissions $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA"
-	elif printf '%s' "$INTERACTIVE_EXTRA" | grep -qE "(^|[ '])--resume([=' ]|\$)"; then
+	elif _has_resume "$INTERACTIVE_EXTRA"; then
 		# `dridock start --resume <id>` (the remedy printed below): --resume and
 		# --continue together are contradictory; --resume is the explicit ask.
 		dbg "interactive: --resume given, not adding --continue"
@@ -1575,9 +1601,11 @@ else
 		# started a fresh session whose TUI cleared the refusal off the screen:
 		# the conversation looked lost. With nothing to continue, `--continue`
 		# exits 0, so the fallback only ever hid real failures. Now claude's own
-		# message stays on screen, and a non-zero exit (other than Ctrl-C's 130)
-		# adds how to get the conversation back.
-		CMD="$CMD && { claude --dangerously-skip-permissions --continue $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA; _rc=\$?; if [ \"\$_rc\" -ne 0 ] && [ \"\$_rc\" -ne 130 ]; then echo \"dridock: claude exited with rc \$_rc. If it refused to continue your last conversation (reason above), get it back with:  dridock start --resume <session-id>  (#128)\" >&2; fi; exit \"\$_rc\"; }"
+		# message stays on screen, and a non-zero exit adds how to get the
+		# conversation back, naming its id. Not for 130 (Ctrl-C), 137 (killed,
+		# e.g. OOM) or 143 (SIGTERM): those aren't refusals, and the hint would
+		# be noise at the moment the user is already confused.
+		CMD="$CMD && { claude --dangerously-skip-permissions --continue $SYSTEM_HINT_FLAG $INTERACTIVE_EXTRA; _rc=\$?; case \"\$_rc\" in 0|130|137|143) ;; *) echo \"dridock: claude exited with rc \$_rc. If it refused to continue your last conversation (reason above), get it back with:  $_RESUME_HINT  (#128)\" >&2 ;; esac; exit \"\$_rc\"; }"
 	fi
 fi
 
