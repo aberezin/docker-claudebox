@@ -79,6 +79,7 @@ export class InMemoryDocker implements Docker {
   readonly rmRefuses = new Set<string>();
   async containerRemoveStopped(context: string, containerName: string): Promise<number> {
     if (this.rmRefuses.has(containerName)) return 1;
+    if (this.containerIdentities.get(this.key(context, containerName))?.status === "running") return 1;
     const list = this.summaries.get(context) ?? [];
     if (list.find((s) => s.name === containerName)?.state === "running") return 1;
     await this.containerRemove(context, containerName);

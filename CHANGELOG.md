@@ -29,6 +29,16 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **`dridock start` no longer kills a running claudebot when the image has changed** (#126).
+  It used to `docker rm -f` any container built from an older image, so an agent working
+  in another terminal died mid-turn after an `./install.sh`, and since #118 reseeds the
+  project image on start, that was routine. Now a stale container that is **running** is
+  left alone: `start` stops with rc 1, names the old and new image, and says
+  `dridock down && dridock start`. A stopped one is still recreated, by a non-force
+  `docker rm`, so one that starts in between is refused by the daemon rather than killed.
+  The one-off #80 data-dir move checks first too, and refuses, before moving anything,
+  while any of the project's containers (cron included) is running. Same rule as #123's
+  adoption: never recreate a running container.
 - **A refused `--continue` no longer silently starts a fresh session** (#128). The
   entrypoint ran `claude --continue … || exec claude …`. After a container recreate on
   2026-11-16, `--continue` was refused ("moved to a background session … registered from

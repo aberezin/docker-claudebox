@@ -553,6 +553,9 @@ describe("StartCommand — migration invalidates existing containers", () => {
     // Pre-phase-2 layout: the project's data still lives at <root>/claude, so
     // this start will migrate it.
     fs.seed("/home/alan/.config/dridock/projects/abc/claude/history.jsonl", "session\n");
+    for (const n of ["claude-p-abc", "claude-p-abc_prog", "claude-p-abc_cron"]) {
+      docker.seedContainer("colima-cb-abc", n, { name: n, imageId: "sha256:infra-1", status: "exited" });
+    }
     const { ctx } = makeCtx(fs);
     await cmd.run([], ctx);
 
@@ -565,6 +568,31 @@ describe("StartCommand — migration invalidates existing containers", () => {
     expect(removed).toContain("claude-p-abc_prog");
     expect(removed).toContain("claude-p-abc_cron");
     void runtime;
+  });
+
+  test("#126: a RUNNING container (cron included) → refuse BEFORE moving anything", async () => {
+    const { fs, runtime, cmd, docker } = seedProjectVmRunning();
+    fs.seed("/home/alan/.config/dridock/projects/abc/claude/history.jsonl", "session\n");
+    docker.seedContainerSummary("colima-cb-abc", { name: "claude-p-abc_cron", state: "running", sameBinds: [] });
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await cmd.run([], ctx);
+    expect(rc).toBe(1);
+    expect(stderr.text()).toContain("claude-p-abc_cron is running on it");
+    expect(stderr.text()).toContain("nothing was changed");
+    // The data stayed put, nothing was removed, nothing launched.
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/history.jsonl")).toBe(true);
+    expect(docker.removals).toEqual([]);
+    expect(runtime.runs).toEqual([]);
+  });
+
+  test("#126: docker can't be asked whether one is running → refuse, nothing moved", async () => {
+    const { fs, cmd, docker } = seedProjectVmRunning();
+    fs.seed("/home/alan/.config/dridock/projects/abc/claude/history.jsonl", "session\n");
+    docker.listFails = true;
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(1);
+    expect(stderr.text()).toContain("docker couldn't be asked");
+    expect(await fs.exists("/home/alan/.config/dridock/projects/abc/claude/history.jsonl")).toBe(true);
   });
 
   test("with nothing to migrate, no containers are removed", async () => {
@@ -729,4 +757,40 @@ test("#123: first start after a move → rc 1 with the session-history mv; the n
   expect(runtime.runs).toEqual([]);
   const second = makeCtx(fs);
   expect(await cmd.run([], second.ctx)).toBe(0);
+});
+
+
+/* ── #126: image drift never kills a running container ────────────────────── */
+
+describe("StartCommand — image drift (#126)", () => {
+  test("stale and STOPPED → recreated, as before", async () => {
+    const { fs, runtime, cmd, docker } = seedProjectVmRunning();
+    docker.seedContainer("colima-cb-abc", "claude-p-abc", { name: "claude-p-abc", imageId: "sha256:OLD", status: "exited" });
+    const { ctx, stderr } = makeCtx(fs);
+    await cmd.run([], ctx);
+    expect(docker.removals.map((r) => r.name)).toEqual(["claude-p-abc"]);
+    expect(stderr.text()).toContain("recreating container claude-p-abc (image drifted)");
+    expect(runtime.runs.length).toBe(1);
+  });
+
+  test("stale but RUNNING → rc 1, left alone, nothing launched, the way forward printed", async () => {
+    const { fs, runtime, cmd, docker } = seedProjectVmRunning();
+    docker.seedContainer("colima-cb-abc", "claude-p-abc", { name: "claude-p-abc", imageId: "sha256:OLD", status: "running" });
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await cmd.run([], ctx);
+    expect(rc).toBe(1);
+    expect(docker.removals).toEqual([]);
+    expect(runtime.runs).toEqual([]);
+    expect(stderr.text()).toContain("claude-p-abc is running on an older image");
+    expect(stderr.text()).toContain("dridock down && dridock start");
+  });
+
+  test("same image and RUNNING → no refusal (the drift check is what refuses, not 'running')", async () => {
+    const { fs, cmd, docker } = seedProjectVmRunning();
+    docker.seedContainer("colima-cb-abc", "claude-p-abc", { name: "claude-p-abc", imageId: "sha256:infra-1", status: "running" });
+    const { ctx, stderr } = makeCtx(fs);
+    await cmd.run([], ctx);
+    expect(docker.removals).toEqual([]);
+    expect(stderr.text()).not.toContain("older image");
+  });
 });

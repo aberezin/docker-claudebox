@@ -32,7 +32,9 @@ export interface ContainerIdentity {
   /** `.Image` — the SHA the container was created from. Diffs against
    *  `image inspect` `.Id` for `cb_refresh_container`. */
   readonly imageId: string;
-  /** Docker status string, e.g. "Up 3 minutes", "Exited (0) 5 min ago". */
+  /** `.State.Status`: "running", "exited", "created", "paused", … (the
+   *  inspect format reads State.Status, not ps's "Up 3 minutes"). #126
+   *  compares it to "running". */
   readonly status?: string;
 }
 

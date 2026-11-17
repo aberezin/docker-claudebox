@@ -27,6 +27,12 @@ export class DotDirMigrator {
   /**
    * @param projectRoot `<data-root>/<id>` — the parent holding both layouts.
    */
+  /** True when `migrate` would move something: the legacy dir exists. Lets
+   *  the caller refuse BEFORE moving data under a running session (#126). */
+  async wouldMove(projectRoot: string): Promise<boolean> {
+    return await this.fs.exists(`${projectRoot}/claude`);
+  }
+
   async migrate(projectRoot: string): Promise<DotMigrateOutcome> {
     const legacy = `${projectRoot}/claude`;
     const dot = `${projectRoot}/dot`;

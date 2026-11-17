@@ -24,7 +24,7 @@ import { MachineConfig } from "../../services/MachineConfig.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
 import { realSpinner } from "../../infra/Spinner.ts";
 import { ImageEnsureService, parseForceReseed } from "../../services/ImageEnsureService.ts";
-import { ContainerRefresher } from "../../services/ContainerRefresher.ts";
+import { ContainerRefresher, staleRunningMessage } from "../../services/ContainerRefresher.ts";
 import { SidecarWriter } from "../../services/SidecarWriter.ts";
 import { AuthSecretsProvisioner } from "../../services/AuthSecretsProvisioner.ts";
 import { collectEnvPassthrough, collectMountPassthrough } from "../../services/EnvMountPassthrough.ts";
@@ -192,7 +192,28 @@ mode (-p) they are validated against an allowlist first.
     const dotDir = await machine.projectDotDir(id);
     if (dotDir !== undefined) {
       const projectRoot = dotDir.replace(/\/dot$/, "");
-      const moved = await new DotDirMigrator(ctx.fs).migrate(projectRoot);
+      const migrator = new DotDirMigrator(ctx.fs);
+      // #126: the move recreates every container afterwards, and moving a
+      // live session's data out from under it is worse. So when there is
+      // something to move, check first and refuse while any of this
+      // project's containers (cron included) is running. Nothing has
+      // changed at that point, so the next start simply tries again.
+      if (await migrator.wouldMove(projectRoot)) {
+        const all = await docker.listContainers(projectContext(id), "claude-");
+        if (all === undefined) {
+          ctx.stderr.write(`❌ dridock: this project's ~/.claude data needs moving (#80), and docker couldn't be asked\n`);
+          ctx.stderr.write(`   whether a container is running on it. Nothing was moved; try again.\n`);
+          return 1;
+        }
+        const live = all.filter((c) => c.state === "running").map((c) => c.name);
+        if (live.length > 0) {
+          ctx.stderr.write(`❌ dridock: this project's ~/.claude data needs moving (#80), and ${live.join(", ")} ${live.length === 1 ? "is" : "are"} running on it.\n`);
+          ctx.stderr.write(`   Not moving a live session's data, so nothing was changed. End that session, then:\n`);
+          ctx.stderr.write(`     ${ctx.binName} down && ${ctx.binName} start\n`);
+          return 1;
+        }
+      }
+      const moved = await migrator.migrate(projectRoot);
       if (moved.kind === "failed") {
         ctx.stderr.write(`❌ dridock: cannot migrate this project's ~/.claude data.\n`);
         ctx.stderr.write(`   ${moved.reason}\n`);
@@ -302,20 +323,33 @@ mode (-p) they are validated against an allowlist first.
     // first project only because that upgrade also rebuilt the image, which
     // triggered a recreate for unrelated reasons.
     if (dataDirMoved) {
+      // Non-force (#126): none was running when the move was checked above,
+      // so a refusal here means one started since. Its mount is stale and the
+      // next start won't know to recreate it (the move is done), so say
+      // exactly what to remove.
       for (const name of [cnameBase, nameFor("programmatic"), nameFor("cron")]) {
-        await docker.containerRemove(ctxDocker, name);
+        if (await docker.containerIdentity(ctxDocker, name) === undefined) continue;
+        const rc = await docker.containerRemoveStopped(ctxDocker, name);
+        if (rc !== 0) {
+          ctx.stderr.write(`❌ ${name} started while its ~/.claude data was being moved, so its mount is stale (docker rm rc ${rc}).\n`);
+          ctx.stderr.write(`   End its session, then remove it so the next start recreates it:\n`);
+          ctx.stderr.write(`     docker --context ${ctxDocker} rm -f ${name}\n`);
+          return 1;
+        }
       }
       ctx.stderr.write(`🔄 recreating containers — the data dir moved, so their mounts are stale\n`);
     }
 
+    // #126: a stale container that is RUNNING is left alone, and this start
+    // stops there with the way forward, rather than killing a live session.
     const refresher = new ContainerRefresher(docker);
-    if (await refresher.maybeRefresh(ctxDocker, cnameBase, this.imageName)) {
-      ctx.stderr.write(`🔄 recreating container ${cnameBase} (image drifted)\n`);
-    }
-    if (isProg) {
-      const progName = nameFor("programmatic");
-      if (await refresher.maybeRefresh(ctxDocker, progName, this.imageName)) {
-        ctx.stderr.write(`🔄 recreating container ${progName} (image drifted)\n`);
+    for (const name of isProg ? [cnameBase, nameFor("programmatic")] : [cnameBase]) {
+      const r = await refresher.maybeRefresh(ctxDocker, name, this.imageName);
+      if (r.kind === "recreated") {
+        ctx.stderr.write(`🔄 recreating container ${name} (image drifted)\n`);
+      } else if (r.kind === "running" || r.kind === "remove-failed") {
+        ctx.stderr.write(staleRunningMessage(name, r, ctx.binName));
+        return 1;
       }
     }
 
