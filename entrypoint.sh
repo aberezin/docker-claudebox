@@ -134,35 +134,84 @@ case "${DRIDOCK_PRUNE_ON_START:-}" in
 		fi ;;
 esac
 
-# match claude user's UID/GID to the host directory owner (skip if root)
-if [ -n "$CLAUDE_WORKSPACE" ] && [ -d "$CLAUDE_WORKSPACE" ]; then
-	HOST_UID=$(stat -c '%u' "$CLAUDE_WORKSPACE")
-	HOST_GID=$(stat -c '%g' "$CLAUDE_WORKSPACE")
-	CURRENT_UID=$(id -u claude)
-	CURRENT_GID=$(id -g claude)
+# Match claude's UID/GID to the workspace owner, and SAY what happened (#141).
+#
+# On Linux the workspace stat names the host user, and matching it is how files
+# claude writes come back owned by you. Under colima the design is a no-op: the
+# mount reads as root, the block is skipped, and claude keeps the baked 1000,
+# with virtiofs reflecting writes to the host user anyway. #141 found it ISN'T
+# always a no-op: one container lifetime read the workspace as 501 (so claude
+# became 501 and $HOME was chowned to it), the next read 1000, and the 501-owned
+# named volumes were then unwritable. Nothing said so: the skip was silent, the
+# chown's rc went nowhere, and a uid change between starts wasn't noticed.
+# So: one line per start naming what was read and what claude runs as; the
+# chown's rc read and reported; and the uid recorded in ~/.claude, with a
+# warning when it differs from last time (this run's stat vs the record, not a
+# scan of accumulated ownership, which would re-announce old residue forever).
+_match_claude_uid() {
+	local ws="$1" record="$2"
+	if [ -z "$ws" ] || [ ! -d "$ws" ]; then
+		echo "dridock: uid: no workspace dir to read ($ws), claude stays $(id -u claude):$(id -g claude) (#141)" >&2
+		return 0
+	fi
+	local host_uid host_gid cur_uid cur_gid how
+	host_uid=$(stat -c '%u' "$ws")
+	host_gid=$(stat -c '%g' "$ws")
+	cur_uid=$(id -u claude)
+	cur_gid=$(id -g claude)
 
-	if [ "$HOST_UID" != "0" ] && [ "$HOST_GID" != "0" ]; then
-		if [ "$HOST_GID" != "$CURRENT_GID" ]; then
-			dbg "fixing GID: $CURRENT_GID -> $HOST_GID"
-			# #37 Tier 1 #9 — surface UID/GID remap failures. If the target
-			# GID is in use, groupmod fails silently and the later
-			# `chown claude:claude` stamps files with the UNCHANGED gid →
-			# host files misowned when the container exits, invisible to
-			# the user until they hit a permission error on their Mac.
-			groupmod -g "$HOST_GID" claude \
-				|| echo "dridock: groupmod -g $HOST_GID claude FAILED — host files may end up misowned" >&2  # swallow-ok: B, the line itself is the trace
+	if [ "$host_uid" = "0" ] || [ "$host_gid" = "0" ]; then
+		how="skipped: the workspace reads as root, the expected colima case"
+	else
+		how="matched"
+		if [ "$host_gid" != "$cur_gid" ]; then
+			dbg "fixing GID: $cur_gid -> $host_gid"
+			# #37 Tier 1 #9: surface UID/GID remap failures. If the target
+			# GID is in use, groupmod fails and the later chown stamps files
+			# with the UNCHANGED gid, misowned on the host.
+			groupmod -g "$host_gid" claude \
+				|| echo "dridock: groupmod -g $host_gid claude FAILED — host files may end up misowned" >&2  # swallow-ok: B, the line itself is the trace
 		fi
-		if [ "$HOST_UID" != "$CURRENT_UID" ]; then
-			dbg "fixing UID: $CURRENT_UID -> $HOST_UID"
-			usermod -u "$HOST_UID" claude \
-				|| echo "dridock: usermod -u $HOST_UID claude FAILED — host files may end up misowned" >&2  # swallow-ok: B, the line itself is the trace
+		if [ "$host_uid" != "$cur_uid" ]; then
+			dbg "fixing UID: $cur_uid -> $host_uid"
+			usermod -u "$host_uid" claude \
+				|| echo "dridock: usermod -u $host_uid claude FAILED — host files may end up misowned" >&2  # swallow-ok: B, the line itself is the trace
 		fi
-		PARALLEL=$(( $(nproc) / 2 ))
-		[ "$PARALLEL" -lt 1 ] && PARALLEL=1
-		dbg "chown /home/claude (only misowned, $PARALLEL parallel)"
-		find /home/claude \( ! -user "$HOST_UID" -o ! -group "$HOST_GID" \) -print0 | xargs -0 -r -P "$PARALLEL" chown claude:claude
+		local parallel=$(( $(nproc) / 2 ))
+		[ "$parallel" -lt 1 ] && parallel=1
+		dbg "chown /home/claude (only misowned, $parallel parallel)"
+		# #141: this pipeline's rc used to go nowhere. A failed chown leaves
+		# files under $HOME the new uid can't write, so read both stages.
+		find /home/claude \( ! -user "$host_uid" -o ! -group "$host_gid" \) -print0 | xargs -0 -r -P "$parallel" chown claude:claude; local rcs=("${PIPESTATUS[@]}")
+		if [ "${rcs[0]}" != "0" ] || [ "${rcs[1]}" != "0" ]; then
+			echo "dridock: chown of /home/claude to claude failed (find rc ${rcs[0]}, xargs rc ${rcs[1]}): some files under \$HOME may not be writable (#141)" >&2
+		fi
 		dbg "chown done"
 	fi
+
+	local now_uid now_gid prev=""
+	now_uid=$(id -u claude)
+	now_gid=$(id -g claude)
+	echo "dridock: uid: workspace reads $host_uid:$host_gid, claude runs as $now_uid:$now_gid ($how) (#141)" >&2
+
+	if [ -n "$record" ] && [ ! -d "${record%/*}" ]; then
+		# A brand-new project: ~/.claude is created further down (#64), so
+		# there is no record yet and nothing to compare; the next start has one.
+		dbg "uid record: ${record%/*} doesn't exist yet, not recording this start"
+	elif [ -n "$record" ]; then
+		if [ -f "$record" ]; then prev=$(cat "$record"); fi
+		if [ -n "$prev" ] && [ "$prev" != "$now_uid:$now_gid" ]; then
+			echo "dridock: claude's uid CHANGED since the last start: $prev -> $now_uid:$now_gid (#141)." >&2
+			echo "   Files created as $prev, including named volumes under \$HOME, may not be writable now." >&2
+		fi
+		if ! { printf '%s\n' "$now_uid:$now_gid" > "$record" && chown claude:claude "$record"; } 2>/dev/null; then
+			echo "dridock: couldn't record claude's uid in $record, so a change next start won't be noticed (#141)" >&2
+		fi
+	fi
+}
+
+if [ -n "$CLAUDE_WORKSPACE" ]; then
+	_match_claude_uid "$CLAUDE_WORKSPACE" /home/claude/.claude/.dridock-claude-uid
 fi
 dbg "uid/gid matching done"
 

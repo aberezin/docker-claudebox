@@ -28,6 +28,18 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **The entrypoint's uid matching says what it did** (#141). A container lifetime read the
+  workspace as uid 501 (so `claude` was remapped to 501 and `$HOME` chowned to it); the next
+  read 1000, and the named cache volumes created under 501 were unwritable. Nothing said so:
+  the skip was silent, the `$HOME` chown's rc went nowhere, and a uid change between starts
+  wasn't noticed. Now every start logs one `dridock: uid: workspace reads U:G, claude runs as
+  U:G (matched | skipped…)` line, a failed chown is reported with both stages' rc, and the uid
+  is recorded in `~/.claude/.dridock-claude-uid` with a warning when it changes. Tests: a
+  docker-free one for every branch, a colima check that `claude` keeps the baked 1000, and
+  the #129 swallow gate now flags a `| xargs` whose rc is unread (Arfy). Not yet explained:
+  why the mount read as 501 in the first place.
+
 ## [6.0.0] - 2026-11-17
 
 The first release cut from a version branch (#137): everything below accumulated on

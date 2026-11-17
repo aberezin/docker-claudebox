@@ -82,6 +82,37 @@ test_entrypoint_workspace_ownership() {
     rm -rf "$tmpdir"
 }
 
+# ── #141: uid matching says what it did, and is a no-op under colima ─────────
+#
+# The ownership test above asserts the round-trip, deliberately not the uid
+# mechanism, which is why nothing failed while the mechanism quietly stopped
+# being a no-op (#141: a container lifetime read the workspace as 501 and
+# remapped claude to it). This asserts the documented colima fact directly:
+# claude keeps the baked uid 1000, or the workspace reads as root (Arfy).
+# The status line is checked on every backend.
+test_entrypoint_uid_observable() {
+    local tmpdir out
+    tmpdir=$(mktemp -d "$WORKDIR/tests/.tmp-uid-XXXXX")
+    out=$(docker run --rm -e DRIDOCK_WORKSPACE="$tmpdir" -v "$tmpdir:$tmpdir" --entrypoint bash "$IMAGE" -c \
+        'bash /opt/dridock/entrypoint.sh true 2>&1; echo "WS=$(stat -c %u "$DRIDOCK_WORKSPACE") CLAUDE=$(id -u claude)"' 2>&1)
+    rm -rf "$tmpdir"
+    assert_contains "$out" "dridock: uid: workspace reads" "entrypoint states what the workspace read as and what claude runs as"
+
+    if [[ "$(docker info --format '{{.Name}}' 2>/dev/null)" == colima* ]]; then
+        local ws claude
+        ws=$(printf '%s\n' "$out" | sed -n 's/^WS=\([0-9]*\) CLAUDE=.*/\1/p' | tail -1)
+        claude=$(printf '%s\n' "$out" | sed -n 's/^WS=[0-9]* CLAUDE=\([0-9]*\)/\1/p' | tail -1)
+        if [ "$claude" = "1000" ] || [ "$ws" = "0" ]; then
+            echo "  OK: colima: uid matching is the documented no-op (workspace reads $ws, claude $claude)"
+        else
+            echo "  FAIL: colima: claude was remapped to $claude (workspace reads $ws); the documented no-op isn't holding (#141)"
+            return 1
+        fi
+    else
+        echo "  SKIP: the colima no-op check needs a colima daemon"
+    fi
+}
+
 test_entrypoint_claude_md() {
     local out
     # Reads ~/.claude/CLAUDE.md, NOT /workspace/CLAUDE.md (#63). The "Available
@@ -211,6 +242,7 @@ ALL_TESTS+=(
     test_entrypoint_behaviors
     test_entrypoint_claude_md
     test_entrypoint_workspace_ownership
+    test_entrypoint_uid_observable
     test_entrypoint_system_hint
     test_entrypoint_config_patching
     test_entrypoint_initd
