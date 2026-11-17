@@ -302,3 +302,43 @@ describe("CronModeCommand — #110 launch-time drift warning", () => {
     expect(stderr.text()).not.toContain("cb-infra image");
   });
 });
+
+/* ── #133: a move orphans cron's history — say so, but still run ──────────── */
+
+describe("CronModeCommand — project move (#133)", () => {
+  test("cron history orphaned → warns and STILL starts (where `start` returns 1)", async () => {
+    setEnv("DRIDOCK_MODE_CRON", "1");
+    const { runtime, cmd, fs } = seedProject();
+    fs.seed("/home/alan/.config/dridock/projects/abc/last-workspace", "/old\n");
+    fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/cron/history/old/2026-11-17T09-00-00-nightly/activity.jsonl", "{}");
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await cmd.run([], ctx);
+    // The point of the whole change: a daemon that refuses to start runs NO
+    // jobs, with nobody at the terminal to read the refusal.
+    expect(rc).toBe(0);
+    expect(runtime.runs.length).toBe(1);
+    expect(stderr.text()).toContain("this project moved: /old → /p");
+    expect(stderr.text()).toContain("only memory of its last run");
+    expect(stderr.text()).toContain("mv '/home/alan/.config/dridock/projects/abc/dot/.claude/cron/history/old'");
+  });
+
+  test("no move → nothing said", async () => {
+    setEnv("DRIDOCK_MODE_CRON", "1");
+    const { runtime, cmd, fs } = seedProject();
+    fs.seed("/home/alan/.config/dridock/projects/abc/last-workspace", "/p\n");
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(runtime.runs.length).toBe(1);
+    expect(stderr.text()).not.toContain("this project moved");
+  });
+
+  test("moved, but nothing orphaned → nothing said, still starts", async () => {
+    setEnv("DRIDOCK_MODE_CRON", "1");
+    const { runtime, cmd, fs } = seedProject();
+    fs.seed("/home/alan/.config/dridock/projects/abc/last-workspace", "/old\n");
+    const { ctx, stderr } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(runtime.runs.length).toBe(1);
+    expect(stderr.text()).not.toContain("this project moved");
+  });
+});

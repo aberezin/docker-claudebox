@@ -12,6 +12,7 @@ import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
 import { ProjectConfig } from "../../services/ProjectConfig.ts";
 import { MachineConfig } from "../../services/MachineConfig.ts";
+import { checkWorkspaceMove } from "../../services/WorkspaceMoveReporter.ts";
 import { VmEnsureService } from "../../services/VmEnsureService.ts";
 import { realSpinner } from "../../infra/Spinner.ts";
 import { ImageEnsureService, parseForceReseed } from "../../services/ImageEnsureService.ts";
@@ -151,6 +152,22 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
     const machine = new MachineConfig(ctx.fs, ctx.env.raw(), ctx.home);
     const dataDir = await machine.projectDataDir(id);
     await ctx.fs.mkdirRecursive(dataDir);
+
+    // #133: a project move orphans cron's per-job history, which is a
+    // scheduled job's ONLY memory of its last run (jobs get no --continue, so
+    // the history hint built from the previous run's dir is all there is). The
+    // host never reported it: checkWorkspaceMove was wired into `start` alone.
+    //
+    // WARN AND KEEP LAUNCHING, deliberately, where `start` returns 1. A cron
+    // daemon that refuses to start runs NO jobs, possibly for days, with
+    // nobody at the terminal to read the refusal — strictly worse than running
+    // them without their prior-run hint, which only degrades jobs that compare
+    // against yesterday. Same reasoning as #136's roster warning and #138's
+    // in-container drift note: for the unattended role, loud beats fatal.
+    const move = await checkWorkspaceMove(ctx.fs, {
+      stateRoot: await machine.projectRoot(id), dataDir, root: project.root, binName: ctx.binName,
+    });
+    if (move.kind === "moved") ctx.stderr.write(move.message);
     const adoption = await new AdoptionService(docker, ctx.fs).adopt({
       context: ctxDocker, root: project.root, ident, dataDir, binName: ctx.binName,
     });

@@ -759,6 +759,19 @@ test("#123: first start after a move → rc 1 with the session-history mv; the n
   expect(await cmd.run([], second.ctx)).toBe(0);
 });
 
+test("#133: start reports the orphaned CRON history too — it never used to mention it", async () => {
+  const { fs, cmd, runtime } = seedProjectVmRunning();
+  fs.seed("/home/alan/.config/dridock/projects/abc/last-workspace", "/old\n");
+  fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/projects/-old/s.jsonl", "{}");
+  fs.seed("/home/alan/.config/dridock/projects/abc/dot/.claude/cron/history/old/run1/activity.jsonl", "{}");
+  const { ctx, stderr } = makeCtx(fs);
+  expect(await cmd.run([], ctx)).toBe(1);
+  // Both, in one message, each with its own slug rule.
+  expect(stderr.text()).toContain("mv '/home/alan/.config/dridock/projects/abc/dot/.claude/projects/-old'");
+  expect(stderr.text()).toContain("mv '/home/alan/.config/dridock/projects/abc/dot/.claude/cron/history/old'");
+  expect(runtime.runs).toEqual([]);
+});
+
 
 /* ── #126: image drift never kills a running container ────────────────────── */
 

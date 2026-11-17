@@ -93,6 +93,18 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   header comment claimed a `pgrep` check that never existed; it now describes the code.
   New `tests/test_fetcher_no_duplicate.sh` (9 cases, stubbed `pgrep`/`ps`).
 
+- **A project move no longer silently restarts cron job history** (#133). `cron.py` keys
+  per-job history by the workspace path, and the host only ever reported the Claude
+  session dir, so a rename emptied the history hint — which, since cron runs `claude -p`
+  with no `--continue`, is a scheduled job's only memory of its last run. The move check
+  now covers both directories off one record (two records would let whichever path ran
+  first silence the other), and it is wired into the cron path as well as `start`. `start`
+  still exits 1; the cron path **warns and keeps launching**, because a daemon that
+  refuses to start runs no jobs at all and nobody is at the terminal to read a refusal.
+  New `tests/test_cron_slug_mirror.sh` runs cron.py's `slugify()` and the TS
+  `cronHistorySlug()` over the same inputs and diffs them — the two rules differ, and
+  using one for the other points the check at a directory that never existed.
+
 ### Changed — 6.0.0 (breaking)
 - **The `.claudebox/` → `.dridock/` migration path is removed** (#135), as
   `docs/roadmap.md` committed for 6.0.0: the `dridock migrate` verb, the auto-migration
