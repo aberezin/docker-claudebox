@@ -63,6 +63,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   a stderr line when the "before" read failed, and an empty answer from a reachable bridge
   is no longer reported as "bridge unreachable". New `tests/test_cdp_cleanup_tristate.sh`
   (10 cases; runs the real `cb-browser` with `curl`/`docker` stubbed).
+- **SessionStart no longer spawns a second team fetcher onto an inbox that already has
+  one** (#134). Every spawn decision came from the pidfile, but `dridock team watch` keeps
+  running when its pidfile write fails (deliberately — `TeamCommand.ts`, whose own comment
+  notes it "breaks every liveness check the hooks do") and a pidfile can be removed by
+  hand, so a live fetcher could be invisible and the hook's answer to an invisible fetcher
+  was to start another. Two writers on one inbox sharing one dedup cursor — the outcome
+  `team-watch-user-prompt-submit.sh` refuses by name on the path where it can see the pid.
+  The spawn path now looks for the process itself (pgrep-narrow then `ps`-filter, argv[0]
+  and `--once` excluded), adopts it by repairing the pidfile, and says so. The file's
+  header comment claimed a `pgrep` check that never existed; it now describes the code.
+  New `tests/test_fetcher_no_duplicate.sh` (9 cases, stubbed `pgrep`/`ps`).
 
 ### Changed — 6.0.0 (breaking)
 - **A project's directory name is free to change** (#123,

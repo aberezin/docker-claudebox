@@ -7,8 +7,11 @@
 # The fetcher is `dridock team watch --inbox <path>`: a detached
 # (nohup) background process that polls GitHub and appends each
 # surfaced event as one JSONL line to a per-agent inbox file. Detached
-# means it survives session teardown; the next SessionStart's `pgrep`
-# finds it and skips the respawn. Per-agent inbox files make consumer
+# means it survives session teardown; the next SessionStart finds it
+# through its pidfile and skips the respawn, or, when the pidfile is
+# gone, by looking for the process itself (#134 — this comment used to
+# claim a `pgrep` the code didn't have, which is how a duplicate-writer
+# gap stayed invisible). Per-agent inbox files make consumer
 # starvation impossible (Bear and Arfy write to different files —
 # there's no shared cursor between agents; the fetcher's own dedup
 # cursor lives in <xdg>/watch-cursors/, orthogonal to the inbox).
@@ -112,6 +115,56 @@ mkdir -p "$(dirname "$_inbox")"
 # unrelated process → kill -0 succeeds → without cmdline check we'd
 # green-light silent starvation. Match on "dridock team watch" AND the
 # specific inbox path (unique per agent+env by construction).
+# A live fetcher for THIS inbox, found WITHOUT the pidfile (#134). Prints its
+# pid, or nothing. Always rc 0: "couldn't look" and "nothing running" are the
+# same answer to the caller, which is to fall back to the pidfile's verdict.
+#
+# WHY this exists: the pidfile is bookkeeping, not evidence. `dridock team
+# watch` keeps running when its pidfile write fails — deliberately, see
+# TeamCommand.ts ("Continue anyway … Loud, not fatal"), whose own comment notes
+# that it "breaks every liveness check the hooks do" — and a pidfile can be
+# removed by hand. So a missing pid is not the same fact as a missing fetcher,
+# and deriving liveness only from the file whose read just failed is what let
+# this hook spawn a SECOND writer on one inbox: the outcome
+# team-watch-user-prompt-submit.sh refuses by name when it can see the pid.
+#
+# Shape borrowed from twh_find_tail (.claude/hooks/lib/team-inbox-watch.sh):
+# pgrep narrows, then ps filters with a GLOB, so the `.` in the inbox path
+# isn't a regex wildcard.
+#
+# Three exclusions, each load-bearing:
+#   --once      the catch-up run this very hook makes. It writes no pidfile and
+#               exits, so it is NOT a live fetcher — and mistaking one for a
+#               fetcher would skip the spawn and leave delivery dead, silently.
+#               The pidfile-anchored check upstream can't see a --once at all,
+#               so this exclusion exists only because we search by cmdline.
+#   argv[0]     must be the dridock binary (`dridock…` or `*/dridock…`), so a
+#               `bash -c` wrapper or a diagnostic pgrep quoting the command
+#               can't pass as the fetcher. This is twh_find_tail's `comm ==
+#               tail` rule, in the form that survives an exec'd shim.
+#   $$          this shell, for the same reason.
+_find_fetcher_without_pidfile() {
+    local _inbox="$1" _p _cmd
+    command -v pgrep >/dev/null 2>&1 || return 0  # swallow-ok: no pgrep means we can't look; the caller keeps the pidfile's answer
+    for _p in $(pgrep -f 'dridock team watch' 2>/dev/null || true); do  # swallow-ok: pgrep exits 1 when nothing matches: an empty loop
+        [ "$_p" = "$$" ] && continue
+        _cmd="$(ps -p "$_p" -o command= 2>/dev/null || true)"  # swallow-ok: the pid can exit between pgrep and ps; an empty command matches no case below
+        case "$_cmd" in *--once*) continue ;; esac
+        # argv[0] ONLY. An unanchored `*/dridock*` also matches the INBOX
+        # path (…/state/dridock/team/…), so a `bash -c "… dridock team watch
+        # --inbox …"` decoy passed as the fetcher — caught by the decoy case in
+        # tests/test_fetcher_no_duplicate.sh.
+        case "${_cmd%% *}" in
+            dridock|*/dridock) ;;
+            *) continue ;;
+        esac
+        case "$_cmd" in
+            *"team watch"*"$_inbox"*) printf '%s' "$_p"; return 0 ;;
+        esac
+    done
+    return 0
+}
+
 _check_fetcher_alive() {
     local pid="$1"
     [ -n "$pid" ] || return 1
@@ -214,7 +267,7 @@ _stop_fetcher_and_wait() {
 
 _spawn_fetcher=0
 if [ -f "$_pid" ]; then
-    _pidval="$(cat "$_pid" 2>/dev/null || true)"  # swallow-ok: unreadable reads as "no fetcher" and respawns; KNOWN GAP (Arfy, #129 review): a LIVE fetcher whose pid file is lost gets a duplicate, since nothing pgreps for it despite the header comment
+    _pidval="$(cat "$_pid" 2>/dev/null || true)"  # swallow-ok: unreadable reads as "no fetcher"; the spawn path then confirms with _find_fetcher_without_pidfile before adding a writer (#134), so a lost pid file no longer means a duplicate
     if _check_fetcher_alive "$_pidval"; then
         # Alive and cmdline matches — but is it running CURRENT code? (#71)
         # Host-only — see the _version_check_enabled rationale above.
@@ -261,6 +314,24 @@ if [ -f "$_pid" ]; then
     fi
 else
     _spawn_fetcher=1
+fi
+
+# #134: before ADDING a writer, look for one already running on this inbox.
+# Every path above decided from the pidfile alone, so each of them can be wrong
+# in the one direction that matters: a live fetcher we can't see. Adopting it
+# (recording its pid) is what keeps the failure from recurring every session;
+# its version is checked on the next start, through the pidfile this writes.
+if [ "$_spawn_fetcher" = 1 ]; then
+    _found="$(_find_fetcher_without_pidfile "$_inbox")"
+    if [ -n "$_found" ]; then
+        echo "⚠ team fetcher: pid $_found is already watching this inbox, but its pidfile was missing or unreadable — NOT spawning a second writer (#134)."
+        if printf '%s\n' "$_found" > "$_pid" 2>/dev/null; then
+            echo "  Adopted it: wrote $_pid, so the next session sees it and can version-check it."
+        else
+            echo "  Could not write $_pid, so this will recur until that path is writable. The fetcher itself is fine."
+        fi
+        _spawn_fetcher=0
+    fi
 fi
 
 if [ "$_spawn_fetcher" = 1 ]; then
