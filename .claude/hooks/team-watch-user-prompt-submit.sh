@@ -139,9 +139,9 @@ fi
 _check_fetcher_alive() {
     local pid="$1"
     [ -n "$pid" ] || return 1
-    kill -0 "$pid" 2>/dev/null || return 1  # swallow-ok: a liveness predicate: any failure means "not our live fetcher", which the caller acts on
-    ps -p "$pid" -o command= 2>/dev/null | grep -qF "dridock team watch" || return 1  # swallow-ok: a liveness predicate: any failure means "not our live fetcher", which the caller acts on
-    ps -p "$pid" -o command= 2>/dev/null | grep -qF "$_inbox" || return 1  # swallow-ok: a liveness predicate: any failure means "not our live fetcher", which the caller acts on
+    kill -0 "$pid" 2>/dev/null || return 1
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF "dridock team watch" || return 1
+    ps -p "$pid" -o command= 2>/dev/null | grep -qF "$_inbox" || return 1
     return 0
 }
 

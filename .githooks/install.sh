@@ -132,7 +132,7 @@ if [ -n "$_hp" ]; then
     # silent one).
     _chains_to_repo() {
         local body
-        body="$(sed 's/#.*//' "$1" 2>/dev/null)" || return 1  # swallow-ok: unreadable counts as "doesn't chain", and that path warns
+        body="$(sed 's/#.*//' "$1" 2>/dev/null)" || return 1
         printf '%s\n' "$body" | grep -q 'rev-parse' || return 1
         printf '%s\n' "$body" | grep -q -- '--git-common-dir' && return 0
         [ "$_linked" = 1 ] && return 1
