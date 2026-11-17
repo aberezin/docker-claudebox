@@ -12,4 +12,5 @@
 #
 # Docs: docs/design/project-config-split.md
 
+name: docker-claudebox-in-claudebox
 plugins: [superpowers@aberezin/superpowers]
