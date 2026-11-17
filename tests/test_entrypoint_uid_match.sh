@@ -19,7 +19,7 @@ test_entrypoint_uid_match() {
 local REPO="$_EUM_DIR/.."
 local PASS=0 FAIL=0
 ok()  { echo "  ok   $1"; PASS=$((PASS + 1)); }
-bad() { echo "  FAIL $1"; FAIL=$((FAIL + 1)); }
+bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
 echo "--- entrypoint: uid matching is observable (#141) ---"
 
 local tmp; tmp="$(mktemp -d)"
@@ -75,6 +75,14 @@ out="$(run 501 20 1000 1000 0 0 "$R")"
     && ok "workspace reads 501:20 → claude matched to 501:20, said and recorded" \
     || bad "match case: $out"
 
+# 3b. A failed usermod doesn't print "(matched)".
+out="$( ( dbg() { :; }; stat() { case "$2" in %u) echo 501 ;; %g) echo 20 ;; esac; }
+    id() { case "$1" in -u) echo 1000 ;; -g) echo 20 ;; esac; }
+    usermod() { return 1; }; groupmod() { :; }; nproc() { echo 2; }; find() { :; }; xargs() { :; }; chown() { :; }
+    . "$tmp/fn.sh"; _match_claude_uid "$tmp/ws" "" 2>&1 ) )"
+[[ "$out" == *"usermod -u 501 claude FAILED"* && "$out" == *"(match FAILED)"* && "$out" != *"(matched)"* ]] \
+    && ok "usermod fails → (match FAILED), not (matched)" || bad "failed-usermod wording: $out"
+
 # 4. #141's sequence: last start was 501:20, this one reads 1000 → warned.
 out="$(run 1000 1000 1000 1000 0 0 "$R")"
 [[ "$out" == *"claude's uid CHANGED since the last start: 501:20 -> 1000:1000"* \
@@ -98,11 +106,33 @@ out="$(run 0 0 1000 1000 0 0 "$tmp/missing/.dridock-claude-uid")"
 
 # 7. The record can't be written → said, since a future change would go unseen.
 out="$(run 0 0 1000 1000 0 1 "$R")"
-[[ "$out" == *"couldn't record claude's uid"* ]] && ok "record not writable → said" || bad "record failure silent: $out"
+[[ "$out" == *"recorded claude's uid in $R but couldn't hand it to claude"* && "$out" != *"won't be noticed"* ]] \
+    && ok "record written but chown fails → says it may not be updatable (not that nothing was recorded)" \
+    || bad "record chown failure: $out"
+if [ "$(command id -u)" = "0" ]; then
+    echo "  SKIP: running as root, a chmod 500 dir doesn't stop the write"
+else
+    chmod 500 "$tmp/claude"
+    out="$(run 0 0 1000 1000 0 0 "$tmp/claude/new-record")"
+    chmod 700 "$tmp/claude"
+    [[ "$out" == *"couldn't record claude's uid in $tmp/claude/new-record"*"Permission denied"* ]] \
+        && ok "record not writable → said, with the real error" \
+        || bad "record write failure: $out"
+fi
 
 # 8. No workspace dir → said, nothing remapped.
 out="$( ( dbg() { :; }; id() { case "$1" in -u) echo 1000 ;; -g) echo 1000 ;; esac; }; . "$tmp/fn.sh"; _match_claude_uid "$tmp/nope" "$R" 2>&1 ) )"
 [[ "$out" == *"no workspace dir to read"* ]] && ok "no workspace dir → said" || bad "no-workspace case: $out"
+
+# 9. The entrypoint calls it UNCONDITIONALLY, so case 8 is reachable: a guard
+#    around the call made "no workspace" a silent skip again (Arfy, #141).
+local call
+call="$(grep -nE '^[[:space:]]*_match_claude_uid "\$CLAUDE_WORKSPACE"' "$REPO/entrypoint.sh")"
+if [ -n "$call" ] && [[ "$call" =~ ^[0-9]+:_match_claude_uid ]]; then
+    ok "the entrypoint calls _match_claude_uid at top level, not behind a guard"
+else
+    bad "the call to _match_claude_uid is missing or indented (inside a condition?): '$call'"
+fi
 
 rm -rf "$tmp"
 echo "  entrypoint uid match: $PASS passed, $FAIL failed"

@@ -163,20 +163,21 @@ _match_claude_uid() {
 	if [ "$host_uid" = "0" ] || [ "$host_gid" = "0" ]; then
 		how="skipped: the workspace reads as root, the expected colima case"
 	else
-		how="matched"
+		how=""
 		if [ "$host_gid" != "$cur_gid" ]; then
 			dbg "fixing GID: $cur_gid -> $host_gid"
 			# #37 Tier 1 #9: surface UID/GID remap failures. If the target
 			# GID is in use, groupmod fails and the later chown stamps files
 			# with the UNCHANGED gid, misowned on the host.
 			groupmod -g "$host_gid" claude \
-				|| echo "dridock: groupmod -g $host_gid claude FAILED — host files may end up misowned" >&2  # swallow-ok: B, the line itself is the trace
+				|| { how="match FAILED"; echo "dridock: groupmod -g $host_gid claude FAILED — host files may end up misowned" >&2; }
 		fi
 		if [ "$host_uid" != "$cur_uid" ]; then
 			dbg "fixing UID: $cur_uid -> $host_uid"
 			usermod -u "$host_uid" claude \
-				|| echo "dridock: usermod -u $host_uid claude FAILED — host files may end up misowned" >&2  # swallow-ok: B, the line itself is the trace
+				|| { how="match FAILED"; echo "dridock: usermod -u $host_uid claude FAILED — host files may end up misowned" >&2; }
 		fi
+		[ -z "$how" ] && how="matched"
 		local parallel=$(( $(nproc) / 2 ))
 		[ "$parallel" -lt 1 ] && parallel=1
 		dbg "chown /home/claude (only misowned, $parallel parallel)"
@@ -204,15 +205,18 @@ _match_claude_uid() {
 			echo "dridock: claude's uid CHANGED since the last start: $prev -> $now_uid:$now_gid (#141)." >&2
 			echo "   Files created as $prev, including named volumes under \$HOME, may not be writable now." >&2
 		fi
-		if ! { printf '%s\n' "$now_uid:$now_gid" > "$record" && chown claude:claude "$record"; } 2>/dev/null; then
-			echo "dridock: couldn't record claude's uid in $record, so a change next start won't be noticed (#141)" >&2
+		local err
+		if ! err=$( { printf '%s\n' "$now_uid:$now_gid" > "$record"; } 2>&1 ); then
+			echo "dridock: couldn't record claude's uid in $record, so a change next start won't be noticed (#141): $err" >&2
+		elif ! err=$(chown claude:claude "$record" 2>&1); then
+			echo "dridock: recorded claude's uid in $record but couldn't hand it to claude, so it may not be updatable later (#141): $err" >&2
 		fi
 	fi
 }
 
-if [ -n "$CLAUDE_WORKSPACE" ]; then
-	_match_claude_uid "$CLAUDE_WORKSPACE" /home/claude/.claude/.dridock-claude-uid
-fi
+# Unconditionally: an empty CLAUDE_WORKSPACE is a case the function reports,
+# and guarding the call here made that report unreachable (Arfy, #141 review).
+_match_claude_uid "$CLAUDE_WORKSPACE" /home/claude/.claude/.dridock-claude-uid
 dbg "uid/gid matching done"
 
 WORKSPACE_DIR="${CLAUDE_WORKSPACE:-/workspace}"
