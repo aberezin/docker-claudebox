@@ -155,6 +155,47 @@ describe("CronModeCommand — existing container branches", () => {
   });
 });
 
+describe("CronModeCommand — #138 image refresh", () => {
+  test("stale and STOPPED → removed, then a fresh run on the new image (no restart of the old one)", async () => {
+    setEnv("DRIDOCK_MODE_CRON", "1");
+    const { docker, runtime, cmd, fs } = seedProject();
+    // After the rm, docker ps no longer lists it, so no seedPs here.
+    docker.seedContainer("colima-cb-abc", "claude-p-abc_cron", { name: "claude-p-abc_cron", imageId: "sha256:OLD", status: "exited" });
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await cmd.run([], ctx);
+    expect(rc).toBe(0);
+    expect(docker.removals.map((r) => r.name)).toEqual(["claude-p-abc_cron"]);
+    expect(stderr.text()).toContain("recreating cron container claude-p-abc_cron (image drifted)");
+    expect(runtime.runs.length).toBe(1);
+    expect(runtime.backgroundStarts).toEqual([]);
+  });
+
+  test("stale but RUNNING → rc 1, never killed, the stop command printed", async () => {
+    setEnv("DRIDOCK_MODE_CRON", "1");
+    const { docker, runtime, cmd, fs } = seedProject();
+    docker.seedContainer("colima-cb-abc", "claude-p-abc_cron", { name: "claude-p-abc_cron", imageId: "sha256:OLD", status: "running" });
+    runtime.seedPs("claude-p-abc_cron", { name: "claude-p-abc_cron", status: "Up 3 weeks", image: "dridock:latest" });
+    const { ctx, stderr } = makeCtx(fs);
+    const rc = await cmd.run([], ctx);
+    expect(rc).toBe(1);
+    expect(docker.removals).toEqual([]);
+    expect(runtime.runs).toEqual([]);
+    expect(stderr.text()).toContain("cron container claude-p-abc_cron is running on an older image");
+    expect(stderr.text()).toContain("DRIDOCK_MODE_CRON=1 dridock stop");
+  });
+
+  test("same image and running → the old 'already running' answer, rc 0", async () => {
+    setEnv("DRIDOCK_MODE_CRON", "1");
+    const { docker, runtime, cmd, fs } = seedProject();
+    docker.seedContainer("colima-cb-abc", "claude-p-abc_cron", { name: "claude-p-abc_cron", imageId: "sha256:infra-1", status: "running" });
+    runtime.seedPs("claude-p-abc_cron", { name: "claude-p-abc_cron", status: "Up 5 minutes", image: "dridock:latest" });
+    const { ctx, stdout } = makeCtx(fs);
+    expect(await cmd.run([], ctx)).toBe(0);
+    expect(stdout.text()).toContain("cron already running");
+    expect(docker.removals).toEqual([]);
+  });
+});
+
 describe("CronModeCommand — stop sub-command", () => {
   test("`stop` + cron running → docker stop, prints stopped message", async () => {
     setEnv("DRIDOCK_MODE_CRON", "1");

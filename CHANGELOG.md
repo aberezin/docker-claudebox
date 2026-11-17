@@ -29,6 +29,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **A cron container now picks up a new image** (#138). `dridock` in cron mode used to
+  `docker start` its existing container as is, so a cron daemon ran the image it was
+  created from indefinitely: old `entrypoint.sh`, `cron.py` and `cb-*`, with nothing
+  saying so. Now a stale **stopped** cron container is recreated on the current image; a
+  stale **running** one is never killed (#126's rule) and starting cron stops with rc 1
+  and the stop command. And because a cron daemon is rarely stopped, `cron.py` checks its
+  own image against its tag every 10 minutes and logs once to `docker logs` when it's
+  out of date (and once if it can't check, rather than assuming it's current).
 - **`dridock start` no longer kills a running claudebot when the image has changed** (#126).
   It used to `docker rm -f` any container built from an older image, so an agent working
   in another terminal died mid-turn after an `./install.sh`, and since #118 reseeds the

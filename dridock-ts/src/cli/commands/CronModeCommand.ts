@@ -6,6 +6,7 @@ import type { ContainerRuntime, RunArgs } from "../../infra/ContainerRuntime.ts"
 import { RealContainerRuntime } from "../../infra/ContainerRuntime.ts";
 import type { Docker } from "../../infra/Docker.ts";
 import { RealDocker, projectContext, projectProfile, WORKSPACE_LABEL, ID_LABEL } from "../../infra/Docker.ts";
+import { ContainerRefresher, shortId } from "../../services/ContainerRefresher.ts";
 import type { GitToplevel } from "../../infra/GitToplevel.ts";
 import { RealGitToplevel } from "../../infra/GitToplevel.ts";
 import { ProjectRootResolver } from "../../services/ProjectRoot.ts";
@@ -159,6 +160,24 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
     }
     for (const n of adoption.notes) ctx.stderr.write(n);
     if (adoption.kind === "deferred") cronName = withRole(adoption.legacyBase, "cron");
+
+    // #138: cron used to restart its own container as is, so a cron daemon
+    // kept the image it was created from forever (old entrypoint, cron.py,
+    // cb-*), and since #118 the project image moves routinely. Same rule as
+    // start (#126): a stale STOPPED container is recreated; a stale RUNNING
+    // one is never killed. cron.py also notices on its own and says so in
+    // `docker logs` (the long-lived daemon that is never stopped is the case
+    // this branch can't reach).
+    const refresh = await new ContainerRefresher(docker).maybeRefresh(ctxDocker, cronName, this.imageName);
+    if (refresh.kind === "recreated") {
+      ctx.stderr.write(`🔄 recreating cron container ${cronName} (image drifted)\n`);
+    } else if (refresh.kind === "running" || refresh.kind === "remove-failed") {
+      const how = refresh.kind === "running" ? `is ${refresh.status}` : `couldn't be removed (docker rm rc ${refresh.rc})`;
+      ctx.stderr.write(`❌ cron container ${cronName} ${how} on an older image (${shortId(refresh.from)}; the project image is now ${shortId(refresh.to)}).\n`);
+      ctx.stderr.write(`   Not stopping it mid-schedule. To move it to the new image, stop it, then start cron again:\n`);
+      ctx.stderr.write(`     DRIDOCK_MODE_CRON=1 ${ctx.binName} stop\n`);
+      return 1;
+    }
 
     // "cron already running" idempotent branch — matches wrapper.sh:3086.
     const existing = await runtime.psFilter(ctxDocker, cronName);

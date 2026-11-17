@@ -26,6 +26,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -415,6 +416,82 @@ def _spawn_job(job: dict[str, Any], fired_at: datetime, workspace_slug: str) -> 
         t.start()
 
 
+# ── #138: notice when this container runs an older image ─────────────────
+#
+# A cron daemon is the one role nobody restarts: it can stay up for weeks
+# while ./install.sh (or a #118 reseed) moves the project image, and every job
+# keeps running the old entrypoint, cron.py and cb-*. The host side recreates a
+# STOPPED stale cron container; this covers the running one, which is never
+# killed (#126), by saying so in `docker logs`.
+DRIFT_CHECK_SECONDS = 600
+
+
+def _docker_out(args: list[str]) -> str | None:
+    """stdout of `docker <args>`, stripped; None if docker failed or is absent."""
+    try:
+        r = subprocess.run(["docker", *args], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _short(image_id: str) -> str:
+    return image_id.removeprefix("sha256:")[:12]
+
+
+class ImageDriftWatch:
+    """Compares this container's image with what its tag points at now.
+
+    Logs a warning the first time they differ (again only if the tag moves
+    again), a note when they match again, and a warning once if it can't
+    tell: "couldn't check" is said, not mistaken for "current".
+    """
+
+    def __init__(self, container: str, run=_docker_out, interval: float = DRIFT_CHECK_SECONDS):
+        self.container = container
+        self._run = run
+        self.interval = interval
+        self._last: float | None = None
+        self._reported: str | None = None   # the newer id we last warned about
+        self._cant_said = False
+
+    def _cant(self, why: str) -> None:
+        if not self._cant_said:
+            log.warning("image drift check (#138) can't run: %s; this daemon won't notice a newer image", why)
+            self._cant_said = True
+
+    def check(self, now: float) -> None:
+        if self._last is not None and now - self._last < self.interval:
+            return
+        self._last = now
+        if not self.container:
+            self._cant("DRIDOCK_CONTAINER_NAME is unset")
+            return
+        own = self._run(["inspect", self.container, "--format", "{{.Image}}\t{{.Config.Image}}"])
+        if not own or "\t" not in own:
+            self._cant(f"docker couldn't inspect {self.container}")
+            return
+        own_id, tag = own.split("\t", 1)
+        current = self._run(["image", "inspect", tag, "--format", "{{.Id}}"])
+        if not current:
+            self._cant(f"docker couldn't inspect the image {tag}")
+            return
+        if current == own_id:
+            if self._reported is not None:
+                log.info("image drift (#138): this container's image is current again (%s)", _short(own_id))
+                self._reported = None
+            return
+        if self._reported == current:
+            return
+        self._reported = current
+        log.warning(
+            "⚠️  image drift (#138): this cron container runs %s, but %s is now %s. "
+            "Jobs keep using the old entrypoint, cron.py and cb-* until it is recreated. "
+            "From the project root on the host: DRIDOCK_MODE_CRON=1 dridock stop, then start cron again.",
+            _short(own_id), tag, _short(current),
+        )
+
+
 def _handle_signal(signum: int, _frame: Any) -> None:
     log.info("received signal %d, shutting down", signum)
     _shutdown.set()
@@ -472,7 +549,9 @@ def main() -> int:
     for n, t in next_at.items():
         log.debug("[%s] next fire: %s", n, t.isoformat())
 
+    drift = ImageDriftWatch(os.environ.get("DRIDOCK_CONTAINER_NAME", ""))
     while not _shutdown.is_set():
+        drift.check(time.monotonic())
         now = datetime.now()
         for j in jobs:
             n = j["name"]

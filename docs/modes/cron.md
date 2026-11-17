@@ -159,6 +159,22 @@ jobs:
     # telegram_chat_id: -100123 # optional per-job override
 ```
 
+## Updating the image (#138)
+
+A cron container runs the image it was created from. Since 6.0 it picks up a new one
+(after `./install.sh`, or a reseed of the project image) like this:
+
+- **Stopped:** starting cron again recreates it on the current image (`🔄 recreating cron
+  container … (image drifted)`).
+- **Running:** it is never killed mid-schedule. Starting cron again stops with rc 1, naming
+  both image ids, and `cron.py` itself checks every 10 minutes and logs once to
+  `docker logs` when its image is out of date:
+  `⚠️  image drift (#138): this cron container runs <old>, but dridock:latest is now <new>…`.
+  To move it: `DRIDOCK_MODE_CRON=1 dridock stop`, then start cron again.
+
+If the check can't run (docker unreachable from inside, or `DRIDOCK_CONTAINER_NAME`
+unset), it says so once instead of assuming the image is current.
+
 ## Environment variables
 
 | Variable                   | Description                                                  | Default      |
