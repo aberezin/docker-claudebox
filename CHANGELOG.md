@@ -86,6 +86,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   deprecation check now names the removed classes exactly: its old `class .*Migrator`
   pattern also matched the unrelated `DotDirMigrator` (#80), so it couldn't have told
   the migrators were gone.
+- **`team:` is required in `.dridock/agents.yml`** (#136), as `docs/roadmap.md`
+  committed for 6.0.0. A roster without it, or with an empty one, is refused with the
+  line to add (`team: my-project`); through 5.x only `dridock team dir` needed it. Every
+  `dridock team` verb now refuses such a roster. `dridock start` keeps launching, but
+  now **warns** when the roster can't be read, for any reason, instead of silently
+  skipping the `DRIDOCK_AGENT_NAME` auto-inject, a silent drop that #136 would
+  otherwise have made reachable for every 5.x roster. **To upgrade:** add `team:` at
+  column 0 of each project's `agents.yml`.
 - **A project's directory name is free to change** (#123,
   [path-independence.md](docs/design/path-independence.md)). Containers are named
   `claude-<name>-<id>` (`_prog`, `_cron`) instead of `claude-<absolute path>`, so a

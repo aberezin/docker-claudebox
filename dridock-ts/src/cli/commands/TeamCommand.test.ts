@@ -40,7 +40,7 @@ function makeCtx(fs: InMemoryFileSystem, cwd = "/proj"): { ctx: Context; stdout:
   };
 }
 
-const CANONICAL_ROSTER = `agents:\n  - name: Bear\n    role: principal-engineer\n    environment: container\n  - name: Arfy\n    role: senior-qa\n    environment: host-macos\nhuman: Alan\n`;
+const CANONICAL_ROSTER = `team: t\nagents:\n  - name: Bear\n    role: principal-engineer\n    environment: container\n  - name: Arfy\n    role: senior-qa\n    environment: host-macos\nhuman: Alan\n`;
 
 function seedProject(fs: InMemoryFileSystem, roster: string = CANONICAL_ROSTER): void {
   fs.seed("/proj/.dridock/config.yml", "id: abc12345\n");
@@ -91,7 +91,7 @@ describe("TeamCommand — arg + roster preconditions", () => {
       .run(["whoami"], makeCtx(absentFs).ctx);
 
     const brokenFs = new InMemoryFileSystem();
-    seedProject(brokenFs, `agents:\n  - role: eng\n`);
+    seedProject(brokenFs, `team: t\nagents:\n  - role: eng\n`);
     const broken = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "")
       .run(["whoami"], makeCtx(brokenFs).ctx);
 
@@ -106,7 +106,7 @@ describe("TeamCommand — arg + roster preconditions", () => {
   // exactly the users who DO have a team.
   test("roster resolves from a subdirectory, not the CWD", async () => {
     const fs = new InMemoryFileSystem();
-    seedProject(fs, `agents:\n  - name: Arfy\n`);
+    seedProject(fs, `team: t\nagents:\n  - name: Arfy\n`);
     const { ctx } = makeCtx(fs, "/proj/deeply/nested/src");
     const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["roster"], ctx);
     expect(rc).toBe(0);
@@ -114,7 +114,7 @@ describe("TeamCommand — arg + roster preconditions", () => {
 
   test("roster malformed → rc 1 with parser error message", async () => {
     const fs = new InMemoryFileSystem();
-    seedProject(fs, `agents:\n  - role: eng\n`); // no 'name:'
+    seedProject(fs, `team: t\nagents:\n  - role: eng\n`); // no 'name:'
     const { ctx, stderr } = makeCtx(fs);
     const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["whoami"], ctx);
     expect(rc).toBe(1);
@@ -139,7 +139,7 @@ describe("TeamCommand.whoami — resolve THIS runtime's agent name", () => {
   test("env unset + single-agent roster → uses fallback, source annotation reflects it", async () => {
     setEnv("DRIDOCK_AGENT_NAME", undefined);
     const fs = new InMemoryFileSystem();
-    seedProject(fs, `agents:\n  - name: Solo\n`);
+    seedProject(fs, `team: t\nagents:\n  - name: Solo\n`);
     const { ctx, stdout, stderr } = makeCtx(fs);
     const rc = await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["whoami"], ctx);
     expect(rc).toBe(0);
@@ -186,7 +186,7 @@ describe("TeamCommand.roster — print the team", () => {
 
   test("agent with no role/env → prints just the name (no empty parens)", async () => {
     const fs = new InMemoryFileSystem();
-    seedProject(fs, `agents:\n  - name: Solo\n`);
+    seedProject(fs, `team: t\nagents:\n  - name: Solo\n`);
     const { ctx, stdout } = makeCtx(fs);
     await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["roster"], ctx);
     // Solo has no meta — the line should be `    - Solo` with no `()` suffix.
@@ -196,7 +196,7 @@ describe("TeamCommand.roster — print the team", () => {
 
   test("roster without human key → doesn't print a 'human:' line", async () => {
     const fs = new InMemoryFileSystem();
-    seedProject(fs, `agents:\n  - name: Bear\n  - name: Arfy\n`);
+    seedProject(fs, `team: t\nagents:\n  - name: Bear\n  - name: Arfy\n`);
     const { ctx, stdout } = makeCtx(fs);
     await new TeamCommand({ git: new StubGitToplevel("/proj") }, async () => "").run(["roster"], ctx);
     expect(stdout.text()).not.toContain("human:");

@@ -32,11 +32,11 @@ export interface Agent {
 
 export interface Roster {
   readonly agents: readonly Agent[];
-  /** Team name. Optional through 5.x, REQUIRED in 6.0 (docs/roadmap.md).
+  /** Team name. REQUIRED since 6.0 (#136; optional through 5.x).
    *  Names the team's shared scratch dir and namespaces it, so two teams
    *  on one machine can't collide. Slug-shaped because it becomes a path
    *  segment. */
-  readonly team?: string;
+  readonly team: string;
   readonly human?: string;
   /** Optional watch config — the GitHub repo `dridock team watch`
    *  polls for this team's messages. Format: `owner/name`. If unset,
@@ -260,6 +260,16 @@ export function parseRoster(text: string): Roster {
   if (agents.length === 0) {
     throw new Error(`agents.yml: roster must declare at least one agent under 'agents:'`);
   }
+  // 6.0 (#136): required. It names the team's shared dir and namespaces it,
+  // so a roster without one has nothing to key that on. Through 5.x only
+  // `team dir` refused; now the whole roster does, with the line to add.
+  if (team === undefined) {
+    throw new Error(
+      `agents.yml: 'team:' is required since dridock 6.0 (#136). Add a line at column 0, e.g.\n`
+      + `       team: my-project\n`
+      + `   It names the team's shared scratch dir (\`dridock team dir\`). See docs/design/agent-teams.md.`,
+    );
+  }
   // Deduplication check — same name twice is almost certainly a user error.
   const seen = new Set<string>();
   for (const a of agents) {
@@ -270,7 +280,7 @@ export function parseRoster(text: string): Roster {
   }
   return {
     agents,
-    ...(team === undefined ? {} : { team }),
+    team,
     ...(human !== undefined ? { human } : {}),
     ...(githubRepo !== undefined ? { githubRepo } : {}),
   };

@@ -370,7 +370,14 @@ mode (-p) they are validated against an allowlist first.
     try {
       const roster = await loadRoster(ctx.fs, rosterPath);
       if (roster !== undefined) autoAgentName = soleAgentByEnvironment(roster, "container");
-    } catch { /* malformed roster — TeamCommand will surface the error; don't crash start */ }
+    } catch (e) {
+      // A bad roster mustn't stop the launch, but it mustn't cost the
+      // DRIDOCK_AGENT_NAME auto-inject silently either: since #136 a 5.x
+      // roster without `team:` lands here, and the agent would come up
+      // without its name and no clue why.
+      ctx.stderr.write(`⚠️  .dridock/agents.yml couldn't be read, so DRIDOCK_AGENT_NAME isn't set from it:\n`);
+      ctx.stderr.write(`   ${e instanceof Error ? e.message : String(e)}\n`);
+    }
 
     // ── Build the run env (all -e pairs) ─────────────────────────────
     const baseEnv: RunArgs["env"] = [

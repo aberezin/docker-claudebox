@@ -13,6 +13,7 @@ import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 describe("parseRoster — the canonical shape from spec §1", () => {
   test("full example from spec: Bear + Arfy + Alan the human", () => {
     const yaml = `# .dridock/agents.yml — the team working this project
+team: t
 agents:
   - name: Bear
     role: principal-engineer
@@ -24,6 +25,7 @@ human: Alan
 `;
     const r = parseRoster(yaml);
     expect(r).toEqual({
+      team: "t",
       agents: [
         { name: "Bear", role: "principal-engineer", environment: "container" },
         { name: "Arfy", role: "senior-qa", environment: "host-macos" },
@@ -33,13 +35,13 @@ human: Alan
   });
 
   test("minimal roster: single agent, no human, no roles", () => {
-    const r = parseRoster(`agents:\n  - name: Solo\n`);
-    expect(r).toEqual({ agents: [{ name: "Solo" }] });
+    const r = parseRoster(`team: t\nagents:\n  - name: Solo\n`);
+    expect(r).toEqual({ team: "t", agents: [{ name: "Solo" }] });
     expect(r.human).toBeUndefined();
   });
 
   test("role or environment can be omitted per-agent (both optional)", () => {
-    const r = parseRoster(`agents:\n  - name: Bear\n    role: eng\n  - name: Arfy\n    environment: host\n`);
+    const r = parseRoster(`team: t\nagents:\n  - name: Bear\n    role: eng\n  - name: Arfy\n    environment: host\n`);
     expect(r.agents).toEqual([
       { name: "Bear", role: "eng" },
       { name: "Arfy", environment: "host" },
@@ -47,14 +49,15 @@ human: Alan
   });
 
   test("human can appear before or after agents block", () => {
-    const before = parseRoster(`human: Alan\nagents:\n  - name: Bear\n`);
-    const after = parseRoster(`agents:\n  - name: Bear\nhuman: Alan\n`);
+    const before = parseRoster(`team: t\nhuman: Alan\nagents:\n  - name: Bear\n`);
+    const after = parseRoster(`team: t\nagents:\n  - name: Bear\nhuman: Alan\n`);
     expect(before.human).toBe("Alan");
     expect(after.human).toBe("Alan");
   });
 
   test("blank lines and full-line comments are skipped", () => {
     const r = parseRoster(`# top comment
+team: t
 agents:
 
   # inline comment
@@ -67,25 +70,25 @@ agents:
   });
 
   test("inline # comments are stripped from values", () => {
-    const r = parseRoster(`agents:\n  - name: Bear # my name\n    role: eng # my role\nhuman: Alan  # the human\n`);
+    const r = parseRoster(`team: t\nagents:\n  - name: Bear # my name\n    role: eng # my role\nhuman: Alan  # the human\n`);
     expect(r.agents[0]).toEqual({ name: "Bear", role: "eng" });
     expect(r.human).toBe("Alan");
   });
 
   test("value-starting-with-# is treated as empty (bash-parity with parseNestedYaml)", () => {
-    const r = parseRoster(`agents:\n  - name: Bear\nhuman: # optional\n`);
+    const r = parseRoster(`team: t\nagents:\n  - name: Bear\nhuman: # optional\n`);
     expect(r.human).toBeUndefined();
   });
 
   test("github_repo top-level key parses (added #46.d.3b for `team watch`)", () => {
-    const r = parseRoster(`agents:\n  - name: Bear\ngithub_repo: aberezin/docker-claudebox\n`);
+    const r = parseRoster(`team: t\nagents:\n  - name: Bear\ngithub_repo: aberezin/docker-claudebox\n`);
     expect(r.githubRepo).toBe("aberezin/docker-claudebox");
   });
 
   test("github_repo can appear before or after agents, and is optional", () => {
-    const before = parseRoster(`github_repo: owner/name\nagents:\n  - name: Bear\n`);
-    const after = parseRoster(`agents:\n  - name: Bear\ngithub_repo: owner/name\n`);
-    const none = parseRoster(`agents:\n  - name: Bear\n`);
+    const before = parseRoster(`team: t\ngithub_repo: owner/name\nagents:\n  - name: Bear\n`);
+    const after = parseRoster(`team: t\nagents:\n  - name: Bear\ngithub_repo: owner/name\n`);
+    const none = parseRoster(`team: t\nagents:\n  - name: Bear\n`);
     expect(before.githubRepo).toBe("owner/name");
     expect(after.githubRepo).toBe("owner/name");
     expect(none.githubRepo).toBeUndefined();
@@ -98,7 +101,7 @@ describe("parseRoster — fail-loud on malformed input", () => {
   });
 
   test("agent item without a 'name:' field → throws with line info missing? (just needs the name error)", () => {
-    expect(() => parseRoster(`agents:\n  - role: eng\n`)).toThrow("without a 'name:' field");
+    expect(() => parseRoster(`team: t\nagents:\n  - role: eng\n`)).toThrow("without a 'name:' field");
   });
 
   test("unknown top-level key → throws", () => {
@@ -106,15 +109,29 @@ describe("parseRoster — fail-loud on malformed input", () => {
   });
 
   test("unknown agent field → throws with line info", () => {
-    expect(() => parseRoster(`agents:\n  - name: Bear\n    handle: bear1\n`)).toThrow(/line 3.*unknown agent field 'handle'/);
+    expect(() => parseRoster(`team: t\nagents:\n  - name: Bear\n    handle: bear1\n`)).toThrow(/line 4.*unknown agent field 'handle'/);
   });
 
   test("duplicate agent names → throws (spec §1: names are the identity)", () => {
-    expect(() => parseRoster(`agents:\n  - name: Bear\n  - name: Bear\n`)).toThrow("duplicate agent name 'Bear'");
+    expect(() => parseRoster(`team: t\nagents:\n  - name: Bear\n  - name: Bear\n`)).toThrow("duplicate agent name 'Bear'");
+  });
+
+  test("#136: no 'team:' → throws, naming the line to add (required since 6.0)", () => {
+    expect(() => parseRoster(`agents:\n  - name: Bear\n`)).toThrow("'team:' is required since dridock 6.0 (#136)");
+    expect(() => parseRoster(`agents:\n  - name: Bear\n`)).toThrow("team: my-project");
+  });
+
+  test("#136: an EMPTY 'team:' counts as missing, not as a team called ''", () => {
+    expect(() => parseRoster(`team:\nagents:\n  - name: Bear\n`)).toThrow("'team:' is required");
+    expect(() => parseRoster(`team: # todo\nagents:\n  - name: Bear\n`)).toThrow("'team:' is required");
+  });
+
+  test("#136: 'team:' may come after agents:", () => {
+    expect(parseRoster(`agents:\n  - name: Bear\nteam: dridock\n`).team).toBe("dridock");
   });
 
   test("agents: with an inline value → throws (must open a list)", () => {
-    expect(() => parseRoster(`agents: [Bear, Arfy]\n`)).toThrow("must open a list");
+    expect(() => parseRoster(`team: t\nagents: [Bear, Arfy]\n`)).toThrow("must open a list");
   });
 
   test("garbage at column 0 → throws", () => {
@@ -126,16 +143,16 @@ describe("parseRoster — fail-loud on malformed input", () => {
   });
 
   test("continuation field before any list item → throws", () => {
-    expect(() => parseRoster(`agents:\n    role: orphan\n`)).toThrow(/expected list item/);
+    expect(() => parseRoster(`team: t\nagents:\n    role: orphan\n`)).toThrow(/expected list item/);
   });
 });
 
 describe("loadRoster — filesystem-integrated", () => {
   test("file present → parsed roster", async () => {
     const fs = new InMemoryFileSystem();
-    fs.seed("/proj/.dridock/agents.yml", `agents:\n  - name: Bear\n    environment: container\n`);
+    fs.seed("/proj/.dridock/agents.yml", `team: t\nagents:\n  - name: Bear\n    environment: container\n`);
     const r = await loadRoster(fs, "/proj/.dridock/agents.yml");
-    expect(r).toEqual({ agents: [{ name: "Bear", environment: "container" }] });
+    expect(r).toEqual({ team: "t", agents: [{ name: "Bear", environment: "container" }] });
   });
 
   test("file absent → undefined (caller decides what to do)", async () => {
@@ -147,12 +164,13 @@ describe("loadRoster — filesystem-integrated", () => {
 
 describe("resolveSelfName — env-first with single-agent fallback", () => {
   const roster = {
+    team: "t",
     agents: [
       { name: "Bear", environment: "container" as const },
       { name: "Arfy", environment: "host-macos" as const },
     ],
   };
-  const soloRoster = { agents: [{ name: "Solo" }] };
+  const soloRoster = { team: "t", agents: [{ name: "Solo" }] };
 
   test("env is set + in roster → returns env value, source='env'", () => {
     const r = resolveSelfName({ DRIDOCK_AGENT_NAME: "Bear" }, roster);
@@ -183,6 +201,7 @@ describe("resolveSelfName — env-first with single-agent fallback", () => {
 describe("soleAgentByEnvironment — for StartCommand auto-inject", () => {
   test("single agent with matching environment → returns that name", () => {
     const r = {
+      team: "t",
       agents: [
         { name: "Bear", environment: "container" as const },
         { name: "Arfy", environment: "host-macos" as const },
@@ -193,12 +212,13 @@ describe("soleAgentByEnvironment — for StartCommand auto-inject", () => {
   });
 
   test("zero matches → undefined", () => {
-    const r = { agents: [{ name: "Solo", environment: "container" as const }] };
+    const r = { team: "t", agents: [{ name: "Solo", environment: "container" as const }] };
     expect(soleAgentByEnvironment(r, "does-not-exist")).toBeUndefined();
   });
 
   test("multiple matches → undefined (ambiguous, skip auto-inject)", () => {
     const r = {
+      team: "t",
       agents: [
         { name: "Bear1", environment: "container" as const },
         { name: "Bear2", environment: "container" as const },
@@ -209,6 +229,7 @@ describe("soleAgentByEnvironment — for StartCommand auto-inject", () => {
 
   test("agents with no environment field → not counted", () => {
     const r = {
+      team: "t",
       agents: [
         { name: "Bear", environment: "container" as const },
         { name: "Anon" }, // no environment

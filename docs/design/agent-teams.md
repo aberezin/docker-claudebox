@@ -26,6 +26,7 @@ today's ad-hoc convention. It deliberately folds in #45 (watcher) and references
 
   ```yaml
   # .dridock/agents.yml — the team working this project
+  team: dridock                      # required since 6.0 (#136)
   agents:
     - name: Bear
       role: principal-engineer
@@ -230,13 +231,17 @@ Today's posts use recipient-only `**→ Arfy:**`. Cutting over to sender-first:
 A roster declares a team name at column 0:
 
 ```yaml
-team: dridock          # optional in 5.x, REQUIRED in 6.0 (docs/roadmap.md)
+team: dridock          # REQUIRED since 6.0 (#136); optional through 5.x
 github_repo: aberezin/docker-claudebox
 agents:
   - name: Bear
   - name: Arfy
 human: Alan
 ```
+
+Since 6.0 (#136) a roster without `team:`, or with an empty one, doesn't load: every
+`dridock team` verb refuses it with the line to add, and `dridock start` warns and skips
+setting `DRIDOCK_AGENT_NAME` from it instead of dropping that silently.
 
 `dridock team dir` resolves (and creates) that team's shared scratch directory:
 

@@ -818,9 +818,8 @@ without --reap is refused, since alone it would age nothing out.`,
    * `team dir [--reap [--older-than N]]` — resolve (and create) the
    * team's shared scratch directory.
    *
-   * Requires `team:` in the roster. Through 5.x its absence is a WARNING
-   * with the exact line to add; in 6.0 it becomes an error
-   * (docs/roadmap.md, enforced by tests/test_deprecation_deadlines.sh).
+   * Named after the roster's `team:`, which the roster parser has required
+   * since 6.0 (#136), so there is no missing-team case left here.
    */
   private async runDir(args: readonly string[], roster: Roster, ctx: Context): Promise<number> {
     let reap = false;
@@ -835,13 +834,6 @@ without --reap is refused, since alone it would age nothing out.`,
     }
     if (!reap && args.includes("--older-than")) {
       ctx.stderr.write(`❌ team dir: --older-than requires --reap (without it there is nothing to age out).\n`);
-      return 1;
-    }
-    if (roster.team === undefined) {
-      ctx.stderr.write(`❌ team dir: no 'team:' in .dridock/agents.yml — the shared dir is named after the team.\n`);
-      ctx.stderr.write(`   Add a line at column 0, e.g.:\n`);
-      ctx.stderr.write(`       team: dridock\n`);
-      ctx.stderr.write(`   Optional in 5.x, REQUIRED in 6.0 (docs/roadmap.md).\n`);
       return 1;
     }
 

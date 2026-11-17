@@ -144,24 +144,18 @@ deadline "pre-6.0 container adoption (legacyContainerName)" 7 \
 
 echo ""
 
-# --- 6.0.0: `team:` becomes REQUIRED in .dridock/agents.yml -----------
-# Optional through 5.x (absence warns and names the fix). The moment 6.0
-# lands, the roster parser must reject a roster without it -- a prose
-# deadline does not hold, which is why every row in docs/roadmap.md has a
-# check here. See docs/design/agent-teams.md.
-_major="$MAJOR"
-if [ "$_major" -ge 6 ]; then
-    if grep -q "readonly team?: string" "$REPO/dridock-ts/src/services/AgentRoster.ts" 2>/dev/null; then
-        bad "6.0 reached ($MAJOR.x) but 'team:' is still OPTIONAL in AgentRoster.ts — make it required"
-    else
-        ok "6.0: 'team:' is required in the roster"
-    fi
+# --- 6.0.0: `team:` is REQUIRED in .dridock/agents.yml (#136) ----------
+# Delivered on release-6.0.0 ahead of the VERSION bump, so this asserts it
+# regardless of $MAJOR: going back to optional is a regression at any version.
+# Two probes, because the type alone could be made required while the parser
+# still let a missing team through.
+_ar="$REPO/dridock-ts/src/services/AgentRoster.ts"
+if grep -q "readonly team?: string" "$_ar" 2>/dev/null; then
+    bad "'team:' is OPTIONAL again in AgentRoster.ts (required since 6.0, #136)"
+elif ! grep -q "'team:' is required since dridock 6.0" "$_ar" 2>/dev/null; then
+    bad "AgentRoster.ts no longer refuses a roster without 'team:' (#136)"
 else
-    if grep -q "readonly team?: string" "$REPO/dridock-ts/src/services/AgentRoster.ts" 2>/dev/null; then
-        ok "pre-6.0 ($MAJOR.x): 'team:' still optional, as documented"
-    else
-        bad "'team:' optional field missing from AgentRoster.ts before its 6.0 deadline"
-    fi
+    ok "6.0: 'team:' is required in the roster (#136)"
 fi
 
 # --- 7.0.0: `features:`/`plugins:` no longer read from config.yml (#97) ------
