@@ -37,6 +37,7 @@ SWALLOW_SWEPT=(
     features/python/on.sh features/python/off.sh features/python/check.sh
     features/typescript/on.sh features/typescript/off.sh features/typescript/check.sh
     features/web-scaffolders/on.sh features/web-scaffolders/off.sh features/web-scaffolders/check.sh
+    install.sh .githooks/install.sh .githooks/pre-commit test.sh run-e2e-cron-telegram.sh
 )
 
 # Echo the pattern name a line needs annotating for, or nothing. Comment-only

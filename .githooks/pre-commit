@@ -66,7 +66,7 @@ if [ "${#_lost_x[@]}" -gt 0 ]; then
     fi
 fi
 
-_branch="$(git symbolic-ref --short -q HEAD || echo detached)"
+_branch="$(git symbolic-ref --short -q HEAD || echo detached)"  # swallow-ok: symbolic-ref fails only on a detached HEAD, which is what this names
 case "$_branch" in
     master|main) ;;
     *) exit 0 ;;

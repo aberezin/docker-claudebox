@@ -263,7 +263,12 @@ if ! colima status -p "$CB_INFRA_PROFILE" >/dev/null 2>&1; then
 fi
 
 # stamp the fork semver into the image (LABEL + ENV); `dridock checkversion` reads it
-DRIDOCK_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 0.0.0)"
+# #129 (B): an unreadable VERSION used to stamp the image 0.0.0 silently, which
+# then shows up only as baffling checkversion drift.
+if ! DRIDOCK_VERSION="$(cat "$SCRIPT_DIR/VERSION" 2>/dev/null)" || [ -z "$DRIDOCK_VERSION" ]; then
+	DRIDOCK_VERSION=0.0.0
+	echo "⚠️  couldn't read $SCRIPT_DIR/VERSION; stamping the image 0.0.0 (dridock checkversion will report drift)." >&2
+fi
 # Only pass --build-arg CLAUDE_VERSION when explicitly overridden, so the
 # Dockerfile's ARG default stays the single source of truth otherwise (#73).
 _build_args=(--build-arg "DRIDOCK_VERSION=$DRIDOCK_VERSION")
@@ -284,7 +289,7 @@ fi
 install_report_other_variant() {
 	local ctx="$1" built="$2" other="$3" want_v="$4" want_c="$5" labels v c why="" runs fix
 	labels="$(docker --context "$ctx" image inspect "$other" \
-		--format '{{ index .Config.Labels "org.dridock.version" }}|{{ index .Config.Labels "org.dridock.claude-version" }}' 2>/dev/null)" || return 0
+		--format '{{ index .Config.Labels "org.dridock.version" }}|{{ index .Config.Labels "org.dridock.claude-version" }}' 2>/dev/null)" || return 0  # swallow-ok: the other variant isn't built, so there's nothing to report on
 	v="${labels%%|*}"; c="${labels#*|}"
 	[ "$v" = "<no value>" ] && v=""
 	[ "$c" = "<no value>" ] && c=""
@@ -420,7 +425,11 @@ fi
 # dridock wrapper — the bash wrapper.sh has been removed (see #47 + CHANGELOG for
 # rollback path via v3.4.1).
 echo "🔨 Compiling dridock (TypeScript wrapper) → single binary..."
-(cd "$SCRIPT_DIR/dridock-ts" && bun install --frozen-lockfile >/dev/null 2>&1 || true; bun run build) || {
+# #129 (B): a failed `bun install --frozen-lockfile` (lockfile drift, network)
+# used to vanish, output and all, and the build then ran on whatever
+# node_modules was already there.
+(cd "$SCRIPT_DIR/dridock-ts" && { bun install --frozen-lockfile >/dev/null 2>&1 \
+	|| echo "⚠️  bun install --frozen-lockfile failed; building with the node_modules already present. Run it in dridock-ts/ to see why." >&2; }; bun run build) || {  # swallow-ok: B, the line itself is the trace
 	echo "❌ dridock TS build failed."
 	exit 1
 }

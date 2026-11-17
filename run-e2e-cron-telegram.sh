@@ -60,7 +60,7 @@ cp "$TELEGRAM_YAML" "$WORKSPACE/.claude/telegram.yml"
 
 mkdir -p "$WORKSPACE/workspaces/e2e"
 
-docker rm -f "$CNAME" >/dev/null 2>&1 || true
+docker rm -f "$CNAME" >/dev/null 2>&1 || true  # swallow-ok: no leftover container from a previous run is the normal case
 
 docker run -d \
     --name "$CNAME" \

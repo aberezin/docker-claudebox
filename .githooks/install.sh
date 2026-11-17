@@ -107,20 +107,20 @@ done
 # mode it's reported as information with the command that proves it.
 # --type=path expands a leading ~; a relative hooksPath is relative to the
 # worktree root (git-config(1)).
-_hp="$(git -C "$REPO" config --type=path --get core.hooksPath 2>/dev/null || true)"
+_hp="$(git -C "$REPO" config --type=path --get core.hooksPath 2>/dev/null || true)"  # swallow-ok: git config --get exits 1 when the key is unset, the normal case
 if [ -n "$_hp" ]; then
     case "$_hp" in /*) _hp_abs="$_hp" ;; *) _hp_abs="$REPO/$_hp" ;; esac
     _scope=unknown
-    if [ -n "$(git -C "$REPO" config --local --get core.hooksPath 2>/dev/null || true)" ]; then
+    if [ -n "$(git -C "$REPO" config --local --get core.hooksPath 2>/dev/null || true)" ]; then  # swallow-ok: git config --get exits 1 when the key is unset, the normal case
         _scope="this repo (.git/config)"
-    elif [ -n "$(git -C "$REPO" config --global --get core.hooksPath 2>/dev/null || true)" ]; then
+    elif [ -n "$(git -C "$REPO" config --global --get core.hooksPath 2>/dev/null || true)" ]; then  # swallow-ok: git config --get exits 1 when the key is unset, the normal case
         _scope="GLOBAL (~/.gitconfig — affects every repo you own)"
     fi
     # In a linked worktree, --git-dir is .git/worktrees/<name> (no hooks there)
     # and <toplevel>/.git is a file, so only --git-common-dir reaches the repo's
     # hooks. Outside one, all three point at the same .git/hooks (Arfy, #117).
     _linked=0
-    _gd="$(git -C "$REPO" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    _gd="$(git -C "$REPO" rev-parse --absolute-git-dir 2>/dev/null || true)"  # swallow-ok: empty skips the linked-worktree test below; a non-repo fails earlier
     if [ -n "$_gd" ] && [ "$(cd "$_gd" && pwd -P)" != "$(cd "${HOOKS_DIR%/hooks}" && pwd -P)" ]; then
         _linked=1
     fi
@@ -132,7 +132,7 @@ if [ -n "$_hp" ]; then
     # silent one).
     _chains_to_repo() {
         local body
-        body="$(sed 's/#.*//' "$1" 2>/dev/null)" || return 1
+        body="$(sed 's/#.*//' "$1" 2>/dev/null)" || return 1  # swallow-ok: unreadable counts as "doesn't chain", and that path warns
         printf '%s\n' "$body" | grep -q 'rev-parse' || return 1
         printf '%s\n' "$body" | grep -q -- '--git-common-dir' && return 0
         [ "$_linked" = 1 ] && return 1
