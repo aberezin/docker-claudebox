@@ -265,14 +265,15 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `tests/test_install_unreadable_guard.sh`.
 
 ### Process
-- **Long-running version branches; master receives only tagged releases** (#137). Work
+- **Long-running version branches; master's tip is always a tagged release** (#137). Work
   for the next version merges into `release-X.Y.Z` (cut from the last release), scoped
   by a GitHub milestone of the same name; `VERSION` is bumped only by that branch's
   last commit, which is fast-forwarded into master and tagged. Build-path branches still
   need Alan's `./install.sh` before merging into the version branch; everything else is
   checked once at release (install, in-container check, Arfy's macOS suite). New
-  `.githooks/pre-push` refuses to push master unless the commit is `v*`-tagged
-  (`DRIDOCK_ALLOW_MASTER_PUSH=1` overrides), with `tests/test_prepush_master_guard.sh`.
+  `.githooks/pre-push` refuses to push master unless the new tip has an exact `vX.Y.Z`
+  tag and the push is a fast-forward (append-only; `DRIDOCK_ALLOW_MASTER_PUSH=1`
+  overrides), with `tests/test_prepush_master_guard.sh`.
   Master as of `1fd5bfc` is frozen as is; `release-6.0.0` and milestone `6.0.0` exist.
 - **The install gate names the merged-first path, the runtime and the shell** (#119).
   On the record the gate has held whenever it applied — #114 (`cd57925`) ran before merging,

@@ -112,7 +112,9 @@ this convention. Don't take them as precedent.
 ### Version branches — `release-X.Y.Z` (#137)
 
 **Work for the next version accumulates on a long-running branch named for it, and
-`master` receives only tagged releases.** Decided by Alan on 2026-11-17, after master
+`master`'s tip is always a tagged release: master only ever moves forward, by a
+fast-forward, onto one.** (Not "every master commit is a release": an ff-merge of the
+version branch brings all its commits, and only the tip carries the tag.) Decided by Alan on 2026-11-17, after master
 ended up carrying #123's breaking 6.0 change under the label 5.14.0 while 6.0.0 itself
 couldn't ship: merging each finished issue straight to master put half-finished work
 there, and its problems surfaced later.
@@ -154,10 +156,18 @@ master ── v5.14.0 ───────────────────�
   to master the same way, then **merged forward** into the open version branch so the
   fix isn't lost at the next release.
 - **Enforced, not trusted:** `.githooks/pre-push` refuses to push `master` (or `main`)
-  unless the commit being pushed carries a `v*` tag. Override for a genuine one-off:
+  unless its new tip carries an exact `vX.Y.Z` tag (not `v6`, not `-rc1`), refuses a
+  push that isn't a fast-forward of the remote's master (a rewritten history re-tagged
+  would otherwise pass), and refuses deleting it. Override for a genuine one-off:
   `DRIDOCK_ALLOW_MASTER_PUSH=1 git push …`. A fast-forward merge runs no hook at all, so
   push is the one place a check can sit, which is why the guard lives there and not
   beside the pre-commit one.
+- **The hook's limit (Arfy):** it guards only clones that have it installed, and unlike
+  the pre-commit guard it protects a SHARED resource. A clone that never ran `make hooks`
+  pushes master freely (#104 is a second checkout that went two months without it).
+  The real boundary is GitHub branch protection on `master` (restrict who can push,
+  require linear history), which Alan sets in the repo settings; the hook complements
+  it, it doesn't replace it.
 
 **Today's master is frozen as is** (Alan, option A): it holds #123's 6.0 change under the
 5.14.0 label, and it isn't rewritten. `v5.14.0` stays the honest last release; a 5.14.x

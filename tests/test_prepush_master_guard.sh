@@ -61,7 +61,24 @@ out="$(DRIDOCK_ALLOW_MASTER_PUSH=1 g push -q origin master 2>&1)"; rc=$?
 [ "$rc" -eq 0 ] && [[ "$out" == *"DRIDOCK_ALLOW_MASTER_PUSH=1"* ]] \
     && ok "DRIDOCK_ALLOW_MASTER_PUSH=1 pushes, with a warning" || bad "override failed (rc $rc): $out"
 
-# 6. Deleting master on the remote is refused too.
+# 6. Only an exact vX.Y.Z counts: not a bare `v6`, not an `-rc`.
+echo c > "$r/a"; g commit -qam three; g tag v6; g tag -a v6.1.0-rc1 -m rc
+out="$(g push -q origin master 2>&1)"; rc=$?
+[ "$rc" -ne 0 ] && ok "a v6 / v6.1.0-rc1 tag doesn't make a commit a release" || bad "loose tag let master through (rc $rc): $out"
+
+# 7. A rewrite is refused even when the new tip is tagged (master is append-only).
+g tag -a v6.1.0 -m v6.1.0
+out="$(g push -q origin master 2>&1)"; rc=$?
+[ "$rc" -eq 0 ] && ok "a tagged fast-forward pushes" || bad "tagged ff refused (rc $rc): $out"
+g reset -q --hard HEAD~1; echo d > "$r/a"; g commit -qam rewritten; g tag -a v6.1.1 -m v6.1.1
+out="$(g push -q --force origin master 2>&1)"; rc=$?
+if [ "$rc" -ne 0 ] && [[ "$out" == *"refusing to rewrite 'master'"* ]]; then
+    ok "a force-push rewriting master is refused, even with a v* tag on the new tip"
+else
+    bad "rewrite not refused (rc $rc): $out"
+fi
+
+# 8. Deleting master on the remote is refused too.
 out="$(g push -q origin :master 2>&1)"; rc=$?
 [ "$rc" -ne 0 ] && [[ "$out" == *"refusing to delete 'master'"* ]] \
     && ok "deleting the remote master is refused" || bad "remote master deletion not refused (rc $rc): $out"

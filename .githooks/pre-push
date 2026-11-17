@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Refuse to push master (or main) unless the commit being pushed is a tagged
-# release (#137).
+# Refuse to push master (or main) unless its new tip is a tagged release
+# (exactly vX.Y.Z) reached by a fast-forward (#137). The enforced invariant is
+# "master's tip is always a tagged release, and master only moves forward onto
+# one": an ff-merge of a version branch brings all its commits, and only the
+# tip carries the tag.
 #
 # WHY: since #137, master receives only tagged releases; work accumulates on a
 # long-running release-X.Y.Z version branch. Before that, finished issues were
@@ -37,7 +40,16 @@ while read -r _lref _lsha _rref _rsha; do
         _bad=1
         continue
     fi
-    if git tag --points-at "$_lsha" | grep -q '^v[0-9]'; then
+    # A rewrite arrives as a non-fast-forward, and re-tagging a rebuilt history
+    # would otherwise pass the tag check below. Fails closed when the remote's
+    # commit isn't here to compare against (Arfy, #137 review).
+    if [ "$_rsha" != "$_zero" ] && ! git merge-base --is-ancestor "$_rsha" "$_lsha" 2>/dev/null; then
+        echo "❌ refusing to rewrite '$_name': the remote's $_rsha is not an ancestor of what you're pushing (#137). Fetch first; $_name is append-only." >&2
+        _bad=1
+        continue
+    fi
+    # Exactly vX.Y.Z: a typo'd `v6` or an `-rc1` isn't a release.
+    if git tag --points-at "$_lsha" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
         continue
     fi
     cat >&2 <<EOF
