@@ -92,5 +92,47 @@ class ImageDriftWatchTest(unittest.TestCase):
         self.assertIn("current again", "\n".join(cm.output))
 
 
+class DriftThreadTest(unittest.TestCase):
+    """The watch runs on its own thread, not the scheduler's (Arfy, #138)."""
+
+    def test_run_until_checks_then_stops_on_the_event(self):
+        import threading
+        stop = threading.Event()
+        run = fake()
+        w = cron.ImageDriftWatch("c", run=run, interval=0.01)
+        t = threading.Thread(target=w.run_until, args=(stop,), daemon=True)
+        t.start()
+        for _ in range(200):
+            if run.calls:
+                break
+            stop.wait(0.01)
+        stop.set()
+        t.join(timeout=2)
+        self.assertFalse(t.is_alive())
+        self.assertTrue(run.calls)
+
+    def test_a_crashing_check_is_logged_and_the_watch_survives(self):
+        import threading
+        stop = threading.Event()
+        n = {"calls": 0}
+
+        def boom(args):
+            n["calls"] += 1
+            if n["calls"] >= 3:
+                stop.set()
+            raise RuntimeError("bug")
+        w = cron.ImageDriftWatch("c", run=boom, interval=0)
+        with self.assertLogs(cron.log, level="ERROR") as cm:
+            w.run_until(stop)
+        self.assertIn("image drift check (#138) failed", "\n".join(cm.output))
+        self.assertGreaterEqual(n["calls"], 3)
+
+    def test_the_scheduler_loop_no_longer_calls_check(self):
+        import inspect
+        src = inspect.getsource(cron.main)
+        self.assertNotIn("drift.check(", src)
+        self.assertIn("target=drift.run_until", src)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -37,6 +37,7 @@ bash test.sh test_api test_cron   # run a subset
 # third-party imports present, see below)
 python -m pytest tests/test_api_server_oai.py -v
 python -m pytest tests/test_md_to_tg_html.py -v
+python -m pytest tests/test_cron_drift.py -v      # cron.py's image-drift watch (#138)
 python tests/test_api_server_oai.py     # each file is also directly runnable
 ```
 
@@ -47,10 +48,10 @@ The Python unit tests exercise **pure logic** — they never touch Docker, a con
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install fastapi uvicorn python-telegram-bot pyyaml mcp croniter pytest
-python -m pytest tests/test_api_server_oai.py tests/test_md_to_tg_html.py -v
+python -m pytest tests/test_api_server_oai.py tests/test_md_to_tg_html.py tests/test_cron_drift.py -v
 ```
 
-Alternatively run them inside the built image, which already has all of it. Either way, a Python change to the daemons is **not** verified by the bash suite alone — that suite drives the daemons through container env, so it exercises their wiring, not their helper functions.
+Alternatively run them inside the built image, which already has all of it (in a dridock container that's `/usr/bin/python3`, not the pyenv `python3` first on PATH). **Every `tests/test_*.py` must be named in this section**: `test.sh` doesn't run Python tests, so an unnamed one is never run by anyone; `tests/test_python_tests_named.sh` enforces it (#138, where a new file was listed nowhere). Either way, a Python change to the daemons is **not** verified by the bash suite alone — that suite drives the daemons through container env, so it exercises their wiring, not their helper functions.
 
 ## Architecture — request flow
 

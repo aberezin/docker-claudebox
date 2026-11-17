@@ -491,6 +491,21 @@ class ImageDriftWatch:
             _short(own_id), tag, _short(current),
         )
 
+    def run_until(self, stop: threading.Event) -> None:
+        """Check every `interval` on THIS thread until `stop` is set.
+
+        Not on the scheduler thread (Arfy, #138 review): the two docker calls
+        can take up to ~20s, and the scheduler advances `next_at` with
+        get_next(), so a stall there doesn't delay fires, it collapses them
+        into one, silently. A 6-field job every 10s would lose fires.
+        """
+        while not stop.is_set():
+            try:
+                self.check(time.monotonic())
+            except Exception:  # noqa: BLE001 — a bug here must not end the watch silently
+                log.exception("image drift check (#138) failed")
+            stop.wait(timeout=self.interval)
+
 
 def _handle_signal(signum: int, _frame: Any) -> None:
     log.info("received signal %d, shutting down", signum)
@@ -550,8 +565,8 @@ def main() -> int:
         log.debug("[%s] next fire: %s", n, t.isoformat())
 
     drift = ImageDriftWatch(os.environ.get("DRIDOCK_CONTAINER_NAME", ""))
+    threading.Thread(target=drift.run_until, args=(_shutdown,), name="image-drift", daemon=True).start()
     while not _shutdown.is_set():
-        drift.check(time.monotonic())
         now = datetime.now()
         for j in jobs:
             n = j["name"]
