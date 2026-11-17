@@ -46,9 +46,10 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   control) makes `--continue` skip or refuse that conversation. Proven by an A/B on
   2026-11-17: with the entry present, `dridock start` continued an older conversation;
   with it removed, the right one. The interactive start now removes `entrypoint: "cli"`
-  registrations that are dead: another container's (pidDomain not ours), or an earlier
-  run of this one (our pidDomain, pid not running; a `docker start` restart keeps the
-  machine-id and was measured getting the same pid-ns inode). Each removal is named on
+  registrations that are dead: a container from another image (pidDomain not ours), or
+  an earlier run (our pidDomain, pid not running per `kill -0`). The second is the main
+  path: `/etc/machine-id` comes from the image layer and the pid-ns inode was measured
+  being reused, so a restart or a recreate on the same image has the same pidDomain. Each removal is named on
   stderr, which is visible in `docker logs`.
   `-p`/SDK entries (`sdk-cli`) are never touched, since they may be a live sibling's.
 

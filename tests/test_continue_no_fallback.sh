@@ -132,11 +132,11 @@ else
     printf '{"pid":13,"sessionId":"sibling-p","entrypoint":"sdk-cli","kind":"interactive","pidDomain":"%s"}' "$OTHER" > "$S/13.json"
     printf 'not json' > "$S/14.json"
     out="$(bash -c ". '$tmp/prune.sh'; _prune_foreign_cli_sessions '$S' '$MINE'" 2>&1)"
-    [ ! -e "$S/11.json" ] && [ ! -e "$S/11.abc.key" ] && [[ "$out" == *"session dead-bg left by a previous container"* ]] \
+    [ ! -e "$S/11.json" ] && [ ! -e "$S/11.abc.key" ] && [[ "$out" == *"session dead-bg left by a container from another image"* ]] \
         && ok "a dead container's cli entry (and its .key) is removed, and named on stderr" \
         || bad "foreign cli entry not pruned as expected: $(ls "$S") / $out"
     [ -e "$S/12.json" ] && [ -e "$S/12.def.key" ] && ok "our domain with a LIVE pid is kept" || bad "live own entry removed"
-    [ ! -e "$S/15.json" ] && [ ! -e "$S/15.ghi.key" ] && [[ "$out" == *"session dead-me left by an earlier run of this container (pid 999999 is gone)"* ]] \
+    [ ! -e "$S/15.json" ] && [ ! -e "$S/15.ghi.key" ] && [[ "$out" == *"session dead-me left by an earlier run (pid 999999 is gone)"* ]] \
         && ok "our domain with a DEAD pid (an earlier run, same machine-id + pid ns) is removed, said as such" \
         || bad "dead own-domain entry not pruned: $(ls "$S") / $out"
     [ -e "$S/13.json" ] && ok "a foreign sdk-cli (-p) entry is kept: it may be a live sibling" || bad "sdk-cli entry removed"

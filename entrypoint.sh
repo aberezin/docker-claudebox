@@ -1589,9 +1589,14 @@ else
 	# the same start continued the right one.
 	#
 	# Two kinds of `entrypoint: "cli"` entry are dead and removed:
-	#   - pidDomain isn't ours: a previous container's;
+	#   - pidDomain isn't ours: in practice a container from a different IMAGE.
+	#     Nothing here sets /etc/machine-id; it comes from the image layer
+	#     (Bear's was dated Nov 16 15:46, older than the containers using it),
+	#     so containers from one image share it;
 	#   - pidDomain IS ours but its pid isn't running: an earlier run of THIS
-	#     container. Needed because a `docker start` restart keeps
+	#     container, or of an earlier container from the same image. This is
+	#     the PRIMARY path, not hardening: `dridock down && dridock start` on an
+	#     unchanged image matches both domain parts. Needed because a restart keeps
 	#     /etc/machine-id and is handed the same pid-ns inode (measured
 	#     2026-11-17: one container started 3x read pid:[4026532415] each time,
 	#     and so did another container started in between), so the domain alone
@@ -1604,11 +1609,15 @@ else
 	# _cron, passthrough share this ~/.claude), so they're never touched; this
 	# runs on the interactive path only, for the same reason.
 	#
-	# LOAD-BEARING: "a foreign `cli` entry is a dead predecessor of mine" holds
-	# only while one project data dir has ONE interactive container. #123's
-	# AdoptionService enforces that by refusing a copied project (two dirs, one
-	# id). If that refusal is ever relaxed, this prune can delete a LIVE
-	# sibling's registration and let two processes write one transcript.
+	# LOAD-BEARING: "a `cli` entry we can't see running is dead" holds only
+	# while one project data dir has ONE interactive container. A live sibling
+	# from the same image would share our machine-id and likely our pid-ns
+	# inode, and its pid isn't visible from here, so it would read as "ours,
+	# pid gone". The domain check does NOT protect it: #123's AdoptionService
+	# (refusing a copied project, a moved running container, and touching no
+	# running old-name container) is the only guard. If those refusals are ever
+	# relaxed, this prune can delete a LIVE sibling's registration and let two
+	# processes write one transcript.
 	# tests/test_continue_no_fallback.sh ties the two together.
 	_prune_foreign_cli_sessions() {   # $1 = sessions dir, $2 = this container's pidDomain
 		local dir="$1" mine="$2" f ep dom sid stem pid why
@@ -1619,12 +1628,15 @@ else
 			dom="$(jq -r '.pidDomain // empty' "$f" 2>/dev/null)" || continue  # swallow-ok: an unreadable entry is left alone, never pruned on a guess
 			[ "$ep" = "cli" ] && [ -n "$dom" ] || continue
 			if [ "$dom" != "$mine" ]; then
-				why="left by a previous container ($dom)"
+				why="left by a container from another image ($dom)"
 			else
 				pid="$(jq -r '.pid // empty' "$f" 2>/dev/null)"
 				case "$pid" in ''|*[!0-9]*) continue ;; esac
-				[ -d "/proc/$pid" ] && continue
-				why="left by an earlier run of this container (pid $pid is gone)"
+				# kill -0, not /proc/<pid>: same meaning here (root, before the
+				# setpriv drop, can signal any pid in this namespace) and portable,
+				# so the macOS host suite tests the shipped predicate (Arfy).
+				kill -0 "$pid" 2>/dev/null && continue
+				why="left by an earlier run (pid $pid is gone)"
 			fi
 			sid="$(jq -r '.sessionId // "?"' "$f" 2>/dev/null)"
 			stem="$(basename "$f" .json)"
