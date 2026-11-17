@@ -68,9 +68,10 @@ one but not the other — you get subtle, confusing breakage. The version makes 
    cut renamed it and #105 had to restore it (#106). `update-cli` now puts a
    missing one back, but `tests/test_version_sync.sh` fails unless there is
    exactly one, above every release heading.
-3. Commit **on a branch** — `master` refuses direct commits (see
-   [Release branches](#release-branches-release-xyz) for which name to use) —
-   then ff-merge and **tag** the merged commit: `git tag -a vX.Y.Z -m "vX.Y.Z"` and push it
+3. Commit it as the **last commit on the version branch** (see
+   [Version branches](#version-branches--release-xyz-137); `master` refuses direct
+   commits and, since #137, pushes of untagged commits), then ff-merge it into master
+   and **tag** the merged commit, pushing the tag before master: `git tag -a vX.Y.Z -m "vX.Y.Z"` and push it
    (`git push <remote> vX.Y.Z`). **Fork gotcha:** the clone inherited upstream's
    `v0.x`–`v1.x` tags locally, so `git tag vX.Y.Z` may collide with an ancient
    upstream tag pointing at the wrong commit. Verify with `git rev-list -n1 vX.Y.Z`,
@@ -108,50 +109,70 @@ Rules:
 Two pre-3.0 branches (`wrapper-typescript-rewrite`, `dridock-skill-statusline`) predate
 this convention. Don't take them as precedent.
 
-### Release branches — `release-X.Y.Z`
+### Version branches — `release-X.Y.Z` (#137)
 
-A standalone release commit — `VERSION` + `dridockVersion.ts` + `CHANGELOG.md` and
-nothing else — goes on **`release-X.Y.Z`**, named for the version it cuts:
+**Work for the next version accumulates on a long-running branch named for it, and
+`master` receives only tagged releases.** Decided by Alan on 2026-11-17, after master
+ended up carrying #123's breaking 6.0 change under the label 5.14.0 while 6.0.0 itself
+couldn't ship: merging each finished issue straight to master put half-finished work
+there, and its problems surfaced later.
 
 ```
-release-5.12.0
+master ── v5.14.0 ────────────────────────────── v6.0.0
+              \                                  /
+               release-6.0.0 ──●──●──●──●── release commit (VERSION, CHANGELOG, tag)
+                              /  /     \
+                  129-swallow-audit     135-remove-migrators …
 ```
 
-This is the one branch form that does **not** take an issue number, because a release
-closes no issue. The "file the issue first" rule exists so a branch has somewhere to
-record the problem statement and the verification; for a version bump the **CHANGELOG
-entry is that record**, and it is in the commit itself.
+- **One version branch per upcoming release, `release-X.Y.Z`, cut from master** (the
+  last release) when work for that version starts. It is the integration branch: Alan and
+  the agents run its tip day to day, so problems show up there and not after release.
+  Don't name it `vX.Y.Z`: that's the tag's name, and git would make the two ambiguous.
+- **Issue branches start from the version branch and merge back into it.** Naming
+  (`<issue#>-<slug>`), sign-off and "the owner merges" are unchanged; only the target
+  differs. Fast-forward where possible, and rebase onto the version branch when it has
+  moved.
+- **Scope is a GitHub milestone named for the version** (`6.0.0`): every issue that will
+  ship in it, open or closed. "Is 6.0 done?" is "is the milestone's open count 0?".
+- **`VERSION` is bumped only by the release commit**, the last commit on the branch
+  (`VERSION` + `dridockVersion.ts` + the CHANGELOG heading, nothing else). Until then the
+  branch name says what's coming, and `VERSION` still names the last release. A `-dev`
+  label isn't a substitute: `Version.parseLoose` reads `6.0.0-dev` as `6.0.0`, the strict
+  parser rejects it, and bumping early would also turn `test_deprecation_deadlines` red on
+  every commit until the version's removals have landed.
+- **Releasing** is done by the version branch's owner, in this order:
+  1. the milestone's open issues are 0;
+  2. Alan runs `./install.sh` on the branch tip from his Mac shell, ending in
+     `✅ setup complete` ([the install gate](#the-install-gate--alan-runs-installsh-from-his-mac-shell));
+  3. one in-container check after `dridock down && dridock start`, since baked files
+     (`entrypoint.sh`, `cb-*`, `features/`, the shim) reach a container only then (#118);
+  4. Arfy runs the full host suite on macOS;
+  5. the release commit, then `git merge --ff-only` it into master, tag it, push the
+     tag and then master, and delete the branch.
+- **Hotfixes** to the released version: `release-X.Y.(Z+1)` from the last tag, released
+  to master the same way, then **merged forward** into the open version branch so the
+  fix isn't lost at the next release.
+- **Enforced, not trusted:** `.githooks/pre-push` refuses to push `master` (or `main`)
+  unless the commit being pushed carries a `v*` tag. Override for a genuine one-off:
+  `DRIDOCK_ALLOW_MASTER_PUSH=1 git push …`. A fast-forward merge runs no hook at all, so
+  push is the one place a check can sit, which is why the guard lives there and not
+  beside the pre-commit one.
 
-- **Only for a cut that spans already-merged work.** A bump that belongs to one issue's
-  work still rides in that issue's branch, which is how every release before 5.12.0
-  happened — 5.10.0 came with #97 (`3567e8e`) and 5.11.0 with #89 (`7a0ea65`).
-  Reach for `release-X.Y.Z` when the release covers issues that each shipped without a
-  bump of their own — as #100/#101/#102 did, all being host-TS or hook-only.
+**Today's master is frozen as is** (Alan, option A): it holds #123's 6.0 change under the
+5.14.0 label, and it isn't rewritten. `v5.14.0` stays the honest last release; a 5.14.x
+hotfix branches from that tag, not from master's tip. `release-6.0.0` was cut from
+master `1fd5bfc`.
 
-  Those precedents are cited by **issue and commit, not branch name**, deliberately:
-  work branches are deleted on merge, so a branch name is the one identifier that
-  stops resolving the moment the work lands. Citing one as a precedent for others to
-  follow sends them looking for something that no longer exists — and the first draft
-  of this section got it wrong in exactly that way, naming a branch that had shipped a
-  *different* release (`89-claude-cli-2-1-258` carried the 5.4.0 pin bump to 2.1.258;
-  5.11.0's bump to 2.1.319 came from a separate #89 branch). The issue number and the
-  commit sha both survive.
-- **Whoever cuts it owns it**: ff-merge to `master`, tag the merged commit, delete the
-  branch. Same ownership rule as any other branch.
-- **Don't use `DRIDOCK_ALLOW_MASTER_COMMIT=1` instead.** The override exists, but the
-  guard it defeats is there precisely because discipline failed once already; spending
-  it on a routine release is how it stops meaning anything. A release branch costs one
-  extra command.
+#### History: the standalone release commit (#103)
 
-Why this needed writing down (#103): the pre-commit hook refused the 5.12.0 bump and
-pointed at `<issue#>-<slug>`, a form that cannot apply to a release. The guard was
-right and its advice was impossible — so the next person's options were an override
-they shouldn't reach for or a name they'd invent.
-
-Merging is **fast-forward** where possible (`git merge --ff-only`); check with
-`git merge-base --is-ancestor origin/master <branch>` before assuming it isn't.
-Note that landing anything on `master` while a long-lived branch is open puts that
-branch out of FF range, so prefer to hold unrelated commits until it merges.
+Before #137, `release-X.Y.Z` named a short-lived branch carrying only a release commit
+(`VERSION` + `dridockVersion.ts` + `CHANGELOG.md`) for a cut spanning work that had
+already merged to master, as 5.12.0 did. That commit is now simply the **last commit on
+the version branch**, so the name keeps its meaning (the branch whose tip becomes
+X.Y.Z) and gains a lifetime. Two rules from #103 still hold: a release closes no issue,
+so its CHANGELOG entry is its record; and don't reach for `DRIDOCK_ALLOW_MASTER_COMMIT=1`
+instead of a branch.
 
 ### Installing the guard — `make hooks`
 
@@ -242,6 +263,11 @@ Ownership decides *who*; it does not decide *whether it has been verified* — a
 still needs its sign-off before its owner merges it.
 
 ### The install gate — Alan runs `./install.sh` from his Mac shell
+
+**Since #137 (Alan's option B, the middle path):** a branch that touches the build path
+needs this run **before it merges into the version branch**; every other change,
+baked files included, is checked once, at release, on the version branch tip (see
+[Version branches](#version-branches--release-xyz-137)).
 
 **A branch that touches the build path is not DONE — issue closed, branch deleted —
 until Alan has run `./install.sh` on that code, from his shell on the Mac, and it has

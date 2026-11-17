@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Refuse to push master (or main) unless the commit being pushed is a tagged
+# release (#137).
+#
+# WHY: since #137, master receives only tagged releases; work accumulates on a
+# long-running release-X.Y.Z version branch. Before that, finished issues were
+# merged to master one by one, and master ended up carrying #123's breaking 6.0
+# change under the label 5.14.0 while 6.0.0 itself couldn't ship.
+#
+# Push is the one place this can be checked. A fast-forward merge into master
+# runs no hook at all, so the pre-commit guard never sees it.
+#
+# A release is pushed tag first, then master:
+#     git push <remote> vX.Y.Z
+#     git push <remote> master
+# The check reads LOCAL tags, so the tag only has to exist here.
+#
+# Override for a genuine one-off:  DRIDOCK_ALLOW_MASTER_PUSH=1 git push ...
+#
+# INSTALL VIA `make hooks` (or ./install.sh), which copies this into .git/hooks/.
+set -uo pipefail
+
+_zero="0000000000000000000000000000000000000000"
+_bad=0
+while read -r _lref _lsha _rref _rsha; do
+    case "$_rref" in
+        refs/heads/master|refs/heads/main) ;;
+        *) continue ;;
+    esac
+    _name="${_rref#refs/heads/}"
+    if [ "${DRIDOCK_ALLOW_MASTER_PUSH:-}" = "1" ]; then
+        echo "⚠️  pushing $_name without the release check (DRIDOCK_ALLOW_MASTER_PUSH=1)." >&2
+        continue
+    fi
+    if [ "$_lsha" = "$_zero" ]; then
+        echo "❌ refusing to delete '$_name' on the remote (#137)." >&2
+        _bad=1
+        continue
+    fi
+    if git tag --points-at "$_lsha" | grep -q '^v[0-9]'; then
+        continue
+    fi
+    cat >&2 <<EOF
+❌ refusing to push '$_name': $(git log -1 --format='%h %s' "$_lsha" | cut -c1-70)
+   is not a tagged release (#137).
+
+   $_name only receives releases. Work goes to the version branch instead:
+       git push <remote> HEAD:release-X.Y.Z      # or your <issue#>-<slug> branch
+
+   Releasing? Tag the release commit first, then push the tag, then $_name:
+       git tag -a vX.Y.Z -m vX.Y.Z && git push <remote> vX.Y.Z && git push <remote> $_name
+
+   A genuine one-off:  DRIDOCK_ALLOW_MASTER_PUSH=1 git push ...
+EOF
+    _bad=1
+done
+exit "$_bad"
