@@ -74,14 +74,21 @@ below runs against the exact commit that will be tagged, with the new version in
   Open with a short upgrade summary when anything is breaking; merge duplicate `###`
   headings; count the entries before and after.
 - Run **every** docker-free test function before pushing it: loop over each
-  `tests/test_*.sh`'s `ALL_TESTS+=(…)` names, plus `bun test` and `tsc --noEmit`. **Not a
+  `tests/test_*.sh`'s `ALL_TESTS+=(…)` names (skipping only the daemon/token suites, a
+  property of what the function needs, not a list anyone picks), **plus any
+  `tests/test_*.sh` that doesn't register** (#140: the loop can't see those by
+  construction; `test_report_bug.sh` is one), plus `bun test` and `tsc --noEmit`. **Not a
   hand-picked list**: 6.0.0's picked list missed `test_env_var_readers`, and #139 was found
-  only at step 3.
+  only at step 3. Read each rc **directly, never through a pipe**: `cmd | tail` reports
+  `tail`'s rc, which produced a false tsc result during 6.0.0.
 
 **2. The gate**, all against that tip:
 1. **Install (Alan, Mac shell):** `./install.sh` on the tip, ending in `✅ setup complete`
    ([the install gate](#the-install-gate--alan-runs-installsh-from-his-mac-shell)), then
-   `dridock down && dridock start` in the harness project. If the export fails with
+   `dridock down && dridock start` in the harness project; `dridock checkversion` then
+   reads **in sync for both variants**, full and minimal (#111: a minimal image once sat
+   ten releases behind a fresh full one, and the release record is where both are
+   confirmed). If the export fails with
    `parent snapshot … does not exist`, run `docker --context colima-cb-infra builder prune -af`
    and install again (cb-infra's image store, not the code; seen at 6.0.0).
 2. **In-container (Bear):** the container runs the new image (its `.Image` is the
@@ -89,7 +96,8 @@ below runs against the exact commit that will be tagged, with the new version in
    `bash test.sh` with no arguments** (it takes *function* names, not file names: 6.0.0's
    first run passed file names and ran nothing); and every `tests/test_*.py` (CLAUDE.md
    names them).
-3. **macOS (Arfy):** every docker-free test function, `bun test`, `tsc --noEmit`.
+3. **macOS (Arfy):** the same sweep as step 1 (every registered docker-free function, the
+   unregistered files, `bun test`, `tsc --noEmit`, each rc read directly).
 4. **Hands-on checks**, listed on the release issue: the behaviours no test can show,
    usually "a second live process survives" (6.0.0: #126's refusal with the first
    session still alive, #138's cron refresh). Before any check that retags
@@ -105,12 +113,17 @@ release's section, and the gate re-runs on the new tip.
 **3. Tag and fast-forward:**
 ```sh
 git tag -a vX.Y.Z -m vX.Y.Z <tip>          # check it's free first: see the fork gotcha
-git push <remote> vX.Y.Z                   # the tag BEFORE master: the pre-push guard needs it
+git push <remote> vX.Y.Z                   # tag first, so the remote never has an untagged master tip
 git push <remote> <tip>:refs/heads/master  # refused unless a fast-forward onto an exact vX.Y.Z
 ```
+The pre-push guard reads **local** tags (`git tag --points-at`), so it's the `tag -a`
+that satisfies it; if a master push is refused, look at your local tags, not the remote's.
+
 **Fork gotcha:** the clone inherited upstream's `v0.x`–`v1.x` tags locally, so a tag name
 may already exist pointing at an ancient upstream commit. Check `git rev-list -n1 vX.Y.Z`
-first; the remote fork only carries the tags we push.
+first. If it resolves to an upstream commit, replace it:
+`git tag -f -a vX.Y.Z <tip>`, then `git push --force <remote> vX.Y.Z`. The remote fork
+only carries the tags we push.
 
 **4. Close out:** close the milestone; post the release record on the release issue (the
 tag, the master range, and each gate step with its evidence and environment); delete
