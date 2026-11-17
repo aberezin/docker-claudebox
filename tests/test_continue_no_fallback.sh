@@ -111,6 +111,39 @@ else
     [ "$(_last_session_id)" = "new-2222" ] && ok "the newest transcript's id, under Claude's slug for the path" || bad "wrong id: '$(_last_session_id)'"
 fi
 
+# 4. The stale-registration prune (proven on 2026-11-17: with a dead
+#    container's `kind: bg` entry present, --continue picked an older
+#    conversation; with it removed, the right one).
+awk '/^\t_prune_foreign_cli_sessions\(\) \{/,/^\t\}/' "$EP" > "$tmp/prune.sh"
+if ! grep -q '_prune_foreign_cli_sessions()' "$tmp/prune.sh"; then
+    bad "couldn't extract _prune_foreign_cli_sessions from entrypoint.sh"
+else
+    local S="$tmp/sessions" MINE="linux:aaaa:pid:[1]" OTHER="linux:bbbb:pid:[1]"
+    mkdir -p "$S"
+    printf '{"pid":11,"sessionId":"dead-bg","entrypoint":"cli","kind":"bg","pidDomain":"%s"}' "$OTHER" > "$S/11.json"
+    : > "$S/11.abc.key"
+    printf '{"pid":12,"sessionId":"live-me","entrypoint":"cli","kind":"interactive","pidDomain":"%s"}' "$MINE" > "$S/12.json"
+    : > "$S/12.def.key"
+    printf '{"pid":13,"sessionId":"sibling-p","entrypoint":"sdk-cli","kind":"interactive","pidDomain":"%s"}' "$OTHER" > "$S/13.json"
+    printf 'not json' > "$S/14.json"
+    out="$(bash -c ". '$tmp/prune.sh'; _prune_foreign_cli_sessions '$S' '$MINE'" 2>&1)"
+    [ ! -e "$S/11.json" ] && [ ! -e "$S/11.abc.key" ] && [[ "$out" == *"session dead-bg left by a previous container"* ]] \
+        && ok "a dead container's cli entry (and its .key) is removed, and named on stderr" \
+        || bad "foreign cli entry not pruned as expected: $(ls "$S") / $out"
+    [ -e "$S/12.json" ] && [ -e "$S/12.def.key" ] && ok "this container's own entry is kept" || bad "own entry removed"
+    [ -e "$S/13.json" ] && ok "a foreign sdk-cli (-p) entry is kept: it may be a live sibling" || bad "sdk-cli entry removed"
+    [ -e "$S/14.json" ] && ok "an unreadable entry is left alone" || bad "malformed entry removed"
+    [ "$(printf '%s' "$out" | grep -c 'removed a stale')" -eq 1 ] && ok "exactly one removal reported" || bad "removal lines: $out"
+fi
+# LOAD-BEARING tie: the prune is safe only while one data dir has one
+# interactive container, which #123's copy refusal enforces. If that refusal
+# is ever removed, this fails, and the prune has to be reconsidered with it.
+if grep -q "looks like a COPY" "$REPO/dridock-ts/src/services/AdoptionService.ts" 2>/dev/null; then  # swallow-ok: a missing file is a FAIL below
+    ok "#123's copy refusal still exists (the prune's one-interactive-container invariant)"
+else
+    bad "AdoptionService no longer refuses a copied project: the #128 prune may now delete a LIVE sibling's registration"
+fi
+
 rm -rf "$tmp"
 echo "  continue no-fallback: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

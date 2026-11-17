@@ -15,6 +15,9 @@ dridock start --resume <session-id>   # resume a specific conversation (skips --
 If `--continue` fails, the session does **not** silently start fresh (#128). Claude's own
 reason stays on screen, and dridock adds how to get the conversation back, as
 `dridock start --resume <id>` with the id of the newest transcript for this workspace.
+The known cause is handled on start: a previous container's stale session registration
+(left behind when a remote-control session had been moved to the background) is removed,
+with a stderr line naming the session.
 That can be a cron job's run rather than your conversation; `claude --resume` lists them all. One known cause: after the container is
 recreated, a conversation that ran with `--remote-control` can be refused as "registered
 from another machine or container".

@@ -1578,6 +1578,48 @@ else
 		f="$(ls -t "$d"/*.jsonl 2>/dev/null | head -1)"
 		[ -n "$f" ] && basename "$f" .jsonl
 	}
+	# #128: drop session registrations left by a PREVIOUS container. Claude Code
+	# registers each running session in ~/.claude/sessions/<pid>.json with a
+	# pidDomain of "linux:<machine-id>:pid:[<ns>]". When a container dies, its
+	# entries stay. An `interactive` one is harmless, but one moved to the
+	# background (`kind: bg`, e.g. a remote-control session) makes --continue
+	# skip or refuse that conversation as "registered from another machine or
+	# container". Proven on 2026-11-17: with the dead container's bg entry in
+	# place, `dridock start` continued an older conversation; with it removed,
+	# the same start continued the right one.
+	#
+	# Only `entrypoint: "cli"` entries whose pidDomain isn't ours. `-p`/SDK runs
+	# register as "sdk-cli" and may belong to a LIVE sibling container (_prog,
+	# _cron, passthrough share this ~/.claude), so they're never touched; this
+	# runs on the interactive path only, for the same reason.
+	#
+	# LOAD-BEARING: "a foreign `cli` entry is a dead predecessor of mine" holds
+	# only while one project data dir has ONE interactive container. #123's
+	# AdoptionService enforces that by refusing a copied project (two dirs, one
+	# id). If that refusal is ever relaxed, this prune can delete a LIVE
+	# sibling's registration and let two processes write one transcript.
+	# tests/test_continue_no_fallback.sh ties the two together.
+	_prune_foreign_cli_sessions() {   # $1 = sessions dir, $2 = this container's pidDomain
+		local dir="$1" mine="$2" f ep dom sid stem
+		[ -d "$dir" ] || return 0  # swallow-ok: no registry yet means nothing to prune
+		for f in "$dir"/*.json; do
+			[ -f "$f" ] || continue
+			ep="$(jq -r '.entrypoint // empty' "$f" 2>/dev/null)" || continue  # swallow-ok: an unreadable entry is left alone, never pruned on a guess
+			dom="$(jq -r '.pidDomain // empty' "$f" 2>/dev/null)" || continue  # swallow-ok: an unreadable entry is left alone, never pruned on a guess
+			[ "$ep" = "cli" ] && [ -n "$dom" ] && [ "$dom" != "$mine" ] || continue
+			sid="$(jq -r '.sessionId // "?"' "$f" 2>/dev/null)"
+			stem="$(basename "$f" .json)"
+			rm -f "$f" "$dir/$stem".*.key
+			echo "dridock: removed a stale registration of session $sid left by a previous container ($dom), so --continue can resume it (#128)" >&2
+		done
+	}
+	_MY_MID="$(cat /etc/machine-id 2>/dev/null)"
+	_MY_NS="$(readlink /proc/self/ns/pid 2>/dev/null)"
+	if [ -n "$_MY_MID" ] && [ -n "$_MY_NS" ]; then
+		_prune_foreign_cli_sessions /home/claude/.claude/sessions "linux:$_MY_MID:$_MY_NS"
+	else
+		echo "dridock: can't tell this container's session domain (machine-id or pid ns unreadable); not pruning stale session registrations (#128)" >&2
+	fi
 	_LAST_SID="$(_last_session_id)"
 	if [ -n "$_LAST_SID" ]; then
 		# Hedged on purpose: a _cron container runs claude -p in the same

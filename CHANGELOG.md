@@ -41,8 +41,13 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `--resume` among the start args (judged per argument, so a value that merely contains
   the text doesn't count) no longer also gets `--continue`. New
   `tests/test_continue_no_fallback.sh` (runs the real command with a stub `claude`).
-  Not in this fix: pruning the stale session registration that caused the refusal; a
-  planted stale entry didn't reproduce it, so the trigger isn't pinned down yet.
+  **The cause, found and fixed:** a dead container's session registration in
+  `~/.claude/sessions/` (`kind: bg`, e.g. a session moved to the background with remote
+  control) makes `--continue` skip or refuse that conversation. Proven by an A/B on
+  2026-11-17: with the entry present, `dridock start` continued an older conversation;
+  with it removed, the right one. The interactive start now removes `entrypoint: "cli"`
+  registrations whose pidDomain belongs to another container, naming each on stderr.
+  `-p`/SDK entries (`sdk-cli`) are never touched, since they may be a live sibling's.
 
 ### Changed — 6.0.0 (breaking)
 - **A project's directory name is free to change** (#123,
