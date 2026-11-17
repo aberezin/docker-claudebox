@@ -105,7 +105,7 @@ fi
 # Prefer the shared host-mounted drop dir; fall back to a per-project file if the
 # mount isn't present (older host wrapper, or the mount failed).
 APPEND=""
-if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then  # swallow-ok: a branch, not a discard: the failure arm says so and falls back loudly
+if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then
     echo "cb-report-bug: shared report dir unavailable ($DIR); falling back to ./.dridock/FRAMEWORK-BUGS.md" >&2
     DIR="$(pwd)/.dridock"; mkdir -p "$DIR"
     OUT="$DIR/FRAMEWORK-BUGS.md"; APPEND=1

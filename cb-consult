@@ -100,7 +100,7 @@ case "$cmd" in
         *) if [ -z "$title" ]; then title="$1"; else title="$title $1"; fi ;;
     esac; shift; done
     [ -n "$title" ] || usage
-    if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then  # swallow-ok: a branch, not a discard: the failure arm prints and exits 1
+    if ! mkdir -p "$DIR" 2>/dev/null || [ ! -w "$DIR" ]; then
         echo "cb-consult: consult dir unavailable ($DIR). Is this an up-to-date dridock harness? Falling back to cb-report-bug is an option." >&2; exit 1; fi
     slug="$(printf '%s' "$title" | tr '[:upper:] ' '[:lower:]-' | tr -cd 'a-z0-9-' | cut -c1-40)"
     id="$(_ts)-${PID}"; td="$DIR/$id"
@@ -158,7 +158,7 @@ case "$cmd" in
         fi
     done
     if [ "$found" = 0 ]; then
-        [ "$all" = 1 ] && echo "no consults across any project yet." || echo "no consults for this project yet."
+        if [ "$all" = 1 ]; then echo "no consults across any project yet."; else echo "no consults for this project yet."; fi
     else
         echo ""; echo "read one: cb-consult read <id>"
     fi ;;

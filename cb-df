@@ -19,8 +19,13 @@ if docker system df 2>/dev/null | sed 's/^/  /'; then :; else
     echo "  (docker not reachable)"; fi
 hr
 echo "biggest images:"
-docker images --format '{{.Size}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null \
-    | sort -h -r | head -8 | sed 's/^/  /' || echo "  (none / docker unavailable)"
+# #129 (B): "no images" and "docker unreachable" used to print the same line.
+if _imgs="$(docker images --format '{{.Size}}\t{{.Repository}}:{{.Tag}}' 2>/dev/null)"; then
+    if [ -n "$_imgs" ]; then printf '%s\n' "$_imgs" | sort -h -r | head -8 | sed 's/^/  /'
+    else echo "  (none)"; fi
+else
+    echo "  (docker not reachable)"
+fi
 hr
 # nudge if the overlay is getting tight
 use="$(df -P / 2>/dev/null | awk 'NR==2{gsub(/%/,"",$5); print $5}')"

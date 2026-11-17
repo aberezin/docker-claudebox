@@ -239,7 +239,11 @@ RUNNER
     echo "  stop   cb-browser watch-stop" ;;
 
   watch-stop)
-    docker rm -f "$WATCH_NAME" >/dev/null 2>&1 && echo "cb-browser: watch stopped" || echo "cb-browser: no watch running" ;;
+    # #129 (B): a failed rm used to read as "no watch running" even when docker
+    # itself was unreachable.
+    if docker rm -f "$WATCH_NAME" >/dev/null 2>&1; then echo "cb-browser: watch stopped"
+    elif docker info >/dev/null 2>&1; then echo "cb-browser: no watch running"
+    else echo "cb-browser: couldn't reach docker to stop the watch" >&2; exit 1; fi ;;
 
   cdp)
     url="${1:-}"; [ -n "$url" ] || _usage

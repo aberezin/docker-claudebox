@@ -12,7 +12,9 @@
 # A line needs `# swallow-ok: <reason>` (trailing, or on the line just above)
 # when it has any of:
 #   || true    || :    || return 0    || exit 0    || exec …
-#   2>/dev/null and || on the same line
+#   || echo / || printf (a silent value or message substitution)
+#   2>/dev/null and || on the same line, unless the line opens an if/elif/while
+#   condition (a branch, not a discard)
 # Branching forms (`|| {`, `|| continue`, `|| <assignment>`) aren't swallowing
 # and aren't gated; the #129 audit checks them by hand. A bare `# swallow-ok`
 # with no reason fails.
@@ -43,7 +45,9 @@ _swallow_pattern() {
     elif [[ "$code" =~ \|\|[[:space:]]*return[[:space:]]+0([[:space:];\)]|$) ]]; then echo "|| return 0"
     elif [[ "$code" =~ \|\|[[:space:]]*exit[[:space:]]+0([[:space:];\)]|$) ]];   then echo "|| exit 0"
     elif [[ "$code" =~ \|\|[[:space:]]*exec[[:space:]] ]]; then echo "|| exec"
-    elif [[ "$code" == *"2>/dev/null"* && "$code" == *"||"* ]]; then echo "2>/dev/null ... ||"
+    elif [[ "$code" =~ \|\|[[:space:]]*(echo|printf)([[:space:]]|$) ]]; then echo "|| echo/printf"
+    elif [[ "$code" == *"2>/dev/null"* && "$code" == *"||"* ]] \
+         && ! [[ "$code" =~ ^[[:space:]]*(if|elif|while)[[:space:]] ]]; then echo "2>/dev/null ... ||"
     fi
 }
 
@@ -79,11 +83,13 @@ echo "--- every error-discarding || in swept shell states why (#129) ---"
 # Self-test first: a regex that silently matches nothing would pass everything.
 local s
 for s in 'x || true' 'x || :' 'f() { [ -d d ] || return 0; }' '[ -n "$a" ] || exit 0' \
-         'claude --continue || exec claude' 'v=$(cmd 2>/dev/null || echo none)' 'x || true)' ; do
+         'claude --continue || exec claude' 'v=$(cmd 2>/dev/null || echo none)' 'x || true)' \
+         'v="$(cmd | sort)" || echo "(none)"' "x || printf '%s' fallback" 'y=$(a 2>/dev/null || b)' ; do
     [ -n "$(_swallow_pattern "$s")" ] && ok "self-test: flags  $s" || bad "self-test: MISSED  $s"
 done
 for s in 'x || { echo no >&2; exit 1; }' '[ -f "$f" ] || continue' 'x || _n=$((_n+1))' \
-         '# comment quoting || true' 'echo "a || b"' 'x || true_name' ; do
+         '# comment quoting || true' 'echo "a || b"' 'x || true_name' \
+         'if ! mkdir -p "$D" 2>/dev/null || [ ! -w "$D" ]; then' 'x || echoes_name' ; do
     [ -z "$(_swallow_pattern "$s")" ] && ok "self-test: ignores  $s" || bad "self-test: wrongly flags  $s"
 done
 _swallow_annotated 'x || true  # swallow-ok: no file is the normal case' '' && ok "self-test: trailing reason accepted" || bad "self-test: trailing reason rejected"
