@@ -60,7 +60,11 @@ export function cronHistorySlug(path: string): string {
 
 export async function checkWorkspaceMove(
   fs: FileSystem,
-  opts: { readonly stateRoot: string; readonly dataDir: string; readonly root: string; readonly binName: string },
+  opts: {
+    readonly stateRoot: string; readonly dataDir: string; readonly root: string; readonly binName: string;
+    /** `start` has exited before anything writes; `cron` is already running (#133, Bear review). */
+    readonly caller: "start" | "cron";
+  },
 ): Promise<MoveCheck> {
   const record = `${opts.stateRoot}/last-workspace`;
   const prev = (await fs.readTextOrUndefined(record))?.trim();
@@ -97,18 +101,40 @@ export async function checkWorkspaceMove(
   if (dirs.length === 0) return { kind: "ok" };
 
   const plural = (n: number): string => `${n} entr${n === 1 ? "y" : "ies"}`;
-  let message = `❌ this project moved: ${prev} → ${opts.root}\n`;
+  const cron = opts.caller === "cron";
+
+  // ENTRIES, not the directory (#133, Bear review). `mv <old> <new>` is a
+  // rename only while <new> doesn't exist; once it does, mv puts <old> INSIDE
+  // it as <new>/<old-slug>, silently and with rc 0 — measured — where neither
+  // Claude's --continue nor cron's _previous_run_dir looks. The "new one does
+  // not exist" check above holds when this RUNS, not when the human ACTS: on
+  // the cron path cron has already launched and the first job to fire creates
+  // <new>, and even on `start` the user may have started again meanwhile. The
+  // entries form is correct either way, and run dirs / transcripts are named
+  // by timestamp or session id, so they don't collide.
+  const adopt = (d: MovedDir): string => `mkdir -p '${d.to}' && mv '${d.from}'/* '${d.to}'/`;
+
+  let message = cron
+    ? `⚠️  this project moved: ${prev} → ${opts.root}\n`
+    : `❌ this project moved: ${prev} → ${opts.root}\n`;
   for (const d of dirs) {
     message += d.what === "sessions"
-      ? `   Claude keeps session history by directory, so the claudebot would start with none.\n`
+      ? `   Claude keeps session history by directory, so a session here starts with none.\n`
         + `   The old history (${plural(d.entries)}) is still here:\n`
       : `   cron keys each job's history by directory too, and that history is a scheduled\n`
         + `   job's only memory of its last run (cron jobs get no --continue). The old\n`
         + `   history (${plural(d.entries)}) is still here:\n`;
-    message += `     ${d.from}\n`
-      + `   To keep it, move it to the new path's slug, then start again:\n`
-      + `     mv '${d.from}' '${d.to}'\n`;
+    message += `     ${d.from}\n`;
+    message += cron
+      ? `   cron has STARTED, so jobs are already writing under the new slug. To keep the\n`
+        + `   old history, stop cron, move its entries, then start cron again:\n`
+        + `     DRIDOCK_MODE_CRON=1 ${opts.binName} stop\n`
+        + `     ${adopt(d)}\n`
+      : `   To keep it, move its entries into the new path's slug, then start again:\n`
+        + `     ${adopt(d)}\n`;
   }
-  message += `   To start fresh instead, just run '${opts.binName} start' again (this is only said once).\n`;
+  message += cron
+    ? `   To let it start fresh instead, do nothing — this is only said once.\n`
+    : `   To start fresh instead, just run '${opts.binName} start' again (this is only said once).\n`;
   return { kind: "moved", dirs, message };
 }

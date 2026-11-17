@@ -55,18 +55,21 @@ python3 "$tmp/slug.py" "${inputs[@]}" > "$tmp/py.out" 2>"$tmp/py.err" || {
     rm -rf "$tmp"; echo "  cron slug mirror: $PASS passed, $FAIL failed"; return 1
 }
 
-# TS side, importing the real module.
-cat > "$tmp/slug.ts" <<'TS'
-import { cronHistorySlug } from "./dridock-ts/src/services/WorkspaceMoveReporter.ts";
-for (const a of Bun.argv.slice(2)) console.log(cronHistorySlug(a));
-TS
-cp "$tmp/slug.ts" "$REPO/.cron-slug-probe.ts"
-(cd "$REPO" && bun ./.cron-slug-probe.ts "${inputs[@]}") > "$tmp/ts.out" 2>"$tmp/ts.err" || {
+# TS side, importing the real module by ABSOLUTE path so the probe stays in
+# $tmp. The first version copied it into the repo root and removed it on both
+# exits with no trap: a Ctrl-C or a bun crash would leave an untracked
+# .cron-slug-probe.ts in the checkout, which is #114's class (a stray from a
+# test run in Alan's real working tree, where it broke an install nobody could
+# see). bun resolves an absolute import from $tmp, so nothing is written into
+# the repo and `rm -rf "$tmp"` is the only cleanup there is (Bear, #133 review).
+{
+    printf 'import { cronHistorySlug } from "%s/dridock-ts/src/services/WorkspaceMoveReporter.ts";\n' "$REPO"
+    printf 'for (const a of Bun.argv.slice(2)) console.log(cronHistorySlug(a));\n'
+} > "$tmp/slug.ts"
+(cd "$tmp" && bun ./slug.ts "${inputs[@]}") > "$tmp/ts.out" 2>"$tmp/ts.err" || {
     bad "bun couldn't run cronHistorySlug: $(head -1 "$tmp/ts.err")"
-    rm -f "$REPO/.cron-slug-probe.ts"; rm -rf "$tmp"
-    echo "  cron slug mirror: $PASS passed, $FAIL failed"; return 1
+    rm -rf "$tmp"; echo "  cron slug mirror: $PASS passed, $FAIL failed"; return 1
 }
-rm -f "$REPO/.cron-slug-probe.ts"
 
 if diff -q "$tmp/py.out" "$tmp/ts.out" >/dev/null 2>&1; then
     ok "all ${#inputs[@]} inputs slug identically in cron.py and cronHistorySlug"

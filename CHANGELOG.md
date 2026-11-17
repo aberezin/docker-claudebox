@@ -101,9 +101,13 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   first silence the other), and it is wired into the cron path as well as `start`. `start`
   still exits 1; the cron path **warns and keeps launching**, because a daemon that
   refuses to start runs no jobs at all and nobody is at the terminal to read a refusal.
-  New `tests/test_cron_slug_mirror.sh` runs cron.py's `slugify()` and the TS
-  `cronHistorySlug()` over the same inputs and diffs them — the two rules differ, and
-  using one for the other points the check at a directory that never existed.
+  The printed command moves the old directory's **entries** (`mkdir -p <new> && mv
+  <old>/* <new>/`): `mv <old> <new>` is a rename only while `<new>` is absent, and once
+  it exists mv nests the old history inside it with rc 0 and no complaint — which on the
+  cron path happens as soon as the first job fires. New `tests/test_cron_slug_mirror.sh`
+  runs cron.py's `slugify()` and the TS `cronHistorySlug()` over the same inputs and
+  diffs them — the two rules differ, and using one for the other points the check at a
+  directory that never existed.
 
 ### Changed — 6.0.0 (breaking)
 - **The `.claudebox/` → `.dridock/` migration path is removed** (#135), as

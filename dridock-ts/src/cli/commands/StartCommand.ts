@@ -232,6 +232,7 @@ mode (-p) they are validated against an allowlist first.
     // ── the project moved? Claude's session history didn't (#123) ─────
     const moved = await checkWorkspaceMove(ctx.fs, {
       stateRoot: await machine.projectRoot(id), dataDir, root: project.root, binName: ctx.binName,
+      caller: "start",
     });
     if (moved.kind === "moved") {
       ctx.stderr.write(moved.message);

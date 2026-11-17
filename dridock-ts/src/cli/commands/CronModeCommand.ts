@@ -166,6 +166,7 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
     // in-container drift note: for the unattended role, loud beats fatal.
     const move = await checkWorkspaceMove(ctx.fs, {
       stateRoot: await machine.projectRoot(id), dataDir, root: project.root, binName: ctx.binName,
+      caller: "cron",
     });
     if (move.kind === "moved") ctx.stderr.write(move.message);
     const adoption = await new AdoptionService(docker, ctx.fs).adopt({

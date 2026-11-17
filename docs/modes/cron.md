@@ -2,7 +2,7 @@
 
 Run scheduled Claude jobs from a YAML cron file. Each job has a cron expression and a multiline instruction. Output streams to `~/.claude/cron/history/<workspace-slug>/<YYYYMMDD-HHMMSS>-<job-name>/` as `activity.jsonl` (Claude's stream-json output) alongside `stderr.log` and `meta.json`.
 
-**The slug is the workspace path**, so renaming or moving the project directory starts every job's history over — and because cron jobs get no `--continue`, that history hint is a job's only memory of its last run. Starting cron after a move says so and gives the exact `mv` to adopt the old history, then **starts anyway** (#133): a cron daemon that refused to start would run no jobs at all, which is worse. The message is printed once per move; see [path-independence](../design/path-independence.md#the-mount-is-the-exception).
+**The slug is the workspace path**, so renaming or moving the project directory starts every job's history over — and because cron jobs get no `--continue`, that history hint is a job's only memory of its last run. Starting cron after a move says so and gives the exact command to adopt the old history — stop cron, move the old directory's *entries* into the new slug, start cron again — then **starts anyway** (#133): a cron daemon that refused to start would run no jobs at all, which is worse. The message is printed once per move; see [path-independence](../design/path-independence.md#the-mount-is-the-exception).
 
 1. **Write a cron yaml** (see `cron.yml.example`):
 

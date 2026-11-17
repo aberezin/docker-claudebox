@@ -4,7 +4,8 @@ import { InMemoryFileSystem } from "../test/fakes/InMemoryFileSystem.ts";
 
 const STATE = "/x/projects/abc";
 const DATA = "/x/projects/abc/dot/.claude";
-const opts = (root: string) => ({ stateRoot: STATE, dataDir: DATA, root, binName: "dridock" });
+const opts = (root: string, caller: "start" | "cron" = "start") =>
+  ({ stateRoot: STATE, dataDir: DATA, root, binName: "dridock", caller });
 
 describe("sessionSlug", () => {
   test("every non-alphanumeric character becomes -", () => {
@@ -36,7 +37,7 @@ describe("checkWorkspaceMove (#123)", () => {
     if (r.kind === "moved") {
       expect(r.message).toContain("/u/old → /u/new");
       expect(r.message).toContain("(2 entries)");
-      expect(r.message).toContain(`mv '${DATA}/projects/-u-old' '${DATA}/projects/-u-new'`);
+      expect(r.message).toContain(`mkdir -p '${DATA}/projects/-u-new' && mv '${DATA}/projects/-u-old'/* '${DATA}/projects/-u-new'/`);
     }
     // The new path is recorded first, so the next start proceeds.
     expect(await checkWorkspaceMove(fs, opts("/u/new"))).toEqual({ kind: "ok" });
@@ -91,7 +92,7 @@ describe("checkWorkspaceMove: cron history (#133)", () => {
     if (r.kind === "moved") {
       expect(r.dirs.map((d) => d.what)).toEqual(["cron-history"]);
       expect(r.message).toContain("only memory of its last run");
-      expect(r.message).toContain(`mv '${DATA}/cron/history/u_old' '${DATA}/cron/history/u_new'`);
+      expect(r.message).toContain(`mv '${DATA}/cron/history/u_old'/* '${DATA}/cron/history/u_new'/`);
       // Not the session wording: there is no session history here.
       expect(r.message).not.toContain("the claudebot would start with none");
     }
@@ -106,8 +107,8 @@ describe("checkWorkspaceMove: cron history (#133)", () => {
     expect(r.kind).toBe("moved");
     if (r.kind === "moved") {
       expect(r.dirs.map((d) => d.what)).toEqual(["sessions", "cron-history"]);
-      expect(r.message).toContain(`mv '${DATA}/projects/-u-old'`);
-      expect(r.message).toContain(`mv '${DATA}/cron/history/u_old'`);
+      expect(r.message).toContain(`mv '${DATA}/projects/-u-old'/*`);
+      expect(r.message).toContain(`mv '${DATA}/cron/history/u_old'/*`);
       expect(r.message.match(/this project moved/g)?.length).toBe(1);
     }
   });
@@ -129,5 +130,48 @@ describe("checkWorkspaceMove: cron history (#133)", () => {
     fs.seed(`${DATA}/cron/history/u_old/run1/activity.jsonl`, "{}");
     const r = await checkWorkspaceMove(fs, opts("/u/new"));
     expect(r.kind === "moved" && r.dirs.length).toBe(2);
+  });
+});
+
+describe("checkWorkspaceMove: the printed command survives the gap between check and act (#133, Bear review)", () => {
+  // `mv OLD NEW` is a rename only while NEW does not exist. Once it does, mv
+  // puts OLD *inside* NEW as NEW/old-slug, with rc 0 and no complaint — and
+  // nothing looks there. On the cron path cron has already launched, so the
+  // first job to fire creates NEW; on start, the user may have started again.
+  test("entries form, not a directory rename, with mkdir -p so it works either way", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed(`${STATE}/last-workspace`, "/u/old\n");
+    fs.seed(`${DATA}/cron/history/u_old/run1/activity.jsonl`, "{}");
+    const r = await checkWorkspaceMove(fs, opts("/u/new", "cron"));
+    expect(r.kind).toBe("moved");
+    if (r.kind === "moved") {
+      expect(r.message).toContain(`mkdir -p '${DATA}/cron/history/u_new' && mv '${DATA}/cron/history/u_old'/* '${DATA}/cron/history/u_new'/`);
+      // The form that nests once the destination exists must be gone.
+      expect(r.message).not.toContain(`mv '${DATA}/cron/history/u_old' '${DATA}/cron/history/u_new'`);
+    }
+  });
+
+  test("cron wording: a warning, stop-cron-first, and no 'run start again'", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed(`${STATE}/last-workspace`, "/u/old\n");
+    fs.seed(`${DATA}/cron/history/u_old/run1/activity.jsonl`, "{}");
+    const r = await checkWorkspaceMove(fs, opts("/u/new", "cron"));
+    if (r.kind !== "moved") throw new Error("expected moved");
+    expect(r.message.startsWith("⚠️")).toBe(true);        // rc 0 on this path
+    expect(r.message).toContain("cron has STARTED");
+    expect(r.message).toContain("DRIDOCK_MODE_CRON=1 dridock stop");
+    expect(r.message).not.toContain("just run 'dridock start' again");
+    expect(r.message).toContain("this is only said once");
+  });
+
+  test("start wording keeps the ❌ and its own remedy", async () => {
+    const fs = new InMemoryFileSystem();
+    fs.seed(`${STATE}/last-workspace`, "/u/old\n");
+    fs.seed(`${DATA}/projects/-u-old/s1.jsonl`, "{}");
+    const r = await checkWorkspaceMove(fs, opts("/u/new", "start"));
+    if (r.kind !== "moved") throw new Error("expected moved");
+    expect(r.message.startsWith("❌")).toBe(true);
+    expect(r.message).toContain("just run 'dridock start' again");
+    expect(r.message).not.toContain("cron has STARTED");
   });
 });
