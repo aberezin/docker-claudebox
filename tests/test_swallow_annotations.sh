@@ -24,6 +24,12 @@
 # fallback would pass with "# swallow-ok: falls back to a fresh session". The
 # audit table on #129 is what classifies; this only holds the line.
 #
+# WHAT IT CAN'T SEE: the patterns are ||-keyed, so `x="$(cmd 2>/dev/null)"`,
+# the same "empty" vs "couldn't tell" collapse with no || at all, passes
+# untouched. #131 (cb-browser _pre) and entrypoint.sh's resolv.conf backup
+# (#129 review) were both that shape. Keep a read's rc when an empty result
+# would drive a write or a delete.
+#
 # RATCHET: only files in SWEPT are gated. A group is added once its sites are
 # classified and annotated (entrypoint.sh in a commit of its own). Pure grep: no
 # image, no docker, no token.

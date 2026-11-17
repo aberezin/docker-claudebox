@@ -214,7 +214,7 @@ _stop_fetcher_and_wait() {
 
 _spawn_fetcher=0
 if [ -f "$_pid" ]; then
-    _pidval="$(cat "$_pid" 2>/dev/null || true)"  # swallow-ok: an unreadable pid file reads as "no fetcher", which respawns one below
+    _pidval="$(cat "$_pid" 2>/dev/null || true)"  # swallow-ok: unreadable reads as "no fetcher" and respawns; KNOWN GAP (Arfy, #129 review): a LIVE fetcher whose pid file is lost gets a duplicate, since nothing pgreps for it despite the header comment
     if _check_fetcher_alive "$_pidval"; then
         # Alive and cmdline matches — but is it running CURRENT code? (#71)
         # Host-only — see the _version_check_enabled rationale above.

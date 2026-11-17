@@ -50,8 +50,11 @@ _hex_le_to_ip() {
 }
 
 _repair_dns() {
-	local backup cand ip ok=0
-	backup="$(cat /etc/resolv.conf 2>/dev/null)"
+	local backup cand ip ok=0 have_backup=0
+	# #129 (Arfy): keep WHETHER the read worked. "empty file" and "couldn't
+	# read it" are both "" in $backup, and the restore below must not write a
+	# blank resolv.conf over one it never managed to read.
+	if backup="$(cat /etc/resolv.conf 2>/dev/null)"; then have_backup=1; fi
 
 	# Candidates, most-principled first: the actual default gateway(s) from the
 	# route table, then the values colima uses in practice. Gateways come first
@@ -75,7 +78,11 @@ _repair_dns() {
 
 	if [ "$ok" != 1 ]; then
 		# Restore rather than leave a container pointed at the last thing we tried.
-		printf '%s\n' "$backup" > /etc/resolv.conf 2>/dev/null || true  # swallow-ok: the loud "DNS is unreachable" lines follow either way
+		if [ "$have_backup" = 1 ]; then
+			printf '%s\n' "$backup" > /etc/resolv.conf 2>/dev/null || true  # swallow-ok: the loud "DNS is unreachable" lines follow either way
+		else
+			echo "dridock: couldn't read the original /etc/resolv.conf, so it can't be restored; it now names the last candidate tried." >&2
+		fi
 		echo "dridock: DNS is unreachable and no local resolver answered (tried: ${cands[*]})." >&2
 		echo "  Name resolution will fail inside this container. Routing may still be fine —" >&2
 		echo "  test with: curl --resolve <host>:443:<ip> https://<host>/" >&2
