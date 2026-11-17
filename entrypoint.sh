@@ -1580,7 +1580,10 @@ else
 	}
 	_LAST_SID="$(_last_session_id)"
 	if [ -n "$_LAST_SID" ]; then
-		_RESUME_HINT="dridock start --resume $_LAST_SID"
+		# Hedged on purpose: a _cron container runs claude -p in the same
+		# workspace over the same ~/.claude, so the newest transcript may be a
+		# cron job's rather than the conversation the user wants.
+		_RESUME_HINT="dridock start --resume $_LAST_SID   (the newest transcript for this workspace; 'claude --resume' lists them)"
 	else
 		_RESUME_HINT="dridock start --resume <session-id>   (list them with: claude --resume)"
 	fi
