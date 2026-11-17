@@ -73,6 +73,22 @@ _ensure_net() { docker network inspect "$NET" >/dev/null 2>&1 || docker network 
 # Empty => bridge/VM not ready.
 _vm_ip() { printf '%s' "${DRIDOCK_VM_IP:-}"; }
 
+# Page-target ids from the CDP bridge on stdout, one per line, or rc 1 when the
+# read can't be trusted. TWO failures with one meaning: curl couldn't reach the
+# bridge, and jq couldn't parse what came back. Neither is "there are no tabs",
+# and collapsing them onto an empty string is what #131 was: cleanup read ""
+# as "nothing was open before the run" and closed every tab it found after it,
+# including the human's own and the warm-up tab below. An empty stdout with
+# rc 0 is the only thing that means "the bridge answered: no page targets".
+_cdp_page_ids() {
+    local _json
+    # `if !` rather than `|| return 1` so #129's gate doesn't read an error
+    # being PROPAGATED as one being discarded (its catch-all is
+    # "2>/dev/null and || on one line", exempt after if/elif/while).
+    if ! _json="$(curl -sf --max-time 3 "$1/json/list" 2>/dev/null)"; then return 1; fi
+    if ! printf '%s' "$_json" | jq -r '.[] | select(.type=="page") | .id' 2>/dev/null; then return 1; fi
+}
+
 # Ensure the debug Chrome has at least one page target before Playwright attaches.
 # Playwright's chromium.connectOverCDP against a stock (non-Playwright) Chrome falls
 # through to Browser.setDownloadBehavior when it finds zero pages, which real Chrome
@@ -83,9 +99,9 @@ _vm_ip() { printf '%s' "${DRIDOCK_VM_IP:-}"; }
 # already exists. Args: $1 = _cdp_base (e.g. http://192.168.64.1:9223, no trailing slash).
 _cdp_ensure_page() {
     local _base="$1" _pages
-    _pages="$(curl -sf --max-time 3 "$_base/json/list" 2>/dev/null \
-        | (jq -r '.[] | select(.type=="page") | .id' 2>/dev/null || true))" || _pages=""  # swallow-ok: no reachable bridge or no pages both mean "warm one up"; the next lines warn if that fails too
-    [ -n "${_pages:-}" ] && return 0
+    # Unreachable, unparseable and empty all mean the same thing HERE: warm one
+    # up, and the lines below say so if that fails too.
+    if _pages="$(_cdp_page_ids "$_base")" && [ -n "$_pages" ]; then return 0; fi
     if curl -sf --max-time 3 -X PUT "$_base/json/new?about:blank" >/dev/null 2>&1 \
        || curl -sf --max-time 3      "$_base/json/new?about:blank" >/dev/null 2>&1; then
         echo "cb-browser: warmed empty debug Chrome with about:blank (Playwright connectOverCDP requires a page target)" >&2
@@ -173,16 +189,25 @@ RUNNER
     # fail with "Browser.setDownloadBehavior: not supported". Fire BEFORE _pre so the
     # warm tab is inside _pre and cleanup preserves it — no accumulation across runs.
     _cdp_ensure_page "$_cdp_base"
-    _pre="$(curl -sf --max-time 3 "$_cdp_base/json/list" 2>/dev/null \
-        | (jq -r '.[] | select(.type=="page") | .id' 2>/dev/null || true))" || _pre=""  # swallow-ok: C: a failed read here empties _pre and cleanup then closes every tab. Tracked in #131
+    # #131: keep WHETHER this read worked, not just its result. _pre_ok=0 and
+    # _pre="" are different states and cleanup must not treat them alike.
+    if _pre="$(_cdp_page_ids "$_cdp_base")"; then _pre_ok=1; else _pre_ok=0; _pre=""; fi
     _cleanup() {
       [ "${CB_BROWSER_CDP_KEEP:-0}" = "1" ] && { echo "cb-browser script-cdp: cleanup skipped (CB_BROWSER_CDP_KEEP=1)" >&2; return 0; }
-      _post="$(curl -sf --max-time 3 "$_cdp_base/json/list" 2>/dev/null \
-          | (jq -r '.[] | select(.type=="page") | .id' 2>/dev/null || true))"  # swallow-ok: an empty _post skips cleanup with a stderr line just below
-      if [ -z "${_post:-}" ]; then
+      # #131: no trustworthy "before" means the diff can't be computed, so
+      # cleanup does NOTHING rather than guess. Fails closed on an unset
+      # _pre_ok as well, though the trap is installed after it is assigned.
+      if [ "${_pre_ok:-0}" != 1 ]; then
+        echo "cb-browser script-cdp: cleanup skipped — couldn't list the tabs open BEFORE the run, so a tab this script opened can't be told from one that was already there (#131). Anything it left open is still open; close it by hand or re-run with the bridge reachable." >&2
+        return 0
+      fi
+      if ! _post="$(_cdp_page_ids "$_cdp_base")"; then
         echo "cb-browser script-cdp: cleanup skipped (CDP bridge unreachable — check 'dridock browser-bridge up' on the Mac)" >&2
         return 0
       fi
+      # The bridge answered with no page targets: nothing to close, and saying
+      # "unreachable" here (as this did before #131) was a false diagnosis.
+      [ -z "$_post" ] && return 0
       _new="$(comm -23 <(printf '%s\n' "$_post" | sort -u) <(printf '%s\n' "$_pre" | sort -u))"
       [ -z "$_new" ] && return 0
       _n=0; _f=0; while IFS= read -r _id; do

@@ -53,6 +53,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stderr, which is visible in `docker logs`.
   `-p`/SDK entries (`sdk-cli`) are never touched, since they may be a live sibling's.
 
+- **`cb-browser script-cdp` cleanup no longer closes tabs it can't account for** (#131).
+  Both `/json/list` reads collapsed a failed read onto the empty string, so an unreachable
+  bridge, a 3s timeout or a jq parse error was indistinguishable from "no tabs were open
+  before the run" — and cleanup then closed every page target it found afterwards: the
+  human's own tabs in the debug Chrome and the `about:blank` warm-up tab, whose loss also
+  made the next `connectOverCDP` fail with `Browser.setDownloadBehavior: not supported`.
+  Reads now go through one `_cdp_page_ids` helper with a trustworthy rc; cleanup skips with
+  a stderr line when the "before" read failed, and an empty answer from a reachable bridge
+  is no longer reported as "bridge unreachable". New `tests/test_cdp_cleanup_tristate.sh`
+  (10 cases; runs the real `cb-browser` with `curl`/`docker` stubbed).
+
 ### Changed — 6.0.0 (breaking)
 - **A project's directory name is free to change** (#123,
   [path-independence.md](docs/design/path-independence.md)). Containers are named

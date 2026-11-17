@@ -221,6 +221,13 @@ with the CDP wiring done for you and a safety net against the tab-lifecycle foot
   an explicit `page.close()` / `Target.closeTarget`. Filter is `type === "page"`, so service
   workers, iframes, background pages, and workers are never touched. **Opt-out**:
   `CB_BROWSER_CDP_KEEP=1` (env var — a flag would collide with pass-through `args...`).
+  **If either snapshot can't be read, cleanup closes nothing** (#131). An unreachable
+  bridge, a 3s timeout or an unparseable answer is not the same fact as "no tabs were
+  open", and treating the two alike closed every tab in the debug Chrome — the human's
+  own and the warm-up tab, which then broke the *next* `connectOverCDP`. A skip prints
+  one stderr line saying which read failed; anything the script left open stays open and
+  is yours to close. `_cdp_page_ids` is the single reader, and an empty list with a
+  zero rc is the only thing that means "the bridge answered: no page targets".
 - **The debug Chrome is dedicated** (see §Security) — don't open tabs in it manually while
   a `script-cdp` run is in flight; they'll be included in "opened during the run" and closed
   on cleanup. Use your normal Chrome for casual browsing.
