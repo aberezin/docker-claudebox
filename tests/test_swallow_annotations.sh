@@ -30,6 +30,9 @@
 # (#129 review) were both that shape. Keep a read's rc when an empty result
 # would drive a write or a delete.
 #
+# A NEW shell file is not covered until it is listed below; add it when you
+# create it (.githooks/pre-push, #137, was listed from birth for that reason).
+#
 # RATCHET: only files in SWEPT are gated. A group is added once its sites are
 # classified and annotated (entrypoint.sh in a commit of its own). Pure grep: no
 # image, no docker, no token.
@@ -44,7 +47,7 @@ SWALLOW_SWEPT=(
     features/python/on.sh features/python/off.sh features/python/check.sh
     features/typescript/on.sh features/typescript/off.sh features/typescript/check.sh
     features/web-scaffolders/on.sh features/web-scaffolders/off.sh features/web-scaffolders/check.sh
-    install.sh .githooks/install.sh .githooks/pre-commit test.sh run-e2e-cron-telegram.sh
+    install.sh .githooks/install.sh .githooks/pre-commit .githooks/pre-push test.sh run-e2e-cron-telegram.sh
     .claude/hooks/consult-session-start.sh .claude/hooks/githooks-session-start.sh
     .claude/hooks/lib/team-inbox-watch.sh .claude/hooks/team-watch-session-end.sh
     .claude/hooks/team-watch-session-start.sh .claude/hooks/team-watch-user-prompt-submit.sh
