@@ -4,7 +4,7 @@ import type { Docker } from "../infra/Docker.ts";
 export type RefreshOutcome =
   | { readonly kind: "current" }                          // absent, no image to compare, or same image
   | { readonly kind: "recreated" }                        // stale and stopped: removed, the run path recreates it
-  | { readonly kind: "running"; readonly from: string; readonly to: string }   // stale but LIVE: left alone (#126)
+  | { readonly kind: "running"; readonly status: string; readonly from: string; readonly to: string }   // stale but LIVE: left alone (#126)
   | { readonly kind: "remove-failed"; readonly rc: number; readonly from: string; readonly to: string };
 
 /**
@@ -26,6 +26,10 @@ export type RefreshOutcome =
  * refused by the daemon (`remove-failed`) rather than killed. Same rule as
  * #123's adoption: never recreate a running container.
  */
+/** `.State.Status` values with processes in them: paused ones are SIGSTOP'd,
+ *  not gone, and restarting ones are between lives (Arfy, #126 review). */
+const LIVE_STATES = new Set(["running", "paused", "restarting"]);
+
 export class ContainerRefresher {
   constructor(private readonly docker: Docker) {}
 
@@ -36,7 +40,9 @@ export class ContainerRefresher {
     if (identity === undefined) return { kind: "current" };
     if (container.imageId === identity.id) return { kind: "current" };
     const from = container.imageId, to = identity.id;
-    if (container.status === "running") return { kind: "running", from, to };
+    if (container.status !== undefined && LIVE_STATES.has(container.status)) {
+      return { kind: "running", status: container.status, from, to };
+    }
     const rc = await this.docker.containerRemoveStopped(context, containerName);
     return rc === 0 ? { kind: "recreated" } : { kind: "remove-failed", rc, from, to };
   }
@@ -48,9 +54,9 @@ export function shortId(id: string): string {
 }
 
 /** The #126 refusal, for a stale container that is running (or started meanwhile). */
-export function staleRunningMessage(name: string, o: { from: string; to: string; rc?: number }, binName: string): string {
+export function staleRunningMessage(name: string, o: { from: string; to: string; rc?: number; status?: string }, binName: string): string {
   const why = o.rc === undefined
-    ? `is running`
+    ? `is ${o.status ?? "running"}`
     : `couldn't be removed (docker rm rc ${o.rc}; it may have started since this run looked)`;
   return `❌ ${name} ${why} on an older image (${shortId(o.from)}; the project image is now ${shortId(o.to)}).\n`
     + `   Not stopping a live session to update it, so nothing was started.\n`

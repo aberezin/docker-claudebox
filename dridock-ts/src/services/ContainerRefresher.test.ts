@@ -24,7 +24,17 @@ describe("ContainerRefresher.maybeRefresh", () => {
     docker.seedContainer("cx", "c1", { name: "c1", imageId: "sha256:OLD", status: "running" });
     docker.seedImageIdentity("cx", "img", { id: "sha256:NEW", labels: {} });
     expect(await new ContainerRefresher(docker).maybeRefresh("cx", "c1", "img"))
-      .toEqual({ kind: "running", from: "sha256:OLD", to: "sha256:NEW" });
+      .toEqual({ kind: "running", status: "running", from: "sha256:OLD", to: "sha256:NEW" });
+    expect(docker.removals).toEqual([]);
+  });
+
+  test.each(["paused", "restarting"])("#126: stale and %s → live too, on the primary path (not the rm backstop)", async (st) => {
+    const docker = new InMemoryDocker();
+    docker.seedContainer("cx", "c1", { name: "c1", imageId: "sha256:OLD", status: st });
+    docker.seedImageIdentity("cx", "img", { id: "sha256:NEW", labels: {} });
+    const r = await new ContainerRefresher(docker).maybeRefresh("cx", "c1", "img");
+    expect(r).toEqual({ kind: "running", status: st, from: "sha256:OLD", to: "sha256:NEW" });
+    expect(staleRunningMessage("c1", r as { from: string; to: string; status: string }, "dridock")).toContain(`c1 is ${st} on an older image`);
     expect(docker.removals).toEqual([]);
   });
 

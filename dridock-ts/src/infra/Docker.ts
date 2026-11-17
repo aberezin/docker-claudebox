@@ -130,8 +130,17 @@ export interface Docker {
   containerRemoveStopped(context: string, containerName: string): Promise<number>;
 
   /**
-   * `docker rm -f <container>` — force-remove. No-op if absent. Used by
-   * cb_refresh_container after label mismatch.
+   * `docker rm -f <container>` — force-remove, KILLING it if it runs. No-op if
+   * absent.
+   *
+   * NO PRODUCTION CALLERS since #126, deliberately: its last two (the image
+   * refresh and the #80 data-dir move) killed live claudebots mid-turn. Reach
+   * for `containerRemoveStopped` instead, which the daemon refuses on a live
+   * container. Forcing is justified only when the caller has itself just
+   * established that nothing is using the container, or the user asked for
+   * exactly that (a `destroy`-style verb), and the call site should say which.
+   * Kept because the fake and the anonymous-volume notes in
+   * ContainerRuntime.ts / DotExclusions.ts refer to it.
    */
   containerRemove(context: string, containerName: string): Promise<void>;
 
