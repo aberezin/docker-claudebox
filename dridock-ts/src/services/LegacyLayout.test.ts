@@ -8,6 +8,11 @@ test("#135: the .claudebox refusal names the manual steps and the 5.x way out", 
   expect(out).toContain("/.claudebox/ lines in /u/proj/.gitignore");
   expect(out).toContain("/Users/a/.config/claudebox/");
   expect(out).toContain("dridock 5.x");
+  // #32's two guards, which lived in the removed StateDirsMigrator (Arfy, #135).
+  expect(out).toContain("stop the debug Chrome (on the Mac: dridock browser-bridge down)");
+  expect(out).toContain("keep both copies");
+  expect(out).toContain("never overwrite");
+  expect(out).toContain("never merge two");
   // It must not send the user to a verb that no longer exists in this binary
   // without saying where that verb lives.
   expect(out).not.toMatch(/Convert it:\s+dridock migrate/);
