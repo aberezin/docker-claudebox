@@ -80,11 +80,34 @@ local CLEAN="$tmp/plain/repo"
 mkdir -p "$CLEAN/tests/.tmp-fixture"
 printf '%s\n' "$MARK" > "$CLEAN/entrypoint.sh"
 printf '%s\n' "$MARK" > "$CLEAN/tests/.tmp-fixture/leftover.sh"
-local chits; RREAL="$CLEAN" chits=$(RREAL="$CLEAN" _dd_grep -rl "$MARK" "$CLEAN")
+# The override goes INSIDE the command substitution's subshell. Written as
+# `RREAL="$CLEAN" chits=$(…)` it is an assignment STATEMENT, not a command
+# prefix, so it reset RREAL for every case below this one — which is what made
+# case 7b read the wrong fixture and report the opposite of the truth.
+local chits; chits=$( RREAL="$CLEAN"; _dd_grep -rl "$MARK" "$CLEAN" )
 printf '%s\n' "$chits" | grep -qF "$CLEAN/entrypoint.sh" \
     && ok "control: an ordinary repo path reports its code" || bad "control: an ordinary repo path reported nothing"
 printf '%s\n' "$chits" | grep -qF 'tests/.tmp-fixture' \
     && bad "control: the fixture leaked" || ok "control: its fixtures are excluded"
+
+# 7b. The filter's PRECONDITION, and the check that the caller meets it
+#     (#155, Bear's review). The anchors are canonical paths, but grep echoes
+#     hits back in whatever shape its root argument had: given an uncanonical
+#     root like "$REPO/tests/..", every hit becomes "…/tests/../X" and no
+#     anchor can match it. Rather than pretend the helper canonicalizes, pin
+#     the limitation AND pin that test_deprecation_deadlines canonicalizes
+#     $REPO so it never hands over a root of that shape. Nothing was broken
+#     today only because no row searches tests/; the first one that did would
+#     have got no exclusions at all.
+local uncanon ucanon_hits
+uncanon="$RREAL/tests/.."
+ucanon_hits=$(_dd_grep -rl "$MARK" "$uncanon")
+printf '%s\n' "$ucanon_hits" | grep -qF '/tests/logs/' \
+    && ok "precondition: an UNcanonical root defeats the anchors (which is why the caller must canonicalize)" \
+    || bad "an uncanonical root was filtered correctly — if the helper now canonicalizes, this case and the next are obsolete and should go"
+grep -qE '^local REPO; REPO="\$\(cd ' "$REPO/tests/test_deprecation_deadlines.sh" \
+    && ok "test_deprecation_deadlines canonicalizes \$REPO, so its rows never produce such a root" \
+    || bad "test_deprecation_deadlines does not canonicalize \$REPO (#155): its anchored exclusions cannot fire"
 
 # 8. The unanchored form must not come back — checked against CODE, not prose.
 #    The first version of this case grepped the whole file and matched the WHY

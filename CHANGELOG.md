@@ -43,8 +43,12 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `DEBUG` reads as removed with the code still present. The exclusions are now anchored to the
   repo's own resolved path and literal (`-F`) — the old `.` in `tests/.tmp` matched any
   character, so `tests/Xtmp` was excluded too — extracted behind `# >>> dd_grep (#155)` markers
-  and driven by a new `tests/test_deadline_filter.sh` (9 cases) whose repo fixture is itself
-  under `tests/.tmp`, the case that was broken (Arfy).
+  and driven by a new `tests/test_deadline_filter.sh` (11 cases) whose repo fixture is itself
+  under `tests/.tmp`, the case that was broken. `$REPO` is also canonicalized now: the anchors
+  are canonical paths but `grep` echoes hits in whatever shape its root argument had, so an
+  uncanonical `…/tests/..` root produced `…/tests/../X` hits that no anchor could match — inert
+  today since no row searches `tests/`, and no exclusions at all for the first row that did
+  (Bear, #155 review) (Arfy).
 
 ## [6.1.1] - 2026-11-18
 

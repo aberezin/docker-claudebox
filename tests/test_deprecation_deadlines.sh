@@ -20,12 +20,19 @@
 _DD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 test_deprecation_deadlines() {
-local REPO="$_DD_DIR/.."
+# CANONICAL, not "$_DD_DIR/.." (#155, Bear's review). Every row passes
+# "$REPO/..." to grep, so grep echoes the hits back with whatever shape $REPO
+# has: an uncanonical "…/tests/.." makes every hit "…/tests/../X", which the
+# anchored exclusions below can never match. No row searches tests/ today, so
+# nothing was wrong yet — but the first row to search "$REPO" whole would have
+# got no exclusions at all, silently including the test's own file and
+# tests/logs/.
+local REPO; REPO="$(cd "$_DD_DIR/.." && pwd)"
 local PASS=0 FAIL=0
-# Canonical repo path, used to anchor the exclusions below (#155). Without it
-# they were substrings of an ABSOLUTE path, so an ancestor directory named
-# tests/.tmp* dropped every hit and the whole test asserted nothing.
-local RREAL; RREAL="$(cd "$REPO" && pwd)"
+# The anchor the exclusions compare against. Same value as $REPO; it has its
+# own name so the extracted-block test can point the filter at a fixture repo
+# without clobbering its own $REPO.
+local RREAL="$REPO"
 ok()  { echo "  ok   $1"; PASS=$((PASS + 1)); }
 bad() { echo "  FAIL $1"; FAIL=$((FAIL + 1)); }
 
