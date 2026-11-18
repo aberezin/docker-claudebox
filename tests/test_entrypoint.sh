@@ -119,6 +119,18 @@ test_entrypoint_workspace_ownership() {
 # the container independently says it is. Echoes findings plus one parseable
 # UIDLINE row; rc 1 when the line is untrue or unparseable.
 #
+# The workspace reading is BRACKETED, not compared across the run (Bear, #149
+# review). On virtiofs the presented owner of a directory is not the host
+# owner and moves when a guest process modifies it, so an `after` reading
+# legitimately differs from what the entrypoint saw: his live run had the line
+# say 0:0 and a later stat say 1000:1000, with neither wrong. WS0= is taken by
+# the same uid in the same container immediately BEFORE the entrypoint runs,
+# which is the closest observation to the moment it looked, so `said_ws` is
+# held to that. WS= is taken after and only ever printed — it is the #143
+# datum, and a WS0 != WS pair is itself a measurement of the mutation Bear
+# found. Same idiom as CLAUDE.md's rule about diagnostics: capture a before
+# watermark rather than compare against accumulated state.
+#
 # This is extracted and driven over synthetic outputs by
 # tests/test_uid_line_contract.sh, because the live test below needs a docker
 # daemon — and a checker can't be verified by the case where nothing is wrong
@@ -126,11 +138,12 @@ test_entrypoint_workspace_ownership() {
 # every sed below yields "" and a checker that only compared empty strings
 # would pass everything. It fails loudly instead.
 _uid_line_contract() {
-    local out="$1" rc=0 line said_ws said_claude how real_ws real_claude
+    local out="$1" rc=0 line said_ws said_claude how before_ws real_ws real_claude
     line=$(printf '%s\n' "$out" | grep -m1 'dridock: uid: workspace reads') || line=""  # swallow-ok: a missing line is reported two lines down as a parse failure, with the rc
     said_ws=$(printf '%s\n' "$line" | sed -n 's/.*workspace reads \([0-9]*:[0-9]*\),.*/\1/p')
     said_claude=$(printf '%s\n' "$line" | sed -n 's/.*claude runs as \([0-9]*:[0-9]*\) .*/\1/p')
     how=$(printf '%s\n' "$line" | sed -n 's/.*claude runs as [0-9]*:[0-9]* (\([^)]*\)).*/\1/p')
+    before_ws=$(printf '%s\n' "$out" | sed -n 's/^WS0=\([0-9]*:[0-9]*\)$/\1/p' | tail -1)
     real_ws=$(printf '%s\n' "$out" | sed -n 's/^WS=\([0-9]*:[0-9]*\) CLAUDE=.*/\1/p' | tail -1)
     real_claude=$(printf '%s\n' "$out" | sed -n 's/^WS=[0-9]*:[0-9]* CLAUDE=\([0-9]*:[0-9]*\)/\1/p' | tail -1)
 
@@ -138,31 +151,34 @@ _uid_line_contract() {
     # created seconds earlier, so real_ws is a FRESH inode's reading. Whether a
     # fresh inode can read 0:0 in one lifetime and 501:* in another is what
     # separates virtiofs attribute caching from the mount itself (#143).
-    echo "  uid: line says workspace=$said_ws claude=$said_claude how='$how'; container says workspace=$real_ws claude=$real_claude"
+    echo "  uid: line says workspace=$said_ws claude=$said_claude how='$how'; container read workspace=$before_ws before / $real_ws after, claude=$real_claude"
+    [ -n "$before_ws" ] && [ -n "$real_ws" ] && [ "$before_ws" != "$real_ws" ] \
+        && echo "  datum (#143): the workspace's presented owner MOVED during this run, $before_ws -> $real_ws, with nothing chowning it"
 
-    if [ -z "$said_ws" ] || [ -z "$said_claude" ] || [ -z "$how" ] || [ -z "$real_ws" ] || [ -z "$real_claude" ]; then
+    if [ -z "$said_ws" ] || [ -z "$said_claude" ] || [ -z "$how" ] || [ -z "$before_ws" ] || [ -z "$real_ws" ] || [ -z "$real_claude" ]; then
         echo "  FAIL: couldn't parse the uid line or the container's own reading (line='$line'): the checks below would assert nothing"
         echo "UIDLINE how= ws= claude="
         return 1
     fi
     [ "$said_claude" = "$real_claude" ] \
         || { echo "  FAIL: the line says claude runs as $said_claude, but id says $real_claude"; rc=1; }
-    [ "$said_ws" = "$real_ws" ] \
-        || { echo "  FAIL: the line says the workspace reads $said_ws, but stat says $real_ws"; rc=1; }
+    [ "$said_ws" = "$before_ws" ] \
+        || { echo "  FAIL: the line says it read the workspace as $said_ws, but a stat by the same uid moments earlier said $before_ws"; rc=1; }
+    # Internal consistency of the line, which holds whatever the mount presents.
     case "$how" in
         matched)
-            [ "$real_claude" = "$real_ws" ] \
-                || { echo "  FAIL: it says (matched) but claude is $real_claude and the workspace reads $real_ws"; rc=1; } ;;
+            [ "$said_claude" = "$said_ws" ] \
+                || { echo "  FAIL: it says (matched) but reports claude as $said_claude against a workspace of $said_ws"; rc=1; } ;;
         skipped*)
-            case "$real_ws" in
+            case "$said_ws" in
                 0:*|*:0) ;;
-                *) echo "  FAIL: it says (skipped) — only a root uid or gid triggers that — but the workspace reads $real_ws"; rc=1 ;;
+                *) echo "  FAIL: it says (skipped) — only a root uid or gid triggers that — but reports reading $said_ws"; rc=1 ;;
             esac ;;
         *FAILED*) echo "  note: groupmod/usermod failed in this run and the line says so, which is the contract" ;;
         *) echo "  FAIL: unrecognised outcome '$how' on the uid line"; rc=1 ;;
     esac
     [ "$rc" -eq 0 ] && echo "  OK: the uid line is true — what it reports matches what the container is"
-    echo "UIDLINE how=$how ws=$real_ws claude=$real_claude"
+    echo "UIDLINE how=$how ws=$real_ws claude=$real_claude wsbefore=$before_ws"
     return "$rc"
 }
 # <<< uid_line_contract
@@ -171,7 +187,7 @@ test_entrypoint_uid_observable() {
     local tmpdir out rc=0 row real_ws real_claude
     tmpdir=$(mktemp -d "$WORKDIR/tests/.tmp-uid-XXXXX")
     out=$(docker run --rm -e DRIDOCK_WORKSPACE="$tmpdir" -v "$tmpdir:$tmpdir" --entrypoint bash "$IMAGE" -c \
-        'bash /opt/dridock/entrypoint.sh true 2>&1; echo "WS=$(stat -c %u:%g "$DRIDOCK_WORKSPACE") CLAUDE=$(id -u claude):$(id -g claude)"' 2>&1)
+        'echo "WS0=$(stat -c %u:%g "$DRIDOCK_WORKSPACE")"; bash /opt/dridock/entrypoint.sh true 2>&1; echo "WS=$(stat -c %u:%g "$DRIDOCK_WORKSPACE") CLAUDE=$(id -u claude):$(id -g claude)"' 2>&1)
     rm -rf "$tmpdir"
     assert_contains "$out" "dridock: uid: workspace reads" "entrypoint states what the workspace read as and what claude runs as"
 
@@ -180,7 +196,7 @@ test_entrypoint_uid_observable() {
     printf '%s\n' "$contract" | grep -v '^UIDLINE '   # swallow-ok: grep -v returns 1 only when every line is the UIDLINE row, which the parse-failure path already reported with its rc
     row=$(printf '%s\n' "$contract" | sed -n 's/^UIDLINE //p' | tail -1)
     real_ws=${row#*ws=}; real_ws=${real_ws%% *}
-    real_claude=${row##*claude=}
+    real_claude=${row#*claude=}; real_claude=${real_claude%% *}
 
     # The ENVIRONMENT: reported, never asserted (#149). A remap under colima is
     # the #143 flip — loud here, not red, because the harness did its job. The

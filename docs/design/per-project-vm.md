@@ -450,7 +450,13 @@ No macOS `sudo` **at runtime**. Specifically:
   skipped and `claude` keeps the baked uid 1000; a mount that reads as 1000 matches to
   the same thing. **That is what usually happens, not what is guaranteed (#141, #143).**
   The same path has been measured presenting `0:0`, `501:1000` and `501:20` in different
-  container lifetimes, and when it reads non-root the match runs: one lifetime remapped
+  container lifetimes. Probing the mount directly (Bear, #143) showed why: **the presented
+  owner of a directory follows the last guest process to modify it** — a root container
+  leaves `0:0`, a `--user 1234` container leaves `1234:1234`, the ssh session sees its own
+  `501:1000` — so it carries no information about the Mac owner, which is always `501`. Writes
+  still land as the host user; it is only the *presented* ownership that is meaningless here.
+  That also makes the flip self-perpetuating: once `claude` runs as 501 and writes, the next
+  start reads 501 and matches again. When the workspace reads non-root the match runs: one lifetime remapped
   `claude` to 501 and chowned `$HOME`, and the next read root, leaving the 501-owned named
   volumes unwritable, with nothing said. So every
   start now logs `dridock: uid: workspace reads U:G, claude runs as U:G (…)`, a failed

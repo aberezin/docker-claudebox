@@ -46,7 +46,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   parse to a silent pass), because the live test needs a docker daemon and a checker cannot be
   verified by the case where nothing is wrong. Every run now prints both readings, pass or
   warn, so the next run in a root-presenting lifetime records a fresh-inode reading for #143
-  at no extra cost. `README.md`, `docs/design/per-project-vm.md` and the entrypoint's own
+  at no extra cost. The workspace reading is **bracketed**, not compared across the run: on
+  virtiofs the presented owner of a directory follows the last guest process to modify it
+  (Bear's probe, #143), so a stat taken after the entrypoint ran legitimately differs from
+  what it saw — his live run had the line say `0:0` and a later stat say `1000:1000` with
+  neither wrong, and the first version of this check failed that honest run. The line is now
+  held to a reading taken by the same uid moments *before* the entrypoint runs; the after
+  reading is printed only, and a pair that differs is itself recorded as a #143 datum.
+  `README.md`, `docs/design/per-project-vm.md` and the entrypoint's own
   `how=` string said the no-op was expected; all three now say it is usual and not guaranteed,
   and name the three presentations measured so far (`0:0`, `501:1000`, `501:20`) (Arfy).
 
