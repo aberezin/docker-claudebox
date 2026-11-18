@@ -28,6 +28,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [6.1.1] - 2026-11-18
+
+Not breaking; fixes only. The one you'll notice: under Colima, `claude` keeps uid 1000 in
+every container instead of flipping to 501 now and then, and the cache volumes under `$HOME`
+are re-owned to it on every start (#147, #143). A project left with 501-owned volumes is
+fixed by its first start on 6.1.1. `./install.sh` also fails fast on a dependency or type error,
+before the image build instead of after it (#145).
+
+To upgrade: `./install.sh`, then in each project `dridock down && dridock start`.
+
+
 ### Fixed
 - **The uid-line checker reads an outcome containing parentheses** (#150). `_uid_line_contract`
   (#149) took the outcome up to the first `)`, so a message with its own parens was truncated.
