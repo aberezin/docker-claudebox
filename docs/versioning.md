@@ -95,7 +95,12 @@ below runs against the exact commit that will be tagged, with the new version in
    `dridock:latest` id, label `X.Y.Z`); the baked files are the new ones; the **full
    `bash test.sh` with no arguments** (it takes *function* names, not file names: 6.0.0's
    first run passed file names and ran nothing); and every `tests/test_*.py` (CLAUDE.md
-   names them).
+   names them). **Run this from the real workspace checkout, never from a git worktree
+   outside it.** Under docker-out-of-docker only the workspace path is shared with the VM,
+   so a suite's `-v "$WORKDIR/tests/.tmp…"` mounts nothing from a worktree elsewhere and the
+   daemon suites fail on empty bind mounts — `78 passed, 18 failed` from `~/.claude/tmp`,
+   all 17 real failures environmental, where the same tip gave 89/0 from the workspace
+   (Bear, #144). A worktree is fine for the docker-free sweep in step 3, which mounts nothing.
 3. **macOS (Arfy):** the sweep below, `bun test`, and `tsc --noEmit`, each rc read directly.
 
    Exclude the daemon suites **by file**, not by function name. A skip list of function
