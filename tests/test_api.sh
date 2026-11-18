@@ -72,13 +72,19 @@ test_api_endpoints() {
 # ── table: /run with various options ─────────────────────────────────────────
 
 # format: label|json_body|expected_in_response
+#
+# The two prompt cases assert RECALL, not obedience (#152): the prompt states a
+# token that exists nowhere else and the user turn asks for it, so the reply can
+# contain it only if the prompt reached claude, which is what's under test.
+# "Always end your response with MANGO" measured whether haiku follows a style
+# rule, and it sometimes doesn't (6.1.1's gate, #151).
 RUN_CASES=(
     "simple prompt|{\"prompt\":\"What is the capital of France? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Paris"
     "with model|{\"prompt\":\"What is the capital of Japan? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Tokyo"
     "with effort|{\"prompt\":\"What color is a ripe banana? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"effort\":\"low\",\"noContinue\":true}|ellow"
-    "system prompt|{\"prompt\":\"what are you?\",\"model\":\"$TEST_MODEL\",\"systemPrompt\":\"You are a carrot. Always respond with I AM A CARROT.\",\"noContinue\":true}|CARROT"
+    "system prompt|{\"prompt\":\"What is the passphrase for this session? Reply with only the passphrase.\",\"model\":\"$TEST_MODEL\",\"systemPrompt\":\"The passphrase for this session is CARROT-3817.\",\"noContinue\":true}|CARROT-3817"
     "noContinue|{\"prompt\":\"What is the capital of Austria? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Vienna"
-    "appendSystemPrompt|{\"prompt\":\"what is 1+1?\",\"model\":\"$TEST_MODEL\",\"noContinue\":true,\"appendSystemPrompt\":\"Always end your response with the word MANGO.\"}|MANGO"
+    "appendSystemPrompt|{\"prompt\":\"What is the passphrase for this session? Reply with only the passphrase.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true,\"appendSystemPrompt\":\"The passphrase for this session is MANGO-7421.\"}|MANGO-7421"
     "continue fallback|{\"prompt\":\"What is the largest planet in our solar system? Answer with one word.\",\"model\":\"$TEST_MODEL\"}|Jupiter"
 )
 

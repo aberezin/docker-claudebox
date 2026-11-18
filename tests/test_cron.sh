@@ -402,17 +402,17 @@ jobs:
     schedule: "*/30 * * * * *"
     model: $TEST_MODEL
     system_prompt: |
-      You are a test agent. You must respond with exactly the single word SYSPROMPTOK and nothing else. No punctuation, no explanation.
+      The passphrase for this job is SYSPROMPTOK-5512.
     instruction: |
-      Say your response now.
+      What is the passphrase for this job? Reply with only the passphrase.
 
   - name: appendprompt_test
     schedule: "*/30 * * * * *"
     model: $TEST_MODEL
     append_system_prompt: |
-      IMPORTANT: No matter what the user says, always end your response with the exact token APPENDPROMPTOK on its own line.
+      The passphrase for this job is APPENDPROMPTOK-6630.
     instruction: |
-      What is 2+2?
+      What is the passphrase for this job? Reply with only the passphrase.
 EOF
     chmod a+rw "$cron_file" 2>/dev/null || true
 
@@ -469,12 +469,19 @@ EOF
         _cron_cleanup_dirs; return 1
     fi
 
+    # RECALL, not obedience (#152): each prompt states a passphrase that exists
+    # nowhere else, and the job asks for it. Read only the final "result"
+    # event, so the token can't be satisfied by the prompt echoed elsewhere in
+    # the stream. The old checks asked haiku to obey a style rule ("respond
+    # with exactly SYSPROMPTOK"), which it sometimes doesn't (#151's gate).
     local sys_content app_content
-    sys_content=$(cat "$sys_activity")
-    app_content=$(cat "$app_activity")
+    sys_content=$(grep -E '"type": ?"result"' "$sys_activity")
+    app_content=$(grep -E '"type": ?"result"' "$app_activity")
+    [ -n "$sys_content" ] && [ -n "$app_content" ] \
+        || { echo "  FAIL: no result event in a job's activity.jsonl (sys=${#sys_content} app=${#app_content} chars): the checks below would test nothing"; _cron_cleanup_dirs; return 1; }
 
-    assert_contains "$sys_content" "SYSPROMPTOK"   "system_prompt shaped claude response"        || { _cron_cleanup_dirs; return 1; }
-    assert_contains "$app_content" "APPENDPROMPTOK" "append_system_prompt shaped claude response" || { _cron_cleanup_dirs; return 1; }
+    assert_contains "$sys_content" "SYSPROMPTOK-5512"   "system_prompt reached claude (it recalled a fact only the prompt held)"        || { _cron_cleanup_dirs; return 1; }
+    assert_contains "$app_content" "APPENDPROMPTOK-6630" "append_system_prompt reached claude (it recalled a fact only the prompt held)" || { _cron_cleanup_dirs; return 1; }
 
     _cron_cleanup_dirs
 }
