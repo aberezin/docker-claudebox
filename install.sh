@@ -444,9 +444,11 @@ echo "🔨 Compiling dridock (TypeScript wrapper) → single binary..."
 #    node_modules had never been installed. So the build CANNOT detect a
 #    dependency problem and the `|| { exit 1; }` around it never could. `tsc`
 #    is the only step that reads node_modules, which makes it both the
-#    typecheck and the real check that the tree is usable for this source. It
-#    comes from the locked typescript (a transitive of @types/bun), so step 1
-#    provides it.
+#    typecheck and the real check that the tree is usable for this source.
+#    `tsc` comes from `typescript` in dridock-ts's devDependencies, so step 1
+#    always installs it. It used to be a peerDependency and worked only because
+#    bun installs peers by default — a default this step would have been
+#    silently relying on (Bear, #132 review), so it was moved.
 #
 # Today dridock-ts has zero runtime dependencies, so step 1 failing costs only
 # @types/bun. The point is that this stops being true at the first `bun add`,

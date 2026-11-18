@@ -12,9 +12,7 @@
     "build": "bun build src/cli/main.ts --compile --minify --sourcemap --outfile bin/dridock"
   },
   "devDependencies": {
-    "@types/bun": "latest"
-  },
-  "peerDependencies": {
+    "@types/bun": "latest",
     "typescript": "^5"
   }
 }
