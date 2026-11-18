@@ -5,7 +5,8 @@
 # format: label|docker_extra_args|entrypoint_override|command|expected_in_output
 ENTRYPOINT_CASES=(
     "version|--entrypoint claude||--version|[0-9]"
-    "debug mode|-e DEBUG=true -e CLAUDE_WORKSPACE=/workspace -e CLAUDE_CONTAINER_NAME=${CONTAINER_PREFIX}-debug|||\\[DEBUG"
+    "debug mode (DRIDOCK_DEBUG=1, #130)|-e DRIDOCK_DEBUG=1 -e CLAUDE_WORKSPACE=/workspace -e CLAUDE_CONTAINER_NAME=${CONTAINER_PREFIX}-debug|||\\[DEBUG"
+    "legacy DEBUG=true still works in 6.x, with the rename nudge (#130)|-e DEBUG=true -e CLAUDE_WORKSPACE=/workspace -e CLAUDE_CONTAINER_NAME=${CONTAINER_PREFIX}-debug2|||bare DEBUG stops working in 7.0.0"
 )
 
 test_entrypoint_behaviors() {

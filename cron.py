@@ -34,7 +34,25 @@ from typing import Any
 import yaml
 from croniter import croniter
 
-DEBUG = os.environ.get("DEBUG", "").lower() == "true"
+def _debug_on() -> bool:
+    """#130: DRIDOCK_DEBUG, the same rule as dridock-ts/src/domain/DebugFlag.ts and
+    entrypoint.sh (tests/test_debug_flag_mirror.sh). on: 1 true yes on; off: "" 0
+    false no off (any case); anything else is off. Bare DEBUG counts through 6.x
+    only as one of those words; the entrypoint prints the notes for both."""
+    def value(v: str) -> str:
+        s = (v or "").strip().lower()
+        if s in ("1", "true", "yes", "on"):
+            return "on"
+        if s in ("", "0", "false", "no", "off"):
+            return "off"
+        return "invalid"
+    d = os.environ.get("DRIDOCK_DEBUG", "")
+    if d:
+        return value(d) == "on"
+    return value(os.environ.get("DEBUG", "")) == "on"
+
+
+DEBUG = _debug_on()
 logging.basicConfig(
     level=logging.DEBUG if DEBUG else logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",

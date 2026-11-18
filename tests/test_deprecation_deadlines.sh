@@ -181,6 +181,13 @@ else
     fi
 fi
 
+# 7.0.0: bare DEBUG as the debug switch (#130). DRIDOCK_DEBUG is the setting since
+# 6.1; the legacy READS (host env["DEBUG"], entrypoint "${DEBUG:-}", the daemons'
+# environ.get("DEBUG") fallback) and the host's extra DEBUG=true forward go at 7.0.
+deadline "legacy bare DEBUG reads (#130)" 7 \
+    -e 'env\["DEBUG"\]' -e '"\${DEBUG:-}"' -e 'os.environ.get("DEBUG"' -e 'key: "DEBUG"' \
+    "$REPO/entrypoint.sh" "$REPO/cron.py" "$REPO/api_server.py" "$REPO/dridock-ts/src/domain/DebugFlag.ts"
+
 echo ""
 
 echo "  deprecation deadlines: $PASS passed, $FAIL failed"

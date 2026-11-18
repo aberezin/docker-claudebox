@@ -101,7 +101,7 @@ EOF
         -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
-        -e "DEBUG=true" \
+        -e "DRIDOCK_DEBUG=1" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
         -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \
@@ -244,7 +244,7 @@ EOF
         -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
-        -e "DEBUG=true" \
+        -e "DRIDOCK_DEBUG=1" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
         -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \
@@ -571,7 +571,7 @@ EOF
         -e "DRIDOCK_WORKSPACE=$CRON_TMP/workspace" \
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
-        -e "DEBUG=true" \
+        -e "DRIDOCK_DEBUG=1" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$CRON_TMP/home/.claude:/home/claude/.claude" \
         -v "$CRON_TMP/workspace:$CRON_TMP/workspace" \

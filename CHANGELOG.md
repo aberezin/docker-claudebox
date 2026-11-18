@@ -28,6 +28,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- **`DEBUG` is now `DRIDOCK_DEBUG`, with one rule everywhere** (#130). It was the one
+  dridock setting outside the `DRIDOCK_*` namespace, and four readers disagreed:
+  `DEBUG=1` turned on the API daemon's debug logs but not the entrypoint's or cron's, and
+  `DEBUG=TRUE` was dropped by the host. Now `1`/`true`/`yes`/`on` (any case) turn it on
+  in the host, the entrypoint, `cron.py` and `api_server.py`; `0`/`false`/`no`/`off` or
+  unset leave it off; any other value is reported and treated as off.
+  `tests/test_debug_flag_mirror.sh` runs one table through all four. **Bare `DEBUG` still
+  works through 6.x** when set to one of those words, with a nudge, and is removed in
+  7.0.0 (roadmap row + deadline check). Anything else in `DEBUG` (npm's `express:*`) is
+  someone else's and is left alone. The host forwards both `DRIDOCK_DEBUG=1` and
+  `DEBUG=true`, so a pre-6.1 image still honours it. **Forwarded env changed: 6.1.0
+  needs the minor bump.**
+
 ### Fixed
 - **The entrypoint's uid matching says what it did** (#141). A container lifetime read the
   workspace as uid 501 (so `claude` was remapped to 501 and `$HOME` chowned to it); the next

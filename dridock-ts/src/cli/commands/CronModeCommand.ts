@@ -1,3 +1,4 @@
+import { resolveDebug, debugEnvPairs } from "../../domain/DebugFlag.ts";
 import type { Command } from "../Command.ts";
 import type { Context } from "../Context.ts";
 import type { Colima } from "../../infra/Colima.ts";
@@ -222,6 +223,9 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
     await ctx.fs.mkdirRecursive(`${xdg}/consult`);
 
     const cronFile = ctx.env.raw()["DRIDOCK_MODE_CRON_FILE"];
+    // #130: DRIDOCK_DEBUG (bare DEBUG honoured through 6.x, with a nudge).
+    const debug = resolveDebug(ctx.env.raw());
+    for (const n of debug.notes) ctx.stderr.write(n);
     const runArgs: RunArgs = {
       context: ctxDocker,
       containerName: cronName,
@@ -244,7 +248,7 @@ Intercepted before verb dispatch, so this text is reached via the cron path.`;
         { key: "DRIDOCK_WORKSPACE", value: project.root },
         { key: "DRIDOCK_CONTAINER_NAME", value: cronName },
         ...(cronFile !== undefined && cronFile !== "" ? [{ key: "DRIDOCK_MODE_CRON_FILE", value: cronFile }] : []),
-        ...(ctx.env.raw()["DEBUG"] === "true" ? [{ key: "DEBUG", value: "true" }] : []),
+        ...debugEnvPairs(debug.on),
         ...envPassthrough.envAdditions,
       ],
       cmd: [],

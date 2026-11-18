@@ -286,7 +286,7 @@ Use `~/.claude/init.d/*.sh` hooks (see [Init Hooks](docs/customization.md#init-h
 - Init hooks via `~/.claude/init.d/*.sh` (run once on first container create)
 - Always-active skills via `~/.claude/.always-skills/` (injected into every invocation)
 - Session continuity via `--continue` / `--no-continue` / `--resume <session_id>`
-- Structured JSON debug logging with `DEBUG=true`
+- Structured JSON debug logging with `DRIDOCK_DEBUG=1`
 
 ## Authentication
 

@@ -102,7 +102,7 @@ services:
       - DRIDOCK_MODE_CRON_FILE=/home/claude/.claude/cron.yaml
       - DRIDOCK_WORKSPACE=/workspace
       - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xxx
-      - DEBUG=true # optional, verbose per-tick logs
+      - DRIDOCK_DEBUG=1 # optional, verbose per-tick logs
     volumes:
       - ./cron.yaml:/home/claude/.claude/cron.yaml:ro
       - ./workspace:/workspace
@@ -184,7 +184,7 @@ unset), it says so once instead of assuming the image is current.
 | `DRIDOCK_MODE_CRON`        | Set to `1` to start in cron mode                             | _(none)_     |
 | `DRIDOCK_MODE_CRON_FILE`   | Path inside the container to the cron yaml                   | _(none)_     |
 | `DRIDOCK_WORKSPACE`        | Absolute path to the workspace directory (cwd for every job) | `/workspace` |
-| `DEBUG`                    | Set to `true` for per-tick + per-line debug logs             | _(none)_     |
+| `DRIDOCK_DEBUG`            | `1`/`true`/`yes`/`on` for per-tick + per-line debug logs (bare `DEBUG` until 7.0.0, #130) | _(none)_     |
 
 > Legacy `CLAUDEBOX_MODE_CRON`, `CLAUDEBOX_MODE_CRON_FILE`, `CLAUDEBOX_WORKSPACE` (and the older `CLAUDE_MODE_CRON*` / `CLAUDE_WORKSPACE`) are still accepted as fallbacks.
 

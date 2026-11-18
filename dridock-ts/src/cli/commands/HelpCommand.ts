@@ -39,6 +39,7 @@ List every verb with a one-line synopsis. \`dridock <verb> --help\` for one verb
 
     ctx.stdout.write(`\nUSEFUL ENV\n`);
     ctx.stdout.write(`  DRIDOCK_MINIMAL=1             use the minimal image variant\n`);
+    ctx.stdout.write(`  DRIDOCK_DEBUG=1               debug output in the container (entrypoint trace, daemon logs)\n`);
     ctx.stdout.write(`  DRIDOCK_NO_API_KEY=1          never forward ANTHROPIC_API_KEY (use Claude subscription)\n`);
     ctx.stdout.write(`  DRIDOCK_NO_OAUTH_TOKEN=1      never forward CLAUDE_CODE_OAUTH_TOKEN\n`);
     ctx.stdout.write(`  DRIDOCK_ENV_FOO=bar           forward FOO=bar into the container\n`);

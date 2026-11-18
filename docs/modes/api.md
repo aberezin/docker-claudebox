@@ -24,7 +24,7 @@ services:
 | `DRIDOCK_MODE_API`         | Set to `1` to start in API server mode                              | _(none)_ |
 | `DRIDOCK_MODE_API_PORT`    | Port the API server listens on                                      | `8080`   |
 | `DRIDOCK_MODE_API_TOKEN`   | Bearer token for API authentication (if unset, no auth is required) | _(none)_ |
-| `DEBUG`                    | Set to `1` or `true` for structured JSON debug logging              | _(none)_ |
+| `DRIDOCK_DEBUG`            | `1`/`true`/`yes`/`on` for DEBUG-level logging (bare `DEBUG` until 7.0.0, #130) | _(none)_ |
 
 > Legacy `CLAUDEBOX_MODE_API`, `CLAUDEBOX_MODE_API_PORT`, `CLAUDEBOX_MODE_API_TOKEN` (and the older `CLAUDE_MODE_API*`) are still accepted as fallbacks.
 

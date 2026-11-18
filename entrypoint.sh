@@ -1,6 +1,39 @@
 #!/bin/bash
 
-dbg() { [ "${DEBUG:-}" = "true" ] && echo "[DEBUG $(date +%H:%M:%S.%3N)] $*" >&2; }
+# #130: DRIDOCK_DEBUG, the same rule as dridock-ts/src/domain/DebugFlag.ts, cron.py
+# and api_server.py (tests/test_debug_flag_mirror.sh holds them together):
+#   on: 1 true yes on · off: "" 0 false no off (any case) · anything else: off, SAID.
+# Bare DEBUG is honoured through 6.x when its value is one of those words, with a
+# nudge; any other DEBUG (npm's `express:*`) is someone else's. Removed in 7.0.0.
+_debug_value() {
+	local s
+	s=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+	case "$s" in
+		1|true|yes|on) echo on ;;
+		""|0|false|no|off) echo off ;;
+		*) echo invalid ;;
+	esac
+}
+# Echoes 1 or 0; notes go to stderr.
+_dridock_debug_decide() {
+	local d="${1-}" legacy="${2-}"
+	if [ -n "$d" ]; then
+		case "$(_debug_value "$d")" in
+			on) echo 1; return ;;
+			invalid) echo "dridock: DRIDOCK_DEBUG=$d isn't a recognised value, so debug stays off (use 1/true/yes/on or 0/false/no/off, #130)" >&2 ;;
+		esac
+		echo 0; return
+	fi
+	if [ -n "$legacy" ]; then
+		case "$(_debug_value "$legacy")" in
+			on)  echo "dridock: DEBUG=$legacy is read as DRIDOCK_DEBUG for now; bare DEBUG stops working in 7.0.0 (#130). Use DRIDOCK_DEBUG." >&2; echo 1; return ;;
+			off) echo "dridock: DEBUG=$legacy is read as DRIDOCK_DEBUG for now; bare DEBUG stops working in 7.0.0 (#130). Use DRIDOCK_DEBUG." >&2 ;;
+		esac
+	fi
+	echo 0
+}
+_DRIDOCK_DEBUG_ON=$(_dridock_debug_decide "${DRIDOCK_DEBUG:-}" "${DEBUG:-}")
+dbg() { [ "$_DRIDOCK_DEBUG_ON" = 1 ] && echo "[DEBUG $(date +%H:%M:%S.%3N)] $*" >&2; }
 
 # DRIDOCK_* is the only tier (5.0.0). Upstream CLAUDE_CODE_* / CLAUDE_CONFIG_DIR are unrelated.
 CLAUDE_CONTAINER_NAME="${DRIDOCK_CONTAINER_NAME:-}"

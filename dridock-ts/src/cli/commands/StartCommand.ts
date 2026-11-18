@@ -1,3 +1,4 @@
+import { resolveDebug, debugEnvPairs } from "../../domain/DebugFlag.ts";
 import type { Command } from "../Command.ts";
 import type { Context } from "../Context.ts";
 import type { Colima } from "../../infra/Colima.ts";
@@ -414,6 +415,10 @@ mode (-p) they are validated against an allowlist first.
       ctx.stderr.write(`   ${e instanceof Error ? e.message : String(e)}\n`);
     }
 
+    // #130: DRIDOCK_DEBUG (bare DEBUG honoured through 6.x, with a nudge).
+    const debug = resolveDebug(ctx.env.raw());
+    for (const n of debug.notes) ctx.stderr.write(n);
+
     // ── Build the run env (all -e pairs) ─────────────────────────────
     const baseEnv: RunArgs["env"] = [
       { key: "DRIDOCK_GIT_NAME", value: gitName },
@@ -426,7 +431,7 @@ mode (-p) they are validated against an allowlist first.
       ...(vmIp !== "" ? [{ key: "DRIDOCK_VM_IP", value: vmIp }] : []),
       ...(hostname !== "" ? [{ key: "DRIDOCK_HOSTNAME", value: hostname }] : []),
       ...(autoAgentName !== undefined ? [{ key: "DRIDOCK_AGENT_NAME", value: autoAgentName }] : []),
-      ...(ctx.env.raw()["DEBUG"] === "true" ? [{ key: "DEBUG", value: "true" }] : []),
+      ...debugEnvPairs(debug.on),
       ...((): { key: string; value: string }[] => {
         const v = ctx.env.raw()["DRIDOCK_DEFAULT_PLUGINS"];
         return v !== undefined ? [{ key: "DRIDOCK_DEFAULT_PLUGINS", value: v }] : [];

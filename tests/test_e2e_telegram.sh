@@ -267,7 +267,7 @@ _e2e_run_dridock_cron_tg() {
         -e "CLAUDE_CODE_OAUTH_TOKEN=$CLAUDE_CODE_OAUTH_TOKEN" \
         -e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
         -e "DRIDOCK_TELEGRAM_BOT_TOKEN=$CLAUDEBOX_TELEGRAM_BOT_TOKEN" \
-        -e "DEBUG=true" \
+        -e "DRIDOCK_DEBUG=1" \
         -v "$cron_file:/cron.yaml:ro" \
         -v "$E2E_TMP/home/.claude:/home/claude/.claude" \
         -v "$E2E_TMP/workspace:$E2E_TMP/workspace" \
