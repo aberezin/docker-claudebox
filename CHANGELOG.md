@@ -28,6 +28,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-11-18
+
+Not breaking. The one change you might notice is that the debug switch is now
+`DRIDOCK_DEBUG`; bare `DEBUG` keeps working through 6.x, with a nudge. The host
+forwards a new variable, which is why this is a minor bump.
+
+To upgrade: `./install.sh`, then in each project `dridock down && dridock start`.
+
 ### Changed
 - **`DEBUG` is now `DRIDOCK_DEBUG`, with one rule everywhere** (#130). It was the one
   dridock setting outside the `DRIDOCK_*` namespace, and four readers disagreed:
@@ -41,8 +49,7 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   someone else's and is left alone. The host forwards both `DRIDOCK_DEBUG=1` and
   `DEBUG=true`, so a pre-6.1 image still honours it. That means setting the new name
   also puts `DEBUG=true` in the container's env through 6.x, where npm-convention tools
-  will see it. **Forwarded env changed: 6.1.0
-  needs the minor bump.**
+  will see it. Forwarded env changed, hence the minor bump.
 
 ### Fixed
 - **The entrypoint's uid matching says what it did** (#141). A container lifetime read the
