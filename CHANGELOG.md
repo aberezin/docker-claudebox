@@ -66,6 +66,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `tests/test_*.sh` registers in `ALL_TESTS` and that each registered name resolves to a
   function in the same file — the shell analogue of `test_python_tests_named.sh` (#138), since
   test.sh runs tests by name and a file that registers nothing is sourced and never run (Arfy).
+- **`install.sh`'s dependency step can now fail the install** (#132). `bun install --frozen-lockfile`
+  only printed a warning and the build continued on whatever `node_modules` was there, which
+  made the guard around it decorative: `bun build` erases types without checking them and needs
+  no `node_modules` at all (measured — a complete working binary came out of a tree where it had
+  never been installed), and nothing on the install path ran `tsc`, the only step that reads it.
+  So a drifted lockfile scrolled past and `✅ setup complete` was printed over a binary that
+  wasn't the one `bun.lock` describes (#118: that line is already read as "the change is live").
+  A lockfile failure is now fatal and shows bun's own output, `bun run typecheck` is on the
+  install path and runs before the compile, and all three steps are `install_ts_wrapper` in
+  marked-off lines with a stubbed-bun test. Harmless until now only because `dridock-ts` has zero
+  runtime dependencies — one `bun add` away from shipping the wrong binary silently (Arfy).
 
 ## [6.0.0] - 2026-11-17
 
