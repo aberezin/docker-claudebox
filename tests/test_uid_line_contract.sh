@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# ok() always returns 0, so `[ … ] && ok … || bad …` can't take both arms.
+# shellcheck disable=SC2015
+# #149: the live uid test needs a docker daemon, so its CHECKER is extracted
+# from tests/test_entrypoint.sh between its markers and driven here over
+# synthetic container output — including the outputs that must be rejected.
+#
+# WHY: #141's live test used to assert that the mount presents the workspace as
+# root. That is an environment fact the entrypoint neither controls nor
+# promises, so 6.1.0 shipped with it red (#146's gate record) while the code did
+# exactly what #141 specifies. The assertion is now the CONTRACT — the status
+# line is true — and this file is what proves the check can fail. A checker
+# verified only by the case where nothing is wrong is the #144 mistake again:
+# every sed yielding "" would compare empty to empty and pass everything.
+
+_ULC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+test_uid_line_contract() {
+local REPO="$_ULC_DIR/.."
+local PASS=0 FAIL=0
+ok()  { echo "  ok   $1"; PASS=$((PASS + 1)); }
+bad() { echo "  FAIL: $1"; FAIL=$((FAIL + 1)); }
+echo "--- the #141 uid line is checked for TRUTH, not for a uid (#149) ---"
+
+local tmp; tmp="$(mktemp -d)"
+local fn="$tmp/fn.sh"
+sed -n '/^# >>> uid_line_contract/,/^# <<< uid_line_contract/p' "$REPO/tests/test_entrypoint.sh" > "$fn"
+if ! grep -q '^_uid_line_contract()' "$fn"; then
+    bad "_uid_line_contract not found between the markers in tests/test_entrypoint.sh: the cases below would test nothing"
+    rm -rf "$tmp"; echo "  uid line contract: $PASS passed, $FAIL failed"; return 1
+fi
+# shellcheck disable=SC1090
+. "$fn"
+
+local LINE='dridock: uid: workspace reads %s, claude runs as %s (%s) (#141)'
+# verdict <expect pass|fail> <label> <said_ws> <said_claude> <how> <real_ws> <real_claude>
+verdict() {
+    local want="$1" label="$2" out rc=0
+    out="$(printf "$LINE\n" "$3" "$4" "$5"; printf 'WS=%s CLAUDE=%s\n' "$6" "$7")"
+    local got; got="$(_uid_line_contract "$out")" || rc=1
+    local v=pass; [ "$rc" -ne 0 ] && v=fail
+    [ "$v" = "$want" ] && ok "$want: $label" \
+        || bad "expected $want, got $v — $label; checker said: $(printf '%s' "$got" | tr '\n' '|')"
+}
+
+# ── truthful lines: the contract holds, whatever the mount presented ─────────
+verdict pass "root presentation, skipped, nothing remapped"   '0:0'      '1000:1000' 'skipped: the workspace reads as root, the usual colima case' '0:0'      '1000:1000'
+verdict pass "501 presentation, matched — #143's flip is not a failure" '501:1000' '501:1000'  'matched' '501:1000' '501:1000'
+verdict pass "the Mac's own ids presented, matched"            '501:20'   '501:20'    'matched' '501:20'   '501:20'
+verdict pass "usermod failed and the line says so"             '501:20'   '1000:1000' 'match FAILED' '501:20' '1000:1000'
+verdict pass "a root GID alone also triggers the skip"         '501:0'    '1000:1000' 'skipped: the workspace reads as root, the usual colima case' '501:0' '1000:1000'
+
+# ── lies: each must fail ────────────────────────────────────────────────────
+verdict fail "says claude is 1000 while id says 501"           '501:1000' '1000:1000' 'matched' '501:1000' '501:1000'
+verdict fail "says the workspace read 0 while stat says 501"   '0:0'      '1000:1000' 'skipped: the workspace reads as root, the usual colima case' '501:1000' '1000:1000'
+verdict fail "claims (matched) with claude != workspace"       '501:1000' '1000:1000' 'matched' '501:1000' '1000:1000'
+verdict fail "claims (skipped) on a non-root workspace"        '501:1000' '501:1000'  'skipped: the workspace reads as root, the usual colima case' '501:1000' '501:1000'
+verdict fail "an outcome word nobody recognises"               '0:0'      '1000:1000' 'whatever' '0:0' '1000:1000'
+
+# ── the format-drift trap: a parse that yields nothing must NOT pass ────────
+local out rc got
+out="$(printf 'dridock: uid: workspace reads 501, claude runs as 501 (matched)\n'; printf 'WS=501:1000 CLAUDE=501:1000\n')"
+rc=0; got="$(_uid_line_contract "$out")" || rc=1
+[ "$rc" -ne 0 ] && ok "fail: a drifted line format (no gid) is a parse failure, not a silent pass" \
+    || bad "a line the checker couldn't parse was accepted: $(printf '%s' "$got" | tr '\n' '|')"
+printf '%s\n' "$got" | grep -q "couldn't parse" \
+    && ok "...and it says so" || bad "the parse failure wasn't reported"
+
+out="$(printf 'some other output entirely\n'; printf 'WS=0:0 CLAUDE=1000:1000\n')"
+rc=0; got="$(_uid_line_contract "$out")" || rc=1
+[ "$rc" -ne 0 ] && ok "fail: no uid line at all" || bad "a missing uid line was accepted"
+
+# ── the #143 data row is always emitted, with the fresh inode's reading ─────
+out="$(printf "$LINE\n" '501:1000' '501:1000' 'matched'; printf 'WS=501:1000 CLAUDE=501:1000\n')"
+got="$(_uid_line_contract "$out")"
+printf '%s\n' "$got" | grep -q '^UIDLINE how=matched ws=501:1000 claude=501:1000$' \
+    && ok "the UIDLINE row carries the outcome and the fresh dir's reading (#143 accumulates for free)" \
+    || bad "the UIDLINE row is missing or malformed: $(printf '%s' "$got" | tr '\n' '|')"
+printf '%s\n' "$got" | grep -q 'container says workspace=501:1000' \
+    && ok "both readings are printed on a PASS too, not only on a failure" \
+    || bad "the pass path doesn't record the readings"
+
+# ── the live test must not assert the presentation again ────────────────────
+grep -q "documented no-op isn't holding" "$REPO/tests/test_entrypoint.sh" \
+    && bad "tests/test_entrypoint.sh still fails on the mount's presentation (#149)" \
+    || ok "the live test no longer fails on which uid the mount presents (#149)"
+
+rm -rf "$tmp"
+echo "  uid line contract: $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]
+}
+
+ALL_TESTS+=(test_uid_line_contract)
+
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    ALL_TESTS=()
+    test_uid_line_contract
+fi

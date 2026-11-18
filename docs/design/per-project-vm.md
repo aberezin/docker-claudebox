@@ -441,21 +441,27 @@ No macOS `sudo` **at runtime**. Specifically:
   the actual footprint. Run `gc` periodically or after large deletes. (`default` is
   the human's VM and is left untouched — trim it yourself with
   `colima ssh -p default -- sudo fstrim -av`.)
-- **File ownership / UID-matching is a no-op under Colima.** The entrypoint's
+- **File ownership / UID-matching is usually a no-op under Colima — not guaranteed.** The entrypoint's
   Linux-style UID/GID matching (adjust the `claude` user to the workspace owner so
   Claude's files aren't root/`1000`-owned on the host) is unnecessary here: Colima's
   virtiofs mount maps *every* container-side write back to the host user regardless
   of the in-container UID, so files Claude creates always come back owned by you.
-  The entrypoint stats the mounted workspace and expects root (`0`), so matching is
+  The entrypoint stats the mounted workspace; it usually reads root (`0`), so matching is
   skipped and `claude` keeps the baked uid 1000; a mount that reads as 1000 matches to
-  the same thing. **It doesn't always hold (#141):** one container lifetime read the
-  workspace as `501`, remapped `claude` to it and chowned `$HOME`, and the next read
-  `1000`, leaving the 501-owned named volumes unwritable, with nothing said. So every
+  the same thing. **That is what usually happens, not what is guaranteed (#141, #143).**
+  The same path has been measured presenting `0:0`, `501:1000` and `501:20` in different
+  container lifetimes, and when it reads non-root the match runs: one lifetime remapped
+  `claude` to 501 and chowned `$HOME`, and the next read root, leaving the 501-owned named
+  volumes unwritable, with nothing said. So every
   start now logs `dridock: uid: workspace reads U:G, claude runs as U:G (…)`, a failed
   `$HOME` chown is reported, and a uid that differs from the one recorded in
   `~/.claude/.dridock-claude-uid` is warned about. `test_entrypoint_uid_observable`
-  asserts the colima no-op directly (`claude` = 1000, or the workspace reads `0`), and
-  the ownership round-trip is still tested separately. If you hit the warning, remove
+  asserts the **contract** — that the status line is true, i.e. the uid, gid and outcome it
+  reports match what the container actually is — and reports the presentation without
+  failing on it (#149: requiring one presentation made the suite red in half the lifetimes
+  while the code behaved exactly as specified). The mechanism itself is pinned for **both**
+  presentations by the 13 docker-free cases in `tests/test_entrypoint_uid_match.sh`, and the
+  ownership round-trip is still tested separately. If you hit the warning, remove
   the project's dot-exclusion volumes (`dridock-<id>-{cache,npm,go-pkg-mod,local-share-pnpm-store}`)
   with the container down; they hold only regenerable caches. (Verified: a file created by a root process in
   a bind-mounted dir shows up owned by the host user `501` on the Mac.)

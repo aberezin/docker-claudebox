@@ -83,35 +83,119 @@ test_entrypoint_workspace_ownership() {
     rm -rf "$tmpdir"
 }
 
-# ── #141: uid matching says what it did, and is a no-op under colima ─────────
+# ── #141: uid matching says TRUTHFULLY what it did ───────────────────────────
 #
 # The ownership test above asserts the round-trip, deliberately not the uid
 # mechanism, which is why nothing failed while the mechanism quietly stopped
 # being a no-op (#141: a container lifetime read the workspace as 501 and
-# remapped claude to it). This asserts the documented colima fact directly:
-# claude keeps the baked uid 1000, or the workspace reads as root (Arfy).
-# The status line is checked on every backend.
+# remapped claude to it).
+#
+# This asserts the #141 CONTRACT: the entrypoint says what it did, and what it
+# says is true. It deliberately does NOT assert which uid the mount presents.
+#
+# WHY (#149): it used to require `claude` = 1000 or a workspace reading 0 — "the
+# documented colima no-op". That is a property of the ENVIRONMENT, which the
+# entrypoint neither controls nor promises. 6.1.0's gate ran in a lifetime where
+# the workspace read 501, so the check failed while the code did exactly what
+# #141 specifies, and the release shipped with a known-red test. A test that is
+# red in some lifetimes and green in others teaches everyone to read past red,
+# which is the opposite of what the FAIL backstop (#144) is for.
+#
+# The mechanism itself IS pinned, for BOTH presentations, by the 13 docker-free
+# cases in tests/test_entrypoint_uid_match.sh (stub mounts: "workspace reads as
+# root -> skip is SAID", "workspace reads 501:20 -> claude matched to 501:20").
+# So a live-colima assertion on one presentation added no coverage, only
+# fragility. What only a live run can check is that the three numbers on the
+# status line match what the container actually is — which is what this does.
+#
+# It prints both readings on every run, pass or warn (Bear's suggestion, #149),
+# so the next run in a lifetime that presents root records a fresh-inode
+# reading for #143 at no extra cost: the tmpdir below is created seconds
+# earlier, so its reading is a fresh inode, and whether a fresh inode can read
+# 0 in one lifetime and 501 in another is exactly what separates virtiofs
+# attribute caching from the mount itself.
+# >>> uid_line_contract (#149) -- tests/test_uid_line_contract.sh runs this block
+# Given the container's combined output, check the #141 status line against what
+# the container independently says it is. Echoes findings plus one parseable
+# UIDLINE row; rc 1 when the line is untrue or unparseable.
+#
+# This is extracted and driven over synthetic outputs by
+# tests/test_uid_line_contract.sh, because the live test below needs a docker
+# daemon — and a checker can't be verified by the case where nothing is wrong
+# (#144). The parse guard is the point: if the entrypoint's line format drifts,
+# every sed below yields "" and a checker that only compared empty strings
+# would pass everything. It fails loudly instead.
+_uid_line_contract() {
+    local out="$1" rc=0 line said_ws said_claude how real_ws real_claude
+    line=$(printf '%s\n' "$out" | grep -m1 'dridock: uid: workspace reads') || line=""  # swallow-ok: a missing line is reported two lines down as a parse failure, with the rc
+    said_ws=$(printf '%s\n' "$line" | sed -n 's/.*workspace reads \([0-9]*:[0-9]*\),.*/\1/p')
+    said_claude=$(printf '%s\n' "$line" | sed -n 's/.*claude runs as \([0-9]*:[0-9]*\) .*/\1/p')
+    how=$(printf '%s\n' "$line" | sed -n 's/.*claude runs as [0-9]*:[0-9]* (\([^)]*\)).*/\1/p')
+    real_ws=$(printf '%s\n' "$out" | sed -n 's/^WS=\([0-9]*:[0-9]*\) CLAUDE=.*/\1/p' | tail -1)
+    real_claude=$(printf '%s\n' "$out" | sed -n 's/^WS=[0-9]*:[0-9]* CLAUDE=\([0-9]*:[0-9]*\)/\1/p' | tail -1)
+
+    # On the record in EVERY outcome (#149, Bear's ask): the mounted dir was
+    # created seconds earlier, so real_ws is a FRESH inode's reading. Whether a
+    # fresh inode can read 0:0 in one lifetime and 501:* in another is what
+    # separates virtiofs attribute caching from the mount itself (#143).
+    echo "  uid: line says workspace=$said_ws claude=$said_claude how='$how'; container says workspace=$real_ws claude=$real_claude"
+
+    if [ -z "$said_ws" ] || [ -z "$said_claude" ] || [ -z "$how" ] || [ -z "$real_ws" ] || [ -z "$real_claude" ]; then
+        echo "  FAIL: couldn't parse the uid line or the container's own reading (line='$line'): the checks below would assert nothing"
+        echo "UIDLINE how= ws= claude="
+        return 1
+    fi
+    [ "$said_claude" = "$real_claude" ] \
+        || { echo "  FAIL: the line says claude runs as $said_claude, but id says $real_claude"; rc=1; }
+    [ "$said_ws" = "$real_ws" ] \
+        || { echo "  FAIL: the line says the workspace reads $said_ws, but stat says $real_ws"; rc=1; }
+    case "$how" in
+        matched)
+            [ "$real_claude" = "$real_ws" ] \
+                || { echo "  FAIL: it says (matched) but claude is $real_claude and the workspace reads $real_ws"; rc=1; } ;;
+        skipped*)
+            case "$real_ws" in
+                0:*|*:0) ;;
+                *) echo "  FAIL: it says (skipped) — only a root uid or gid triggers that — but the workspace reads $real_ws"; rc=1 ;;
+            esac ;;
+        *FAILED*) echo "  note: groupmod/usermod failed in this run and the line says so, which is the contract" ;;
+        *) echo "  FAIL: unrecognised outcome '$how' on the uid line"; rc=1 ;;
+    esac
+    [ "$rc" -eq 0 ] && echo "  OK: the uid line is true — what it reports matches what the container is"
+    echo "UIDLINE how=$how ws=$real_ws claude=$real_claude"
+    return "$rc"
+}
+# <<< uid_line_contract
+
 test_entrypoint_uid_observable() {
-    local tmpdir out
+    local tmpdir out rc=0 row real_ws real_claude
     tmpdir=$(mktemp -d "$WORKDIR/tests/.tmp-uid-XXXXX")
     out=$(docker run --rm -e DRIDOCK_WORKSPACE="$tmpdir" -v "$tmpdir:$tmpdir" --entrypoint bash "$IMAGE" -c \
-        'bash /opt/dridock/entrypoint.sh true 2>&1; echo "WS=$(stat -c %u "$DRIDOCK_WORKSPACE") CLAUDE=$(id -u claude)"' 2>&1)
+        'bash /opt/dridock/entrypoint.sh true 2>&1; echo "WS=$(stat -c %u:%g "$DRIDOCK_WORKSPACE") CLAUDE=$(id -u claude):$(id -g claude)"' 2>&1)
     rm -rf "$tmpdir"
     assert_contains "$out" "dridock: uid: workspace reads" "entrypoint states what the workspace read as and what claude runs as"
 
+    local contract
+    contract=$(_uid_line_contract "$out") || rc=1
+    printf '%s\n' "$contract" | grep -v '^UIDLINE '   # swallow-ok: grep -v returns 1 only when every line is the UIDLINE row, which the parse-failure path already reported with its rc
+    row=$(printf '%s\n' "$contract" | sed -n 's/^UIDLINE //p' | tail -1)
+    real_ws=${row#*ws=}; real_ws=${real_ws%% *}
+    real_claude=${row##*claude=}
+
+    # The ENVIRONMENT: reported, never asserted (#149). A remap under colima is
+    # the #143 flip — loud here, not red, because the harness did its job. The
+    # mechanism for BOTH presentations is pinned docker-free by
+    # tests/test_entrypoint_uid_match.sh (13 cases), so asserting one
+    # presentation here added no coverage, only a suite that went red in half
+    # the container lifetimes while the code behaved exactly as specified.
     if [[ "$(docker info --format '{{.Name}}' 2>/dev/null)" == colima* ]]; then
-        local ws claude
-        ws=$(printf '%s\n' "$out" | sed -n 's/^WS=\([0-9]*\) CLAUDE=.*/\1/p' | tail -1)
-        claude=$(printf '%s\n' "$out" | sed -n 's/^WS=[0-9]* CLAUDE=\([0-9]*\)/\1/p' | tail -1)
-        if [ "$claude" = "1000" ] || [ "$ws" = "0" ]; then
-            echo "  OK: colima: uid matching is the documented no-op (workspace reads $ws, claude $claude)"
-        else
-            echo "  FAIL: colima: claude was remapped to $claude (workspace reads $ws); the documented no-op isn't holding (#141)"
-            return 1
-        fi
-    else
-        echo "  SKIP: the colima no-op check needs a colima daemon"
+        case "$real_ws" in
+            0:*|*:0) echo "  note: colima presented the workspace as root ($real_ws) — the usual case, matching skipped" ;;
+            "") echo "  note: no workspace reading to report (the contract check above failed)" ;;
+            *) echo "  ⚠️  colima presented the workspace as $real_ws, so claude was remapped to $real_claude. That is #143 (cause unknown); #147 reconciles the named volumes either way. NOT a failure — the entrypoint reported it correctly." ;;
+        esac
     fi
+    return "$rc"
 }
 
 test_entrypoint_claude_md() {

@@ -199,7 +199,9 @@ _match_claude_uid() {
 	cur_gid=$(id -g claude)
 
 	if [ "$host_uid" = "0" ] || [ "$host_gid" = "0" ]; then
-		how="skipped: the workspace reads as root, the expected colima case"
+		# "usual", not "expected" (#149): the same mount has also presented
+		# 501:1000 and 501:20, and then the match runs. Neither is a fault.
+		how="skipped: the workspace reads as root, the usual colima case"
 	else
 		how=""
 		if [ "$host_gid" != "$cur_gid" ]; then

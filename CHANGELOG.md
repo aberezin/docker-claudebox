@@ -28,6 +28,28 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **The colima uid test asserts the #141 contract, not a property of the mount** (#149).
+  `test_entrypoint_uid_observable` required `claude` = 1000 or a workspace reading `0` — "the
+  documented colima no-op". That is an environment fact the entrypoint neither controls nor
+  promises: 6.1.0's gate ran in a lifetime where the workspace read `501:1000`, so the check
+  failed while the code did exactly what #141 specifies, and the release shipped with a
+  known-red test (#146's record). A test that is red in some container lifetimes and green in
+  others teaches everyone to read past red, which is what the FAIL backstop (#144) exists to
+  prevent. It now asserts that the status line is **true** — the uid, gid and outcome it
+  reports match what the container independently is — and *reports* the presentation without
+  failing on it. The mechanism was never only covered here: the 13 docker-free cases in
+  `tests/test_entrypoint_uid_match.sh` already pin both presentations, so requiring one of
+  them live added no coverage, only fragility. The checker is extracted behind
+  `# >>> uid_line_contract (#149)` markers and driven over synthetic output by a new
+  `tests/test_uid_line_contract.sh` (16 cases, including a drifted line format that must not
+  parse to a silent pass), because the live test needs a docker daemon and a checker cannot be
+  verified by the case where nothing is wrong. Every run now prints both readings, pass or
+  warn, so the next run in a root-presenting lifetime records a fresh-inode reading for #143
+  at no extra cost. `README.md`, `docs/design/per-project-vm.md` and the entrypoint's own
+  `how=` string said the no-op was expected; all three now say it is usual and not guaranteed,
+  and name the three presentations measured so far (`0:0`, `501:1000`, `501:20`) (Arfy).
+
 ## [6.1.0] - 2026-11-18
 
 Not breaking. The one change you might notice is that the debug switch is now
