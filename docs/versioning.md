@@ -120,13 +120,20 @@ below runs against the exact commit that will be tagged, with the new version in
    6.1.2: **299s, 75s, 73s, 71s, 299s, 65s**. It is **bimodal** — about 70 seconds or about five
    minutes, with nothing in between — and **the cause is not established**: the two slow runs were
    299s to the second, which looks like something waiting out a fixed timeout rather than a
-   variable cost, but `setup()` prints nothing between `creating throwaway test VM (cb-cbxtest)...`
-   and the first test, and `cleanup()` deletes the profile, so there is no step-level timing to
-   point at. Expect one of the two durations, nearly all of it silent. **It has not hung.**
-   (#148 replaced "takes seconds" with a range; #154 removed the "slowest was the first run of the
-   day" explanation, which the fifth run contradicted at exactly the same 299s. If you catch a
-   299s run, `colima start -p cb-cbxtest --verbose` under `DRIDOCK_DEBUG=1` is the read that would
-   settle it.)
+   variable cost. Expect one of the two durations, nearly all of it silent. **It has not hung.**
+
+   **To find out which step it is**, on the next slow run: `setup()` prints two lines before the
+   first test (`tests/common.sh:221,227`) — `creating throwaway test VM (cb-cbxtest)...` then
+   `building dridock test image (dridock:test) into cb-cbxtest...` — so *which of those the long
+   silence follows* already says whether the time goes to `colima start` or to the image build.
+   `_setup_step` captures each command's output and discards it on success, so nothing is written
+   down: read it live, or timestamp the stream
+   (`bash test.sh … | while IFS= read -r l; do printf '%s %s\n' "$(date +%T)" "$l"; done`).
+   If it is `colima start`, then `colima start -p cb-cbxtest --verbose` by hand, or
+   `~/.colima/_lima/colima-cb-cbxtest/ha.stderr.log` read **before** `cleanup()` deletes the
+   profile, is where to look. (#148 replaced "takes seconds" with a range; #154 removed the
+   "slowest was the first run of the day" explanation, which the fifth run contradicted at exactly
+   the same 299s.)
 
    ```sh
    DOCKER_FILES="test_api.sh test_build.sh test_cron.sh test_cron_telegram.sh \

@@ -55,8 +55,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   presented as an observation, in the doc that tells a release runner what to expect. Six
   measurements on one Mac now read `299s, 75s, 73s, 71s, 299s, 65s`: **bimodal**, nothing in
   between, cause not established. The doc gives both durations, says the cause is unknown, keeps
-  "it has not hung", and names the one read that would settle it. The `docker`-backend half is now
-  quoted from that side's own setup line rather than read off `tests/common.sh` (Bear, #148) (Arfy).
+  "it has not hung", and says how to find out which step it is. The `docker`-backend half is
+  quoted from that side's own setup line rather than read off `tests/common.sh` (Bear, #148).
+  Two claims in the first draft were wrong and Bear caught both (#154 review): `setup()` prints a
+  **second** line before the first test (`tests/common.sh:227`), so the step-level split the text
+  called unavailable already exists — which of the two lines the silence follows says whether the
+  time is `colima start` or the image build; and `DRIDOCK_DEBUG` has no effect on that path, which
+  reads neither it nor `--verbose`. The second line was in every sweep log quoted on #151 and
+  #154, so that one was asserted over data already in hand (Arfy).
 
 ## [6.1.1] - 2026-11-18
 
