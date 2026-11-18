@@ -240,13 +240,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install bun (used at build time only; not shipped in the final image).
 RUN curl -fsSL https://bun.sh/install | bash
 ENV PATH=/root/.bun/bin:$PATH
-# Copy only the dridock-ts subtree — edits under other dirs (docs, tests/, wrapper
-# scripts, README) do NOT invalidate this cache layer. `bun install --frozen-lockfile`
-# needs package.json + bun.lock only; the compile pulls in src/.
-COPY dridock-ts/ /build/dridock-ts/
+# Copy only what each step reads, in two layers (#145). `bun install
+# --frozen-lockfile` needs package.json + bun.lock only, so it's cached across
+# source edits: an ordinary TS change re-runs just the compile, not the
+# dependency fetch. The compile then reads src/ and tsconfig.json. Edits outside
+# dridock-ts/ (docs, tests/, scripts, README) don't invalidate either layer. The
+# host's dridock-ts/bin and node_modules are also in .dockerignore, so a broad
+# COPY added here later still wouldn't pull in the Mac's build outputs.
+COPY dridock-ts/package.json dridock-ts/bun.lock /build/dridock-ts/
 WORKDIR /build/dridock-ts
-RUN bun install --frozen-lockfile && \
-    mkdir -p /out && \
+RUN bun install --frozen-lockfile
+COPY dridock-ts/tsconfig.json /build/dridock-ts/
+COPY dridock-ts/src/ /build/dridock-ts/src/
+RUN mkdir -p /out && \
     bun build --compile src/cli/main.ts --outfile /out/dridock
 
 # ── harness ──────────────────────────────────────────────────────────────────────

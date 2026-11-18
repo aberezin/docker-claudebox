@@ -117,6 +117,30 @@ grep -q 'building with the node_modules already present' "$INSTALL" \
 grep -q 'bun run typecheck' "$INSTALL" \
     && ok "install.sh runs the typecheck" || bad "typecheck is not on the install path"
 
+# 6. #145: the ~2 s compile runs BEFORE the multi-minute image build, so a
+#    dependency or type failure doesn't first cost a full build. The binary is
+#    still INSTALLED after the build, so a failed build leaves the old binary
+#    beside the old images. Read off the top-level call lines in install.sh.
+lineof() { grep -nE "^$1" "$INSTALL" | head -1 | cut -d: -f1; }
+local l_ts l_guard l_build l_inst
+l_ts="$(lineof 'install_ts_wrapper "\$SCRIPT_DIR/dridock-ts"')"
+l_guard="$(lineof 'if ! install_clear_unreadable "\$SCRIPT_DIR"')"
+l_build="$(lineof 'install_build_variants "\$CB_INFRA_CTX"')"
+l_inst="$(lineof '\s*install -m 755 "\$TS_BIN"')"
+if [ -z "$l_ts" ] || [ -z "$l_guard" ] || [ -z "$l_build" ] || [ -z "$l_inst" ]; then
+    bad "couldn't find a top-level call in install.sh (ts=$l_ts guard=$l_guard build=$l_build install=$l_inst): the order checks would test nothing"
+else
+    [ "$l_ts" -lt "$l_build" ] \
+        && ok "the compile (line $l_ts) runs before the image build (line $l_build) (#145)" \
+        || bad "the compile (line $l_ts) runs after the image build (line $l_build): a lockfile drift costs a full build first"
+    [ "$l_ts" -lt "$l_guard" ] \
+        && ok "the compile runs before the unreadable-file guard (line $l_guard), so a stray it leaves is swept" \
+        || bad "the compile (line $l_ts) runs after install_clear_unreadable (line $l_guard)"
+    [ "$l_inst" -gt "$l_build" ] \
+        && ok "the binary is installed after the image build (line $l_inst), so a failed build changes nothing installed" \
+        || bad "the binary is installed (line $l_inst) before the image build (line $l_build)"
+fi
+
 rm -rf "$tmp"
 echo "  install dep step: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -59,6 +59,20 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `README.md`, `docs/design/per-project-vm.md` and the entrypoint's own
   `how=` string said the no-op was expected; all three now say it is usual and not guaranteed,
   and name the three presentations measured so far (`0:0`, `501:1000`, `501:20`) (Arfy).
+- **`install.sh` compiles the host binary before the image build, not after** (#145). The
+  compile's ~2 s of checks (lockfile, typecheck, build) can fail the install since #132, but they
+  ran after both image variants were built, so a lockfile drift or a type error cost a
+  multi-minute build before it could stop anything. They now run up front, beside the git hooks
+  (#104) and the unreadable-file guard (#114), which sit there for the same reason. Installing the
+  binary (and the macOS re-sign) still happens after the build, so a failed build leaves the old
+  binary beside the old images. Alongside it, the image build no longer reads the Mac's build
+  outputs. `.dockerignore` now excludes `dridock-ts/bin` (the ~90 MB Mach-O) and
+  `dridock-ts/node_modules` (a macOS tree): about 128 MB had been going into every build context,
+  and the Linux stage's `bun install` ran on top of it. The Dockerfile's `dridock-ts-build`
+  stage now copies `package.json` + `bun.lock` in one layer and `src/` in another. Measured in a
+  container build: after a source edit, `bun install` was `CACHED` and only the compile re-ran.
+  Tests: call order in `test_install_dep_step`, and the excluded/kept paths in
+  `test_dockerignore` (real docker build).
 
 ## [6.1.0] - 2026-11-18
 

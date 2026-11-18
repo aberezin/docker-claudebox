@@ -20,7 +20,7 @@ local REPO="$_DI2_DIR/.."
 local PASS=0 FAIL=0
 ok()  { echo "  ok   $1"; PASS=$((PASS + 1)); }
 bad() { echo "  FAIL $1"; FAIL=$((FAIL + 1)); }
-echo "--- .dockerignore keeps .bun-build strays out of the context ---"
+echo "--- .dockerignore keeps .bun-build strays and host build outputs out of the context ---"
 
 if ! docker info >/dev/null 2>&1; then
     echo "  SKIP no docker daemon reachable — not verified"
@@ -35,6 +35,12 @@ touch "$tmp/ctx/top.bun-build" \
       "$tmp/ctx/dridock-ts/.d0334600dafd3bdc-00000000.bun-build" \
       "$tmp/ctx/dridock-ts/deep/.x-00000000.bun-build" \
       "$tmp/ctx/dridock-ts/keep.ts"
+# #145: the host's dridock-ts build outputs, the shapes install.sh leaves.
+mkdir -p "$tmp/ctx/dridock-ts/bin" "$tmp/ctx/dridock-ts/node_modules/typescript/bin" "$tmp/ctx/dridock-ts/src"
+touch "$tmp/ctx/dridock-ts/bin/dridock" "$tmp/ctx/dridock-ts/bin/dridock.map" \
+      "$tmp/ctx/dridock-ts/node_modules/typescript/bin/tsc" \
+      "$tmp/ctx/dridock-ts/package.json" "$tmp/ctx/dridock-ts/bun.lock" \
+      "$tmp/ctx/dridock-ts/tsconfig.json" "$tmp/ctx/dridock-ts/src/main.ts"
 
 if ! docker build -q -o "type=local,dest=$tmp/out" "$tmp/ctx" >/dev/null 2>&1; then
     bad "the probe build itself failed"
@@ -52,6 +58,20 @@ else
     else
         bad "dridock-ts/keep.ts was excluded too"
     fi
+    # #145: the Mac's compiled binary and node_modules stay out; what the
+    # Dockerfile's dridock-ts-build stage reads stays in.
+    leaked="$(cd "$tmp/out/ctx/dridock-ts" && find bin node_modules -type f 2>/dev/null)"
+    if [ -z "$leaked" ]; then
+        ok "dridock-ts/bin and dridock-ts/node_modules (the host's build outputs) don't reach the context (#145)"
+    else
+        bad "host build outputs leaked into the context: $(echo "$leaked" | tr '\n' ' ')"
+    fi
+    local f missing=""
+    for f in package.json bun.lock tsconfig.json src/main.ts; do
+        [ -f "$tmp/out/ctx/dridock-ts/$f" ] || missing+=" $f"
+    done
+    [ -z "$missing" ] && ok "the files the dridock-ts-build stage COPYs are still included" \
+        || bad "excluded but the Dockerfile needs them:$missing"
 fi
 
 rm -rf "$tmp"

@@ -20,3 +20,14 @@ docker-compose.dev.yaml
 # them) fails the build on macOS before any pattern applies, so install.sh
 # removes those first (install_clear_unreadable, #114).
 **/*.bun-build
+
+# The host's own dridock-ts build outputs (#145). install.sh compiles the host
+# binary on the Mac into dridock-ts/bin/ (~90 MB Mach-O) after `bun install`
+# fills dridock-ts/node_modules/ with a macOS tree. The Dockerfile's
+# dridock-ts-build stage compiles its OWN Linux binary from package.json,
+# bun.lock and src/, so neither is wanted there: without these lines ~128 MB of
+# Mac artifacts went into every build context, and the stage's
+# `bun install --frozen-lockfile` ran on top of the macOS node_modules.
+# tests/test_dockerignore.sh checks this with a real build.
+dridock-ts/node_modules
+dridock-ts/bin

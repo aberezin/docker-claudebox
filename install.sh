@@ -180,6 +180,88 @@ if [ -f "$SCRIPT_DIR/.githooks/install.sh" ] && git -C "$SCRIPT_DIR" rev-parse -
 	fi
 fi
 
+# ── compile the host binary, BEFORE the image build (#145) ─────────────────────
+# install_ts_wrapper's three steps take ~2 s and can each fail the install
+# (#132); the image build takes minutes. A cheap check that can stop the
+# install runs before the expensive thing it would stop — the same reason the
+# git hooks (#104) and the unreadable-file guard (#114) sit up here. Before
+# #145 a lockfile drift or a type error was found only after both image
+# variants had been built.
+#
+# Only the COMPILE moves. Installing the binary to $BIN_PATH (and the codesign)
+# stays after the image build, so a failed build leaves the previously
+# installed binary next to the previously built images: a failed install
+# changes nothing that's installed. It also runs before install_clear_unreadable,
+# so any stray the compile leaves is swept before the build context is read.
+#
+# The image build doesn't use this binary (the Dockerfile compiles its own in
+# the dridock-ts-build stage), and .dockerignore keeps dridock-ts/bin and
+# dridock-ts/node_modules out of that stage's context (#145).
+# Compile the dridock TypeScript wrapper (a single ~95MB standalone binary via
+# `bun build --compile`) and install it as `$BIN_NAME`. Since 4.0.0 this IS the
+# dridock wrapper — the bash wrapper.sh has been removed (see #47 + CHANGELOG for
+# rollback path via v3.4.1).
+echo "🔨 Compiling dridock (TypeScript wrapper) → single binary..."
+
+# >>> install_ts_wrapper (#132) -- tests/test_install_dep_step.sh runs this block
+# Install deps, typecheck, build — three steps, each able to fail the install on
+# its own. They used to be one pipeline, which could only report the last rc.
+#
+# WHY each one is separate and fatal (#132):
+#
+# 1. #129 (B) made a lost `bun install` audible; this makes it fatal. During an
+#    INSTALL, `--frozen-lockfile` failing means the tree doesn't match
+#    `bun.lock`, so the build isn't reproducible — and the old code continued
+#    and printed `✅ setup complete` over a binary that is not the one the
+#    lockfile describes (#118: that line already gets read as "the change is
+#    live"). Bun's own output is shown, not discarded behind "run it yourself".
+#
+# 2. `bun build` erases types without checking them and needs no node_modules
+#    at all: measured, a complete working binary came out of a tree where
+#    node_modules had never been installed. So the build CANNOT detect a
+#    dependency problem and the `|| { exit 1; }` around it never could. `tsc`
+#    is the only step that reads node_modules, which makes it both the
+#    typecheck and the real check that the tree is usable for this source.
+#    `tsc` comes from `typescript` in dridock-ts's devDependencies, so step 1
+#    always installs it. It used to be a peerDependency and worked only because
+#    bun installs peers by default — a default this step would have been
+#    silently relying on (Bear, #132 review), so it was moved.
+#
+# Today dridock-ts has zero runtime dependencies, so step 1 failing costs only
+# @types/bun. The point is that this stops being true at the first `bun add`,
+# and nothing would have failed when it did.
+install_ts_wrapper() {
+	local dir="$1" out
+	if ! out="$(cd "$dir" && bun install --frozen-lockfile 2>&1)"; then
+		echo "❌ bun install --frozen-lockfile failed in dridock-ts/:" >&2
+		printf '%s\n' "$out" >&2
+		echo "   The dependency tree doesn't match bun.lock, so this build would not be reproducible." >&2
+		echo "   Relock with 'bun install' in dridock-ts/, then re-run ./install.sh." >&2
+		return 1
+	fi
+	if ! out="$(cd "$dir" && bun run typecheck 2>&1)"; then
+		echo "❌ typecheck (tsc --noEmit) failed in dridock-ts/:" >&2
+		printf '%s\n' "$out" >&2
+		echo "   Not installing a binary built from source that doesn't typecheck." >&2
+		echo "   If tsc itself is missing the dependency tree is incomplete: run 'bun install' in dridock-ts/." >&2
+		return 1
+	fi
+	if ! out="$(cd "$dir" && bun run build 2>&1)"; then
+		echo "❌ dridock TS build failed:" >&2
+		printf '%s\n' "$out" >&2
+		return 1
+	fi
+	return 0
+}
+# <<< install_ts_wrapper
+
+install_ts_wrapper "$SCRIPT_DIR/dridock-ts" || exit 1
+TS_BIN="$SCRIPT_DIR/dridock-ts/bin/dridock"
+if [ ! -x "$TS_BIN" ]; then
+	echo "❌ dridock binary not found at $TS_BIN after build."
+	exit 1
+fi
+
 # >>> install_clear_unreadable (#114) -- tests/test_install_unreadable_guard.sh runs this block
 # A file or directory the current user can't read anywhere in the checkout fails
 # the docker build on macOS with "failed to xattr …: permission denied", and
@@ -418,71 +500,6 @@ if [ -z "$INSTALL_SECONDARY" ]; then
 	echo "   (DRIDOCK_SKIP_MINIMAL: not building $IMAGE_NAME:latest-minimal)"
 	_want_claude="${CLAUDE_VERSION_OVERRIDE:-$(sed -n 's/^ARG CLAUDE_VERSION=\([^ ]*\).*/\1/p' "$SCRIPT_DIR/Dockerfile" 2>/dev/null | head -1)}"
 	install_report_other_variant "$CB_INFRA_CTX" "$IMAGE_NAME:latest" "$IMAGE_NAME:latest-minimal" "$DRIDOCK_VERSION" "$_want_claude"
-fi
-
-# Compile the dridock TypeScript wrapper (a single ~95MB standalone binary via
-# `bun build --compile`) and install it as `$BIN_NAME`. Since 4.0.0 this IS the
-# dridock wrapper — the bash wrapper.sh has been removed (see #47 + CHANGELOG for
-# rollback path via v3.4.1).
-echo "🔨 Compiling dridock (TypeScript wrapper) → single binary..."
-
-# >>> install_ts_wrapper (#132) -- tests/test_install_dep_step.sh runs this block
-# Install deps, typecheck, build — three steps, each able to fail the install on
-# its own. They used to be one pipeline, which could only report the last rc.
-#
-# WHY each one is separate and fatal (#132):
-#
-# 1. #129 (B) made a lost `bun install` audible; this makes it fatal. During an
-#    INSTALL, `--frozen-lockfile` failing means the tree doesn't match
-#    `bun.lock`, so the build isn't reproducible — and the old code continued
-#    and printed `✅ setup complete` over a binary that is not the one the
-#    lockfile describes (#118: that line already gets read as "the change is
-#    live"). Bun's own output is shown, not discarded behind "run it yourself".
-#
-# 2. `bun build` erases types without checking them and needs no node_modules
-#    at all: measured, a complete working binary came out of a tree where
-#    node_modules had never been installed. So the build CANNOT detect a
-#    dependency problem and the `|| { exit 1; }` around it never could. `tsc`
-#    is the only step that reads node_modules, which makes it both the
-#    typecheck and the real check that the tree is usable for this source.
-#    `tsc` comes from `typescript` in dridock-ts's devDependencies, so step 1
-#    always installs it. It used to be a peerDependency and worked only because
-#    bun installs peers by default — a default this step would have been
-#    silently relying on (Bear, #132 review), so it was moved.
-#
-# Today dridock-ts has zero runtime dependencies, so step 1 failing costs only
-# @types/bun. The point is that this stops being true at the first `bun add`,
-# and nothing would have failed when it did.
-install_ts_wrapper() {
-	local dir="$1" out
-	if ! out="$(cd "$dir" && bun install --frozen-lockfile 2>&1)"; then
-		echo "❌ bun install --frozen-lockfile failed in dridock-ts/:" >&2
-		printf '%s\n' "$out" >&2
-		echo "   The dependency tree doesn't match bun.lock, so this build would not be reproducible." >&2
-		echo "   Relock with 'bun install' in dridock-ts/, then re-run ./install.sh." >&2
-		return 1
-	fi
-	if ! out="$(cd "$dir" && bun run typecheck 2>&1)"; then
-		echo "❌ typecheck (tsc --noEmit) failed in dridock-ts/:" >&2
-		printf '%s\n' "$out" >&2
-		echo "   Not installing a binary built from source that doesn't typecheck." >&2
-		echo "   If tsc itself is missing the dependency tree is incomplete: run 'bun install' in dridock-ts/." >&2
-		return 1
-	fi
-	if ! out="$(cd "$dir" && bun run build 2>&1)"; then
-		echo "❌ dridock TS build failed:" >&2
-		printf '%s\n' "$out" >&2
-		return 1
-	fi
-	return 0
-}
-# <<< install_ts_wrapper
-
-install_ts_wrapper "$SCRIPT_DIR/dridock-ts" || exit 1
-TS_BIN="$SCRIPT_DIR/dridock-ts/bin/dridock"
-if [ ! -x "$TS_BIN" ]; then
-	echo "❌ dridock binary not found at $TS_BIN after build."
-	exit 1
 fi
 
 echo "📝 Installing $BIN_NAME to $BIN_PATH..."
