@@ -60,11 +60,17 @@ else
     fi
     # #145: the Mac's compiled binary and node_modules stay out; what the
     # Dockerfile's dridock-ts-build stage reads stays in.
-    leaked="$(cd "$tmp/out/ctx/dridock-ts" && find bin node_modules -type f 2>/dev/null)"
-    if [ -z "$leaked" ]; then
+    # The dir must exist first: if it didn't, an empty find would read as "nothing leaked".
+    local d; leaked=""
+    for d in bin node_modules; do
+        [ -e "$tmp/out/ctx/dridock-ts/$d" ] && leaked+=" $(cd "$tmp/out/ctx/dridock-ts" && find "$d" -type f | tr '\n' ' ')"
+    done
+    if [ ! -d "$tmp/out/ctx/dridock-ts" ]; then
+        bad "dridock-ts/ is missing from the probe output altogether: can't check what leaked"
+    elif [ -z "$leaked" ]; then
         ok "dridock-ts/bin and dridock-ts/node_modules (the host's build outputs) don't reach the context (#145)"
     else
-        bad "host build outputs leaked into the context: $(echo "$leaked" | tr '\n' ' ')"
+        bad "host build outputs leaked into the context:$leaked"
     fi
     local f missing=""
     for f in package.json bun.lock tsconfig.json src/main.ts; do

@@ -247,6 +247,10 @@ ENV PATH=/root/.bun/bin:$PATH
 # dridock-ts/ (docs, tests/, scripts, README) don't invalidate either layer. The
 # host's dridock-ts/bin and node_modules are also in .dockerignore, so a broad
 # COPY added here later still wouldn't pull in the Mac's build outputs.
+# This list is exhaustive for TODAY's src/: if src/ ever reads a file from
+# outside dridock-ts/ (the planned case is the repo-root VERSION, see
+# src/domain/dridockVersion.ts), the file has to be COPYed here too, or the
+# compile fails in the image only.
 COPY dridock-ts/package.json dridock-ts/bun.lock /build/dridock-ts/
 WORKDIR /build/dridock-ts
 RUN bun install --frozen-lockfile

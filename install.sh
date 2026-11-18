@@ -191,8 +191,15 @@ fi
 # Only the COMPILE moves. Installing the binary to $BIN_PATH (and the codesign)
 # stays after the image build, so a failed build leaves the previously
 # installed binary next to the previously built images: a failed install
-# changes nothing that's installed. It also runs before install_clear_unreadable,
-# so any stray the compile leaves is swept before the build context is read.
+# changes nothing that's installed.
+#
+# It also runs before install_clear_unreadable, which matters only for some
+# filesystems (measured 2026-11-18): bun 1.4.4 on macOS (APFS) and bun 1.4.0 on
+# a Linux overlay fs leave no *.bun-build stray, but bun 1.4.0 compiling onto a
+# virtiofs share from a container leaves one, mode 000. #114's strays came from
+# that case. A stray already present doesn't stop the compile (bun 1.4.4,
+# macOS, rc 0, Arfy), so this order is insurance: whatever the compile leaves,
+# the guard sweeps before the build context is read.
 #
 # The image build doesn't use this binary (the Dockerfile compiles its own in
 # the dridock-ts-build stage), and .dockerignore keeps dridock-ts/bin and
