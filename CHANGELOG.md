@@ -38,6 +38,27 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sweep, which mounts nothing" was true of the tests and misleading about the run, so it now
   says the sweep isn't daemon-free and points at step 3. Both sentences were mine from #144 and
   both surfaced the first time I ran the documented step verbatim, during 6.1.0's gate (Arfy).
+- **Under Colima, `claude` is no longer remapped to whatever uid the workspace happens to read
+  as, and the named volumes under `$HOME` are reconciled on every start** (#147, #143). On a
+  virtiofs share, a directory's presented owner follows the last guest process that wrote into
+  it: a root container leaves `0:0`, a `--user 1234` one leaves `1234:1234`, while the Mac side
+  stays 501 (measured, #143). So the entrypoint's match flipped `claude` between 501 and 1000
+  across container lifetimes, and kept flipping, since `claude` writing as 501 made the next
+  start read 501. The chown after a match walked all of `$HOME` (itself a share of the Mac,
+  `~/.ssh` inside it), and a skip chowned nothing, so volumes stamped 501 stayed 501 and
+  `~/.cache` was unwritable (seen at 6.1.0's gate).
+
+  Now the rule is the workspace's **filesystem**, read from `/proc/self/mountinfo`: the match runs
+  only on a local one (`ext4`/`ext3`/`xfs`/`btrfs`/`overlay`, so the Linux docker backend still
+  matches). It's skipped on a share or an unrecognised type, and the status line says which.
+  On every start, each local mount under `$HOME` is reconciled to the uid `claude` actually
+  has, read after any `usermod`; on a failed `usermod` that used to be the requested uid. Each
+  walk is `-xdev`; shares are never walked; an unrecognised type is reported and left alone.
+  Existing projects with 501-owned volumes are fixed on their first start, with no manual step.
+
+  The docker-free test grew from 13 to 24 cases over stub mount tables in the live layout. It
+  also found that its old "nothing was walked" assertion was vacuous: the `find` stub ran in a
+  pipeline subshell, so it never recorded anything.
 - **The colima uid test asserts the #141 contract, not a property of the mount** (#149).
   `test_entrypoint_uid_observable` required `claude` = 1000 or a workspace reading `0` — "the
   documented colima no-op". That is an environment fact the entrypoint neither controls nor

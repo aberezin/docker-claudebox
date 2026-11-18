@@ -169,11 +169,14 @@ _uid_line_contract() {
         matched)
             [ "$said_claude" = "$said_ws" ] \
                 || { echo "  FAIL: it says (matched) but reports claude as $said_claude against a workspace of $said_ws"; rc=1; } ;;
-        skipped*)
+        "skipped: the workspace reads as root"*)
             case "$said_ws" in
                 0:*|*:0) ;;
-                *) echo "  FAIL: it says (skipped) — only a root uid or gid triggers that — but reports reading $said_ws"; rc=1 ;;
+                *) echo "  FAIL: it says it skipped because the workspace reads as root, but reports reading $said_ws"; rc=1 ;;
             esac ;;
+        # #147: on a share or an untrusted filesystem the match is skipped
+        # whatever the workspace reads; the uid check above still holds it.
+        "skipped: the workspace is a "*" share"*|"skipped: the workspace's filesystem"*) ;;
         *FAILED*) echo "  note: groupmod/usermod failed in this run and the line says so, which is the contract" ;;
         *) echo "  FAIL: unrecognised outcome '$how' on the uid line"; rc=1 ;;
     esac
@@ -213,7 +216,8 @@ test_entrypoint_uid_observable() {
     if [[ "$(docker info --format '{{.Name}}' 2>/dev/null)" == colima* ]]; then
         case "$how" in
             matched) echo "  ⚠️  colima presented the workspace as $said_ws, so claude was remapped to $real_claude. The presented owner on virtiofs follows guest writes, not the host (#143); #147 reconciles the named volumes either way. NOT a failure — the entrypoint reported it correctly." ;;
-            skipped*) echo "  note: colima presented the workspace as root ($said_ws) — the usual case, matching skipped" ;;
+            "skipped: the workspace reads as root"*) echo "  note: the workspace read as root ($said_ws), matching skipped" ;;
+            skipped*) echo "  note: matching skipped by design on this filesystem (#147); the workspace happened to read $said_ws, which on virtiofs only says who last wrote to it (#143)" ;;
             "") echo "  note: no outcome to report (the contract check above failed)" ;;
             *) echo "  note: outcome '$how' — see the line above" ;;
         esac

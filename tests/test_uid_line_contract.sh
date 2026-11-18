@@ -33,7 +33,9 @@ fi
 . "$fn"
 
 local LINE='dridock: uid: workspace reads %s, claude runs as %s (%s) (#141)'
-local SKIP='skipped: the workspace reads as root, the usual colima case'
+local SKIP='skipped: the workspace reads as root'
+local SHARE='skipped: the workspace is a virtiofs share, whose owner reading follows guest writes, not the host, see #143'
+local UNTRUSTED="skipped: the workspace's filesystem 'unreadable' isn't one whose owner can be trusted, see #147"
 # verdict <pass|fail> <label> <said_ws> <said_claude> <how> <before_ws> <after_ws> <real_claude>
 #
 # before_ws and after_ws are deliberately separate (#149 review): on virtiofs
@@ -55,6 +57,8 @@ verdict pass "501 presentation, matched — #143's flip is not a failure" '501:1
 verdict pass "the Mac's own ids presented, matched"                     '501:20'   '501:20'    'matched'      '501:20'   '501:20'    '501:20'
 verdict pass "usermod failed and the line says so"                      '501:20'   '1000:1000' 'match FAILED' '501:20'   '501:20'    '1000:1000'
 verdict pass "a root GID alone also triggers the skip"                   '501:0'    '1000:1000' "$SKIP"        '501:0'    '501:0'     '1000:1000'
+verdict pass "#147: a virtiofs workspace reading 501 is skipped, claude 1000" '501:1000' '1000:1000' "$SHARE"     '501:1000' '501:1000'  '1000:1000'
+verdict pass "#147: an untrusted filesystem is skipped, whatever it reads" '501:20'  '1000:1000' "$UNTRUSTED"  '501:20'   '501:20'    '1000:1000'
 
 # ── Bear's live case: the presented owner MOVED during the run (#143) ───────
 # The line said 0:0, a later stat said 1000:1000, and neither was wrong. The
@@ -68,6 +72,7 @@ verdict fail "says claude is 1000 while id says 501"                    '501:100
 verdict fail "says it read 0:0 when the pre-read said 501:1000"         '0:0'      '1000:1000' "$SKIP"        '501:1000' '501:1000'  '1000:1000'
 verdict fail "claims (matched) against a workspace it reports as other" '501:1000' '1000:1000' 'matched'      '501:1000' '501:1000'  '1000:1000'
 verdict fail "claims (skipped) while reporting a non-root read"         '501:1000' '501:1000'  "$SKIP"        '501:1000' '501:1000'  '501:1000'
+verdict fail "a share skip that misreports claude's uid"                 '501:1000' '501:1000'  "$SHARE"      '501:1000' '501:1000'  '1000:1000'
 verdict fail "an outcome word nobody recognises"                        '0:0'      '1000:1000' 'whatever'     '0:0'      '0:0'       '1000:1000'
 verdict fail "no pre-read at all: nothing to hold the line to"          '0:0'      '1000:1000' "$SKIP"        ''         '0:0'       '1000:1000'
 

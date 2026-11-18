@@ -186,29 +186,97 @@ esac
 # chown's rc read and reported; and the uid recorded in ~/.claude, with a
 # warning when it differs from last time (this run's stat vs the record, not a
 # scan of accumulated ownership, which would re-announce old residue forever).
+#
+# #147 / #143: two corrections to the above, from measuring the mount.
+# 1. On a virtiofs share the workspace's presented owner is not the host owner.
+#    It follows whichever guest process last wrote into the directory: a root
+#    container's write makes it read 0:0, a uid-1234 container's write makes it
+#    read 1234:1234, while the Mac side stays 501 throughout (#143). Matching
+#    against it is meaningless and self-perpetuating: once claude runs as 501
+#    and writes, the next start reads 501 and matches again. So the match runs
+#    only when the workspace's filesystem is a LOCAL one, where the owner is
+#    real (the Linux docker backend's bind of an ext4 dir), and is skipped,
+#    and said, on a share or an unrecognised type. The rule is the filesystem,
+#    not the platform, so the docker backend keeps matching.
+# 2. The chown that follows a match used to walk all of /home/claude, which is
+#    itself a virtiofs share of the Mac with ~/.ssh inside it, and ran only on
+#    the match path. Named volumes stamped 501 by one lifetime stayed 501 when
+#    the next lifetime skipped, so ~/.cache was unwritable (#143's damage).
+#    Now, on EVERY start, each mount under $HOME on a local filesystem (the
+#    named volumes, and $HOME itself if it is local) is reconciled to the uid
+#    claude actually ends up with, each walk with -xdev so it can't cross onto
+#    a share nested inside it. Shares are never walked. A mount of a type that
+#    is neither known-local nor known-share is reported and left alone: leaving
+#    it keeps the old bug visibly, chowning it could reach a host filesystem.
+
+# >>> uid_mounts (#147) -- tests/test_entrypoint_uid_match.sh extracts this block
+# The mount table as "mountpoint<TAB>fstype" lines, from /proc/self/mountinfo
+# ($_DRIDOCK_MOUNTINFO overrides it for tests). In mountinfo the fstype is the
+# first field after the " - " separator (the optional fields before it vary in
+# number, so a fixed column is wrong), and mount points are octal-escaped.
+_dridock_mount_table() {
+	local mi="${_DRIDOCK_MOUNTINFO:-/proc/self/mountinfo}"
+	[ -r "$mi" ] || return 1
+	awk '{
+		i = index($0, " - "); if (!i) next
+		split(substr($0, 1, i - 1), l, " "); split(substr($0, i + 3), r, " ")
+		mp = l[5]
+		gsub(/\\040/, " ", mp); gsub(/\\011/, "\t", mp); gsub(/\\012/, "\n", mp); gsub(/\\134/, "\\", mp)
+		print mp "\t" r[1]
+	}' "$mi"
+}
+
+# fstype of the mount that contains $1 (the longest mount point that prefixes
+# it), read from the table in $2. Empty when nothing matches.
+_dridock_fstype_of() {
+	local path="$1" table="$2"
+	printf '%s\n' "$table" | awk -F '\t' -v p="$path" '
+		{ mp = $1; ok = (mp == "/" || p == mp || index(p, mp "/") == 1) }
+		ok && length(mp) >= best { best = length(mp); fs = $2 }  # >=: the later of two stacked mounts is the visible one
+		END { print fs }'
+}
+
+# local | share | unknown. Only "local" filesystems have an owner worth matching
+# or reconciling. An allowlist, not "!= virtiofs": the next host-share type
+# (9p, sshfs, nfs, a future lima default) must not be chowned by default.
+_dridock_fs_class() {
+	case "$1" in
+		ext4|ext3|xfs|btrfs|overlay) echo local ;;
+		virtiofs|9p|fuse.sshfs|sshfs|nfs|nfs4|cifs|smb3|fakeowner) echo share ;;
+		*) echo unknown ;;
+	esac
+}
+# <<< uid_mounts
+
 _match_claude_uid() {
-	local ws="$1" record="$2"
+	local ws="$1" record="$2" home="${_DRIDOCK_HOME:-/home/claude}"
 	if [ -z "$ws" ] || [ ! -d "$ws" ]; then
 		echo "dridock: uid: no workspace dir to read ($ws), claude stays $(id -u claude):$(id -g claude) (#141)" >&2
 		return 0
 	fi
+	local table ws_fs ws_class
+	table=$(_dridock_mount_table) || table=""  # swallow-ok: an unreadable mount table leaves every fstype empty, which classifies as unknown and is SAID below, never matched or chowned
+	ws_fs=$(_dridock_fstype_of "$ws" "$table")
+	ws_class=$(_dridock_fs_class "$ws_fs")
+
 	local host_uid host_gid cur_uid cur_gid how
 	host_uid=$(stat -c '%u' "$ws")
 	host_gid=$(stat -c '%g' "$ws")
 	cur_uid=$(id -u claude)
 	cur_gid=$(id -g claude)
 
-	if [ "$host_uid" = "0" ] || [ "$host_gid" = "0" ]; then
-		# "usual", not "expected" (#149): the same mount has also presented
-		# 501:1000 and 501:20, and then the match runs. Neither is a fault.
-		how="skipped: the workspace reads as root, the usual colima case"
+	if [ "$ws_class" = "share" ]; then
+		how="skipped: the workspace is a $ws_fs share, whose owner reading follows guest writes, not the host, see #143"
+	elif [ "$ws_class" != "local" ]; then
+		how="skipped: the workspace's filesystem '${ws_fs:-unreadable}' isn't one whose owner can be trusted, see #147"
+	elif [ "$host_uid" = "0" ] || [ "$host_gid" = "0" ]; then
+		how="skipped: the workspace reads as root"
 	else
 		how=""
 		if [ "$host_gid" != "$cur_gid" ]; then
 			dbg "fixing GID: $cur_gid -> $host_gid"
 			# #37 Tier 1 #9: surface UID/GID remap failures. If the target
-			# GID is in use, groupmod fails and the later chown stamps files
-			# with the UNCHANGED gid, misowned on the host.
+			# GID is in use, groupmod fails and claude keeps the old gid.
 			groupmod -g "$host_gid" claude \
 				|| { how="match FAILED"; echo "dridock: groupmod -g $host_gid claude FAILED — host files may end up misowned" >&2; }
 		fi
@@ -218,21 +286,40 @@ _match_claude_uid() {
 				|| { how="match FAILED"; echo "dridock: usermod -u $host_uid claude FAILED — host files may end up misowned" >&2; }
 		fi
 		[ -z "$how" ] && how="matched"
-		local parallel=$(( $(nproc) / 2 ))
-		[ "$parallel" -lt 1 ] && parallel=1
-		dbg "chown /home/claude (only misowned, $parallel parallel)"
-		# #141: this pipeline's rc used to go nowhere. A failed chown leaves
-		# files under $HOME the new uid can't write, so read both stages.
-		find /home/claude \( ! -user "$host_uid" -o ! -group "$host_gid" \) -print0 | xargs -0 -r -P "$parallel" chown claude:claude; local rcs=("${PIPESTATUS[@]}")
-		if [ "${rcs[0]}" != "0" ] || [ "${rcs[1]}" != "0" ]; then
-			echo "dridock: chown of /home/claude to claude failed (find rc ${rcs[0]}, xargs rc ${rcs[1]}): some files under \$HOME may not be writable (#141)" >&2
-		fi
-		dbg "chown done"
 	fi
 
-	local now_uid now_gid prev=""
+	# Reconcile $HOME's local mounts to the uid claude ACTUALLY has now, read
+	# after groupmod/usermod: on "match FAILED" that's the old uid, and
+	# selecting by the requested one while chowning to the real one was the
+	# inconsistency #147 fixes. Every start, both paths (#143's damage).
+	local now_uid now_gid
 	now_uid=$(id -u claude)
 	now_gid=$(id -g claude)
+	local parallel=$(( $(nproc) / 2 ))
+	[ "$parallel" -lt 1 ] && parallel=1
+	local mp fs cls roots=()
+	cls=$(_dridock_fs_class "$(_dridock_fstype_of "$home" "$table")")
+	[ "$cls" = "local" ] && roots+=("$home")
+	while IFS=$'\t' read -r mp fs; do
+		case "$mp" in "$home"/*) ;; *) continue ;; esac
+		cls=$(_dridock_fs_class "$fs")
+		if [ "$cls" = "local" ]; then
+			roots+=("$mp")
+		elif [ "$cls" = "unknown" ]; then
+			echo "dridock: uid: $mp is on '$fs', which isn't a known local or share filesystem: not reconciling its ownership (#147)" >&2
+		fi
+	done <<< "$table"
+	local root rcs
+	for root in "${roots[@]}"; do
+		dbg "reconcile $root to $now_uid:$now_gid (-xdev, only misowned, $parallel parallel)"
+		find "$root" -xdev \( ! -user "$now_uid" -o ! -group "$now_gid" \) -print0 | xargs -0 -r -P "$parallel" chown "$now_uid:$now_gid"; rcs=("${PIPESTATUS[@]}")
+		if [ "${rcs[0]}" != "0" ] || [ "${rcs[1]}" != "0" ]; then
+			echo "dridock: chown of $root to $now_uid:$now_gid failed (find rc ${rcs[0]}, xargs rc ${rcs[1]}): some files there may not be writable (#141, #147)" >&2
+		fi
+	done
+	dbg "reconciled: ${roots[*]:-nothing local under $home}"
+
+	local prev=""
 	echo "dridock: uid: workspace reads $host_uid:$host_gid, claude runs as $now_uid:$now_gid ($how) (#141)" >&2
 
 	if [ -n "$record" ] && [ ! -d "${record%/*}" ]; then
@@ -243,7 +330,7 @@ _match_claude_uid() {
 		if [ -f "$record" ]; then prev=$(cat "$record"); fi
 		if [ -n "$prev" ] && [ "$prev" != "$now_uid:$now_gid" ]; then
 			echo "dridock: claude's uid CHANGED since the last start: $prev -> $now_uid:$now_gid (#141)." >&2
-			echo "   Files created as $prev, including named volumes under \$HOME, may not be writable now." >&2
+			echo "   The named volumes under \$HOME were reconciled to $now_uid:$now_gid above (#147); anything elsewhere created as $prev may not be writable." >&2
 		fi
 		local err
 		if ! err=$( { printf '%s\n' "$now_uid:$now_gid" > "$record"; } 2>&1 ); then

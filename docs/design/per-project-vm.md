@@ -441,36 +441,45 @@ No macOS `sudo` **at runtime**. Specifically:
   the actual footprint. Run `gc` periodically or after large deletes. (`default` is
   the human's VM and is left untouched — trim it yourself with
   `colima ssh -p default -- sudo fstrim -av`.)
-- **File ownership / UID-matching is usually a no-op under Colima — not guaranteed.** The entrypoint's
+- **File ownership: under Colima `claude` is never remapped (#147).** The entrypoint's
   Linux-style UID/GID matching (adjust the `claude` user to the workspace owner so
   Claude's files aren't root/`1000`-owned on the host) is unnecessary here: Colima's
   virtiofs mount maps *every* container-side write back to the host user regardless
   of the in-container UID, so files Claude creates always come back owned by you.
-  The entrypoint stats the mounted workspace; it usually reads root (`0`), so matching is
-  skipped and `claude` keeps the baked uid 1000; a mount that reads as 1000 matches to
-  the same thing. **That is what usually happens, not what is guaranteed (#141, #143).**
-  The same path has been measured presenting `0:0`, `501:1000` and `501:20` in different
-  container lifetimes. Probing the mount directly (Bear, #143) showed why: **the presented
-  owner of a directory follows the last guest process to modify it** — a root container
-  leaves `0:0`, a `--user 1234` container leaves `1234:1234`, the ssh session sees its own
-  `501:1000` — so it carries no information about the Mac owner, which is always `501`. Writes
-  still land as the host user; it is only the *presented* ownership that is meaningless here.
-  That also makes the flip self-perpetuating: once `claude` runs as 501 and writes, the next
-  start reads 501 and matches again. When the workspace reads non-root the match runs: one lifetime remapped
-  `claude` to 501 and chowned `$HOME`, and the next read root, leaving the 501-owned named
-  volumes unwritable, with nothing said. So every
-  start now logs `dridock: uid: workspace reads U:G, claude runs as U:G (…)`, a failed
-  `$HOME` chown is reported, and a uid that differs from the one recorded in
-  `~/.claude/.dridock-claude-uid` is warned about. `test_entrypoint_uid_observable`
-  asserts the **contract** — that the status line is true, i.e. the uid, gid and outcome it
-  reports match what the container actually is — and reports the presentation without
-  failing on it (#149: requiring one presentation made the suite red in half the lifetimes
-  while the code behaved exactly as specified). The mechanism itself is pinned for **both**
-  presentations by the 13 docker-free cases in `tests/test_entrypoint_uid_match.sh`, and the
-  ownership round-trip is still tested separately. If you hit the warning, remove
-  the project's dot-exclusion volumes (`dridock-<id>-{cache,npm,go-pkg-mod,local-share-pnpm-store}`)
-  with the container down; they hold only regenerable caches. (Verified: a file created by a root process in
-  a bind-mounted dir shows up owned by the host user `501` on the Mac.)
+  (Verified: a file created by a root process in a bind-mounted dir shows up owned by
+  the host user `501` on the Mac.)
+
+  It is also **meaningless** here, which is why it's now skipped by rule rather than by luck.
+  Until 6.2.0 the entrypoint matched whenever the workspace didn't read as root, and the same
+  path was measured presenting `0:0`, `501:1000` and `501:20` in different lifetimes (#141,
+  #143). Probing the mount directly (Bear, #143) showed why: **the presented owner of a
+  directory follows the last guest process to modify it**. A root container leaves `0:0`, a
+  `--user 1234` container leaves `1234:1234`, and the ssh session sees its own `501:1000`. So
+  it carries no information about the Mac owner, which is always `501`. The flip was also
+  self-perpetuating: once `claude` ran as 501 and wrote, the next start read 501 and matched
+  again. And the chown after a match walked all of `$HOME`, which is itself a virtiofs share of
+  the Mac (with `~/.ssh` inside it), while a skip chowned nothing. So named volumes stamped 501
+  by one lifetime stayed 501 in the next, and `~/.cache` was unwritable.
+
+  Since #147 the rule is the **filesystem**, read from `/proc/self/mountinfo`, not the platform:
+  - **The match runs only when the workspace is on a local filesystem** (`ext4`, `ext3`,
+    `xfs`, `btrfs`, `overlay`), where the owner is real. That's the Linux docker backend's
+    bind, where matching is the point. On a share (`virtiofs`, `9p`, `sshfs`, `nfs`, `cifs`, …)
+    it's skipped and the status line says why. On anything unrecognised it's skipped too,
+    and says so.
+  - **On every start**, each mount under `$HOME` on a local filesystem (the named volumes, and
+    `$HOME` itself when it isn't a share) is reconciled to the uid `claude` actually has, read
+    after any `usermod`. Each walk is `-xdev`, so it can't cross onto a share nested inside it.
+    Shares are never walked. A mount of an unrecognised type is reported and left alone.
+
+  Every start logs `dridock: uid: workspace reads U:G, claude runs as U:G (…)`, a failed chown is
+  reported per mount, and a uid that differs from the one recorded in
+  `~/.claude/.dridock-claude-uid` is warned about (#141). The mechanism is pinned by the
+  docker-free cases in `tests/test_entrypoint_uid_match.sh`, against stub mount tables in the
+  live layout. `test_entrypoint_uid_observable` asserts the **contract**: the status line is
+  true, i.e. the uid, gid and outcome it reports match what the container actually is. It
+  reports the presentation without failing on it (#149). A project carrying 501-owned volumes
+  from before 6.2.0 is fixed by its first start on 6.2.0, with no manual step.
 
 ### Container DNS: the resolver address rotates per VM lifecycle (#72)
 
