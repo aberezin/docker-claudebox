@@ -30,6 +30,7 @@ local -a cases=(
     "0|-|0" "false|-|0" "no|-|0" "OFF|-|0" "verbose|-|0" "2|-|0"
     "-|true|1" "-|1|1" "-|TRUE|1" "-|yes|1" "-|false|0" "-|express:*|0" "-|-|0"
     "1|false|1" "0|true|0" "verbose|true|0"
+    "t rue|-|0" "o n|-|0" "-|y es|0" "	on	|-|1"
 )
 local tmp; tmp="$(mktemp -d)"
 

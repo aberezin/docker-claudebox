@@ -39,7 +39,9 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   works through 6.x** when set to one of those words, with a nudge, and is removed in
   7.0.0 (roadmap row + deadline check). Anything else in `DEBUG` (npm's `express:*`) is
   someone else's and is left alone. The host forwards both `DRIDOCK_DEBUG=1` and
-  `DEBUG=true`, so a pre-6.1 image still honours it. **Forwarded env changed: 6.1.0
+  `DEBUG=true`, so a pre-6.1 image still honours it. That means setting the new name
+  also puts `DEBUG=true` in the container's env through 6.x, where npm-convention tools
+  will see it. **Forwarded env changed: 6.1.0
   needs the minor bump.**
 
 ### Fixed

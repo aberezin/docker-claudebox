@@ -7,7 +7,12 @@
 # nudge; any other DEBUG (npm's `express:*`) is someone else's. Removed in 7.0.0.
 _debug_value() {
 	local s
-	s=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+	s=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+	# Trim the ENDS only, as .trim()/.strip() do in the other three readers.
+	# `tr -d '[:space:]'` removed inner spaces too, so 't rue' was on here and
+	# invalid everywhere else (Arfy, #130 review).
+	s="${s#"${s%%[![:space:]]*}"}"
+	s="${s%"${s##*[![:space:]]}"}"
 	case "$s" in
 		1|true|yes|on) echo on ;;
 		""|0|false|no|off) echo off ;;
