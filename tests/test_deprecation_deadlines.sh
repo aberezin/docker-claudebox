@@ -22,6 +22,10 @@ _DD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 test_deprecation_deadlines() {
 local REPO="$_DD_DIR/.."
 local PASS=0 FAIL=0
+# Canonical repo path, used to anchor the exclusions below (#155). Without it
+# they were substrings of an ABSOLUTE path, so an ancestor directory named
+# tests/.tmp* dropped every hit and the whole test asserted nothing.
+local RREAL; RREAL="$(cd "$REPO" && pwd)"
 ok()  { echo "  ok   $1"; PASS=$((PASS + 1)); }
 bad() { echo "  FAIL $1"; FAIL=$((FAIL + 1)); }
 
@@ -29,12 +33,35 @@ local MAJOR
 MAJOR="$(cut -d. -f1 < "$REPO/VERSION")"
 echo "--- deprecation deadlines (current major: $MAJOR) ---"
 
+# >>> dd_grep (#155) -- tests/test_deadline_filter.sh runs this block
+# The hits for one row, with THIS REPO's own noise excluded.
+#
+# WHY anchored (#155): the exclusions used to be plain substrings —
+# `grep -v "tests/.tmp\|/logs/\|/roadmap.md\|test_deprecation_deadlines"` —
+# matched against paths that are absolute, because every call site passes
+# "$REPO/...". Run from a git worktree under tests/.tmp-* (which is where the
+# daemon suites must run from under DooD), EVERY hit contains that ancestor
+# directory's name, so `hits` came back empty for every row. Empty then means
+# opposite things in the two branches: a loud FAIL for a row whose deadline is
+# future, and a silent `ok "removed, as committed"` for one whose deadline has
+# passed. 6.1.1's gate hit this and reported six "removed" passes having read
+# nothing (#151). Anchoring each exclusion to $RREAL makes an ancestor of that
+# name irrelevant, and -F makes them literal (the old `.` in "tests/.tmp"
+# matched any character).
+_dd_grep() {
+	grep -rl "$@" 2>/dev/null \
+		| grep -vF -e "$RREAL/tests/.tmp" -e "$RREAL/tests/logs/" \
+		            -e "$RREAL/docs/roadmap.md" -e "$RREAL/tests/test_deprecation_deadlines.sh" \
+		| head -5
+}
+# <<< dd_grep
+
 # deadline <label> <deadline-major> <grep-args...>
 #   Asserts the pattern is ABSENT once $MAJOR >= deadline, PRESENT before it.
 deadline() {
     local label="$1" due="$2"; shift 2
     local hits
-    hits=$(grep -rl "$@" 2>/dev/null | grep -v "tests/.tmp\|/logs/\|/roadmap.md\|test_deprecation_deadlines" | head -5)
+    hits=$(_dd_grep "$@")
     if [ "$MAJOR" -ge "$due" ]; then
         if [ -z "$hits" ]; then
             ok "$label — removed, as committed for ${due}.0.0"
@@ -57,7 +84,7 @@ deadline() {
 removed() {
     local label="$1" due="$2"; shift 2
     local hits
-    hits=$(grep -rl "$@" 2>/dev/null | grep -v "tests/.tmp\|/logs/\|/roadmap.md\|test_deprecation_deadlines" | head -5)
+    hits=$(_dd_grep "$@")
     if [ -z "$hits" ]; then
         ok "$label — removed (committed for ${due}.0.0)"
     else

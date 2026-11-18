@@ -28,6 +28,24 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **`test_deprecation_deadlines` could be silently neutralised by where it was run** (#155). Its
+  noise filter was `grep -v "tests/.tmp\|/logs/\|/roadmap.md\|test_deprecation_deadlines"`
+  matched against **absolute** paths, since every call site passes `"$REPO/…"`. Run from a git
+  worktree under `tests/.tmp-*` — which is where the daemon suites must run from under DooD —
+  every hit contained that ancestor's name and was dropped, so `hits` came back empty for every
+  row. Empty means opposite things in the two branches: a loud FAIL where the deadline is in the
+  future, and a silent `ok "removed, as committed"` where it has passed. 6.1.1's gate hit this
+  and reported **six** "removed, as committed" passes having read nothing, with only two rows
+  red (#151). That matters more here than in any other test: CLAUDE.md leans on this one for
+  "a prose deadline does not hold; a test that fails the moment the release arrives does" (#82),
+  so 7.0.0's gate run from such a worktree would have reported `legacyContainerName` and the bare
+  `DEBUG` reads as removed with the code still present. The exclusions are now anchored to the
+  repo's own resolved path and literal (`-F`) — the old `.` in `tests/.tmp` matched any
+  character, so `tests/Xtmp` was excluded too — extracted behind `# >>> dd_grep (#155)` markers
+  and driven by a new `tests/test_deadline_filter.sh` (9 cases) whose repo fixture is itself
+  under `tests/.tmp`, the case that was broken (Arfy).
+
 ## [6.1.1] - 2026-11-18
 
 Not breaking; fixes only. The one you'll notice: under Colima, `claude` keeps uid 1000 in
