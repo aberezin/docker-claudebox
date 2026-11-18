@@ -310,14 +310,24 @@ _match_claude_uid() {
 		fi
 	done <<< "$table"
 	local root rcs
-	for root in "${roots[@]}"; do
+	# Cost: one find per local mount, every start. The floor is process spawn
+	# (~130 entries took ~1s here); a warm walk runs ~100k entries/s (Arfy,
+	# #147 review). If it ever needs skipping when the recorded uid already
+	# equals the current one, the record must first be written only AFTER a
+	# successful reconcile, or "record == now" won't imply "reconciled".
+	for root in "${roots[@]+"${roots[@]}"}"; do
 		dbg "reconcile $root to $now_uid:$now_gid (-xdev, only misowned, $parallel parallel)"
 		find "$root" -xdev \( ! -user "$now_uid" -o ! -group "$now_gid" \) -print0 | xargs -0 -r -P "$parallel" chown "$now_uid:$now_gid"; rcs=("${PIPESTATUS[@]}")
 		if [ "${rcs[0]}" != "0" ] || [ "${rcs[1]}" != "0" ]; then
 			echo "dridock: chown of $root to $now_uid:$now_gid failed (find rc ${rcs[0]}, xargs rc ${rcs[1]}): some files there may not be writable (#141, #147)" >&2
 		fi
 	done
-	dbg "reconciled: ${roots[*]:-nothing local under $home}"
+	# Said at normal verbosity: this chowns on the skip path too, which was
+	# inert before #147, and on the docker backend $HOME can be a local bind of
+	# a host dir. A path that changes something says so (Arfy, #147 review).
+	if [ "${#roots[@]}" -gt 0 ]; then
+		echo "dridock: uid: reconciled ownership to $now_uid:$now_gid under ${roots[*]} (only misowned files are changed) (#147)" >&2
+	fi
 
 	local prev=""
 	echo "dridock: uid: workspace reads $host_uid:$host_gid, claude runs as $now_uid:$now_gid ($how) (#141)" >&2

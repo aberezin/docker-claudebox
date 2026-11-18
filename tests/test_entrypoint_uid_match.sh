@@ -104,6 +104,13 @@ out="$(run "$LIVE" 501 20 1000 1000 0 0 "$R")"
     && ok "each walk is -xdev and selects by claude's actual uid (1000:1000)" \
     || bad "find args: $out"
 
+# 2b. The reconcile is SAID at normal verbosity (dbg is stubbed out here, which
+#     is a start with DRIDOCK_DEBUG off): otherwise the only line says
+#     "skipped" while files were chowned (Arfy, #147 review).
+[[ "$out" == *"dridock: uid: reconciled ownership to 1000:1000 under $H/.cache (only misowned files are changed) (#147)"* ]] \
+    && ok "a reconcile prints a line at normal verbosity, naming the uid and the roots" \
+    || bad "reconcile not said: $out"
+
 # 3. Same again: record matches → no warning.
 out="$(run "$LIVE" 501 20 1000 1000 0 0 "$R")"
 [[ "$out" != *"CHANGED"* ]] && ok "same uid as last start → no warning" || bad "warned on no change: $out"
@@ -191,6 +198,8 @@ out="$(run "$tmp/no-such-mountinfo" 501 20 1000 1000 0 0 "")"
 [[ "$out" == *"(skipped: the workspace's filesystem 'unreadable' isn't one whose owner can be trusted, see #147)"* ]] \
     && [[ "$out" != *usermod* && "$out" != *"find["* ]] \
     && ok "mount table unreadable → no match, nothing walked, and said" || bad "unreadable mountinfo: $out"
+[[ "$out" != *"reconciled ownership"* ]] \
+    && ok "nothing walked → no 'reconciled' line (it doesn't claim work it didn't do)" || bad "reconciled line with no roots: $out"
 
 # 14. No $HOME/.claude yet (brand-new project) → no record, no error, still the uid line.
 out="$(run "$LIVE" 0 0 1000 1000 0 0 "$tmp/missing/.dridock-claude-uid")"

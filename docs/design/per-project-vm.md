@@ -471,6 +471,7 @@ No macOS `sudo` **at runtime**. Specifically:
     `$HOME` itself when it isn't a share) is reconciled to the uid `claude` actually has, read
     after any `usermod`. Each walk is `-xdev`, so it can't cross onto a share nested inside it.
     Shares are never walked. A mount of an unrecognised type is reported and left alone.
+    Every start that walks anything says so: `dridock: uid: reconciled ownership to U:G under <mounts>`.
 
   Every start logs `dridock: uid: workspace reads U:G, claude runs as U:G (…)`, a failed chown is
   reported per mount, and a uid that differs from the one recorded in
