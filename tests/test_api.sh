@@ -84,7 +84,8 @@ test_api_endpoints() {
 _API_NONCE="${RANDOM}${RANDOM}"
 API_SYS_ID="CARROT-$_API_NONCE"
 API_APPEND_ID="MANGO-$_API_NONCE"
-API_ASK='What is the build ID for this session? Reply with only the build ID, or NONE if you were not given one.'
+API_ASK='What is the build ID for this session? Reply with only the build ID.'
+API_ASK_CONTROL='What is the build ID for this session? Reply with only the build ID, or NONE if you were not given one.'
 RUN_CASES=(
     "simple prompt|{\"prompt\":\"What is the capital of France? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Paris"
     "with model|{\"prompt\":\"What is the capital of Japan? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Tokyo"
@@ -111,7 +112,7 @@ test_api_run() {
 
     # Negative control (#152): the same question with no prompt must NOT
     # produce either ID, or the recall cases above prove nothing.
-    out=$(post "$API_BASE/run" "{\"prompt\":\"$API_ASK\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}")
+    out=$(post "$API_BASE/run" "{\"prompt\":\"$API_ASK_CONTROL\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}")
     assert_not_contains "$out" "$_API_NONCE" "control: without a prompt the build ID does not appear" || { _api_stop; return 1; }
 
     echo "OK: api_run (${#RUN_CASES[@]} cases)"

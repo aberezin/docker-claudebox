@@ -397,7 +397,10 @@ test_cron_system_prompt_end_to_end() {
     _cron_setup_dirs
     # Per-run nonces (#152): cron.py's history hint invites claude to Read
     # earlier runs' activity.jsonl, so a constant token could be recalled from
-    # an old run instead of this run's prompt.
+    # an old run instead of this run's prompt. Only the control job is offered
+    # "or NONE": offered it alongside cron's history hint (appended AFTER the
+    # job's own append_system_prompt from the second tick on), haiku answered
+    # NONE in 2 of 7 runs while the ID was in its prompt.
     local nonce="${RANDOM}${RANDOM}"
     local sys_id="SYSPROMPTOK-$nonce" app_id="APPENDPROMPTOK-$nonce"
     local cron_file="$CRON_TMP/cron.yaml"
@@ -409,7 +412,7 @@ jobs:
     system_prompt: |
       The build ID for this job is $sys_id.
     instruction: |
-      What is the build ID for this job? Reply with only the build ID, or NONE if you were not given one.
+      What is the build ID for this job? Reply with only the build ID.
 
   - name: appendprompt_test
     schedule: "*/30 * * * * *"
@@ -417,7 +420,7 @@ jobs:
     append_system_prompt: |
       The build ID for this job is $app_id.
     instruction: |
-      What is the build ID for this job? Reply with only the build ID, or NONE if you were not given one.
+      What is the build ID for this job? Reply with only the build ID.
 
   - name: control_test
     schedule: "*/30 * * * * *"
