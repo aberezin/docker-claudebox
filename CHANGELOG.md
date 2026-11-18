@@ -77,6 +77,18 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   install path and runs before the compile, and all three steps are `install_ts_wrapper` in
   marked-off lines with a stubbed-bun test. Harmless until now only because `dridock-ts` has zero
   runtime dependencies — one `bun add` away from shipping the wrong binary silently (Arfy).
+- **`test.sh`'s FAIL backstop covers every test file** (#144). It greped `FAIL:` with a colon
+  while 28 of 35 test files print `  FAIL $1` without one, so the net that exists precisely so
+  the rule "keeps working for tests written later, rather than depending on every author
+  remembering `|| return 1`" covered 7 files and left the rest resting on the return code — and
+  a shell function returns its LAST command's status, so a trailing `rm -rf` masks a failed
+  assertion above it (#63). Now `FAIL[: ]`, with the `^` anchor and the `FAILED` boundary kept
+  so narration isn't mistaken for a failure. The detection moved into `_test_outcome` behind
+  markers so `tests/test_runner_failure_detection.sh` can exercise the **fail** path — a change
+  to a failure detector can't be verified by the suite passing. **`docs/versioning.md`** now
+  carries the release sweep as a runnable command that excludes the daemon suites by file:
+  a function-name skip list missed six daemon tests during 6.0.0's gate, because `^test_cron$`
+  doesn't match `test_cron_end_to_end_fires` (Arfy).
 
 ## [6.0.0] - 2026-11-17
 

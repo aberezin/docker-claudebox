@@ -30,6 +30,44 @@ for t in "${TESTS_TO_RUN[@]}"; do
     fi
 done
 
+# >>> test_outcome (#144) -- tests/test_runner_failure_detection.sh runs this block
+# A test passes only if it BOTH returned 0 AND printed no FAIL line.
+#
+# Return code alone is not sufficient: a shell function exits with the status
+# of its LAST command, so a trailing cleanup line masks a failed assertion
+# above it —
+#
+#     assert_eq "$owner" "$host_uid" "..."   # prints FAIL, returns 1
+#     rm -rf "$tmpdir"                       # returns 0  <- function returns 0
+#
+# the runner then counts a visibly-failing test as PASSED. Bear caught this on
+# #63 (test_entrypoint_workspace_ownership, docker backend). At least 11 tests
+# end with cleanup after their last assert, so this was never one test's bug.
+#
+# Checking the log closes the whole class at once and keeps working for tests
+# written later, rather than depending on every author remembering
+# `|| return 1`. It is also the same rule this suite is being fixed to
+# enforce elsewhere: a failure must not be silently discarded.
+#
+# #144: the pattern was `FAIL:` with the colon, and most test files print
+# `  FAIL $1` without one — so the backstop covered 7 of 35 files and the rest
+# were back to resting on the rc, which is the thing this exists to stop being
+# necessary. `FAIL[: ]` covers every file. The rule's edges, pinned by the test:
+#   * the `^` anchor matters — a test may legitimately print the word mid-line
+#     ("expected FAIL for bad input"), and that is not a failure;
+#   * `FAILED` is deliberately NOT matched (the character after FAIL must be a
+#     colon or a space), so narration like "  FAILED to reach the host" doesn't
+#     fail a passing test. A reporter that wants to be caught prints FAIL: or
+#     FAIL followed by a space.
+_test_outcome() {   # $1 = the test's own rc, $2 = its log file; echoes pass|fail
+    if [ "$1" -ne 0 ] || grep -qE "^[[:space:]]*FAIL[: ]" "$2"; then
+        echo fail
+    else
+        echo pass
+    fi
+}
+# <<< test_outcome
+
 trap cleanup EXIT
 setup
 
@@ -60,24 +98,7 @@ for t in "${TESTS_TO_RUN[@]}"; do
     else
         rc_first=${PIPESTATUS[0]}
     fi
-    # A test passes only if it BOTH returned 0 AND printed no FAIL line.
-    #
-    # Return code alone is not sufficient: a shell function exits with the status
-    # of its LAST command, so a trailing cleanup line masks a failed assertion
-    # above it —
-    #
-    #     assert_eq "$owner" "$host_uid" "..."   # prints FAIL, returns 1
-    #     rm -rf "$tmpdir"                       # returns 0  <- function returns 0
-    #
-    # the runner then counts a visibly-failing test as PASSED. Bear caught this on
-    # #63 (test_entrypoint_workspace_ownership, docker backend). At least 11 tests
-    # end with cleanup after their last assert, so this was never one test's bug.
-    #
-    # Checking the log closes the whole class at once and keeps working for tests
-    # written later, rather than depending on every author remembering
-    # `|| return 1`. It is also the same rule this suite is being fixed to
-    # enforce elsewhere: a failure must not be silently discarded.
-    if [ "$rc_first" -ne 0 ] || grep -qE "^[[:space:]]*FAIL:" "$log_file"; then
+    if [ "$(_test_outcome "$rc_first" "$log_file")" = fail ]; then
         FAILED=$((FAILED + 1))
         [ "$rc_first" -eq 0 ] && echo "  ^^ counted FAILED: assertion failed but the test function returned 0"
     else

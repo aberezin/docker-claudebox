@@ -96,8 +96,33 @@ below runs against the exact commit that will be tagged, with the new version in
    `bash test.sh` with no arguments** (it takes *function* names, not file names: 6.0.0's
    first run passed file names and ran nothing); and every `tests/test_*.py` (CLAUDE.md
    names them).
-3. **macOS (Arfy):** the same sweep as step 1 (every registered docker-free function, the
-   unregistered files, `bun test`, `tsc --noEmit`, each rc read directly).
+3. **macOS (Arfy):** the sweep below, `bun test`, and `tsc --noEmit`, each rc read directly.
+
+   Exclude the daemon suites **by file**, not by function name. A skip list of function
+   names looks more precise and isn't: `^test_cron$` doesn't match `test_cron_end_to_end_fires`,
+   so six daemon tests ran without a daemon and reported `45 passed, 6 failed` during 6.0.0's
+   gate (#144). One invocation, not one per function — 51 separate `bash test.sh <fn>` calls
+   each re-source every test file and the sweep ran past ten minutes, where this takes seconds.
+
+   ```sh
+   DOCKER_FILES="test_api.sh test_build.sh test_cron.sh test_cron_telegram.sh \
+                 test_e2e_telegram.sh test_entrypoint.sh test_entrypoint_sidecar_warning.sh"
+   run=""
+   for f in tests/test_*.sh; do
+       b=$(basename "$f")
+       case " $DOCKER_FILES " in *" $b "*) continue ;; esac
+       run="$run $(awk 'BEGIN{x=0}{l=$0;sub(/#.*/,"",l);
+           if(x==0){if(l~/ALL_TESTS\+=\(/){sub(/.*ALL_TESTS\+=\(/,"",l);x=1}else next}
+           if(l~/\)/){sub(/\).*/,"",l);x=0} print l}' "$f" \
+           | tr -s ' \t' '\n\n' | grep -E '^[A-Za-z_][A-Za-z0-9_]*$' | tr '\n' ' ')"
+   done
+   bash test.sh $run
+   ```
+
+   `tests/test_shell_tests_registered.sh` (#140) guarantees the `ALL_TESTS` scrape sees every
+   file, so this enumerates the same population the runner does. Report the **file** count with
+   the function count: "26 suites" in the 6.0.0 record meant files, while 91 functions are
+   registered in all, most of them in the seven excluded ones.
 4. **Hands-on checks**, listed on the release issue: the behaviours no test can show,
    usually "a second live process survives" (6.0.0: #126's refusal with the first
    session still alive, #138's cron refresh). Before any check that retags
