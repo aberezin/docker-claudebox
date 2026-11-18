@@ -157,7 +157,7 @@ _uid_line_contract() {
 
     if [ -z "$said_ws" ] || [ -z "$said_claude" ] || [ -z "$how" ] || [ -z "$before_ws" ] || [ -z "$real_ws" ] || [ -z "$real_claude" ]; then
         echo "  FAIL: couldn't parse the uid line or the container's own reading (line='$line'): the checks below would assert nothing"
-        echo "UIDLINE how= ws= claude="
+        echo "UIDLINE ws= claude= wsbefore= saidws= how="
         return 1
     fi
     [ "$said_claude" = "$real_claude" ] \
@@ -178,13 +178,15 @@ _uid_line_contract() {
         *) echo "  FAIL: unrecognised outcome '$how' on the uid line"; rc=1 ;;
     esac
     [ "$rc" -eq 0 ] && echo "  OK: the uid line is true — what it reports matches what the container is"
-    echo "UIDLINE how=$how ws=$real_ws claude=$real_claude wsbefore=$before_ws"
+    # `how` goes LAST: it contains spaces, so any field after it would be
+    # unparseable from the row.
+    echo "UIDLINE ws=$real_ws claude=$real_claude wsbefore=$before_ws saidws=$said_ws how=$how"
     return "$rc"
 }
 # <<< uid_line_contract
 
 test_entrypoint_uid_observable() {
-    local tmpdir out rc=0 row real_ws real_claude
+    local tmpdir out rc=0 row real_claude said_ws how
     tmpdir=$(mktemp -d "$WORKDIR/tests/.tmp-uid-XXXXX")
     out=$(docker run --rm -e DRIDOCK_WORKSPACE="$tmpdir" -v "$tmpdir:$tmpdir" --entrypoint bash "$IMAGE" -c \
         'echo "WS0=$(stat -c %u:%g "$DRIDOCK_WORKSPACE")"; bash /opt/dridock/entrypoint.sh true 2>&1; echo "WS=$(stat -c %u:%g "$DRIDOCK_WORKSPACE") CLAUDE=$(id -u claude):$(id -g claude)"' 2>&1)
@@ -195,8 +197,9 @@ test_entrypoint_uid_observable() {
     contract=$(_uid_line_contract "$out") || rc=1
     printf '%s\n' "$contract" | grep -v '^UIDLINE '   # swallow-ok: grep -v returns 1 only when every line is the UIDLINE row, which the parse-failure path already reported with its rc
     row=$(printf '%s\n' "$contract" | sed -n 's/^UIDLINE //p' | tail -1)
-    real_ws=${row#*ws=}; real_ws=${real_ws%% *}
     real_claude=${row#*claude=}; real_claude=${real_claude%% *}
+    said_ws=${row#*saidws=}; said_ws=${said_ws%% *}
+    how=${row#*how=}
 
     # The ENVIRONMENT: reported, never asserted (#149). A remap under colima is
     # the #143 flip — loud here, not red, because the harness did its job. The
@@ -204,11 +207,15 @@ test_entrypoint_uid_observable() {
     # tests/test_entrypoint_uid_match.sh (13 cases), so asserting one
     # presentation here added no coverage, only a suite that went red in half
     # the container lifetimes while the code behaved exactly as specified.
+    # Keyed on the OUTCOME, not on a reading (Bear, #149 review): keying it off
+    # the after-reading announced "claude was remapped to 1000:1000" for a run
+    # whose line said (skipped). A remap is exactly `how` = matched.
     if [[ "$(docker info --format '{{.Name}}' 2>/dev/null)" == colima* ]]; then
-        case "$real_ws" in
-            0:*|*:0) echo "  note: colima presented the workspace as root ($real_ws) — the usual case, matching skipped" ;;
-            "") echo "  note: no workspace reading to report (the contract check above failed)" ;;
-            *) echo "  ⚠️  colima presented the workspace as $real_ws, so claude was remapped to $real_claude. That is #143 (cause unknown); #147 reconciles the named volumes either way. NOT a failure — the entrypoint reported it correctly." ;;
+        case "$how" in
+            matched) echo "  ⚠️  colima presented the workspace as $said_ws, so claude was remapped to $real_claude. The presented owner on virtiofs follows guest writes, not the host (#143); #147 reconciles the named volumes either way. NOT a failure — the entrypoint reported it correctly." ;;
+            skipped*) echo "  note: colima presented the workspace as root ($said_ws) — the usual case, matching skipped" ;;
+            "") echo "  note: no outcome to report (the contract check above failed)" ;;
+            *) echo "  note: outcome '$how' — see the line above" ;;
         esac
     fi
     return "$rc"

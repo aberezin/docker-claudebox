@@ -53,6 +53,9 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   neither wrong, and the first version of this check failed that honest run. The line is now
   held to a reading taken by the same uid moments *before* the entrypoint runs; the after
   reading is printed only, and a pair that differs is itself recorded as a #143 datum.
+  The colima note keys off the reported **outcome** rather than a reading, so a `(skipped)`
+  run can no longer be announced as a remap (Bear, #149 review), and a structural case pins
+  that — reintroducing it turns the suite red.
   `README.md`, `docs/design/per-project-vm.md` and the entrypoint's own
   `how=` string said the no-op was expected; all three now say it is usual and not guaranteed,
   and name the three presentations measured so far (`0:0`, `501:1000`, `501:20`) (Arfy).

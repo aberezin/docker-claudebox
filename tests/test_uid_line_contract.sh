@@ -87,12 +87,28 @@ rc=0; got="$(_uid_line_contract "$out")" || rc=1
 # ── the #143 data row is always emitted, with the fresh inode's reading ─────
 out="$(printf 'WS0=501:1000\n'; printf "$LINE\n" '501:1000' '501:1000' 'matched'; printf 'WS=501:1000 CLAUDE=501:1000\n')"
 got="$(_uid_line_contract "$out")"
-printf '%s\n' "$got" | grep -q '^UIDLINE how=matched ws=501:1000 claude=501:1000 wsbefore=501:1000$' \
-    && ok "the UIDLINE row carries the outcome and the fresh dir's reading (#143 accumulates for free)" \
+printf '%s\n' "$got" | grep -q '^UIDLINE ws=501:1000 claude=501:1000 wsbefore=501:1000 saidws=501:1000 how=matched$' \
+    && ok "the UIDLINE row carries both readings, what the line said, and the outcome LAST (it has spaces)" \
     || bad "the UIDLINE row is missing or malformed: $(printf '%s' "$got" | tr '\n' '|')"
 printf '%s\n' "$got" | grep -q 'container read workspace=501:1000 before / 501:1000 after' \
     && ok "both readings are printed on a PASS too, not only on a failure" \
     || bad "the pass path doesn't record the readings"
+
+# ── the row must survive an outcome with spaces in it ───────────────────────
+out="$(printf 'WS0=0:0\n'; printf "$LINE\n" '0:0' '1000:1000' "$SKIP"; printf 'WS=0:0 CLAUDE=1000:1000\n')"
+got="$(_uid_line_contract "$out")"
+printf '%s\n' "$got" | grep -q "^UIDLINE ws=0:0 claude=1000:1000 wsbefore=0:0 saidws=0:0 how=$SKIP\$" \
+    && ok "a multi-word outcome survives the row intact, because how= is last" \
+    || bad "the row mangled a multi-word outcome: $(printf '%s' "$got" | tr '\n' '|')"
+
+# ── the ⚠️ must key off the OUTCOME, not off a reading (#149 review) ────────
+# Keying it off the after-reading announced "claude was remapped to 1000:1000"
+# for a run whose line said (skipped). Structural, since the branch lives in
+# the caller rather than in the extracted block.
+awk '/== colima\*/{f=1} f&&/case "\$how" in/{print "KEYED_ON_HOW"; exit} f&&/case "\$real_ws" in|case "\$said_ws" in/{print "KEYED_ON_A_READING"; exit}' \
+    "$REPO/tests/test_entrypoint.sh" | grep -q KEYED_ON_HOW \
+    && ok "the colima note keys off the outcome, so (skipped) can't be reported as a remap" \
+    || bad "the colima note keys off a reading again (#149): a skipped run will be announced as a remap"
 
 # ── the live test must not assert the presentation again ────────────────────
 grep -q "documented no-op isn't holding" "$REPO/tests/test_entrypoint.sh" \
