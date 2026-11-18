@@ -99,6 +99,36 @@ printf '%s\n' "$got" | grep -q 'container read workspace=501:1000 before / 501:1
     && ok "both readings are printed on a PASS too, not only on a failure" \
     || bad "the pass path doesn't record the readings"
 
+# ── an outcome containing its own parens (#150) ─────────────────────────────
+# The old parse took the outcome up to the FIRST ")", so an inner "(…)" lost
+# everything after it. #147's answer was to forbid parens in the message; the
+# reader is fixed instead.
+#
+# These two cases are chosen to DISCRIMINATE, which my first attempt did not:
+# `skipped*` is a prefix glob, so a truncated tail still classifies correctly
+# and a "skipped (…)" case passes under either parser. What actually breaks is
+# an outcome whose keyword sits AFTER the inner paren, and the outcome the
+# checker REPORTS — truncated text in the record line is a reporting defect
+# even when the classification happens to survive.
+verdict pass "the FAILED keyword after an inner (paren) is still seen" \
+    '501:20' '1000:1000' 'match (usermod rc 1) FAILED' '501:20' '501:20' '1000:1000'
+out="$(printf 'WS0=0:0\n'; printf "$LINE\n" '0:0' '1000:1000' 'skipped: the workspace reads as root (the usual colima case)'; printf 'WS=0:0 CLAUDE=1000:1000\n')"
+got="$(_uid_line_contract "$out")"
+printf '%s\n' "$got" | grep -qF "how='skipped: the workspace reads as root (the usual colima case)'" \
+    && ok "the outcome is reported in full, inner parens and closing paren included" \
+    || bad "the reported outcome is truncated: $(printf '%s' "$got" | grep -o "how='[^']*'" | head -1)"
+printf '%s\n' "$got" | grep -qF "how=skipped: the workspace reads as root (the usual colima case)" \
+    && ok "...and the UIDLINE row carries it in full too" \
+    || bad "the UIDLINE row truncated the outcome"
+
+# ── the parse now anchors on the " (#141)" suffix ───────────────────────────
+# Which means dropping that suffix is a parse failure rather than a silent
+# mis-read. Worth pinning: it is the thing a future reformat would remove.
+out="$(printf 'WS0=0:0\n'; printf 'dridock: uid: workspace reads 0:0, claude runs as 1000:1000 (matched)\n'; printf 'WS=0:0 CLAUDE=1000:1000\n')"
+rc=0; got="$(_uid_line_contract "$out")" || rc=1
+[ "$rc" -ne 0 ] && ok "fail: a line with no ' (#141)' suffix is a parse failure, not a silent mis-read" \
+    || bad "a line missing the (#141) suffix was accepted: $(printf '%s' "$got" | tr '\n' '|')"
+
 # ── the row must survive an outcome with spaces in it ───────────────────────
 out="$(printf 'WS0=0:0\n'; printf "$LINE\n" '0:0' '1000:1000' "$SKIP"; printf 'WS=0:0 CLAUDE=1000:1000\n')"
 got="$(_uid_line_contract "$out")"

@@ -29,6 +29,19 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **The uid-line checker reads an outcome containing parentheses** (#150). `_uid_line_contract`
+  (#149) took the outcome up to the first `)`, so a message with its own parens was truncated.
+  #147 hit it live and worked around it by **forbidding parens in the message**, which is the
+  wrong way round: a diagnostic whose job is to say clearly what the entrypoint did shouldn't be
+  constrained by a reader's regex. The parse now anchors on the last `)` before the ` (#141)`
+  suffix — which also makes dropping that suffix a loud parse failure rather than a silent
+  mis-read. What the truncation broke was narrower than it looked and is recorded in the test:
+  `skipped*` is a prefix glob so a truncated tail still classified, `matched` is exact so trailing
+  text broke it either way, and the real damage was an outcome whose keyword sits *after* the
+  inner paren (`match (usermod rc 1) FAILED`) being misread as unrecognised — plus the truncated
+  string appearing in the checker's own record line. `test_entrypoint_uid_match`'s case 19 stays
+  as defence in depth with its rationale corrected: it is no longer the only thing standing
+  between a nested `(#143)` and a mis-parse (Arfy).
 - **The release doc says what the by-file sweep actually costs** (#148). Step 3 said the sweep
   "takes seconds". It doesn't: `test.sh` calls `setup()` whatever you ask it to run, and on the
   colima backend that creates the throwaway `cb-cbxtest` VM and builds the minimal `:test`

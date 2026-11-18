@@ -243,13 +243,17 @@ grep -qE 'find /home/claude ' "$REPO/entrypoint.sh" \
     && bad "entrypoint.sh still walks /home/claude unconditionally (it's a host share, ~/.ssh inside)" \
     || ok "no unconditional walk of /home/claude remains"
 
-# 19. No outcome string contains ")": the status line wraps it in "(…)" and
-#     readers (#149's checker) take the outcome up to the first ")", so a
-#     nested "(#143)" truncated it in the first live run of #147.
+# 19. No outcome string contains ")". Kept as defence in depth, with its reason
+#     corrected (#150): #149's checker no longer truncates on an inner ")" — it
+#     reads to the last ")" before the " (#141)" suffix — so this is no longer
+#     what stands between a nested "(#143)" and a mis-parse. It stays because an
+#     outcome without parens can be delimited by ANY reader, including a one-off
+#     grep at a terminal, and because every reader we might add gets the simple
+#     case for free. It is not a licence to constrain the message further.
 local paren
 paren="$(grep -nE '^[[:space:]]*how="[^"]*\)' "$REPO/entrypoint.sh")"
-[ -z "$paren" ] && ok "no uid outcome string contains ')' (the line's own parens delimit it)" \
-    || bad "an outcome string contains ')', which truncates it for every reader: $paren"
+[ -z "$paren" ] && ok "no uid outcome string contains ')', so any reader can delimit it (#150: belt, not the only guard)" \
+    || bad "an outcome string contains ')': #149's checker handles it, but a simpler reader won't: $paren"
 
 rm -rf "$tmp"
 echo "  entrypoint uid match: $PASS passed, $FAIL failed"

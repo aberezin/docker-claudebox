@@ -142,7 +142,13 @@ _uid_line_contract() {
     line=$(printf '%s\n' "$out" | grep -m1 'dridock: uid: workspace reads') || line=""  # swallow-ok: a missing line is reported two lines down as a parse failure, with the rc
     said_ws=$(printf '%s\n' "$line" | sed -n 's/.*workspace reads \([0-9]*:[0-9]*\),.*/\1/p')
     said_claude=$(printf '%s\n' "$line" | sed -n 's/.*claude runs as \([0-9]*:[0-9]*\) .*/\1/p')
-    how=$(printf '%s\n' "$line" | sed -n 's/.*claude runs as [0-9]*:[0-9]* (\([^)]*\)).*/\1/p')
+    # Greedy to the LAST ")" before the " (#141)" suffix, not to the first ")".
+    # `[^)]*` truncated an outcome containing its own parens — a nested "(#143)"
+    # lost everything after it in #147's first live run, and the response was to
+    # forbid parens in the MESSAGE. That is the wrong way round: a user-facing
+    # string shouldn't be constrained by a reader's regex, so the reader was
+    # fixed instead (#150).
+    how=$(printf '%s\n' "$line" | sed -n 's/.*claude runs as [0-9]*:[0-9]* (\(.*\)) (#141).*/\1/p')
     before_ws=$(printf '%s\n' "$out" | sed -n 's/^WS0=\([0-9]*:[0-9]*\)$/\1/p' | tail -1)
     real_ws=$(printf '%s\n' "$out" | sed -n 's/^WS=\([0-9]*:[0-9]*\) CLAUDE=.*/\1/p' | tail -1)
     real_claude=$(printf '%s\n' "$out" | sed -n 's/^WS=[0-9]*:[0-9]* CLAUDE=\([0-9]*:[0-9]*\)/\1/p' | tail -1)
