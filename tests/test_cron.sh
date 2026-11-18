@@ -460,11 +460,17 @@ EOF
         sleep 1
     done
 
-    # wait for all to finish
+    # Wait for each job's run to FINISH, i.e. its final "result" event is
+    # written (#152). The checks below read only that event, so stopping the
+    # container mid-run is a false failure. 15s was enough when the checks read
+    # the whole stream, but a run's own length varies (three jobs share the
+    # tick), and one #152 run was cut off with no result yet. A run still
+    # unfinished after 90s is reported as such by the result check below,
+    # naming which job.
     for f in "$sys_activity" "$app_activity" "$ctl_activity"; do
         [ -z "$f" ] && continue
-        for _ in $(seq 1 15); do
-            grep -q '"finished_at": "' "${f%/activity.jsonl}/meta.json" 2>/dev/null && break
+        for _ in $(seq 1 90); do
+            grep -qE '"type": ?"result"' "$f" 2>/dev/null && break  # swallow-ok: not there yet is the loop's condition, re-checked each second
             sleep 1
         done
     done
@@ -493,7 +499,7 @@ EOF
     sys_content=$(grep -E '"type": ?"result"' "$sys_activity")
     app_content=$(grep -E '"type": ?"result"' "$app_activity")
     [ -n "$sys_content" ] && [ -n "$app_content" ] \
-        || { echo "  FAIL: no result event in a job's activity.jsonl (sys=${#sys_content} app=${#app_content} chars): the checks below would test nothing"; _cron_cleanup_dirs; return 1; }
+        || { echo "  FAIL: a job had not finished (no result event) after 90s (sysprompt=${#sys_content} appendprompt=${#app_content} chars): the checks below would test nothing"; _cron_cleanup_dirs; return 1; }
 
     assert_contains "$sys_content" "$sys_id" "system_prompt reached claude (it recalled a fact only the prompt held)"        || { _cron_cleanup_dirs; return 1; }
     assert_contains "$app_content" "$app_id" "append_system_prompt reached claude (it recalled a fact only the prompt held)" || { _cron_cleanup_dirs; return 1; }
