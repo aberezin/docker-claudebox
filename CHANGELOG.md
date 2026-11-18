@@ -39,6 +39,17 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   docker-free one for every branch, a colima check that `claude` keeps the baked 1000, and
   the #129 swallow gate now flags a `| xargs` whose rc is unread (Arfy). Not yet explained:
   why the mount read as 501 in the first place.
+- **`tests/test_report_bug.sh` now runs in the suite** (#140). It had opted out on line 7
+  (`[ "${BASH_SOURCE[0]}" != "${0}" ] && return 0`), so `make test` never ran it and it
+  passed 10/0 only for someone who already knew the standalone command — found by sweeping
+  for the 6.0.0 gate, not by the suite. It was written as a top-level script, so sourcing it
+  would have run its assertions at source time, set `-uo pipefail` on the suite's shell, armed
+  a `trap … EXIT` firing at the suite's end, and defined `PASS`/`FAIL`/`ok`/`bad` globally;
+  it is now a function with locals and a dual-mode footer, so `bash tests/test_report_bug.sh`
+  still works. A new `tests/test_shell_tests_registered.sh` gate asserts every
+  `tests/test_*.sh` registers in `ALL_TESTS` and that each registered name resolves to a
+  function in the same file — the shell analogue of `test_python_tests_named.sh` (#138), since
+  test.sh runs tests by name and a file that registers nothing is sourced and never run (Arfy).
 
 ## [6.0.0] - 2026-11-17
 
