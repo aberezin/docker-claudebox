@@ -29,6 +29,15 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Fixed
+- **The release doc says what the by-file sweep actually costs** (#148). Step 3 said the sweep
+  "takes seconds". It doesn't: `test.sh` calls `setup()` whatever you ask it to run, and on the
+  colima backend that creates the throwaway `cb-cbxtest` VM and builds the minimal `:test`
+  image before the first test — measured at 4m59s, 1m15s and 1m13s on one Mac, nearly all of it
+  silent. A gate runner who reads "seconds" and then watches five minutes of nothing concludes
+  it has hung and kills a correct command. Step 2.2's "a worktree is fine for the docker-free
+  sweep, which mounts nothing" was true of the tests and misleading about the run, so it now
+  says the sweep isn't daemon-free and points at step 3. Both sentences were mine from #144 and
+  both surfaced the first time I ran the documented step verbatim, during 6.1.0's gate (Arfy).
 - **The colima uid test asserts the #141 contract, not a property of the mount** (#149).
   `test_entrypoint_uid_observable` required `claude` = 1000 or a workspace reading `0` — "the
   documented colima no-op". That is an environment fact the entrypoint neither controls nor

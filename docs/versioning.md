@@ -100,14 +100,26 @@ below runs against the exact commit that will be tagged, with the new version in
    so a suite's `-v "$WORKDIR/tests/.tmp…"` mounts nothing from a worktree elsewhere and the
    daemon suites fail on empty bind mounts — `78 passed, 18 failed` from `~/.claude/tmp`,
    all 17 real failures environmental, where the same tip gave 89/0 from the workspace
-   (Bear, #144). A worktree is fine for the docker-free sweep in step 3, which mounts nothing.
+   (Bear, #144). A worktree is fine for the sweep in step 3 — the tests it selects mount
+   nothing — but the sweep is **not** daemon-free: `test.sh` runs `setup()` first whatever you
+   ask it to run, and on macOS that creates a VM (see step 3).
 3. **macOS (Arfy):** the sweep below, `bun test`, and `tsc --noEmit`, each rc read directly.
 
    Exclude the daemon suites **by file**, not by function name. A skip list of function
    names looks more precise and isn't: `^test_cron$` doesn't match `test_cron_end_to_end_fires`,
    so six daemon tests ran without a daemon and reported `45 passed, 6 failed` during 6.0.0's
    gate (#144). One invocation, not one per function — 51 separate `bash test.sh <fn>` calls
-   each re-source every test file and the sweep ran past ten minutes, where this takes seconds.
+   each re-source every test file and the sweep ran past ten minutes.
+
+   **It is not instant, and the wait comes before any test output.** `test.sh` calls `setup()`
+   unconditionally, and on the colima backend that creates the throwaway `cb-cbxtest` VM and
+   builds the minimal `:test` image before the first test runs; on the `docker` backend
+   (in-container) it only builds the image, which is why this step is cheap for Bear and not
+   for Arfy. Measured on one Mac across 6.1.0 and 6.2.0: **4m59s, 1m15s, 1m13s** — the slowest
+   was the first run of the day, and the cause of the spread isn't established. So expect
+   anywhere from about a minute to five, nearly all of it silent after
+   `creating throwaway test VM (cb-cbxtest)...`. It has not hung (#148, which exists because
+   this line used to say "takes seconds").
 
    ```sh
    DOCKER_FILES="test_api.sh test_build.sh test_cron.sh test_cron_telegram.sh \
