@@ -49,6 +49,14 @@ Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   uncanonical `…/tests/..` root produced `…/tests/../X` hits that no anchor could match — inert
   today since no row searches `tests/`, and no exclusions at all for the first row that did
   (Bear, #155 review) (Arfy).
+- **The sweep's timing note no longer explains a spread it can't account for** (#154). #148 gave
+  `docs/versioning.md` a measured range, plus "the slowest was the first run of the day" — written
+  from a sample of one. The fifth run took **exactly the same 299s**, so that clause was a guess
+  presented as an observation, in the doc that tells a release runner what to expect. Six
+  measurements on one Mac now read `299s, 75s, 73s, 71s, 299s, 65s`: **bimodal**, nothing in
+  between, cause not established. The doc gives both durations, says the cause is unknown, keeps
+  "it has not hung", and names the one read that would settle it. The `docker`-backend half is now
+  quoted from that side's own setup line rather than read off `tests/common.sh` (Bear, #148) (Arfy).
 
 ## [6.1.1] - 2026-11-18
 

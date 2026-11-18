@@ -114,12 +114,19 @@ below runs against the exact commit that will be tagged, with the new version in
    **It is not instant, and the wait comes before any test output.** `test.sh` calls `setup()`
    unconditionally, and on the colima backend that creates the throwaway `cb-cbxtest` VM and
    builds the minimal `:test` image before the first test runs; on the `docker` backend
-   (in-container) it only builds the image, which is why this step is cheap for Bear and not
-   for Arfy. Measured on one Mac across 6.1.0 and 6.2.0: **4m59s, 1m15s, 1m13s** — the slowest
-   was the first run of the day, and the cause of the spread isn't established. So expect
-   anywhere from about a minute to five, nearly all of it silent after
-   `creating throwaway test VM (cb-cbxtest)...`. It has not hung (#148, which exists because
-   this line used to say "takes seconds").
+   (in-container) it only builds the image — confirmed from that side by its own setup line,
+   `docker backend: building the test image on the ambient daemon (no test VM)...` — which is why
+   this step is cheap for Bear and not for Arfy. Measured on one Mac across 6.1.0, 6.1.1 and
+   6.1.2: **299s, 75s, 73s, 71s, 299s, 65s**. It is **bimodal** — about 70 seconds or about five
+   minutes, with nothing in between — and **the cause is not established**: the two slow runs were
+   299s to the second, which looks like something waiting out a fixed timeout rather than a
+   variable cost, but `setup()` prints nothing between `creating throwaway test VM (cb-cbxtest)...`
+   and the first test, and `cleanup()` deletes the profile, so there is no step-level timing to
+   point at. Expect one of the two durations, nearly all of it silent. **It has not hung.**
+   (#148 replaced "takes seconds" with a range; #154 removed the "slowest was the first run of the
+   day" explanation, which the fifth run contradicted at exactly the same 299s. If you catch a
+   299s run, `colima start -p cb-cbxtest --verbose` under `DRIDOCK_DEBUG=1` is the read that would
+   settle it.)
 
    ```sh
    DOCKER_FILES="test_api.sh test_build.sh test_cron.sh test_cron_telegram.sh \
