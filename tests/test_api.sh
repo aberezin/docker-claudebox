@@ -74,17 +74,24 @@ test_api_endpoints() {
 # format: label|json_body|expected_in_response
 #
 # The two prompt cases assert RECALL, not obedience (#152): the prompt states a
-# token that exists nowhere else and the user turn asks for it, so the reply can
-# contain it only if the prompt reached claude, which is what's under test.
+# build ID that exists nowhere else and the user turn asks for it, so the reply
+# can contain it only if the prompt reached claude, which is what's under test.
 # "Always end your response with MANGO" measured whether haiku follows a style
-# rule, and it sometimes doesn't (6.1.1's gate, #151).
+# rule, and it sometimes doesn't (6.1.1's gate, #151). The IDs are per-run
+# nonces, so nothing left over from an earlier run can satisfy them, and
+# test_api_run asks the same question WITHOUT a prompt and requires the ID to
+# be absent: a detector is only worth having if it has been seen not to fire.
+_API_NONCE="${RANDOM}${RANDOM}"
+API_SYS_ID="CARROT-$_API_NONCE"
+API_APPEND_ID="MANGO-$_API_NONCE"
+API_ASK='What is the build ID for this session? Reply with only the build ID, or NONE if you were not given one.'
 RUN_CASES=(
     "simple prompt|{\"prompt\":\"What is the capital of France? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Paris"
     "with model|{\"prompt\":\"What is the capital of Japan? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Tokyo"
     "with effort|{\"prompt\":\"What color is a ripe banana? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"effort\":\"low\",\"noContinue\":true}|ellow"
-    "system prompt|{\"prompt\":\"What is the passphrase for this session? Reply with only the passphrase.\",\"model\":\"$TEST_MODEL\",\"systemPrompt\":\"The passphrase for this session is CARROT-3817.\",\"noContinue\":true}|CARROT-3817"
+    "system prompt|{\"prompt\":\"$API_ASK\",\"model\":\"$TEST_MODEL\",\"systemPrompt\":\"The build ID for this session is $API_SYS_ID.\",\"noContinue\":true}|$API_SYS_ID"
     "noContinue|{\"prompt\":\"What is the capital of Austria? Answer with one word.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}|Vienna"
-    "appendSystemPrompt|{\"prompt\":\"What is the passphrase for this session? Reply with only the passphrase.\",\"model\":\"$TEST_MODEL\",\"noContinue\":true,\"appendSystemPrompt\":\"The passphrase for this session is MANGO-7421.\"}|MANGO-7421"
+    "appendSystemPrompt|{\"prompt\":\"$API_ASK\",\"model\":\"$TEST_MODEL\",\"noContinue\":true,\"appendSystemPrompt\":\"The build ID for this session is $API_APPEND_ID.\"}|$API_APPEND_ID"
     "continue fallback|{\"prompt\":\"What is the largest planet in our solar system? Answer with one word.\",\"model\":\"$TEST_MODEL\"}|Jupiter"
 )
 
@@ -101,6 +108,11 @@ test_api_run() {
 
     # check camelCase on last response
     assert_no_snake_keys "$out" "api json no snake_case keys" || { _api_stop; return 1; }
+
+    # Negative control (#152): the same question with no prompt must NOT
+    # produce either ID, or the recall cases above prove nothing.
+    out=$(post "$API_BASE/run" "{\"prompt\":\"$API_ASK\",\"model\":\"$TEST_MODEL\",\"noContinue\":true}")
+    assert_not_contains "$out" "$_API_NONCE" "control: without a prompt the build ID does not appear" || { _api_stop; return 1; }
 
     echo "OK: api_run (${#RUN_CASES[@]} cases)"
     _api_stop

@@ -395,6 +395,11 @@ EOF
 
 test_cron_system_prompt_end_to_end() {
     _cron_setup_dirs
+    # Per-run nonces (#152): cron.py's history hint invites claude to Read
+    # earlier runs' activity.jsonl, so a constant token could be recalled from
+    # an old run instead of this run's prompt.
+    local nonce="${RANDOM}${RANDOM}"
+    local sys_id="SYSPROMPTOK-$nonce" app_id="APPENDPROMPTOK-$nonce"
     local cron_file="$CRON_TMP/cron.yaml"
     cat > "$cron_file" <<EOF
 jobs:
@@ -402,17 +407,23 @@ jobs:
     schedule: "*/30 * * * * *"
     model: $TEST_MODEL
     system_prompt: |
-      The passphrase for this job is SYSPROMPTOK-5512.
+      The build ID for this job is $sys_id.
     instruction: |
-      What is the passphrase for this job? Reply with only the passphrase.
+      What is the build ID for this job? Reply with only the build ID, or NONE if you were not given one.
 
   - name: appendprompt_test
     schedule: "*/30 * * * * *"
     model: $TEST_MODEL
     append_system_prompt: |
-      The passphrase for this job is APPENDPROMPTOK-6630.
+      The build ID for this job is $app_id.
     instruction: |
-      What is the passphrase for this job? Reply with only the passphrase.
+      What is the build ID for this job? Reply with only the build ID, or NONE if you were not given one.
+
+  - name: control_test
+    schedule: "*/30 * * * * *"
+    model: $TEST_MODEL
+    instruction: |
+      What is the build ID for this job? Reply with only the build ID, or NONE if you were not given one.
 EOF
     chmod a+rw "$cron_file" 2>/dev/null || true
 
@@ -436,17 +447,18 @@ EOF
     local slug
     slug=$(echo "$CRON_TMP/workspace" | sed -E 's/[^A-Za-z0-9]+/_/g' | sed 's/^_*//;s/_*$//')
 
-    # wait for both jobs to produce activity files
-    local sys_activity="" app_activity=""
+    # wait for all three jobs (the two prompt jobs and #152's control) to produce activity files
+    local sys_activity="" app_activity="" ctl_activity=""
     for i in $(seq 1 70); do
         sys_activity=$(find "$history_root" -path "*-sysprompt_test/activity.jsonl" -size +0 2>/dev/null | head -1)
         app_activity=$(find "$history_root" -path "*-appendprompt_test/activity.jsonl" -size +0 2>/dev/null | head -1)
-        [ -n "$sys_activity" ] && [ -n "$app_activity" ] && break
+        ctl_activity=$(find "$history_root" -path "*-control_test/activity.jsonl" -size +0 2>/dev/null | head -1)
+        [ -n "$sys_activity" ] && [ -n "$app_activity" ] && [ -n "$ctl_activity" ] && break
         sleep 1
     done
 
-    # wait for both to finish
-    for f in "$sys_activity" "$app_activity"; do
+    # wait for all to finish
+    for f in "$sys_activity" "$app_activity" "$ctl_activity"; do
         [ -z "$f" ] && continue
         for _ in $(seq 1 15); do
             grep -q '"finished_at": "' "${f%/activity.jsonl}/meta.json" 2>/dev/null && break
@@ -469,7 +481,7 @@ EOF
         _cron_cleanup_dirs; return 1
     fi
 
-    # RECALL, not obedience (#152): each prompt states a passphrase that exists
+    # RECALL, not obedience (#152): each prompt states a build ID that exists
     # nowhere else, and the job asks for it. Read only the final "result"
     # event, so the token can't be satisfied by the prompt echoed elsewhere in
     # the stream. The old checks asked haiku to obey a style rule ("respond
@@ -480,8 +492,15 @@ EOF
     [ -n "$sys_content" ] && [ -n "$app_content" ] \
         || { echo "  FAIL: no result event in a job's activity.jsonl (sys=${#sys_content} app=${#app_content} chars): the checks below would test nothing"; _cron_cleanup_dirs; return 1; }
 
-    assert_contains "$sys_content" "SYSPROMPTOK-5512"   "system_prompt reached claude (it recalled a fact only the prompt held)"        || { _cron_cleanup_dirs; return 1; }
-    assert_contains "$app_content" "APPENDPROMPTOK-6630" "append_system_prompt reached claude (it recalled a fact only the prompt held)" || { _cron_cleanup_dirs; return 1; }
+    assert_contains "$sys_content" "$sys_id" "system_prompt reached claude (it recalled a fact only the prompt held)"        || { _cron_cleanup_dirs; return 1; }
+    assert_contains "$app_content" "$app_id" "append_system_prompt reached claude (it recalled a fact only the prompt held)" || { _cron_cleanup_dirs; return 1; }
+
+    # Negative control: the job with no prompt must not produce the nonce.
+    local ctl_content
+    [ -n "$ctl_activity" ] || { echo "  FAIL: control_test job never produced output: the control would assert nothing"; _cron_cleanup_dirs; return 1; }
+    ctl_content=$(grep -E '"type": ?"result"' "$ctl_activity")
+    [ -n "$ctl_content" ] || { echo "  FAIL: no result event in control_test's activity.jsonl"; _cron_cleanup_dirs; return 1; }
+    assert_not_contains "$ctl_content" "$nonce" "control: the job with no prompt does not produce the build ID" || { _cron_cleanup_dirs; return 1; }
 
     _cron_cleanup_dirs
 }

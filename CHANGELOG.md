@@ -40,6 +40,16 @@ To upgrade: `./install.sh`, then in each project `dridock down && dridock start`
 
 
 ### Fixed
+- **The LLM prompt tests assert that the prompt reached Claude, not that the model obeyed it**
+  (#152). 6.1.1's own gate went red on `test_api_run`'s "always end your response with MANGO",
+  which then passed twice on its own, so it was measuring haiku's instruction-following, not our
+  code. The tag was held for this fix. Each `systemPrompt`/`appendSystemPrompt` case, in the API
+  and in cron, now states a **per-run nonce** build ID that exists only in the prompt and asks for
+  it. A per-run value means nothing from an earlier run, including the cron history Claude is
+  invited to read, can satisfy it. A **negative control** asks the same question with no prompt
+  and requires the ID to be absent. The cron check reads only the final `result` event. A
+  testing rule in CLAUDE.md now names the class shared with #149: a harness test asserts
+  something the harness controls.
 - **The uid-line checker reads an outcome containing parentheses** (#150). `_uid_line_contract`
   (#149) took the outcome up to the first `)`, so a message with its own parens was truncated.
   #147 hit it live and worked around it by **forbidding parens in the message**, which is the
